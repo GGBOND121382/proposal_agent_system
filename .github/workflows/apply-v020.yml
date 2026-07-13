@@ -1,0 +1,64 @@
+name: Apply v0.2.0 runtime fixes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-v020.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply reviewed patches
+        run: |
+          git apply --check .patches/v020/context.patch
+          git apply --check .patches/v020/workflows.patch
+          git apply --check .patches/v020/exporter.patch
+          git apply --check .patches/v020/tests.patch
+          git apply .patches/v020/context.patch
+          git apply .patches/v020/workflows.patch
+          git apply .patches/v020/exporter.patch
+          git apply .patches/v020/tests.patch
+
+      - name: Mark v0.2.0
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('pyproject.toml')
+          text = path.read_text(encoding='utf-8').replace('version = "0.1.1"', 'version = "0.2.0"')
+          path.write_text(text, encoding='utf-8')
+          PY
+          cat >> README.md <<'EOF'
+
+## v0.2.0 完整申请书编制修复
+
+- `WF-4_PROPOSAL_AUTHORING` 按 `CURRENT_PROPOSAL` 正式章节逐章执行蓝图、正文及 Critic，不再只生成第一节；
+- 跨章节一致性审查和最终保密审查使用真实章节候选聚合结果，不再保留 Replay 单节示例；
+- 多章节任务导出清稿 DOCX，支持标题、列表、表格、页码及表头重复；单章节任务继续保留定向补丁路径；
+- 新增多章节编排、真实候选聚合、终审输入和导出回归测试。
+EOF
+
+      - name: Install and test
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+          pytest -q
+
+      - name: Commit verified runtime changes
+        run: |
+          rm -rf .patches/v020 .github/workflows/apply-v020.yml
+          git config user.name "proposal-agent-maintainer"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "fix full proposal authoring and export"
+          git push origin HEAD:main
