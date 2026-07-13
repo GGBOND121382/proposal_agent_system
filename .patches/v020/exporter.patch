@@ -1,0 +1,291 @@
+--- a/app/exporter.py
++++ b/app/exporter.py
+@@ -7,10 +7,12 @@
+ from typing import Any
+ 
+ from docx import Document
++from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
+ from docx.enum.text import WD_ALIGN_PARAGRAPH
+ from docx.oxml import OxmlElement
++from docx.oxml.ns import qn
+ from docx.text.paragraph import Paragraph
+-from docx.shared import Pt
++from docx.shared import Cm, Pt
+ 
+ from .util import new_id, safe_filename, sha256_bytes, utc_now, write_json
+ 
+@@ -34,7 +36,10 @@
+         integrity: dict[str, Any]
+         filename = safe_filename(f"{project['name']}-{new_id('export')}.docx")
+         path = self.settings.exports_dir / filename
+-        if template_row and candidates:
++        # A single-section revision can safely patch the uploaded draft.  A full
++        # multi-section authoring run is rendered as a clean document so authoring
++        # instructions/placeholders in the source scaffold cannot leak to delivery.
++        if template_row and len(candidates) == 1:
+             path, integrity = self._patch_template(Path(template_row["file_path"]), path, candidates)
+         else:
+             path, integrity = self._generate_document(project, path, candidates)
+@@ -44,8 +49,8 @@
+         self.db.audit("DOCX_EXPORTED", project_id=project_id, object_id=filename, metadata={"filename": path.name, "sha256": manifest["document_sha256"], "candidate_count": len(candidates), "mode": integrity["mode"]})
+         return path
+ 
+-    def export_package(self, project_id: str) -> Path:
+-        document_path = self.export(project_id)
++    def export_package(self, project_id: str, document_path: Path | None = None) -> Path:
++        document_path = document_path or self.export(project_id)
+         package_path = document_path.with_suffix(".zip")
+         with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+             for path in [document_path, document_path.with_suffix(".integrity.json"), document_path.with_suffix(".manifest.json")]:
+@@ -67,26 +72,36 @@
+ 
+     def _candidate_runs(self, project_id: str) -> list[dict[str, Any]]:
+         rows = self.db.fetchall(
+-            "SELECT id,input_json,output_json,created_at FROM prompt_runs WHERE project_id=? AND prompt_id='P-WRITE-CONTENT' AND status='PASS' ORDER BY created_at",
++            "SELECT id,input_json,output_json,created_at FROM prompt_runs WHERE project_id=? AND prompt_id='P-WRITE-CONTENT' AND status='PASS' ORDER BY created_at,id",
+             (project_id,),
+         )
+-        candidates = []
++        latest: dict[str, dict[str, Any]] = {}
+         for row in rows:
+             input_data = json.loads(row["input_json"])
+             output = json.loads(row["output_json"])
+             source_section = input_data.get("payload", {}).get("source_section", {})
+             result = output.get("result", {})
+-            candidates.append(
+-                {
+-                    "run_id": row["id"],
+-                    "section_id": source_section.get("section_id"),
+-                    "section_title": source_section.get("title") or source_section.get("section_key"),
+-                    "source_section_hash": source_section.get("text_hash"),
+-                    "contains_complex_content": any(source_section.get(k, False) for k in ["contains_table", "contains_formula", "contains_image", "contains_comment", "contains_revision"]),
+-                    "paragraphs": [p.get("text", "") for p in sorted(result.get("paragraphs", []), key=lambda x: x.get("sequence", 0))] or [result.get("candidate_text", "")],
+-                    "candidate_id": result.get("candidate_id"),
+-                }
+-            )
++            key = source_section.get("section_id") or source_section.get("title") or row["id"]
++            latest[key] = {
++                "run_id": row["id"],
++                "section_id": source_section.get("section_id"),
++                "section_title": source_section.get("title") or source_section.get("section_key"),
++                "source_section_hash": source_section.get("text_hash"),
++                "contains_complex_content": any(source_section.get(k, False) for k in ["contains_table", "contains_formula", "contains_image", "contains_comment", "contains_revision"]),
++                "paragraphs": [p.get("text", "") for p in sorted(result.get("paragraphs", []), key=lambda x: x.get("sequence", 0))] or [result.get("candidate_text", "")],
++                "candidate_id": result.get("candidate_id"),
++            }
++
++        order: dict[str, int] = {}
++        template_row = self.db.fetchone(
++            "SELECT parsed_json FROM documents WHERE project_id=? AND role='CURRENT_PROPOSAL' ORDER BY created_at DESC LIMIT 1",
++            (project_id,),
++        )
++        if template_row:
++            parsed = json.loads(template_row["parsed_json"])
++            order = {section.get("section_id"): index for index, section in enumerate(parsed.get("sections", []))}
++        candidates = list(latest.values())
++        candidates.sort(key=lambda item: (order.get(item.get("section_id"), 10_000), item.get("section_title") or ""))
+         return candidates
+ 
+     def _patch_template(self, template_path: Path, output_path: Path, candidates: list[dict[str, Any]]) -> tuple[Path, dict[str, Any]]:
+@@ -167,26 +182,53 @@
+ 
+     def _generate_document(self, project: dict[str, Any], path: Path, candidates: list[dict[str, Any]], fallback_reason: str | None = None) -> tuple[Path, dict[str, Any]]:
+         document = Document()
+-        document.styles["Normal"].font.name = "宋体"
+-        document.styles["Normal"].font.size = Pt(12)
+-        title = document.add_paragraph()
+-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+-        run = title.add_run(project["name"])
+-        run.bold = True
+-        run.font.size = Pt(18)
++        self._configure_document(document)
++
++        title = self._document_title(project.get("name", "项目申请书"))
++        title_paragraph = document.add_paragraph()
++        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
++        title_paragraph.paragraph_format.space_before = Pt(90)
++        title_paragraph.paragraph_format.space_after = Pt(24)
++        title_run = title_paragraph.add_run(title)
++        self._set_run_font(title_run, "黑体", 22, bold=True)
++
++        subtitle = document.add_paragraph()
++        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
++        subtitle_run = subtitle.add_run("项目申请书")
++        self._set_run_font(subtitle_run, "黑体", 18, bold=True)
++
++        description = (project.get("description") or "").strip()
++        if description:
++            note = document.add_paragraph()
++            note.alignment = WD_ALIGN_PARAGRAPH.CENTER
++            note.paragraph_format.space_before = Pt(42)
++            note_run = note.add_run(description)
++            self._set_run_font(note_run, "宋体", 10)
++
++        meta = document.add_paragraph()
++        meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
++        meta.paragraph_format.space_before = Pt(80)
++        meta_run = meta.add_run(f"资料等级：{project.get('security_level', 'INTERNAL')}\n生成时间：{utc_now()[:10]}")
++        self._set_run_font(meta_run, "宋体", 11)
++        document.add_page_break()
++
+         if candidates:
+-            for index, candidate in enumerate(candidates, 1):
+-                document.add_heading(candidate.get("section_title") or f"候选章节 {index}", level=1)
+-                for text in candidate.get("paragraphs", []):
+-                    if text.strip():
+-                        document.add_paragraph(text.strip())
++            document.add_heading("目录", level=1)
++            for candidate in candidates:
++                p = document.add_paragraph()
++                p.paragraph_format.first_line_indent = None
++                p.paragraph_format.left_indent = Cm(0.8)
++                run = p.add_run(candidate.get("section_title") or "未命名章节")
++                self._set_run_font(run, "宋体", 12)
++            document.add_page_break()
++            for candidate in candidates:
++                document.add_heading(candidate.get("section_title") or "未命名章节", level=1)
++                for block in candidate.get("paragraphs", []):
++                    self._append_block(document, block)
+         else:
+             document.add_paragraph("当前尚无通过写作与审查流程的正文候选。")
+-        document.add_page_break()
+-        document.add_heading("导出审计信息", level=1)
+-        document.add_paragraph(f"项目编号：{project.get('id', 'unknown')}")
+-        document.add_paragraph(f"安全等级：{project.get('security_level', 'INTERNAL')}")
+-        document.add_paragraph(f"导出时间：{utc_now()}")
++
++        self._add_page_numbers(document)
+         document.save(path)
+         integrity = {
+             "schema_version": "1.0",
+@@ -196,10 +238,129 @@
+             "candidate_count": len(candidates),
+             "changed_sections": [{"run_id": c["run_id"], "section_title": c.get("section_title")} for c in candidates],
+             "skipped_sections": [],
+-            "non_target_integrity_check": {"status": "NOT_APPLICABLE", "reason": "No source DOCX template was patched"},
++            "non_target_integrity_check": {"status": "NOT_APPLICABLE", "reason": "A clean multi-section document was generated; audit metadata is stored in the sidecar manifest."},
+         }
+         return path, integrity
+ 
++    def _configure_document(self, document: Document) -> None:
++        section = document.sections[0]
++        section.top_margin = Cm(2.5)
++        section.bottom_margin = Cm(2.5)
++        section.left_margin = Cm(2.8)
++        section.right_margin = Cm(2.5)
++        section.different_first_page_header_footer = True
++
++        normal = document.styles["Normal"]
++        normal.font.name = "宋体"
++        normal._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
++        normal.font.size = Pt(12)
++        normal.paragraph_format.line_spacing = 1.5
++        normal.paragraph_format.first_line_indent = Pt(24)
++        normal.paragraph_format.space_after = Pt(6)
++
++        for style_name, font_name, size in [("Heading 1", "黑体", 16), ("Heading 2", "黑体", 14), ("Heading 3", "楷体", 12)]:
++            style = document.styles[style_name]
++            style.font.name = font_name
++            style._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
++            style.font.size = Pt(size)
++            style.font.bold = True
++            style.paragraph_format.space_before = Pt(12)
++            style.paragraph_format.space_after = Pt(6)
++            style.paragraph_format.keep_with_next = True
++
++    @staticmethod
++    def _document_title(name: str) -> str:
++        cleaned = re.sub(r"（智能体系统测试）|\(智能体系统测试\)", "", name).strip()
++        cleaned = re.sub(r"项目申请书$", "", cleaned).strip()
++        return cleaned
++
++    def _append_block(self, document: Document, text: str) -> None:
++        text = (text or "").strip()
++        if not text:
++            return
++        if text.startswith("[[H2]]"):
++            document.add_heading(text.removeprefix("[[H2]]").strip(), level=2)
++            return
++        if text.startswith("[[H3]]"):
++            document.add_heading(text.removeprefix("[[H3]]").strip(), level=3)
++            return
++        if text.startswith("[[TABLE]]"):
++            self._append_table(document, text.removeprefix("[[TABLE]]").strip())
++            return
++        if text.startswith("[[BULLET]]"):
++            paragraph = document.add_paragraph(style="List Bullet")
++            paragraph.paragraph_format.first_line_indent = None
++            run = paragraph.add_run(text.removeprefix("[[BULLET]]").strip())
++            self._set_run_font(run, "宋体", 12)
++            return
++        if text.startswith("[[NUMBER]]"):
++            paragraph = document.add_paragraph(style="List Number")
++            paragraph.paragraph_format.first_line_indent = None
++            run = paragraph.add_run(text.removeprefix("[[NUMBER]]").strip())
++            self._set_run_font(run, "宋体", 12)
++            return
++        paragraph = document.add_paragraph()
++        run = paragraph.add_run(text)
++        self._set_run_font(run, "宋体", 12)
++
++    def _append_table(self, document: Document, raw: str) -> None:
++        rows = []
++        for line in raw.splitlines():
++            line = line.strip().strip("|")
++            if not line or set(line.replace("|", "").replace("-", "").replace(":", "")) == set():
++                continue
++            rows.append([cell.strip() for cell in line.split("|")])
++        if not rows:
++            return
++        width = max(len(row) for row in rows)
++        rows = [row + [""] * (width - len(row)) for row in rows]
++        table = document.add_table(rows=len(rows), cols=width)
++        table.style = "Table Grid"
++        table.alignment = WD_TABLE_ALIGNMENT.CENTER
++        table.autofit = True
++        for row_index, values in enumerate(rows):
++            row = table.rows[row_index]
++            tr_pr = row._tr.get_or_add_trPr()
++            cant_split = OxmlElement("w:cantSplit")
++            tr_pr.append(cant_split)
++            if row_index == 0:
++                tbl_header = OxmlElement("w:tblHeader")
++                tbl_header.set(qn("w:val"), "true")
++                tr_pr.append(tbl_header)
++            for column_index, value in enumerate(values):
++                cell = row.cells[column_index]
++                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
++                cell.text = value
++                for paragraph in cell.paragraphs:
++                    paragraph.paragraph_format.first_line_indent = None
++                    paragraph.paragraph_format.space_after = Pt(0)
++                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER if row_index == 0 else WD_ALIGN_PARAGRAPH.LEFT
++                    for run in paragraph.runs:
++                        self._set_run_font(run, "宋体", 9.5, bold=row_index == 0)
++        document.add_paragraph().paragraph_format.space_after = Pt(0)
++
++    @staticmethod
++    def _set_run_font(run, font_name: str, size: float, bold: bool = False) -> None:
++        run.font.name = font_name
++        run._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
++        run.font.size = Pt(size)
++        run.bold = bold
++
++    def _add_page_numbers(self, document: Document) -> None:
++        for section in document.sections:
++            paragraph = section.footer.paragraphs[0]
++            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
++            run = paragraph.add_run()
++            begin = OxmlElement("w:fldChar")
++            begin.set(qn("w:fldCharType"), "begin")
++            instr = OxmlElement("w:instrText")
++            instr.set(qn("xml:space"), "preserve")
++            instr.text = " PAGE "
++            end = OxmlElement("w:fldChar")
++            end.set(qn("w:fldCharType"), "end")
++            run._r.extend([begin, instr, end])
++            self._set_run_font(run, "宋体", 10)
++
+     @staticmethod
+     def _non_target_check(before: list[str], after: list[str], changed_sections: list[dict[str, Any]]) -> dict[str, Any]:
+         # Full OOXML equivalence is not claimed. This check records stable prefix/suffix evidence
