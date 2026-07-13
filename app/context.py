@@ -61,7 +61,16 @@ class ContextBuilder:
 
     def _documents(self, project_id: str) -> list[dict[str, Any]]:
         rows = self.db.fetchall("SELECT parsed_json,document_hash,role,security_level FROM documents WHERE project_id=? ORDER BY created_at", (project_id,))
-        return [json.loads(row["parsed_json"]) for row in rows]
+        documents: list[dict[str, Any]] = []
+        for row in rows:
+            document = json.loads(row["parsed_json"])
+            # ``safe_filename`` is upload/storage metadata, not part of the strict
+            # document_context schema used by prompts.  Passing it through makes
+            # schema-guarded context replacement fail silently and leaves Replay
+            # seed documents in the model input.
+            document.pop("safe_filename", None)
+            documents.append(document)
+        return documents
 
     def _latest_output(self, project_id: str, prompt_id: str) -> dict[str, Any] | None:
         row = self.db.fetchone("SELECT content_json FROM artifacts WHERE project_id=? AND prompt_id=? ORDER BY version DESC LIMIT 1", (project_id, prompt_id))

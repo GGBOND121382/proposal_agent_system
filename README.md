@@ -10,11 +10,16 @@
 - 五条核心工作流状态机与十三类人工 Gate；
 - 一次定向修复额度与 Critic/Producer 分离；
 - DOCX、PDF、Markdown、TXT、JSON、CSV 材料解析；
+- 上传存储元数据与 Prompt `document_context` 严格隔离，确保真实材料替换 Replay 种子；
 - 项目、材料、Prompt Run、Artifact、Workflow、Gate 和审计事件持久化；
 - 受控在线公共研究接口，默认关闭，支持自建 SearXNG；
 - DOCX 新文档生成、简单章节定向补丁、完整性报告和导出审计包；
 - 浏览器操作台及 FastAPI 接口文档；
 - Prompt 包静态校验和端到端自动化测试。
+
+## v0.1.1 兼容性修复
+
+修复上传文档解析结果中的内部存储字段 `safe_filename` 被传入严格 Prompt Schema 的问题。该问题会使 `source_documents` 或 `reference_document` 的安全替换失败，并保留 Replay 示例输入。v0.1.1 在 Context Builder 中移除该内部字段，并新增包含该字段的回归测试。
 
 ## 快速启动
 
@@ -156,7 +161,7 @@ app/
   static/          # 浏览器操作台
 prompt_pack/       # 原 V2 Prompt 交接包
 scripts/           # 启动、验证和演示
- tests/             # 自动测试
+tests/             # 自动测试
 ```
 
 ## 生产上线前必须完成

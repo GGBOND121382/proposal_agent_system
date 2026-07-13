@@ -74,7 +74,6 @@ def test_document_context_builder_uses_uploaded_material(runtime):
     settings, pack, db, _, builder, *_ = runtime
     project_id = create_project(db)
     parsed = parse_document("guide.md", b"# Guide\nMust include technical route.", "APPLICATION_GUIDE", "INTERNAL")
-    parsed.pop("safe_filename")
     path = settings.uploads_dir / "guide.md"
     path.write_bytes(b"x")
     db.execute(
