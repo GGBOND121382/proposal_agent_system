@@ -1,0 +1,60 @@
+--- a/tests/test_runtime.py
++++ b/tests/test_runtime.py
+@@ -141,3 +141,57 @@
+     package = exporter.export_package(project_id)
+     assert package.exists()
+     assert package.stat().st_size > 10_000
++
++
++def test_multi_section_authoring_and_real_candidate_aggregation(runtime):
++    settings, pack, db, _, builder, _, engine, exporter = runtime
++    project_id = create_project(db)
++    draft = "# 全文\nplaceholder\n# Section A\nwrite A\n# Section B\nwrite B\n# Section C\nwrite C\n".encode("utf-8")
++    parsed = parse_document("draft.md", draft, "CURRENT_PROPOSAL", "INTERNAL")
++    path = settings.uploads_dir / "draft.md"
++    path.write_bytes(draft)
++    db.execute(
++        "INSERT INTO documents(id,project_id,filename,role,security_level,document_hash,file_path,parsed_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
++        (parsed["document_id"], project_id, "draft.md", "CURRENT_PROPOSAL", "INTERNAL", parsed["document_hash"], str(path), json.dumps(parsed), utc_now()),
++    )
++
++    async def finish(workflow_type: str):
++        wf = engine.start(project_id, workflow_type)
++        for _ in range(40):
++            wf = await engine.advance(wf["id"])
++            if wf["status"] == "WAITING_GATE":
++                gate = [g for g in engine.list_gates(workflow_id=wf["id"]) if g["status"] == "OPEN"][0]
++                action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
++                engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
++                continue
++            break
++        assert wf["status"] == "COMPLETED", wf["state"].get("last_error")
++        return wf
++
++    authoring = asyncio.run(finish("WF-4_PROPOSAL_AUTHORING"))
++    runs = db.fetchall(
++        "SELECT input_json FROM prompt_runs WHERE workflow_id=? AND prompt_id='P-WRITE-CONTENT' AND status='PASS' ORDER BY created_at,id",
++        (authoring["id"],),
++    )
++    titles = [json.loads(row["input_json"])["payload"]["source_section"]["title"] for row in runs]
++    assert titles == ["Section A", "Section B", "Section C"]
++
++    integration_run = db.fetchone(
++        "SELECT input_json FROM prompt_runs WHERE workflow_id=? AND prompt_id='P-INTEGRATION-CRITIC' ORDER BY created_at DESC LIMIT 1",
++        (authoring["id"],),
++    )
++    integration_input = json.loads(integration_run["input_json"])
++    assert [item["section_id"] for item in integration_input["payload"]["candidate_sections"]] == [
++        json.loads(row["input_json"])["payload"]["source_section"]["section_id"] for row in runs
++    ]
++    assert all("candidate" in item for item in integration_input["payload"]["candidate_sections"])
++
++    asyncio.run(finish("WF-5_SECURITY_REVIEW_AND_EXPORT"))
++    review_run = db.fetchone(
++        "SELECT input_json FROM prompt_runs WHERE project_id=? AND prompt_id='P-FINAL-CONFIDENTIALITY-REVIEW' ORDER BY created_at DESC LIMIT 1",
++        (project_id,),
++    )
++    review_input = json.loads(review_run["input_json"])
++    assert len(review_input["payload"]["candidate_document"]["sections"]) == 3
++    exported = exporter.export(project_id)
++    assert exported.exists()
