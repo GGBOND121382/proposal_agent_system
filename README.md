@@ -32,13 +32,10 @@
 
 ```bash
 python scripts/run_outdoor_thermos_simulated_e2e.py \
-  --materials-dir ../outdoor_thermos_test_materials/01_upload_required \
-  --project-json ../outdoor_thermos_test_materials/03_control_and_expected/project_create_online_variant.json \
-  --output-dir data/outdoor_thermos_simulated_e2e \
-  --clean
+  --output-dir data/outdoor_thermos_simulated_e2e
 ```
 
-模拟模型测试用于验证 Prompt 边界、Schema、编排、门禁、隐私隔离、终审和导出，不等同于真实大模型的语义能力测评。
+该脚本以 REPLAY 模型边界运行五条工作流和十二章逐章编制，用于验证编排、门禁、候选聚合和导出。隐私替换与在线调用阻断由自动化测试覆盖；本脚本不等同于真实大模型语义能力测评。
 
 ## v0.2.0 完整申请书编制修复
 
