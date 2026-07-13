@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project_relation.schema.json",
+  "type": "object",
+  "properties": {
+    "relation_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "source_item_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "source_item_type": {
+      "type": "string",
+      "enum": [
+        "PROJECT_BASIC",
+        "STAKEHOLDER",
+        "DEMAND",
+        "SCENARIO",
+        "CURRENT_STATE",
+        "EXISTING_APPROACH",
+        "GAP",
+        "ROOT_CAUSE",
+        "PROBLEM",
+        "OBJECTIVE",
+        "WORK_PACKAGE",
+        "METHOD",
+        "DATA_RESOURCE",
+        "EXPERIMENT",
+        "INNOVATION",
+        "DELIVERABLE",
+        "METRIC",
+        "ACHIEVEMENT",
+        "CAPABILITY",
+        "TEAM_MEMBER",
+        "SCHEDULE_PHASE",
+        "RISK",
+        "RESOURCE_REQUIREMENT",
+        "BUDGET_ITEM",
+        "COMPLIANCE_ITEM"
+      ]
+    },
+    "relation_type": {
+      "type": "string",
+      "enum": [
+        "ADDRESSED_BY",
+        "AFFECTS",
+        "BASELINE_FOR",
+        "CAUSED_BY",
+        "CONSTRAINS",
+        "DECOMPOSES_TO",
+        "EXECUTES",
+        "FAILS_TO_CLOSE",
+        "FORMS",
+        "FUNDS",
+        "HAS_CURRENT_STATE",
+        "HAS_GAP",
+        "IMPLEMENTED_BY",
+        "MEASURED_BY",
+        "MOTIVATES",
+        "OCCURS_IN",
+        "PRODUCES",
+        "REALIZED_BY",
+        "SCHEDULED_IN",
+        "SUPPORTS",
+        "USES",
+        "VALIDATED_BY"
+      ]
+    },
+    "target_item_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "target_item_type": {
+      "type": "string",
+      "enum": [
+        "PROJECT_BASIC",
+        "STAKEHOLDER",
+        "DEMAND",
+        "SCENARIO",
+        "CURRENT_STATE",
+        "EXISTING_APPROACH",
+        "GAP",
+        "ROOT_CAUSE",
+        "PROBLEM",
+        "OBJECTIVE",
+        "WORK_PACKAGE",
+        "METHOD",
+        "DATA_RESOURCE",
+        "EXPERIMENT",
+        "INNOVATION",
+        "DELIVERABLE",
+        "METRIC",
+        "ACHIEVEMENT",
+        "CAPABILITY",
+        "TEAM_MEMBER",
+        "SCHEDULE_PHASE",
+        "RISK",
+        "RESOURCE_REQUIREMENT",
+        "BUDGET_ITEM",
+        "COMPLIANCE_ITEM"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "CANDIDATE",
+        "CONFIRMED",
+        "REJECTED",
+        "CONFLICTED",
+        "SUPERSEDED"
+      ]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "UNKNOWN"
+      ]
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/source_ref.schema.json"
+      }
+    },
+    "security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    },
+    "relation_hash": {
+      "type": "string",
+      "minLength": 64,
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "relation_id",
+    "source_item_id",
+    "source_item_type",
+    "relation_type",
+    "target_item_id",
+    "target_item_type",
+    "status",
+    "confidence",
+    "source_refs",
+    "security_level",
+    "relation_hash"
+  ]
+}

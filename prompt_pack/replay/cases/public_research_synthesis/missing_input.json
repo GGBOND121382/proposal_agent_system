@@ -1,0 +1,167 @@
+{
+  "case_id": "public_research_synthesis-missing_input",
+  "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS",
+  "case_type": "missing_input",
+  "description": "结构合法但业务信息缺失，应要求用户补充",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "HYBRID_ONLINE_ASSIST",
+      "current_step": "PUBLIC_RESEARCH_SYNTHESIS",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": null,
+      "fact_context_hash": null,
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "research_plan": {
+        "plan_id": "rplan-001",
+        "task_type": "PUBLIC_RESEARCH",
+        "research_questions": [
+          "公开评价方法有哪些？"
+        ],
+        "queries": [
+          "公开评价方法"
+        ],
+        "source_priorities": [
+          "官方标准"
+        ],
+        "time_scope": null,
+        "evidence_requirements": [
+          "至少两个来源"
+        ],
+        "prohibited_inferences": [
+          "不得推断内部项目"
+        ]
+      },
+      "retrieved_sources": [
+        {
+          "source_id": "src-001",
+          "source_type": "PUBLIC_SOURCE",
+          "document_version_id": null,
+          "section_id": null,
+          "span_start": null,
+          "span_end": null,
+          "quoted_text": "用户确认的示例内容",
+          "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "authority_rank": 50,
+          "security_level": "PUBLIC"
+        }
+      ],
+      "extracted_passages": [
+        {
+          "passage_id": "pass-001",
+          "source_ref": {
+            "source_id": "src-001",
+            "source_type": "PUBLIC_SOURCE",
+            "document_version_id": null,
+            "section_id": null,
+            "span_start": null,
+            "span_end": null,
+            "quoted_text": "用户确认的示例内容",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "authority_rank": 50,
+            "security_level": "PUBLIC"
+          },
+          "text": "公开资料说明。",
+          "relevance": "支持评价方法"
+        }
+      ],
+      "safe_online_package": {
+        "object_id": "obj-001",
+        "object_type": "GENERIC",
+        "version": 1,
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "security_level": "INTERNAL",
+        "display_name": "示例对象"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/public_research_synthesis_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS",
+    "prompt_version": "2.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "claims": [],
+      "source_comparisons": [],
+      "conflicts": [],
+      "limitations": [
+        "仅基于公开资料"
+      ],
+      "coverage_summary": "完成公开范围综合"
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-001",
+        "type": "MISSING",
+        "description": "缺少必需输入",
+        "target_paths": [
+          "payload"
+        ],
+        "required_action": "补充输入",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-001",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充必需输入。",
+        "reason": "当前输入不足",
+        "target_paths": [
+          "payload"
+        ],
+        "answer_schema": {
+          "type": "OBJECT",
+          "allowed_values": []
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

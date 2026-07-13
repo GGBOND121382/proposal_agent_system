@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "application_scheme_profile.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "scheme_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scheme_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "funding_organization": {
+      "type": "string",
+      "minLength": 1
+    },
+    "application_year": {
+      "type": "integer",
+      "minimum": 2000,
+      "maximum": 2100
+    },
+    "guide_direction_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "research_attribute": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "duration_months": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 240
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "rule_type": {
+            "type": "string",
+            "enum": [
+              "MANDATORY_SCOPE",
+              "MANDATORY_METRIC",
+              "EXCLUDED_SCOPE",
+              "DOCUMENT_STRUCTURE",
+              "PAGE_OR_WORD_LIMIT",
+              "BUDGET",
+              "DURATION",
+              "REVIEW_FOCUS",
+              "COMPLIANCE",
+              "AI_USAGE"
+            ]
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mandatory": {
+            "type": "boolean"
+          },
+          "source_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "../common/source_ref.schema.json"
+            },
+            "minItems": 1
+          },
+          "security_level": {
+            "type": "string",
+            "enum": [
+              "PUBLIC",
+              "INTERNAL",
+              "SENSITIVE",
+              "CLASSIFIED"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "rule_type",
+          "statement",
+          "mandatory",
+          "source_refs",
+          "security_level"
+        ]
+      },
+      "minItems": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "REVIEWING",
+        "CONFIRMED",
+        "SUPERSEDED",
+        "INVALID"
+      ]
+    },
+    "security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    },
+    "profile_hash": {
+      "type": "string",
+      "minLength": 64,
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "project_id",
+    "version",
+    "scheme_name",
+    "scheme_type",
+    "funding_organization",
+    "application_year",
+    "guide_direction_name",
+    "research_attribute",
+    "duration_months",
+    "rules",
+    "status",
+    "security_level",
+    "profile_hash"
+  ]
+}

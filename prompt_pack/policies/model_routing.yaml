@@ -1,0 +1,40 @@
+version: '2.0'
+default:
+  deny: true
+rules:
+- rule_id: sensitive-offline-only
+  priority: 100
+  when:
+    security_level:
+    - INTERNAL
+    - SENSITIVE
+    - CLASSIFIED
+  require:
+    environment: OFFLINE_LOCAL
+- rule_id: approved-public-online
+  priority: 90
+  when:
+    security_level:
+    - PUBLIC
+    transfer_approval_status:
+    - APPROVED
+    task_type:
+    - PUBLIC_RESEARCH_PLAN
+    - PUBLIC_RESEARCH_SYNTHESIS
+    - PUBLIC_RESEARCH_CRITIC
+    - PUBLIC_TEMPLATE_ANALYSIS
+    - GENERIC_LANGUAGE_ASSIST
+  allow:
+    environment:
+    - ONLINE_PUBLIC
+- rule_id: public-offline-default
+  priority: 10
+  when:
+    security_level:
+    - PUBLIC
+  allow:
+    environment:
+    - OFFLINE_LOCAL
+prohibitions:
+- 不得从OFFLINE_LOCAL自动Fallback到ONLINE_PUBLIC
+- ONLINE_PUBLIC只允许APPROVED安全任务包

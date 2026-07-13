@@ -1,0 +1,267 @@
+{
+  "case_id": "write_blueprint-normal",
+  "prompt_id": "P-WRITE-BLUEPRINT",
+  "case_type": "normal",
+  "description": "正常业务输入应通过",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-WRITE-BLUEPRINT",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "WRITE_BLUEPRINT",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "confirmed_plan": {
+        "object_id": "obj-001",
+        "object_type": "GENERIC",
+        "version": 1,
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "security_level": "INTERNAL",
+        "display_name": "示例对象"
+      },
+      "section_profile": {
+        "profile_id": "RESEARCH_CONTENT",
+        "version": "2.0.0",
+        "required_inputs": [
+          "OBJECTIVE",
+          "WORK_PACKAGE"
+        ],
+        "acceptance_rules": [
+          "目标与任务对应"
+        ]
+      },
+      "template_context": {
+        "template_id": "tpl-001",
+        "component_ids": [
+          "comp-001"
+        ],
+        "rules": [
+          "总分结构"
+        ]
+      },
+      "project_subgraph": {
+        "item_ids": [
+          "item-001"
+        ],
+        "relation_ids": [],
+        "items": [
+          {
+            "item_id": "item-001",
+            "item_type": "OBJECTIVE",
+            "domain": "OBJECTIVES",
+            "content": {
+              "statement": "形成可验证能力。",
+              "baseline_state": "尚未形成",
+              "target_state": "形成原型能力",
+              "success_definition": "通过场景验证",
+              "out_of_scope": []
+            },
+            "knowledge_status": "CONFIRMED",
+            "owner_ref": null,
+            "source_refs": [
+              {
+                "source_id": "src-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认的示例内容",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ],
+            "security_level": "INTERNAL",
+            "locked": true,
+            "confidence": "HIGH",
+            "item_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "relations": []
+      },
+      "confirmed_facts": [
+        {
+          "claim_id": "fact-001",
+          "claim_text": "项目拟开展研究。",
+          "claim_type": "PLAN",
+          "subject_id": "project-001",
+          "temporal_status": "PLANNED",
+          "qualifiers": [
+            "拟"
+          ],
+          "numeric_values": [],
+          "source_refs": [
+            {
+              "source_id": "src-001",
+              "source_type": "USER_CONFIRMATION",
+              "document_version_id": null,
+              "section_id": null,
+              "span_start": null,
+              "span_end": null,
+              "quoted_text": "用户确认的示例内容",
+              "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "authority_rank": 100,
+              "security_level": "INTERNAL"
+            }
+          ],
+          "knowledge_status": "CONFIRMED",
+          "security_level": "INTERNAL"
+        }
+      ],
+      "technical_inputs": [
+        {
+          "object_id": "obj-001",
+          "object_type": "GENERIC",
+          "version": 1,
+          "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "security_level": "INTERNAL",
+          "display_name": "示例对象"
+        }
+      ],
+      "metric_inputs": [
+        {
+          "object_id": "obj-001",
+          "object_type": "GENERIC",
+          "version": 1,
+          "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "security_level": "INTERNAL",
+          "display_name": "示例对象"
+        }
+      ],
+      "source_section": {
+        "section_id": "sec-001",
+        "section_key": "research_content",
+        "title": "研究内容",
+        "level": 1,
+        "text": "现有正文示例。",
+        "text_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_ids": [
+          "block-001"
+        ],
+        "contains_table": false,
+        "contains_formula": false,
+        "contains_image": false,
+        "contains_comment": false,
+        "contains_revision": false,
+        "security_level": "INTERNAL"
+      },
+      "security_constraints": {
+        "project_security_level": "INTERNAL",
+        "input_max_security_level": "INTERNAL",
+        "required_environment": "OFFLINE_LOCAL",
+        "online_transfer_approval_status": "NOT_REQUIRED",
+        "allowed_model_endpoint_ids": [
+          "offline-primary"
+        ],
+        "prohibited_fields": [
+          "真实项目名称"
+        ],
+        "recipient_scope": [
+          "内部用户"
+        ],
+        "policy_version": "2.0"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/write_blueprint_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-WRITE-BLUEPRINT",
+    "prompt_version": "2.0.0",
+    "status": "PASS",
+    "result": {
+      "blueprint": {
+        "blueprint_id": "bp-001",
+        "section_objective": "说明研究任务",
+        "paragraphs": [
+          {
+            "paragraph_id": "bp-p-001",
+            "sequence": 1,
+            "function": "总述",
+            "must_answer": [
+              "研究内容总体逻辑"
+            ],
+            "fact_slots": [
+              "fact-001"
+            ],
+            "project_item_slots": [
+              "item-001"
+            ],
+            "technical_slots": [],
+            "metric_slots": [],
+            "source_strategy": "REPLACE",
+            "forbidden_content": [
+              "未确认技术"
+            ],
+            "transition_requirement": null
+          }
+        ],
+        "unresolved_slot_ids": []
+      },
+      "plan_task_coverage": [
+        {
+          "revision_task_id": "rt-001",
+          "paragraph_ids": [
+            "bp-p-001"
+          ]
+        }
+      ],
+      "input_usage_summary": [
+        {
+          "source_id": "item-001",
+          "used_in_paragraph_ids": [
+            "bp-p-001"
+          ]
+        }
+      ]
+    },
+    "findings": [],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "PASS"
+  }
+}

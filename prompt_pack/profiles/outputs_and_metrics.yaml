@@ -1,0 +1,42 @@
+profile_id: OUTPUTS_AND_METRICS
+version: 2.0.0
+purpose: 建立研究任务、成果、指标、测试条件与验收方式的完整映射。
+must_answer:
+- 形成哪些成果
+- 每个成果由哪些任务产生
+- 指标测量什么对象
+- 基线和目标值是什么
+- 单位和计算方法是什么
+- 测试场景和条件是什么
+- 谁如何验收
+required_item_types:
+- WORK_PACKAGE
+- DELIVERABLE
+- METRIC
+- EXPERIMENT
+recommended_chain:
+- 成果总表
+- 成果一及指标
+- 成果二及指标
+- 测试条件
+- 验收方式
+paragraph_roles:
+- 成果定义
+- 指标定义
+- 测试条件
+- 验收映射
+forbidden:
+- 显著提升等模糊指标
+- 无对象数字
+- 没有测试条件
+- 成果和指标未映射
+readiness:
+  minimum_confirmed_ratio: 0.85
+  minimum_evidence_ratio: 0.7
+  blocking_item_types:
+  - DELIVERABLE
+  - METRIC
+critic_checks:
+- 指标六要素齐全
+- 成果有任务来源
+- 指标有验收方法

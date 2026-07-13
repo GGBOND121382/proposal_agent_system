@@ -1,0 +1,113 @@
+{
+  "case_id": "template_extract-schema_error",
+  "prompt_id": "P-TEMPLATE-EXTRACT",
+  "case_type": "schema_error",
+  "description": "输入Envelope缺少必需字段，应在调用模型前被Schema拒绝",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-TEMPLATE-EXTRACT",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "TEMPLATE_EXTRACT",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "reference_document": {
+        "document_id": "doc-001",
+        "document_version_id": "docv-001",
+        "document_role": "REFERENCE_PROPOSAL",
+        "title": "项目申请书",
+        "document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "authority_rank": 80,
+        "allowed_uses": [
+          "FACT_SOURCE",
+          "WRITING_SOURCE"
+        ],
+        "prohibited_uses": [],
+        "security_level": "INTERNAL",
+        "sections": [
+          {
+            "section_id": "sec-001",
+            "section_key": "research_content",
+            "title": "研究内容",
+            "level": 1,
+            "text": "现有正文示例。",
+            "text_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "block_ids": [
+              "block-001"
+            ],
+            "contains_table": false,
+            "contains_formula": false,
+            "contains_image": false,
+            "contains_comment": false,
+            "contains_revision": false,
+            "security_level": "INTERNAL"
+          }
+        ]
+      },
+      "section_tree": [
+        {
+          "section_id": "sec-001",
+          "title": "研究内容",
+          "level": 1,
+          "parent_section_id": null
+        }
+      ],
+      "style_summary": {
+        "paragraph_styles": [
+          "正文"
+        ],
+        "heading_styles": [
+          "标题1"
+        ],
+        "table_styles": []
+      },
+      "extraction_scope": [
+        "全部指南"
+      ],
+      "security_constraints": {
+        "project_security_level": "INTERNAL",
+        "input_max_security_level": "INTERNAL",
+        "required_environment": "OFFLINE_LOCAL",
+        "online_transfer_approval_status": "NOT_REQUIRED",
+        "allowed_model_endpoint_ids": [
+          "offline-primary"
+        ],
+        "prohibited_fields": [
+          "真实项目名称"
+        ],
+        "recipient_scope": [
+          "内部用户"
+        ],
+        "policy_version": "2.0"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/template_extract_output.schema.json"
+  },
+  "expected_output": null,
+  "expected_validation": {
+    "input_schema_valid": false,
+    "output_schema_valid": false,
+    "expected_status": null
+  }
+}

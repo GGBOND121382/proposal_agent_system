@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prompt_input_envelope.schema.json",
+  "title": "统一Prompt输入Envelope；具体payload由26个Prompt Schema严格约束",
+  "oneOf": [
+    {
+      "$ref": "../prompts/security_classify_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/security_classify_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/safe_online_package_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/safe_online_package_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/online_result_import_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/final_confidentiality_review_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/public_research_plan_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/public_research_synthesis_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/public_research_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/scheme_extract_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/scheme_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/project_definition_extract_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/project_definition_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/project_readiness_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/fact_extract_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/fact_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/template_extract_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/template_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/revision_plan_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/revision_plan_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/write_blueprint_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/write_blueprint_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/write_content_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/write_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/integration_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/targeted_repair_input.schema.json"
+    }
+  ]
+}

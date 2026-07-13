@@ -1,0 +1,45 @@
+version: '2.0'
+levels: &id001
+- PUBLIC
+- INTERNAL
+- SENSITIVE
+- CLASSIFIED
+ordering: *id001
+default_rule: MAX_INPUT_LEVEL
+applies_to:
+- Project
+- Document
+- DocumentVersion
+- Section
+- ProjectDefinitionItem
+- ProjectDefinitionRelation
+- Fact
+- Evidence
+- PromptInput
+- PromptOutput
+- AgentRun
+- ModelRun
+- WritingCandidate
+- Artifact
+- TransferPackage
+- PublicResearchResult
+- Export
+downgrade_requires:
+- DETERMINISTIC_REDACTION
+- MINIMIZATION
+- DEIDENTIFICATION
+- HUMAN_SECURITY_REVIEW
+- FORMAL_APPROVAL
+rules:
+- when: any input is CLASSIFIED
+  result: CLASSIFIED
+- when: any input is SENSITIVE and none CLASSIFIED
+  result: SENSITIVE
+- when: any input is INTERNAL and none above
+  result: INTERNAL
+- when: all inputs PUBLIC
+  result: PUBLIC
+prohibitions:
+- 模型不得自行降级
+- 离线对象不得因摘要自动变为PUBLIC
+- 在线结果默认PUBLIC但必须经过导入审批

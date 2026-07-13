@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "template_extract_input.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-TEMPLATE-EXTRACT"
+    },
+    "prompt_version": {
+      "const": "2.0.0"
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "workflow_type": {
+          "type": "string",
+          "enum": [
+            "PROJECT_INTAKE",
+            "TEMPLATE_EXTRACTION",
+            "HYBRID_ONLINE_ASSIST",
+            "PROPOSAL_AUTHORING",
+            "SECURITY_REVIEW_AND_EXPORT"
+          ]
+        },
+        "current_step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "writing_mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "COPY_EDIT_ONLY",
+                "SUBSTANTIVE_REVISION",
+                "DRAFT_FROM_PROJECT_DEFINITION"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "workflow_type",
+        "current_step",
+        "attempt",
+        "writing_mode"
+      ]
+    },
+    "security_context": {
+      "$ref": "../common/security_context.schema.json"
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "target_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "read_only_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "protected_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "target_object_ids",
+        "read_only_object_ids",
+        "protected_object_ids"
+      ]
+    },
+    "freshness": {
+      "$ref": "../common/freshness.schema.json"
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "reference_document": {
+          "$ref": "../common/document_context.schema.json"
+        },
+        "section_tree": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "section_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "level": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "parent_section_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "section_id",
+              "title",
+              "level",
+              "parent_section_id"
+            ]
+          }
+        },
+        "style_summary": {
+          "type": "object",
+          "properties": {
+            "paragraph_styles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "heading_styles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "table_styles": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "paragraph_styles",
+            "heading_styles",
+            "table_styles"
+          ]
+        },
+        "extraction_scope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "security_constraints": {
+          "$ref": "../common/security_context.schema.json"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "reference_document",
+        "section_tree",
+        "style_summary",
+        "extraction_scope",
+        "security_constraints"
+      ]
+    },
+    "expected_output_schema": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "task",
+    "security_context",
+    "scope",
+    "freshness",
+    "payload",
+    "expected_output_schema"
+  ]
+}

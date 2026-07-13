@@ -1,0 +1,340 @@
+{
+  "case_id": "integration_critic-need_user_input",
+  "prompt_id": "P-INTEGRATION-CRITIC",
+  "case_type": "need_user_input",
+  "description": "关键事实未确认，应生成具体用户问题",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-INTEGRATION-CRITIC",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "INTEGRATION_CRITIC",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": null,
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "candidate_sections": [
+        {
+          "section_id": "sec-001",
+          "candidate": {
+            "candidate_id": "cand-001",
+            "candidate_text": "本项目拟开展相关研究。",
+            "paragraphs": [
+              {
+                "paragraph_id": "p-001",
+                "sequence": 1,
+                "paragraph_role": "总述",
+                "text": "本项目拟开展相关研究。",
+                "blueprint_paragraph_id": "bp-p-001",
+                "trace_link_ids": [
+                  "trace-001"
+                ],
+                "preserved_source_span": null,
+                "contains_unresolved_placeholder": false
+              }
+            ],
+            "trace_links": [
+              {
+                "trace_id": "trace-001",
+                "target_path": "paragraphs[0].text",
+                "source_kind": "FACT",
+                "source_id": "fact-001",
+                "source_path_or_span": null,
+                "support_type": "DIRECT",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ],
+            "term_usage": [
+              {
+                "term": "本项目",
+                "canonical_term": "本项目",
+                "paragraph_ids": [
+                  "p-001"
+                ]
+              }
+            ],
+            "unresolved_items": []
+          }
+        }
+      ],
+      "document_section_map": [
+        {
+          "section_id": "sec-001",
+          "title": "研究内容",
+          "level": 1,
+          "candidate_id": "cand-001"
+        }
+      ],
+      "project_definition": {
+        "schema_version": "2.0",
+        "project_id": "project-001",
+        "version": 1,
+        "parent_version_id": null,
+        "items": [
+          {
+            "item_id": "item-001",
+            "item_type": "OBJECTIVE",
+            "domain": "OBJECTIVES",
+            "content": {
+              "statement": "形成可验证能力。",
+              "baseline_state": "尚未形成",
+              "target_state": "形成原型能力",
+              "success_definition": "通过场景验证",
+              "out_of_scope": []
+            },
+            "knowledge_status": "CONFIRMED",
+            "owner_ref": null,
+            "source_refs": [
+              {
+                "source_id": "src-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认的示例内容",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ],
+            "security_level": "INTERNAL",
+            "locked": true,
+            "confidence": "HIGH",
+            "item_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "relations": [],
+        "domain_readiness": [
+          {
+            "domain": "OBJECTIVES",
+            "completeness": 1.0,
+            "confirmation_ratio": 1.0,
+            "evidence_ratio": 1.0,
+            "open_conflicts": 0,
+            "readiness": "READY",
+            "missing_item_types": []
+          }
+        ],
+        "open_conflict_ids": [],
+        "status": "CONFIRMED",
+        "security_level": "INTERNAL",
+        "package_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "fact_package": {
+        "schema_version": "2.0",
+        "project_id": "project-001",
+        "version": 1,
+        "claims": [
+          {
+            "claim_id": "fact-001",
+            "claim_text": "项目拟开展研究。",
+            "claim_type": "PLAN",
+            "subject_id": "project-001",
+            "temporal_status": "PLANNED",
+            "qualifiers": [
+              "拟"
+            ],
+            "numeric_values": [],
+            "source_refs": [
+              {
+                "source_id": "src-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认的示例内容",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ],
+            "knowledge_status": "CONFIRMED",
+            "security_level": "INTERNAL"
+          }
+        ],
+        "conflicts": [],
+        "package_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "security_level": "INTERNAL"
+      },
+      "scheme_profile": {
+        "schema_version": "2.0",
+        "profile_id": "scheme-001",
+        "project_id": "project-001",
+        "version": 1,
+        "scheme_name": "示例计划",
+        "scheme_type": "RESEARCH",
+        "funding_organization": "示例机构",
+        "application_year": 2026,
+        "guide_direction_name": "示例方向",
+        "research_attribute": null,
+        "duration_months": 36,
+        "rules": [
+          {
+            "rule_id": "rule-001",
+            "rule_type": "MANDATORY_SCOPE",
+            "statement": "围绕示例方向开展研究",
+            "mandatory": true,
+            "source_refs": [
+              {
+                "source_id": "src-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认的示例内容",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ],
+            "security_level": "PUBLIC"
+          }
+        ],
+        "status": "CONFIRMED",
+        "security_level": "PUBLIC",
+        "profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "terminology": [
+        {
+          "canonical_term": "本项目",
+          "aliases": [],
+          "definition": "当前申报项目"
+        }
+      ],
+      "security_policy": {
+        "schema_version": "2.0",
+        "profile_id": "security-001",
+        "project_id": "project-001",
+        "version": 1,
+        "default_security_level": "INTERNAL",
+        "internet_access_allowed": false,
+        "anonymized_external_processing_allowed": false,
+        "prohibited_external_fields": [
+          "真实项目名称"
+        ],
+        "allowed_public_topics": [
+          "公开政策"
+        ],
+        "allowed_model_endpoint_ids": [
+          "offline-primary"
+        ],
+        "outbound_approval_required": true,
+        "import_approval_required": true,
+        "final_content_approval_required": true,
+        "final_export_approval_required": true,
+        "log_content_policy": "FULL_IN_SECURE_ARTIFACT_ONLY",
+        "retention_days": 365,
+        "profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/integration_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-INTEGRATION-CRITIC",
+    "prompt_version": "2.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "verdict": "ACCEPT",
+      "terminology_checks": [
+        {
+          "term": "本项目",
+          "consistent": true,
+          "sections": [
+            "sec-001"
+          ]
+        }
+      ],
+      "numeric_checks": [],
+      "mapping_checks": [
+        {
+          "mapping_type": "OBJECTIVE_TO_WORK_PACKAGE",
+          "source_id": "item-001",
+          "target_ids": [
+            "item-002"
+          ],
+          "complete": true
+        }
+      ],
+      "routing_actions": []
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-002",
+        "type": "UNCERTAIN",
+        "description": "关键事实尚未确认",
+        "target_paths": [
+          "payload"
+        ],
+        "required_action": "用户确认",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-002",
+        "question_type": "CONFIRMATION",
+        "question": "请确认关键事实。",
+        "reason": "事实状态未知",
+        "target_paths": [
+          "payload"
+        ],
+        "answer_schema": {
+          "type": "BOOLEAN",
+          "allowed_values": [
+            true,
+            false
+          ]
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

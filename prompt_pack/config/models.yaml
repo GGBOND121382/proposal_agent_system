@@ -1,0 +1,39 @@
+version: '2.0'
+models:
+- model_id: offline-general-primary
+  endpoint_id: offline-primary
+  provider_model_name: ${OFFLINE_GENERAL_MODEL}
+  enabled: true
+  capabilities:
+    structured_output: true
+    long_context: true
+    chinese_writing: true
+    document_analysis: true
+  defaults:
+    temperature: 0.1
+    top_p: 0.9
+    max_output_tokens: 10000
+- model_id: offline-critic-primary
+  endpoint_id: offline-primary
+  provider_model_name: ${OFFLINE_CRITIC_MODEL}
+  enabled: true
+  capabilities:
+    structured_output: true
+    long_context: true
+    chinese_writing: true
+    document_analysis: true
+  defaults:
+    temperature: 0.0
+    top_p: 1.0
+    max_output_tokens: 7000
+- model_id: online-public-primary
+  endpoint_id: online-public-primary
+  provider_model_name: ${ONLINE_PUBLIC_MODEL}
+  enabled: ${ONLINE_LLM_ENABLED:false}
+  capabilities:
+    structured_output: true
+    long_context: true
+  defaults:
+    temperature: 0.1
+    top_p: 0.9
+    max_output_tokens: 8000

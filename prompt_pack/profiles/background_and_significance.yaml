@@ -1,0 +1,50 @@
+profile_id: BACKGROUND_AND_SIGNIFICANCE
+version: 2.0.0
+purpose: 建立需求、场景、现状、差距、根因、问题与立项价值的证据链。
+must_answer:
+- 谁提出需求
+- 需求发生在哪些场景
+- 当前如何处理
+- 具体差距及其根因是什么
+- 为什么现在必须立项
+- 不立项的后果和预期价值是什么
+required_item_types:
+- STAKEHOLDER
+- DEMAND
+- SCENARIO
+- CURRENT_STATE
+- GAP
+- ROOT_CAUSE
+- PROBLEM
+recommended_chain:
+- 需求来源
+- 应用场景
+- 现状与已有方案
+- 具体差距
+- 根因
+- 核心问题
+- 立项必要性与价值
+paragraph_roles:
+- 需求引入
+- 场景展开
+- 现状分析
+- 差距与根因
+- 问题凝练
+- 必要性与价值
+forbidden:
+- 空泛形势判断
+- 无来源政策表述
+- 将预期成果写成现有能力
+- 没有对比基线的先进性判断
+readiness:
+  minimum_confirmed_ratio: 0.7
+  minimum_evidence_ratio: 0.6
+  blocking_item_types:
+  - DEMAND
+  - GAP
+  - PROBLEM
+critic_checks:
+- 需求主体明确
+- 差距有证据
+- 根因与问题不混淆
+- 价值与目标相连

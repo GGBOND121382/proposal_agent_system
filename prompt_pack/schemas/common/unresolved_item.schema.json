@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "unresolved_item.schema.json",
+  "type": "object",
+  "properties": {
+    "item_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "MISSING",
+        "CONFLICT",
+        "UNCERTAIN",
+        "UNSUPPORTED",
+        "OUT_OF_SCOPE",
+        "SECURITY_RESTRICTED"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "required_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "blocking": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "item_id",
+    "type",
+    "description",
+    "target_paths",
+    "required_action",
+    "blocking"
+  ]
+}

@@ -1,0 +1,196 @@
+{
+  "case_id": "write_content-schema_error",
+  "prompt_id": "P-WRITE-CONTENT",
+  "case_type": "schema_error",
+  "description": "输入Envelope缺少必需字段，应在调用模型前被Schema拒绝",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-WRITE-CONTENT",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "WRITE_CONTENT",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "approved_blueprint": {
+        "object_id": "obj-001",
+        "object_type": "GENERIC",
+        "version": 1,
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "security_level": "INTERNAL",
+        "display_name": "示例对象"
+      },
+      "source_section": {
+        "section_id": "sec-001",
+        "section_key": "research_content",
+        "title": "研究内容",
+        "level": 1,
+        "text": "现有正文示例。",
+        "text_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "block_ids": [
+          "block-001"
+        ],
+        "contains_table": false,
+        "contains_formula": false,
+        "contains_image": false,
+        "contains_comment": false,
+        "contains_revision": false,
+        "security_level": "INTERNAL"
+      },
+      "project_subgraph": {
+        "item_ids": [
+          "item-001"
+        ],
+        "relation_ids": [],
+        "items": [
+          {
+            "item_id": "item-001",
+            "item_type": "OBJECTIVE",
+            "domain": "OBJECTIVES",
+            "content": {
+              "statement": "形成可验证能力。",
+              "baseline_state": "尚未形成",
+              "target_state": "形成原型能力",
+              "success_definition": "通过场景验证",
+              "out_of_scope": []
+            },
+            "knowledge_status": "CONFIRMED",
+            "owner_ref": null,
+            "source_refs": [
+              {
+                "source_id": "src-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认的示例内容",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ],
+            "security_level": "INTERNAL",
+            "locked": true,
+            "confidence": "HIGH",
+            "item_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "relations": []
+      },
+      "confirmed_facts": [
+        {
+          "claim_id": "fact-001",
+          "claim_text": "项目拟开展研究。",
+          "claim_type": "PLAN",
+          "subject_id": "project-001",
+          "temporal_status": "PLANNED",
+          "qualifiers": [
+            "拟"
+          ],
+          "numeric_values": [],
+          "source_refs": [
+            {
+              "source_id": "src-001",
+              "source_type": "USER_CONFIRMATION",
+              "document_version_id": null,
+              "section_id": null,
+              "span_start": null,
+              "span_end": null,
+              "quoted_text": "用户确认的示例内容",
+              "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "authority_rank": 100,
+              "security_level": "INTERNAL"
+            }
+          ],
+          "knowledge_status": "CONFIRMED",
+          "security_level": "INTERNAL"
+        }
+      ],
+      "technical_inputs": [
+        {
+          "object_id": "obj-001",
+          "object_type": "GENERIC",
+          "version": 1,
+          "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "security_level": "INTERNAL",
+          "display_name": "示例对象"
+        }
+      ],
+      "metric_inputs": [
+        {
+          "object_id": "obj-001",
+          "object_type": "GENERIC",
+          "version": 1,
+          "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "security_level": "INTERNAL",
+          "display_name": "示例对象"
+        }
+      ],
+      "read_only_context": [],
+      "template_context": {
+        "template_id": "tpl-001",
+        "component_ids": [
+          "comp-001"
+        ],
+        "rules": [
+          "总分结构"
+        ]
+      },
+      "section_profile": {
+        "profile_id": "RESEARCH_CONTENT",
+        "version": "2.0.0",
+        "required_inputs": [
+          "OBJECTIVE",
+          "WORK_PACKAGE"
+        ],
+        "acceptance_rules": [
+          "目标与任务对应"
+        ]
+      },
+      "security_constraints": {
+        "project_security_level": "INTERNAL",
+        "input_max_security_level": "INTERNAL",
+        "required_environment": "OFFLINE_LOCAL",
+        "online_transfer_approval_status": "NOT_REQUIRED",
+        "allowed_model_endpoint_ids": [
+          "offline-primary"
+        ],
+        "prohibited_fields": [
+          "真实项目名称"
+        ],
+        "recipient_scope": [
+          "内部用户"
+        ],
+        "policy_version": "2.0"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/write_content_output.schema.json"
+  },
+  "expected_output": null,
+  "expected_validation": {
+    "input_schema_valid": false,
+    "output_schema_valid": false,
+    "expected_status": null
+  }
+}

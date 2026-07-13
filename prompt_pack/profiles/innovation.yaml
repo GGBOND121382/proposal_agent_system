@@ -1,0 +1,43 @@
+profile_id: INNOVATION
+version: 2.0.0
+purpose: 基于明确对比基线说明拟提出的新机制、适用条件和预期优势。
+must_answer:
+- 现有基线是什么
+- 基线不足是什么
+- 拟改变什么
+- 新的机制是什么
+- 优势如何产生
+- 适用条件是什么
+- 证据和置信度如何
+required_item_types:
+- EXISTING_APPROACH
+- GAP
+- INNOVATION
+- METHOD
+recommended_chain:
+- 对比基线
+- 现有不足
+- 新做法
+- 新机制
+- 预期优势
+- 适用条件
+paragraph_roles:
+- 基线与不足
+- 创新做法
+- 机制解释
+- 优势与边界
+forbidden:
+- 无依据的首次或领先
+- 把一般集成包装为创新
+- 没有适用条件
+readiness:
+  minimum_confirmed_ratio: 0.75
+  minimum_evidence_ratio: 0.65
+  blocking_item_types:
+  - EXISTING_APPROACH
+  - INNOVATION
+critic_checks:
+- 存在对比基线
+- 新机制具体
+- 优势可解释
+- 绝对表述有证据

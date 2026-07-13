@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gate_request.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "gate_request_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "gate_type": {
+      "type": "string",
+      "enum": [
+        "SCHEME_CONFIRMATION",
+        "PROJECT_DEFINITION_CONFIRMATION",
+        "PROJECT_GAP_RESOLUTION",
+        "FACT_CONFIRMATION",
+        "FACT_CONFLICT_RESOLUTION",
+        "TEMPLATE_CONFIRMATION",
+        "TECHNICAL_OR_METRIC_INFORMATION",
+        "PLAN_CONFIRMATION",
+        "CANDIDATE_REVIEW",
+        "OUTBOUND_SECURITY_APPROVAL",
+        "ONLINE_RESULT_IMPORT_APPROVAL",
+        "FINAL_CONTENT_SECURITY_APPROVAL",
+        "FINAL_EXPORT_APPROVAL"
+      ]
+    },
+    "target_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "target_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "context_hash": {
+      "type": "string",
+      "minLength": 64,
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "question_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "allowed_actions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "CONFIRM",
+          "RETURN",
+          "REJECT",
+          "RESOLVE",
+          "PROVIDE_INFORMATION",
+          "CANCEL",
+          "APPROVE"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "required_role": {
+      "type": "string",
+      "enum": [
+        "PROJECT_OWNER",
+        "CONTENT_OPERATOR",
+        "SECURITY_REVIEWER",
+        "EXPORT_APPROVER",
+        "SYSTEM_ADMIN"
+      ]
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/user_question.schema.json"
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "gate_request_id",
+    "gate_type",
+    "target_id",
+    "target_type",
+    "target_version",
+    "context_hash",
+    "question_version",
+    "allowed_actions",
+    "required_role",
+    "questions",
+    "created_at",
+    "expires_at",
+    "security_level"
+  ]
+}

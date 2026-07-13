@@ -1,0 +1,46 @@
+version: '2.0'
+profiles:
+  extraction:
+    preferred_models:
+    - offline-general-primary
+    temperature: 0.0
+    max_output_tokens: 10000
+    response_format: JSON_SCHEMA
+    fallback_models: []
+  critic:
+    preferred_models:
+    - offline-critic-primary
+    temperature: 0.0
+    max_output_tokens: 7000
+    response_format: JSON_SCHEMA
+    fallback_models:
+    - offline-general-primary
+  planning:
+    preferred_models:
+    - offline-general-primary
+    temperature: 0.1
+    max_output_tokens: 10000
+    response_format: JSON_SCHEMA
+    fallback_models: []
+  formal_writing:
+    preferred_models:
+    - offline-general-primary
+    temperature: 0.2
+    max_output_tokens: 12000
+    response_format: JSON_SCHEMA
+    fallback_models: []
+  public_research:
+    preferred_models:
+    - online-public-primary
+    temperature: 0.1
+    max_output_tokens: 8000
+    response_format: JSON_SCHEMA
+    fallback_models: []
+  security_review:
+    preferred_models:
+    - offline-critic-primary
+    temperature: 0.0
+    max_output_tokens: 7000
+    response_format: JSON_SCHEMA
+    fallback_models:
+    - offline-general-primary

@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user_decision.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "gate_request_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "gate_type": {
+      "type": "string",
+      "enum": [
+        "SCHEME_CONFIRMATION",
+        "PROJECT_DEFINITION_CONFIRMATION",
+        "PROJECT_GAP_RESOLUTION",
+        "FACT_CONFIRMATION",
+        "FACT_CONFLICT_RESOLUTION",
+        "TEMPLATE_CONFIRMATION",
+        "TECHNICAL_OR_METRIC_INFORMATION",
+        "PLAN_CONFIRMATION",
+        "CANDIDATE_REVIEW",
+        "OUTBOUND_SECURITY_APPROVAL",
+        "ONLINE_RESULT_IMPORT_APPROVAL",
+        "FINAL_CONTENT_SECURITY_APPROVAL",
+        "FINAL_EXPORT_APPROVAL"
+      ]
+    },
+    "target_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "target_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "context_hash": {
+      "type": "string",
+      "minLength": 64,
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "question_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "CONFIRM",
+        "RETURN",
+        "REJECT",
+        "RESOLVE",
+        "PROVIDE_INFORMATION",
+        "CANCEL",
+        "APPROVE"
+      ]
+    },
+    "comment": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "answers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "value": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "array",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "question_id",
+          "value"
+        ]
+      }
+    },
+    "decided_by": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "decided_role": {
+      "type": "string",
+      "enum": [
+        "PROJECT_OWNER",
+        "CONTENT_OPERATOR",
+        "SECURITY_REVIEWER",
+        "EXPORT_APPROVER",
+        "SYSTEM_ADMIN"
+      ]
+    },
+    "decided_at": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision_id",
+    "gate_request_id",
+    "gate_type",
+    "target_id",
+    "target_version",
+    "context_hash",
+    "question_version",
+    "action",
+    "comment",
+    "answers",
+    "decided_by",
+    "decided_role",
+    "decided_at"
+  ]
+}

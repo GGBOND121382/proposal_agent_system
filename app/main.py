@@ -1,0 +1,275 @@
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from .api_models import GateDecisionRequest, ProjectCreate, PromptExecuteRequest, WorkflowStartRequest
+from .config import Settings
+from .context import ContextBuilder
+from .db import Database
+from .documents import ALLOWED_EXTENSIONS, parse_document
+from .executor import PromptExecutionError, PromptExecutor
+from .exporter import DocxExporter, ExportDenied
+from .llm import ModelGateway
+from .pack import PromptPack
+from .research import PublicResearchService
+from .security import SecurityRouter
+from .util import new_id, safe_filename, sha256_json, utc_now
+from .workflows import WORKFLOWS, WorkflowEngine
+
+settings = Settings.load()
+pack = PromptPack(settings.prompt_pack_dir)
+db = Database(settings.db_path)
+router = SecurityRouter(pack)
+gateway = ModelGateway(settings, pack)
+context_builder = ContextBuilder(db, pack)
+executor = PromptExecutor(db, pack, router, gateway)
+research = PublicResearchService(settings)
+workflows = WorkflowEngine(db, pack, context_builder, executor, research)
+exporter = DocxExporter(db, settings)
+
+app = FastAPI(title="项目申请书智能体系统", version="0.1.0")
+app.mount("/static", StaticFiles(directory=settings.root_dir / "app" / "static"), name="static")
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(settings.root_dir / "app" / "static" / "index.html")
+
+
+@app.get("/api/health")
+def health() -> dict[str, Any]:
+    report = json.loads((settings.prompt_pack_dir / "BUILD_REPORT.json").read_text(encoding="utf-8"))
+    return {"status": "ok", "runtime_mode": settings.runtime_mode, "prompt_pack_status": report.get("status"), "prompt_count": len(pack.prompt_ids()), "database": str(settings.db_path.name)}
+
+
+@app.get("/api/config/status")
+def config_status() -> dict[str, Any]:
+    endpoints = []
+    for item in pack.endpoints["endpoints"]:
+        endpoints.append({"endpoint_id": item["endpoint_id"], "environment": item["environment"], "enabled": item.get("enabled", False), "base_url_configured": bool(item.get("base_url")), "internet_access": item.get("network_policy", {}).get("internet_access", False)})
+    return {"runtime_mode": settings.runtime_mode, "public_search_provider": settings.public_search_provider, "endpoints": endpoints}
+
+
+@app.get("/api/prompts")
+def list_prompts() -> list[dict[str, Any]]:
+    return [pack.entry(pid) for pid in pack.prompt_ids()]
+
+
+@app.get("/api/prompts/{prompt_id}/schema")
+def prompt_schema(prompt_id: str) -> dict[str, Any]:
+    try:
+        return {"input": pack.schema(prompt_id, "input"), "output": pack.schema(prompt_id, "output"), "replay_input": pack.replay_input(prompt_id)}
+    except (KeyError, FileNotFoundError) as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/projects")
+def create_project(req: ProjectCreate) -> dict[str, Any]:
+    project_id = new_id("project")
+    now = utc_now()
+    config = {
+        "internet_access_allowed": req.internet_access_allowed,
+        "anonymized_external_processing_allowed": req.anonymized_external_processing_allowed,
+        "allowed_public_topics": req.allowed_public_topics,
+        "prohibited_external_fields": req.prohibited_external_fields,
+        "recipient_scope": req.recipient_scope,
+        "allowed_model_endpoint_ids": ["offline-primary"],
+        "retention_days": 365,
+        "task_instruction": req.task_instruction,
+    }
+    db.execute("INSERT INTO projects(id,name,description,security_level,config_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (project_id, req.name, req.description, req.security_level, json.dumps(config, ensure_ascii=False), now, now))
+    db.audit("PROJECT_CREATED", project_id=project_id, object_id=project_id, metadata={"security_level": req.security_level})
+    return get_project(project_id)
+
+
+@app.get("/api/projects")
+def list_projects() -> list[dict[str, Any]]:
+    rows = db.fetchall("SELECT * FROM projects ORDER BY created_at DESC")
+    for row in rows:
+        row["config"] = json.loads(row.pop("config_json"))
+    return rows
+
+
+@app.get("/api/projects/{project_id}")
+def get_project(project_id: str) -> dict[str, Any]:
+    row = db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
+    if not row:
+        raise HTTPException(404, "Project not found")
+    row["config"] = json.loads(row.pop("config_json"))
+    row["document_count"] = db.fetchone("SELECT COUNT(*) AS n FROM documents WHERE project_id=?", (project_id,))["n"]
+    return row
+
+
+@app.post("/api/projects/{project_id}/documents")
+async def upload_document(
+    project_id: str,
+    file: UploadFile = File(...),
+    role: str = Form("OTHER"),
+    security_level: str = Form("INTERNAL"),
+) -> dict[str, Any]:
+    project = db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
+    if not project:
+        raise HTTPException(404, "Project not found")
+    filename = safe_filename(file.filename or "upload.bin")
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type: {ext}")
+    content = await file.read()
+    if len(content) > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB")
+    try:
+        parsed = parse_document(filename, content, role, security_level)
+    except Exception as exc:
+        raise HTTPException(400, f"Document parsing failed: {exc}") from exc
+    stored_dir = settings.uploads_dir / project_id
+    stored_dir.mkdir(parents=True, exist_ok=True)
+    stored_path = stored_dir / f"{parsed['document_id']}-{filename}"
+    stored_path.write_bytes(content)
+    safe_name = parsed.pop("safe_filename")
+    db.execute(
+        "INSERT INTO documents(id,project_id,filename,role,security_level,document_hash,file_path,parsed_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        (parsed["document_id"], project_id, safe_name, role, security_level, parsed["document_hash"], str(stored_path), json.dumps(parsed, ensure_ascii=False), utc_now()),
+    )
+    db.audit("DOCUMENT_UPLOADED", project_id=project_id, object_id=parsed["document_id"], metadata={"filename": safe_name, "role": role, "security_level": security_level, "document_hash": parsed["document_hash"]})
+    return parsed
+
+
+@app.get("/api/projects/{project_id}/documents")
+def list_documents(project_id: str) -> list[dict[str, Any]]:
+    rows = db.fetchall("SELECT id,filename,role,security_level,document_hash,parsed_json,created_at FROM documents WHERE project_id=? ORDER BY created_at DESC", (project_id,))
+    for row in rows:
+        parsed = json.loads(row.pop("parsed_json"))
+        row["title"] = parsed.get("title")
+        row["section_count"] = len(parsed.get("sections", []))
+    return rows
+
+
+@app.post("/api/prompts/{prompt_id}/execute")
+async def execute_prompt(prompt_id: str, req: PromptExecuteRequest) -> dict[str, Any]:
+    try:
+        envelope = req.input_data or context_builder.build(prompt_id, req.project_id, workflow_id=req.workflow_id, overrides=req.overrides)
+        return await executor.execute(prompt_id, envelope, project_id=req.project_id, workflow_id=req.workflow_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (PromptExecutionError, ValueError) as exc:
+        raise HTTPException(422, {"message": str(exc), "validation_errors": getattr(exc, "validation_errors", [])}) from exc
+
+
+@app.post("/api/replay/{prompt_id}/{case_type}")
+async def execute_replay(prompt_id: str, case_type: str, project_id: str = Query(...)) -> dict[str, Any]:
+    try:
+        case = pack.replay_case(prompt_id, case_type)
+        return await executor.execute(prompt_id, case["input"], project_id=project_id)
+    except Exception as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/workflows")
+async def start_workflow(req: WorkflowStartRequest) -> dict[str, Any]:
+    try:
+        wf = workflows.start(req.project_id, req.workflow_type, req.options)
+        return await workflows.advance(wf["id"]) if req.auto_advance else wf
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/advance")
+async def advance_workflow(workflow_id: str) -> dict[str, Any]:
+    try:
+        return await workflows.advance(workflow_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/workflows")
+def list_workflows(project_id: str | None = None) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM workflows"
+    params: tuple[Any, ...] = ()
+    if project_id:
+        sql += " WHERE project_id=?"; params = (project_id,)
+    sql += " ORDER BY created_at DESC"
+    rows = db.fetchall(sql, params)
+    for row in rows:
+        row["state"] = json.loads(row.pop("state_json"))
+    return rows
+
+
+@app.get("/api/workflows/{workflow_id}")
+def get_workflow(workflow_id: str) -> dict[str, Any]:
+    try:
+        return workflows.get(workflow_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/gates")
+def list_gates(project_id: str | None = None, workflow_id: str | None = None) -> list[dict[str, Any]]:
+    return workflows.list_gates(project_id, workflow_id)
+
+
+@app.post("/api/gates/{gate_id}/decide")
+def decide_gate(gate_id: str, req: GateDecisionRequest) -> dict[str, Any]:
+    try:
+        return workflows.decide_gate(gate_id, action=req.action, decided_by=req.decided_by, decided_role=req.decided_role, comment=req.comment, answers=req.answers, context_hash=req.context_hash)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/api/runs")
+def list_runs(project_id: str | None = None, workflow_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    sql = "SELECT id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,input_hash,output_hash,error,duration_ms,created_at FROM prompt_runs WHERE 1=1"
+    params: list[Any] = []
+    if project_id:
+        sql += " AND project_id=?"; params.append(project_id)
+    if workflow_id:
+        sql += " AND workflow_id=?"; params.append(workflow_id)
+    sql += " ORDER BY created_at DESC LIMIT ?"; params.append(min(max(limit, 1), 500))
+    return db.fetchall(sql, tuple(params))
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str) -> dict[str, Any]:
+    row = db.fetchone("SELECT * FROM prompt_runs WHERE id=?", (run_id,))
+    if not row:
+        raise HTTPException(404, "Run not found")
+    row["input"] = json.loads(row.pop("input_json"))
+    row["output"] = json.loads(row.pop("output_json")) if row.get("output_json") else None
+    return row
+
+
+@app.post("/api/projects/{project_id}/export")
+def export_project(project_id: str) -> FileResponse:
+    try:
+        path = exporter.export(project_id)
+        return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=path.name)
+    except KeyError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    except ExportDenied as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+@app.post("/api/projects/{project_id}/export-package")
+def export_project_package(project_id: str) -> FileResponse:
+    try:
+        path = exporter.export_package(project_id)
+        return FileResponse(path, media_type="application/zip", filename=path.name)
+    except KeyError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    except ExportDenied as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+@app.get("/api/workflow-types")
+def workflow_types() -> dict[str, Any]:
+    return WORKFLOWS

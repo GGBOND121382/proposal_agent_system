@@ -1,0 +1,291 @@
+{
+  "version": "2.0",
+  "prompts": [
+    {
+      "prompt_id": "P-SECURITY-CLASSIFY",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/security/security_classify.md",
+      "input_schema": "schemas/prompts/security_classify_input.schema.json",
+      "output_schema": "schemas/prompts/security_classify_output.schema.json",
+      "model_profile": "security_review",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Security Review Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-SECURITY-CLASSIFY-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/security/security_classify_critic.md",
+      "input_schema": "schemas/prompts/security_classify_critic_input.schema.json",
+      "output_schema": "schemas/prompts/security_classify_critic_output.schema.json",
+      "model_profile": "security_review",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-SAFE-ONLINE-PACKAGE",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/security/safe_online_package.md",
+      "input_schema": "schemas/prompts/safe_online_package_input.schema.json",
+      "output_schema": "schemas/prompts/safe_online_package_output.schema.json",
+      "model_profile": "extraction",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Security Review Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/security/safe_online_package_critic.md",
+      "input_schema": "schemas/prompts/safe_online_package_critic_input.schema.json",
+      "output_schema": "schemas/prompts/safe_online_package_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "OUTBOUND_SECURITY_APPROVAL"
+    },
+    {
+      "prompt_id": "P-ONLINE-RESULT-IMPORT-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/security/online_result_import_critic.md",
+      "input_schema": "schemas/prompts/online_result_import_critic_input.schema.json",
+      "output_schema": "schemas/prompts/online_result_import_critic_output.schema.json",
+      "model_profile": "security_review",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "ONLINE_RESULT_IMPORT_APPROVAL"
+    },
+    {
+      "prompt_id": "P-FINAL-CONFIDENTIALITY-REVIEW",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/security/final_confidentiality_review.md",
+      "input_schema": "schemas/prompts/final_confidentiality_review_input.schema.json",
+      "output_schema": "schemas/prompts/final_confidentiality_review_output.schema.json",
+      "model_profile": "security_review",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "FINAL_CONTENT_SECURITY_APPROVAL"
+    },
+    {
+      "prompt_id": "P-PUBLIC-RESEARCH-PLAN",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/public_research/research_plan.md",
+      "input_schema": "schemas/prompts/public_research_plan_input.schema.json",
+      "output_schema": "schemas/prompts/public_research_plan_output.schema.json",
+      "model_profile": "public_research",
+      "required_environment": "ONLINE_PUBLIC",
+      "executor_role": "Public Research Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/public_research/research_synthesis.md",
+      "input_schema": "schemas/prompts/public_research_synthesis_input.schema.json",
+      "output_schema": "schemas/prompts/public_research_synthesis_output.schema.json",
+      "model_profile": "public_research",
+      "required_environment": "ONLINE_PUBLIC",
+      "executor_role": "Public Research Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-PUBLIC-RESEARCH-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/public_research/research_critic.md",
+      "input_schema": "schemas/prompts/public_research_critic_input.schema.json",
+      "output_schema": "schemas/prompts/public_research_critic_output.schema.json",
+      "model_profile": "public_research",
+      "required_environment": "ONLINE_PUBLIC",
+      "executor_role": "Critic Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-SCHEME-EXTRACT",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/scheme/scheme_extract.md",
+      "input_schema": "schemas/prompts/scheme_extract_input.schema.json",
+      "output_schema": "schemas/prompts/scheme_extract_output.schema.json",
+      "model_profile": "extraction",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Project Knowledge Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-SCHEME-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/scheme/scheme_critic.md",
+      "input_schema": "schemas/prompts/scheme_critic_input.schema.json",
+      "output_schema": "schemas/prompts/scheme_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "SCHEME_CONFIRMATION"
+    },
+    {
+      "prompt_id": "P-PROJECT-DEFINITION-EXTRACT",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/project_definition/project_definition_extract.md",
+      "input_schema": "schemas/prompts/project_definition_extract_input.schema.json",
+      "output_schema": "schemas/prompts/project_definition_extract_output.schema.json",
+      "model_profile": "extraction",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Project Knowledge Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-PROJECT-DEFINITION-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/project_definition/project_definition_critic.md",
+      "input_schema": "schemas/prompts/project_definition_critic_input.schema.json",
+      "output_schema": "schemas/prompts/project_definition_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "PROJECT_DEFINITION_CONFIRMATION"
+    },
+    {
+      "prompt_id": "P-PROJECT-READINESS-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/project_definition/project_readiness_critic.md",
+      "input_schema": "schemas/prompts/project_readiness_critic_input.schema.json",
+      "output_schema": "schemas/prompts/project_readiness_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "PROJECT_GAP_RESOLUTION"
+    },
+    {
+      "prompt_id": "P-FACT-EXTRACT",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/fact/fact_extract.md",
+      "input_schema": "schemas/prompts/fact_extract_input.schema.json",
+      "output_schema": "schemas/prompts/fact_extract_output.schema.json",
+      "model_profile": "extraction",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Project Knowledge Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-FACT-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/fact/fact_critic.md",
+      "input_schema": "schemas/prompts/fact_critic_input.schema.json",
+      "output_schema": "schemas/prompts/fact_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "FACT_CONFIRMATION"
+    },
+    {
+      "prompt_id": "P-TEMPLATE-EXTRACT",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/template/template_extract.md",
+      "input_schema": "schemas/prompts/template_extract_input.schema.json",
+      "output_schema": "schemas/prompts/template_extract_output.schema.json",
+      "model_profile": "extraction",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Template Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-TEMPLATE-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/template/template_critic.md",
+      "input_schema": "schemas/prompts/template_critic_input.schema.json",
+      "output_schema": "schemas/prompts/template_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "TEMPLATE_CONFIRMATION"
+    },
+    {
+      "prompt_id": "P-REVISION-PLAN",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/planning/revision_plan.md",
+      "input_schema": "schemas/prompts/revision_plan_input.schema.json",
+      "output_schema": "schemas/prompts/revision_plan_output.schema.json",
+      "model_profile": "planning",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Planning Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-REVISION-PLAN-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/planning/revision_plan_critic.md",
+      "input_schema": "schemas/prompts/revision_plan_critic_input.schema.json",
+      "output_schema": "schemas/prompts/revision_plan_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "PLAN_CONFIRMATION"
+    },
+    {
+      "prompt_id": "P-WRITE-BLUEPRINT",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/writing/write_blueprint.md",
+      "input_schema": "schemas/prompts/write_blueprint_input.schema.json",
+      "output_schema": "schemas/prompts/write_blueprint_output.schema.json",
+      "model_profile": "planning",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Writing Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-WRITE-BLUEPRINT-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/writing/write_blueprint_critic.md",
+      "input_schema": "schemas/prompts/write_blueprint_critic_input.schema.json",
+      "output_schema": "schemas/prompts/write_blueprint_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-WRITE-CONTENT",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/writing/write_content.md",
+      "input_schema": "schemas/prompts/write_content_input.schema.json",
+      "output_schema": "schemas/prompts/write_content_output.schema.json",
+      "model_profile": "formal_writing",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Writing Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-WRITE-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/writing/write_critic.md",
+      "input_schema": "schemas/prompts/write_critic_input.schema.json",
+      "output_schema": "schemas/prompts/write_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "CANDIDATE_REVIEW"
+    },
+    {
+      "prompt_id": "P-INTEGRATION-CRITIC",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/integration/integration_critic.md",
+      "input_schema": "schemas/prompts/integration_critic_input.schema.json",
+      "output_schema": "schemas/prompts/integration_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Integration Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-TARGETED-REPAIR",
+      "prompt_version": "2.0.0",
+      "prompt_file": "prompts/repair/targeted_repair.md",
+      "input_schema": "schemas/prompts/targeted_repair_input.schema.json",
+      "output_schema": "schemas/prompts/targeted_repair_output.schema.json",
+      "model_profile": "extraction",
+      "required_environment": "SAME_AS_ORIGINAL",
+      "executor_role": "Original Producer",
+      "next_human_gate": null
+    }
+  ]
+}

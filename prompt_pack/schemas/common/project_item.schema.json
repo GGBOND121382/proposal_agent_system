@@ -1,0 +1,3851 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project_item.schema.json",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "PROJECT_BASIC"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "project_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "short_name": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "domain": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "target_users": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "maturity_stage": {
+              "type": "string",
+              "enum": [
+                "CONCEPT",
+                "PRELIMINARY_RESEARCH",
+                "PROTOTYPE",
+                "PILOT",
+                "ENGINEERING_VALIDATION",
+                "APPLICATION_DEMONSTRATION"
+              ]
+            },
+            "scope_summary": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "project_name",
+            "short_name",
+            "project_type",
+            "domain",
+            "target_users",
+            "maturity_stage",
+            "scope_summary"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "STAKEHOLDER"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "stakeholder_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "needs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "affected_by": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "stakeholder_type",
+            "role",
+            "needs",
+            "affected_by"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "DEMAND"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "demand_statement": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_type": {
+              "type": "string",
+              "enum": [
+                "NATIONAL_STRATEGY",
+                "POLICY_REQUIREMENT",
+                "MILITARY_OR_OPERATIONAL_REQUIREMENT",
+                "INDUSTRY_DEMAND",
+                "ORGANIZATION_BUSINESS_NEED",
+                "SCIENTIFIC_FRONTIER",
+                "USER_REPORTED_PROBLEM",
+                "GUIDE_REQUIREMENT"
+              ]
+            },
+            "requester": {
+              "type": "string",
+              "minLength": 1
+            },
+            "urgency": {
+              "type": "string",
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ]
+            },
+            "why_now": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "non_execution_consequences": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "demand_statement",
+            "source_type",
+            "requester",
+            "urgency",
+            "why_now",
+            "non_execution_consequences"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "SCENARIO"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "scenario_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "actors": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "trigger_conditions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "current_process": {
+              "type": "string",
+              "minLength": 1
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "frequency_or_scale": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "scenario_name",
+            "actors",
+            "trigger_conditions",
+            "current_process",
+            "constraints",
+            "frequency_or_scale"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "CURRENT_STATE"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "limitations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "baseline_metrics": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "description",
+            "capabilities",
+            "limitations",
+            "baseline_metrics"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "EXISTING_APPROACH"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "owner_or_source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "applicable_scope": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "strengths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "limitations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "owner_or_source",
+            "applicable_scope",
+            "strengths",
+            "limitations"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "GAP"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "gap_type": {
+              "type": "string",
+              "enum": [
+                "SCIENTIFIC",
+                "TECHNICAL",
+                "ENGINEERING",
+                "DATA",
+                "PROCESS",
+                "ORGANIZATION",
+                "RESOURCE",
+                "APPLICATION"
+              ]
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "affected_scenarios": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "impact": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "gap_type",
+            "description",
+            "affected_scenarios",
+            "impact"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "ROOT_CAUSE"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cause_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence_summary": {
+              "type": "string",
+              "minLength": 1
+            },
+            "controllable": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "description",
+            "cause_type",
+            "evidence_summary",
+            "controllable"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "PROBLEM"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "problem_class": {
+              "type": "string",
+              "enum": [
+                "SCIENTIFIC",
+                "TECHNICAL",
+                "ENGINEERING",
+                "MANAGEMENT_PROCESS"
+              ]
+            },
+            "statement": {
+              "type": "string",
+              "minLength": 1
+            },
+            "why_difficult": {
+              "type": "string",
+              "minLength": 1
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "expected_breakthrough": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "problem_class",
+            "statement",
+            "why_difficult",
+            "constraints",
+            "expected_breakthrough"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "OBJECTIVE"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "statement": {
+              "type": "string",
+              "minLength": 1
+            },
+            "baseline_state": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target_state": {
+              "type": "string",
+              "minLength": 1
+            },
+            "success_definition": {
+              "type": "string",
+              "minLength": 1
+            },
+            "out_of_scope": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "statement",
+            "baseline_state",
+            "target_state",
+            "success_definition",
+            "out_of_scope"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "WORK_PACKAGE"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "research_object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "inputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "main_activities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "responsible_organization": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "acceptance_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "research_object",
+            "inputs",
+            "main_activities",
+            "methods",
+            "outputs",
+            "responsible_organization",
+            "acceptance_refs"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "METHOD"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "method_type": {
+              "type": "string",
+              "enum": [
+                "ALGORITHM",
+                "MODEL",
+                "MECHANISM",
+                "EXPERIMENTAL_METHOD",
+                "ENGINEERING_METHOD",
+                "ANALYTICAL_METHOD"
+              ]
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1
+            },
+            "principle": {
+              "type": "string",
+              "minLength": 1
+            },
+            "inputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "selection_reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maturity": {
+              "type": "string",
+              "enum": [
+                "EXISTING",
+                "PRELIMINARY_VALIDATED",
+                "PROPOSED",
+                "TO_BE_SELECTED",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "method_type",
+            "purpose",
+            "principle",
+            "inputs",
+            "outputs",
+            "constraints",
+            "selection_reason",
+            "maturity"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "DATA_RESOURCE"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "data_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "availability": {
+              "type": "string",
+              "enum": [
+                "AVAILABLE",
+                "PARTIALLY_AVAILABLE",
+                "TO_BE_COLLECTED",
+                "UNKNOWN"
+              ]
+            },
+            "security_level": {
+              "type": "string",
+              "enum": [
+                "PUBLIC",
+                "INTERNAL",
+                "SENSITIVE",
+                "CLASSIFIED"
+              ]
+            },
+            "quality_constraints": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "data_type",
+            "source",
+            "availability",
+            "security_level",
+            "quality_constraints"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "EXPERIMENT"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1
+            },
+            "test_object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dataset_or_scenario": {
+              "type": "string",
+              "minLength": 1
+            },
+            "conditions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "procedure": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "expected_evidence": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "purpose",
+            "test_object",
+            "dataset_or_scenario",
+            "conditions",
+            "procedure",
+            "expected_evidence"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "INNOVATION"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "innovation_type": {
+              "type": "string",
+              "enum": [
+                "THEORY",
+                "METHOD",
+                "MECHANISM",
+                "SYSTEM",
+                "APPLICATION"
+              ]
+            },
+            "existing_baseline": {
+              "type": "string",
+              "minLength": 1
+            },
+            "existing_limitation": {
+              "type": "string",
+              "minLength": 1
+            },
+            "proposed_change": {
+              "type": "string",
+              "minLength": 1
+            },
+            "novel_mechanism": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expected_advantage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "applicable_conditions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "CONFIRMED",
+                "PROPOSED",
+                "UNCERTAIN"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "innovation_type",
+            "existing_baseline",
+            "existing_limitation",
+            "proposed_change",
+            "novel_mechanism",
+            "expected_advantage",
+            "applicable_conditions",
+            "confidence"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "DELIVERABLE"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "deliverable_type": {
+              "type": "string",
+              "enum": [
+                "THEORY",
+                "METHOD",
+                "ALGORITHM",
+                "DATASET",
+                "SOFTWARE",
+                "PROTOTYPE_SYSTEM",
+                "STANDARD",
+                "REPORT",
+                "PATENT",
+                "PAPER",
+                "DEMONSTRATION"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "delivery_time": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "acceptance_form": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "deliverable_type",
+            "name",
+            "description",
+            "delivery_time",
+            "acceptance_form"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "METRIC"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "object": {
+              "type": "string",
+              "minLength": 1
+            },
+            "metric_type": {
+              "type": "string",
+              "enum": [
+                "QUANTITY",
+                "TECHNICAL",
+                "QUALITY",
+                "PERFORMANCE",
+                "APPLICATION",
+                "ECONOMIC",
+                "SOCIAL",
+                "INTELLECTUAL_PROPERTY"
+              ]
+            },
+            "baseline_value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target_value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "comparison": {
+              "type": "string",
+              "enum": [
+                "GREATER_THAN",
+                "GREATER_THAN_OR_EQUAL",
+                "LESS_THAN",
+                "LESS_THAN_OR_EQUAL",
+                "EQUAL",
+                "RANGE",
+                "DESCRIPTIVE"
+              ]
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 0
+            },
+            "measurement_method": {
+              "type": "string",
+              "minLength": 1
+            },
+            "test_dataset_or_scenario": {
+              "type": "string",
+              "minLength": 1
+            },
+            "test_conditions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "verifier": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "object",
+            "metric_type",
+            "baseline_value",
+            "target_value",
+            "comparison",
+            "unit",
+            "measurement_method",
+            "test_dataset_or_scenario",
+            "test_conditions",
+            "verifier"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "ACHIEVEMENT"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "owner_type": {
+              "type": "string",
+              "enum": [
+                "APPLICANT",
+                "TEAM",
+                "ORGANIZATION",
+                "PARTNER",
+                "EXTERNAL"
+              ]
+            },
+            "owner_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "achievement_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "PLANNED",
+                "IN_PROGRESS",
+                "COMPLETED",
+                "ACCEPTED",
+                "PUBLISHED",
+                "AUTHORIZED"
+              ]
+            },
+            "date": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "contribution": {
+              "type": "string",
+              "minLength": 1
+            },
+            "project_relevance": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner_type",
+            "owner_name",
+            "achievement_type",
+            "title",
+            "status",
+            "date",
+            "contribution",
+            "project_relevance"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "CAPABILITY"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "owner_type": {
+              "type": "string",
+              "enum": [
+                "APPLICANT",
+                "TEAM",
+                "ORGANIZATION",
+                "PARTNER"
+              ]
+            },
+            "owner_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "capability": {
+              "type": "string",
+              "minLength": 1
+            },
+            "current_status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "project_support": {
+              "type": "string",
+              "minLength": 1
+            },
+            "limitations": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "owner_type",
+            "owner_name",
+            "capability",
+            "current_status",
+            "project_support",
+            "limitations"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "TEAM_MEMBER"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "organization": {
+              "type": "string",
+              "minLength": 1
+            },
+            "role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expertise": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "work_package_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "time_commitment": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "organization",
+            "role",
+            "expertise",
+            "work_package_refs",
+            "time_commitment"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "SCHEDULE_PHASE"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "start": {
+              "type": "string",
+              "minLength": 1
+            },
+            "end": {
+              "type": "string",
+              "minLength": 1
+            },
+            "milestones": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "deliverable_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "start",
+            "end",
+            "milestones",
+            "deliverable_refs"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "RISK"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "risk_type": {
+              "type": "string",
+              "enum": [
+                "SCIENTIFIC",
+                "TECHNICAL",
+                "DATA",
+                "ENGINEERING",
+                "SCHEDULE",
+                "RESOURCE",
+                "COLLABORATION",
+                "APPLICATION",
+                "SECURITY",
+                "COMPLIANCE"
+              ]
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "probability": {
+              "type": "string",
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH"
+              ]
+            },
+            "impact": {
+              "type": "string",
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ]
+            },
+            "trigger": {
+              "type": "string",
+              "minLength": 1
+            },
+            "mitigation": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "contingency": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "owner": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "risk_type",
+            "description",
+            "probability",
+            "impact",
+            "trigger",
+            "mitigation",
+            "contingency",
+            "owner"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "RESOURCE_REQUIREMENT"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "resource_type": {
+              "type": "string",
+              "enum": [
+                "EQUIPMENT",
+                "COMPUTING",
+                "DATA",
+                "SITE",
+                "EXTERNAL_SERVICE",
+                "PERSONNEL"
+              ]
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "quantity_or_scale": {
+              "type": "string",
+              "minLength": 1
+            },
+            "availability": {
+              "type": "string",
+              "enum": [
+                "AVAILABLE",
+                "PARTIALLY_AVAILABLE",
+                "NOT_AVAILABLE",
+                "UNKNOWN"
+              ]
+            },
+            "acquisition_plan": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "resource_type",
+            "description",
+            "quantity_or_scale",
+            "availability",
+            "acquisition_plan"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "BUDGET_ITEM"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string",
+              "minLength": 1
+            },
+            "amount": {
+              "type": "number",
+              "minimum": 0
+            },
+            "currency": {
+              "type": "string",
+              "minLength": 1
+            },
+            "calculation_basis": {
+              "type": "string",
+              "minLength": 1
+            },
+            "work_package_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "amount",
+            "currency",
+            "calculation_basis",
+            "work_package_refs"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "item_type": {
+          "const": "COMPLIANCE_ITEM"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "PROJECT_BASIC",
+            "BACKGROUND_AND_DEMAND",
+            "STATE_GAP_ROOT_CAUSE",
+            "CORE_PROBLEMS",
+            "OBJECTIVES",
+            "RESEARCH_CONTENT",
+            "TECHNICAL_ROUTE",
+            "INNOVATION",
+            "OUTPUTS_AND_METRICS",
+            "RESEARCH_FOUNDATION",
+            "TEAM_AND_IMPLEMENTATION",
+            "RESOURCES_BUDGET_RISK_COMPLIANCE"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "compliance_type": {
+              "type": "string",
+              "enum": [
+                "ETHICS",
+                "DATA_SECURITY",
+                "CONFIDENTIALITY",
+                "INTELLECTUAL_PROPERTY",
+                "HUMAN_SUBJECTS",
+                "ANIMAL_SUBJECTS",
+                "EXPORT_CONTROL",
+                "OTHER"
+              ]
+            },
+            "requirement": {
+              "type": "string",
+              "minLength": 1
+            },
+            "applicability": {
+              "type": "string",
+              "enum": [
+                "APPLICABLE",
+                "NOT_APPLICABLE",
+                "UNKNOWN"
+              ]
+            },
+            "measure": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence_required": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "compliance_type",
+            "requirement",
+            "applicability",
+            "measure",
+            "evidence_required"
+          ]
+        },
+        "knowledge_status": {
+          "type": "string",
+          "enum": [
+            "CONFIRMED",
+            "USER_ASSERTED",
+            "DOCUMENT_EXTRACTED",
+            "ESTIMATED",
+            "UNKNOWN",
+            "NOT_APPLICABLE",
+            "CONFLICTED",
+            "SUPERSEDED"
+          ]
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "security_level": {
+          "type": "string",
+          "enum": [
+            "PUBLIC",
+            "INTERNAL",
+            "SENSITIVE",
+            "CLASSIFIED"
+          ]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "UNKNOWN"
+          ]
+        },
+        "item_hash": {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_type",
+        "domain",
+        "content",
+        "knowledge_status",
+        "owner_ref",
+        "source_refs",
+        "security_level",
+        "locked",
+        "confidence",
+        "item_hash"
+      ]
+    }
+  ]
+}

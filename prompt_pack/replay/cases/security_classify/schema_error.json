@@ -1,0 +1,100 @@
+{
+  "case_id": "security_classify-schema_error",
+  "prompt_id": "P-SECURITY-CLASSIFY",
+  "case_type": "schema_error",
+  "description": "输入Envelope缺少必需字段，应在调用模型前被Schema拒绝",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-SECURITY-CLASSIFY",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "SECURITY_CLASSIFY",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "object_context": {
+        "object_id": "obj-001",
+        "object_type": "GENERIC",
+        "version": 1,
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "security_level": "INTERNAL",
+        "display_name": "示例对象"
+      },
+      "content_segments": [
+        {
+          "segment_id": "seg-001",
+          "text": "内部系统参数为示例值。",
+          "source_ref": {
+            "source_id": "src-001",
+            "source_type": "USER_CONFIRMATION",
+            "document_version_id": null,
+            "section_id": null,
+            "span_start": null,
+            "span_end": null,
+            "quoted_text": "用户确认的示例内容",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "authority_rank": 100,
+            "security_level": "INTERNAL"
+          },
+          "security_level": "INTERNAL"
+        }
+      ],
+      "security_policy": {
+        "schema_version": "2.0",
+        "profile_id": "security-001",
+        "project_id": "project-001",
+        "version": 1,
+        "default_security_level": "INTERNAL",
+        "internet_access_allowed": false,
+        "anonymized_external_processing_allowed": false,
+        "prohibited_external_fields": [
+          "真实项目名称"
+        ],
+        "allowed_public_topics": [
+          "公开政策"
+        ],
+        "allowed_model_endpoint_ids": [
+          "offline-primary"
+        ],
+        "outbound_approval_required": true,
+        "import_approval_required": true,
+        "final_content_approval_required": true,
+        "final_export_approval_required": true,
+        "log_content_policy": "FULL_IN_SECURE_ARTIFACT_ONLY",
+        "retention_days": 365,
+        "profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "existing_labels": [],
+      "intended_uses": [
+        "OFFLINE_WRITING"
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/security_classify_output.schema.json"
+  },
+  "expected_output": null,
+  "expected_validation": {
+    "input_schema_valid": false,
+    "output_schema_valid": false,
+    "expected_status": null
+  }
+}

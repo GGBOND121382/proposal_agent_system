@@ -1,0 +1,154 @@
+{
+  "case_id": "public_research_critic-need_user_input",
+  "prompt_id": "P-PUBLIC-RESEARCH-CRITIC",
+  "case_type": "need_user_input",
+  "description": "关键事实未确认，应生成具体用户问题",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-PUBLIC-RESEARCH-CRITIC",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "HYBRID_ONLINE_ASSIST",
+      "current_step": "PUBLIC_RESEARCH_CRITIC",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": null,
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "research_plan": {
+        "plan_id": "rplan-001",
+        "task_type": "PUBLIC_RESEARCH",
+        "research_questions": [
+          "公开评价方法有哪些？"
+        ],
+        "queries": [
+          "公开评价方法"
+        ],
+        "source_priorities": [
+          "官方标准"
+        ],
+        "time_scope": null,
+        "evidence_requirements": [
+          "至少两个来源"
+        ],
+        "prohibited_inferences": [
+          "不得推断内部项目"
+        ]
+      },
+      "synthesis_candidate": {
+        "claims": [],
+        "source_comparisons": [],
+        "conflicts": [],
+        "limitations": []
+      },
+      "retrieved_sources": [
+        {
+          "source_id": "src-001",
+          "source_type": "PUBLIC_SOURCE",
+          "document_version_id": null,
+          "section_id": null,
+          "span_start": null,
+          "span_end": null,
+          "quoted_text": "用户确认的示例内容",
+          "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "authority_rank": 50,
+          "security_level": "PUBLIC"
+        }
+      ],
+      "safe_online_package": {
+        "object_id": "obj-001",
+        "object_type": "GENERIC",
+        "version": 1,
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "security_level": "INTERNAL",
+        "display_name": "示例对象"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/public_research_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-PUBLIC-RESEARCH-CRITIC",
+    "prompt_version": "2.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "verdict": "ACCEPT_FOR_IMPORT_REVIEW",
+      "source_quality_summary": [],
+      "unsupported_claim_ids": [],
+      "missing_counterevidence_topics": []
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-002",
+        "type": "UNCERTAIN",
+        "description": "关键事实尚未确认",
+        "target_paths": [
+          "payload"
+        ],
+        "required_action": "用户确认",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-002",
+        "question_type": "CONFIRMATION",
+        "question": "请确认关键事实。",
+        "reason": "事实状态未知",
+        "target_paths": [
+          "payload"
+        ],
+        "answer_schema": {
+          "type": "BOOLEAN",
+          "allowed_values": [
+            true,
+            false
+          ]
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

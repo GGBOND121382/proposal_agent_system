@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "document_context.schema.json",
+  "type": "object",
+  "properties": {
+    "document_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "document_version_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "document_role": {
+      "type": "string",
+      "enum": [
+        "CURRENT_PROPOSAL",
+        "REFERENCE_PROPOSAL",
+        "APPLICATION_GUIDE",
+        "PROJECT_BRIEF",
+        "TECHNICAL_DESIGN",
+        "EVIDENCE_MATERIAL",
+        "TEAM_PROFILE",
+        "BUDGET_MATERIAL",
+        "REVIEW_COMMENT",
+        "OTHER"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 0
+    },
+    "document_hash": {
+      "type": "string",
+      "minLength": 64,
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "authority_rank": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "allowed_uses": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "prohibited_uses": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "$ref": "document_section.schema.json"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "document_id",
+    "document_version_id",
+    "document_role",
+    "title",
+    "document_hash",
+    "authority_rank",
+    "allowed_uses",
+    "prohibited_uses",
+    "security_level",
+    "sections"
+  ]
+}

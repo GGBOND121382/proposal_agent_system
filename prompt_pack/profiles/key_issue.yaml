@@ -1,0 +1,41 @@
+profile_id: KEY_ISSUE
+version: 2.0.0
+purpose: 凝练必须突破的科学问题或技术瓶颈，并解释其困难与突破作用。
+must_answer:
+- 关键问题是什么
+- 为什么困难
+- 现有方法为什么不足
+- 受哪些约束
+- 需要突破什么机制
+- 突破后支撑哪些目标和任务
+required_item_types:
+- GAP
+- ROOT_CAUSE
+- PROBLEM
+- OBJECTIVE
+recommended_chain:
+- 问题来源
+- 困难机理
+- 现有不足
+- 关键突破
+- 支撑作用
+paragraph_roles:
+- 问题提出
+- 困难分析
+- 突破点
+- 目标支撑
+forbidden:
+- 把开发模块当关键问题
+- 只写任务名称
+- 没有根因的困难描述
+readiness:
+  minimum_confirmed_ratio: 0.75
+  minimum_evidence_ratio: 0.6
+  blocking_item_types:
+  - GAP
+  - ROOT_CAUSE
+  - PROBLEM
+critic_checks:
+- 问题类型正确
+- 困难来自根因
+- 突破点可研究

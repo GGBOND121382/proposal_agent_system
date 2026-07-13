@@ -1,0 +1,154 @@
+{
+  "case_id": "security_classify_critic-missing_input",
+  "prompt_id": "P-SECURITY-CLASSIFY-CRITIC",
+  "case_type": "missing_input",
+  "description": "结构合法但业务信息缺失，应要求用户补充",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-SECURITY-CLASSIFY-CRITIC",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "SECURITY_CLASSIFY_CRITIC",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": null,
+      "fact_context_hash": null,
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "classification_candidate": {
+        "object_id": "obj-001",
+        "recommended_level": "INTERNAL",
+        "sensitive_entities": [
+          "内部系统"
+        ],
+        "sensitive_fields": [
+          "参数"
+        ],
+        "combination_risks": [],
+        "allowed_environments": [
+          "OFFLINE_LOCAL"
+        ]
+      },
+      "original_object": {
+        "object_type": "GENERIC",
+        "object_id": "obj-001",
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "content": {
+          "text": "示例内容"
+        }
+      },
+      "security_policy": {
+        "schema_version": "2.0",
+        "profile_id": "security-001",
+        "project_id": "project-001",
+        "version": 1,
+        "default_security_level": "INTERNAL",
+        "internet_access_allowed": false,
+        "anonymized_external_processing_allowed": false,
+        "prohibited_external_fields": [
+          "真实项目名称"
+        ],
+        "allowed_public_topics": [
+          "公开政策"
+        ],
+        "allowed_model_endpoint_ids": [
+          "offline-primary"
+        ],
+        "outbound_approval_required": true,
+        "import_approval_required": true,
+        "final_content_approval_required": true,
+        "final_export_approval_required": true,
+        "log_content_policy": "FULL_IN_SECURE_ARTIFACT_ONLY",
+        "retention_days": 365,
+        "profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "deterministic_findings": []
+    },
+    "expected_output_schema": "schemas/prompts/security_classify_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-SECURITY-CLASSIFY-CRITIC",
+    "prompt_version": "2.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "verdict": "ACCEPT",
+      "checked_dimensions": [
+        "实体",
+        "组合风险"
+      ],
+      "recommended_level": "INTERNAL",
+      "approved_candidate_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-001",
+        "type": "MISSING",
+        "description": "缺少必需输入",
+        "target_paths": [
+          "payload"
+        ],
+        "required_action": "补充输入",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-001",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充必需输入。",
+        "reason": "当前输入不足",
+        "target_paths": [
+          "payload"
+        ],
+        "answer_schema": {
+          "type": "OBJECT",
+          "allowed_values": []
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

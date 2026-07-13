@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "write_content_output.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-WRITE-CONTENT"
+    },
+    "prompt_version": {
+      "const": "2.0.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "REVISE",
+        "NEED_USER_INPUT",
+        "BLOCK"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "candidate_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "candidate_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "paragraphs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/paragraph.schema.json"
+          },
+          "minItems": 1
+        },
+        "trace_links": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/trace_link.schema.json"
+          },
+          "minItems": 1
+        },
+        "term_usage": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "term": {
+                "type": "string",
+                "minLength": 1
+              },
+              "canonical_term": {
+                "type": "string",
+                "minLength": 1
+              },
+              "paragraph_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "term",
+              "canonical_term",
+              "paragraph_ids"
+            ]
+          }
+        },
+        "unresolved_items": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/unresolved_item.schema.json"
+          }
+        },
+        "source_preservation_summary": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source_span": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "PRESERVED",
+                  "REPHRASED",
+                  "REPLACED",
+                  "REMOVED"
+                ]
+              },
+              "paragraph_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "source_span",
+              "action",
+              "paragraph_id"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "candidate_text",
+        "paragraphs",
+        "trace_links",
+        "term_usage",
+        "unresolved_items",
+        "source_preservation_summary"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/finding.schema.json"
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/unresolved_item.schema.json"
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/user_question.schema.json"
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/source_ref.schema.json"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "status",
+    "result",
+    "findings",
+    "unresolved_items",
+    "user_questions",
+    "source_refs",
+    "warnings"
+  ]
+}

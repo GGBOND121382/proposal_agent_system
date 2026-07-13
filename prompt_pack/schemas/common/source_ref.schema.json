@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "source_ref.schema.json",
+  "type": "object",
+  "properties": {
+    "source_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "USER_CONFIRMATION",
+        "APPLICATION_GUIDE",
+        "TASK_BOOK",
+        "CONTRACT",
+        "CURRENT_PROPOSAL",
+        "TECHNICAL_MATERIAL",
+        "EVIDENCE_MATERIAL",
+        "HISTORICAL_DOCUMENT",
+        "REFERENCE_PROPOSAL",
+        "PUBLIC_SOURCE",
+        "MODEL_INFERENCE"
+      ]
+    },
+    "document_version_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "section_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "span_start": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "span_end": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "quoted_text": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "authority_rank": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "source_id",
+    "source_type",
+    "authority_rank",
+    "security_level"
+  ]
+}

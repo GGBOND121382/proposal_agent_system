@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "security_handling_profile.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "default_security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    },
+    "internet_access_allowed": {
+      "type": "boolean"
+    },
+    "anonymized_external_processing_allowed": {
+      "type": "boolean"
+    },
+    "prohibited_external_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "allowed_public_topics": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "allowed_model_endpoint_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "outbound_approval_required": {
+      "type": "boolean"
+    },
+    "import_approval_required": {
+      "type": "boolean"
+    },
+    "final_content_approval_required": {
+      "type": "boolean"
+    },
+    "final_export_approval_required": {
+      "type": "boolean"
+    },
+    "log_content_policy": {
+      "type": "string",
+      "enum": [
+        "NO_CONTENT",
+        "REDACTED",
+        "FULL_IN_SECURE_ARTIFACT_ONLY"
+      ]
+    },
+    "retention_days": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "profile_hash": {
+      "type": "string",
+      "minLength": 64,
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "project_id",
+    "version",
+    "default_security_level",
+    "internet_access_allowed",
+    "anonymized_external_processing_allowed",
+    "prohibited_external_fields",
+    "allowed_public_topics",
+    "allowed_model_endpoint_ids",
+    "outbound_approval_required",
+    "import_approval_required",
+    "final_content_approval_required",
+    "final_export_approval_required",
+    "log_content_policy",
+    "retention_days",
+    "profile_hash"
+  ]
+}

@@ -1,0 +1,11 @@
+services:
+  proposal-agent:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./prompt_pack:/app/prompt_pack:ro
+    restart: unless-stopped

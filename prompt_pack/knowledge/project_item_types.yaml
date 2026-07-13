@@ -1,0 +1,65 @@
+version: '2.0'
+item_types:
+- item_type: PROJECT_BASIC
+  content_schema: schemas/common/project_item.schema.json#/0
+- item_type: STAKEHOLDER
+  content_schema: schemas/common/project_item.schema.json#/1
+- item_type: DEMAND
+  content_schema: schemas/common/project_item.schema.json#/2
+- item_type: SCENARIO
+  content_schema: schemas/common/project_item.schema.json#/3
+- item_type: CURRENT_STATE
+  content_schema: schemas/common/project_item.schema.json#/4
+- item_type: EXISTING_APPROACH
+  content_schema: schemas/common/project_item.schema.json#/5
+- item_type: GAP
+  content_schema: schemas/common/project_item.schema.json#/6
+- item_type: ROOT_CAUSE
+  content_schema: schemas/common/project_item.schema.json#/7
+- item_type: PROBLEM
+  content_schema: schemas/common/project_item.schema.json#/8
+- item_type: OBJECTIVE
+  content_schema: schemas/common/project_item.schema.json#/9
+- item_type: WORK_PACKAGE
+  content_schema: schemas/common/project_item.schema.json#/10
+- item_type: METHOD
+  content_schema: schemas/common/project_item.schema.json#/11
+- item_type: DATA_RESOURCE
+  content_schema: schemas/common/project_item.schema.json#/12
+- item_type: EXPERIMENT
+  content_schema: schemas/common/project_item.schema.json#/13
+- item_type: INNOVATION
+  content_schema: schemas/common/project_item.schema.json#/14
+- item_type: DELIVERABLE
+  content_schema: schemas/common/project_item.schema.json#/15
+- item_type: METRIC
+  content_schema: schemas/common/project_item.schema.json#/16
+- item_type: ACHIEVEMENT
+  content_schema: schemas/common/project_item.schema.json#/17
+- item_type: CAPABILITY
+  content_schema: schemas/common/project_item.schema.json#/18
+- item_type: TEAM_MEMBER
+  content_schema: schemas/common/project_item.schema.json#/19
+- item_type: SCHEDULE_PHASE
+  content_schema: schemas/common/project_item.schema.json#/20
+- item_type: RISK
+  content_schema: schemas/common/project_item.schema.json#/21
+- item_type: RESOURCE_REQUIREMENT
+  content_schema: schemas/common/project_item.schema.json#/22
+- item_type: BUDGET_ITEM
+  content_schema: schemas/common/project_item.schema.json#/23
+- item_type: COMPLIANCE_ITEM
+  content_schema: schemas/common/project_item.schema.json#/24
+domains:
+- PROJECT_BASIC
+- BACKGROUND_AND_DEMAND
+- STATE_GAP_ROOT_CAUSE
+- CORE_PROBLEMS
+- OBJECTIVES
+- RESEARCH_CONTENT
+- TECHNICAL_ROUTE
+- INNOVATION
+- OUTPUTS_AND_METRICS
+- RESEARCH_FOUNDATION
+- TEAM_AND_IMPLEMENTATION
+- RESOURCES_BUDGET_RISK_COMPLIANCE

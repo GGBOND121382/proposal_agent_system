@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "document_section.schema.json",
+  "type": "object",
+  "properties": {
+    "section_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "section_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 0
+    },
+    "level": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9
+    },
+    "text": {
+      "type": "string",
+      "minLength": 0
+    },
+    "text_hash": {
+      "type": "string",
+      "minLength": 64,
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "block_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "contains_table": {
+      "type": "boolean"
+    },
+    "contains_formula": {
+      "type": "boolean"
+    },
+    "contains_image": {
+      "type": "boolean"
+    },
+    "contains_comment": {
+      "type": "boolean"
+    },
+    "contains_revision": {
+      "type": "boolean"
+    },
+    "security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "section_id",
+    "section_key",
+    "title",
+    "level",
+    "text",
+    "text_hash",
+    "block_ids",
+    "contains_table",
+    "contains_formula",
+    "contains_image",
+    "contains_comment",
+    "contains_revision",
+    "security_level"
+  ]
+}

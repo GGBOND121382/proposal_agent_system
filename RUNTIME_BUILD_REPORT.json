@@ -1,0 +1,32 @@
+{
+  "version": "0.1.0",
+  "built_at": "2026-07-13T13:47:28.393335+00:00",
+  "status": "PASS",
+  "runtime_mode_tested": "REPLAY",
+  "prompt_pack_validation": "PASS",
+  "inline_output_schemas_validated": 26,
+  "workflow_end_to_end": {
+    "WF-1_PROJECT_INTAKE": "PASS",
+    "WF-2_TEMPLATE_EXTRACTION": "PASS",
+    "WF-3_HYBRID_ONLINE_ASSIST": "PASS",
+    "WF-4_PROPOSAL_AUTHORING": "PASS",
+    "WF-5_SECURITY_REVIEW_AND_EXPORT": "PASS"
+  },
+  "http_smoke": "PASS",
+  "docx_export_and_audit_package": "PASS",
+  "docker_runtime_test": "NOT_RUN_DOCKER_UNAVAILABLE",
+  "live_model_test": "NOT_RUN_ENDPOINTS_NOT_CONFIGURED",
+  "counts": {
+    "total_files": 307,
+    "python_files": 19,
+    "prompt_files": 30,
+    "schema_files": 76,
+    "replay_cases": 130,
+    "automated_tests": 5
+  },
+  "known_boundaries": [
+    "Replay success does not prove real model semantic quality.",
+    "Unit-specific classification mapping and human identity integration remain deployment tasks.",
+    "Complex OOXML sections require deployment-specific patch and integrity validation."
+  ]
+}

@@ -1,0 +1,104 @@
+version: '2.0'
+profiles:
+  BACKGROUND_AND_SIGNIFICANCE:
+    required_item_types:
+    - STAKEHOLDER
+    - DEMAND
+    - SCENARIO
+    - CURRENT_STATE
+    - GAP
+    - ROOT_CAUSE
+    - PROBLEM
+    readiness:
+      minimum_confirmed_ratio: 0.7
+      minimum_evidence_ratio: 0.6
+      blocking_item_types:
+      - DEMAND
+      - GAP
+      - PROBLEM
+  RESEARCH_OBJECTIVE:
+    required_item_types:
+    - PROBLEM
+    - OBJECTIVE
+    - METRIC
+    readiness:
+      minimum_confirmed_ratio: 0.75
+      minimum_evidence_ratio: 0.5
+      blocking_item_types:
+      - PROBLEM
+      - OBJECTIVE
+  RESEARCH_CONTENT:
+    required_item_types:
+    - OBJECTIVE
+    - WORK_PACKAGE
+    - METHOD
+    - DELIVERABLE
+    readiness:
+      minimum_confirmed_ratio: 0.7
+      minimum_evidence_ratio: 0.5
+      blocking_item_types:
+      - OBJECTIVE
+      - WORK_PACKAGE
+  KEY_ISSUE:
+    required_item_types:
+    - GAP
+    - ROOT_CAUSE
+    - PROBLEM
+    - OBJECTIVE
+    readiness:
+      minimum_confirmed_ratio: 0.75
+      minimum_evidence_ratio: 0.6
+      blocking_item_types:
+      - GAP
+      - ROOT_CAUSE
+      - PROBLEM
+  TECHNICAL_ROUTE:
+    required_item_types:
+    - WORK_PACKAGE
+    - METHOD
+    - DATA_RESOURCE
+    - EXPERIMENT
+    - DELIVERABLE
+    readiness:
+      minimum_confirmed_ratio: 0.8
+      minimum_evidence_ratio: 0.55
+      blocking_item_types:
+      - WORK_PACKAGE
+      - METHOD
+      - EXPERIMENT
+  INNOVATION:
+    required_item_types:
+    - EXISTING_APPROACH
+    - GAP
+    - INNOVATION
+    - METHOD
+    readiness:
+      minimum_confirmed_ratio: 0.75
+      minimum_evidence_ratio: 0.65
+      blocking_item_types:
+      - EXISTING_APPROACH
+      - INNOVATION
+  OUTPUTS_AND_METRICS:
+    required_item_types:
+    - WORK_PACKAGE
+    - DELIVERABLE
+    - METRIC
+    - EXPERIMENT
+    readiness:
+      minimum_confirmed_ratio: 0.85
+      minimum_evidence_ratio: 0.7
+      blocking_item_types:
+      - DELIVERABLE
+      - METRIC
+  RESEARCH_FOUNDATION:
+    required_item_types:
+    - ACHIEVEMENT
+    - CAPABILITY
+    - TEAM_MEMBER
+    - RESOURCE_REQUIREMENT
+    readiness:
+      minimum_confirmed_ratio: 0.8
+      minimum_evidence_ratio: 0.75
+      blocking_item_types:
+      - ACHIEVEMENT
+      - CAPABILITY

@@ -1,0 +1,44 @@
+profile_id: RESEARCH_FOUNDATION
+version: 2.0.0
+purpose: 准确说明申请人、团队、单位和合作方已有成果与能力对项目的支撑。
+must_answer:
+- 已有成果是什么
+- 成果属于谁
+- 状态和时间是什么
+- 如何支撑本项目
+- 现有设施数据软件是什么
+- 还缺哪些条件及解决途径
+required_item_types:
+- ACHIEVEMENT
+- CAPABILITY
+- TEAM_MEMBER
+- RESOURCE_REQUIREMENT
+recommended_chain:
+- 申请人基础
+- 团队基础
+- 单位平台
+- 已有数据和软件
+- 与任务对应关系
+- 缺口与保障
+paragraph_roles:
+- 成果基础
+- 能力基础
+- 平台条件
+- 对应关系
+- 不足与解决
+forbidden:
+- 外部成果写成内部成果
+- 团队成果写成个人成果
+- 计划写成完成
+- 只罗列成果不说明支撑关系
+readiness:
+  minimum_confirmed_ratio: 0.8
+  minimum_evidence_ratio: 0.75
+  blocking_item_types:
+  - ACHIEVEMENT
+  - CAPABILITY
+critic_checks:
+- 主体归属正确
+- 状态时间正确
+- 支撑关系明确
+- 不足不写入正文自我否定而进入改进建议

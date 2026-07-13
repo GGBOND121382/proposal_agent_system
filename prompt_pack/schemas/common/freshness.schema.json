@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "freshness.schema.json",
+  "type": "object",
+  "properties": {
+    "source_document_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target_section_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scheme_profile_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "project_definition_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "fact_context_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "template_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "security_policy_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

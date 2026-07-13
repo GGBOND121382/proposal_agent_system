@@ -1,0 +1,154 @@
+{
+  "case_id": "fact_critic-high_risk",
+  "prompt_id": "P-FACT-CRITIC",
+  "case_type": "high_risk",
+  "description": "高风险或安全越权场景，应阻断",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-FACT-CRITIC",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "FACT_CRITIC",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "CLASSIFIED",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": [
+        "obj-secret"
+      ]
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "fact_candidates": [
+        {
+          "claim_id": "fact-001",
+          "claim_text": "项目拟开展研究。",
+          "claim_type": "PLAN",
+          "subject_id": "project-001",
+          "temporal_status": "PLANNED",
+          "qualifiers": [
+            "拟"
+          ],
+          "numeric_values": [],
+          "source_refs": [
+            {
+              "source_id": "src-001",
+              "source_type": "USER_CONFIRMATION",
+              "document_version_id": null,
+              "section_id": null,
+              "span_start": null,
+              "span_end": null,
+              "quoted_text": "用户确认的示例内容",
+              "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "authority_rank": 100,
+              "security_level": "INTERNAL"
+            }
+          ],
+          "knowledge_status": "CONFIRMED",
+          "security_level": "INTERNAL"
+        }
+      ],
+      "source_spans": [
+        {
+          "span_id": "span-001",
+          "text": "项目拟开展研究。",
+          "source_ref": {
+            "source_id": "src-001",
+            "source_type": "USER_CONFIRMATION",
+            "document_version_id": null,
+            "section_id": null,
+            "span_start": null,
+            "span_end": null,
+            "quoted_text": "用户确认的示例内容",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "authority_rank": 100,
+            "security_level": "INTERNAL"
+          }
+        }
+      ],
+      "existing_facts": [],
+      "locked_facts": [],
+      "authority_rules": {
+        "version": "2.0",
+        "ordered_source_types": [
+          "USER_CONFIRMATION",
+          "APPLICATION_GUIDE",
+          "CURRENT_PROPOSAL"
+        ]
+      }
+    },
+    "expected_output_schema": "schemas/prompts/fact_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-FACT-CRITIC",
+    "prompt_version": "2.0.0",
+    "status": "BLOCK",
+    "result": {
+      "verdict": "ACCEPT",
+      "accepted_claim_ids": [
+        "fact-001"
+      ],
+      "rejected_claim_ids": [],
+      "conflict_ids": [],
+      "locked_fact_violations": []
+    },
+    "findings": [
+      {
+        "code": "FACT_CRITIC_STATUS_UPGRADE",
+        "severity": "P0",
+        "category": "SYSTEM",
+        "target_type": "INPUT",
+        "target_path_or_span": "payload",
+        "description": "高风险场景触发阻断规则",
+        "evidence_refs": [
+          "src-001"
+        ],
+        "repairable": false,
+        "repair_instruction": null,
+        "suggested_route": "BLOCK",
+        "blocking": true
+      }
+    ],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "BLOCK"
+  }
+}

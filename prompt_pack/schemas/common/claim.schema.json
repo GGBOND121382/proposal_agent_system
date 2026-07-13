@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "claim.schema.json",
+  "type": "object",
+  "properties": {
+    "claim_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "claim_text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_type": {
+      "type": "string",
+      "enum": [
+        "FACT",
+        "PLAN",
+        "EXPECTED_RESULT",
+        "REQUIREMENT",
+        "PUBLIC_CLAIM",
+        "MODEL_INFERENCE"
+      ]
+    },
+    "subject_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "temporal_status": {
+      "type": "string",
+      "enum": [
+        "PAST",
+        "CURRENT",
+        "PLANNED",
+        "EXPECTED",
+        "TIME_INDEPENDENT",
+        "UNKNOWN"
+      ]
+    },
+    "qualifiers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "numeric_values": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1
+          },
+          "object": {
+            "type": "string",
+            "minLength": 1
+          },
+          "condition": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "value",
+          "unit",
+          "object",
+          "condition"
+        ]
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "source_ref.schema.json"
+      }
+    },
+    "knowledge_status": {
+      "type": "string",
+      "enum": [
+        "CONFIRMED",
+        "USER_ASSERTED",
+        "DOCUMENT_EXTRACTED",
+        "ESTIMATED",
+        "UNKNOWN",
+        "NOT_APPLICABLE",
+        "CONFLICTED",
+        "SUPERSEDED"
+      ]
+    },
+    "security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "claim_id",
+    "claim_text",
+    "claim_type",
+    "subject_id",
+    "temporal_status",
+    "qualifiers",
+    "numeric_values",
+    "source_refs",
+    "knowledge_status",
+    "security_level"
+  ]
+}

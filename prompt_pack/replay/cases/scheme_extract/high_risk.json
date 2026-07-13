@@ -1,0 +1,185 @@
+{
+  "case_id": "scheme_extract-high_risk",
+  "prompt_id": "P-SCHEME-EXTRACT",
+  "case_type": "high_risk",
+  "description": "高风险或安全越权场景，应阻断",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-SCHEME-EXTRACT",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "SCHEME_EXTRACT",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "CLASSIFIED",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": [
+        "obj-secret"
+      ]
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "guide_documents": [
+        {
+          "document_id": "doc-001",
+          "document_version_id": "docv-001",
+          "document_role": "APPLICATION_GUIDE",
+          "title": "项目申请书",
+          "document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "authority_rank": 80,
+          "allowed_uses": [
+            "FACT_SOURCE",
+            "WRITING_SOURCE"
+          ],
+          "prohibited_uses": [],
+          "security_level": "PUBLIC",
+          "sections": [
+            {
+              "section_id": "sec-001",
+              "section_key": "research_content",
+              "title": "研究内容",
+              "level": 1,
+              "text": "现有正文示例。",
+              "text_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "block_ids": [
+                "block-001"
+              ],
+              "contains_table": false,
+              "contains_formula": false,
+              "contains_image": false,
+              "contains_comment": false,
+              "contains_revision": false,
+              "security_level": "INTERNAL"
+            }
+          ]
+        }
+      ],
+      "document_structure": [
+        {
+          "section_id": "sec-g-001",
+          "title": "申报要求",
+          "level": 1,
+          "text_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "existing_profile": null,
+      "extraction_scope": [
+        "全部指南"
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/scheme_extract_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-SCHEME-EXTRACT",
+    "prompt_version": "2.0.0",
+    "status": "BLOCK",
+    "result": {
+      "scheme_profile": {
+        "schema_version": "2.0",
+        "profile_id": "scheme-001",
+        "project_id": "project-001",
+        "version": 1,
+        "scheme_name": "示例计划",
+        "scheme_type": "RESEARCH",
+        "funding_organization": "示例机构",
+        "application_year": 2026,
+        "guide_direction_name": "示例方向",
+        "research_attribute": null,
+        "duration_months": 36,
+        "rules": [
+          {
+            "rule_id": "rule-001",
+            "rule_type": "MANDATORY_SCOPE",
+            "statement": "围绕示例方向开展研究",
+            "mandatory": true,
+            "source_refs": [
+              {
+                "source_id": "src-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认的示例内容",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ],
+            "security_level": "PUBLIC"
+          }
+        ],
+        "status": "CONFIRMED",
+        "security_level": "PUBLIC",
+        "profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "extraction_coverage": [
+        {
+          "source_id": "src-001",
+          "covered_rule_ids": [
+            "rule-001"
+          ]
+        }
+      ],
+      "ambiguous_rule_ids": []
+    },
+    "findings": [
+      {
+        "code": "SCHEME_MISSING_MANDATORY_RULE",
+        "severity": "P0",
+        "category": "SYSTEM",
+        "target_type": "INPUT",
+        "target_path_or_span": "payload",
+        "description": "高风险场景触发阻断规则",
+        "evidence_refs": [
+          "src-001"
+        ],
+        "repairable": false,
+        "repair_instruction": null,
+        "suggested_route": "BLOCK",
+        "blocking": true
+      }
+    ],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "BLOCK"
+  }
+}

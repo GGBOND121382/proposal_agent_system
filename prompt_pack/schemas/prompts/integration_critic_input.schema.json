@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "integration_critic_input.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-INTEGRATION-CRITIC"
+    },
+    "prompt_version": {
+      "const": "2.0.0"
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "workflow_type": {
+          "type": "string",
+          "enum": [
+            "PROJECT_INTAKE",
+            "TEMPLATE_EXTRACTION",
+            "HYBRID_ONLINE_ASSIST",
+            "PROPOSAL_AUTHORING",
+            "SECURITY_REVIEW_AND_EXPORT"
+          ]
+        },
+        "current_step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "writing_mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "COPY_EDIT_ONLY",
+                "SUBSTANTIVE_REVISION",
+                "DRAFT_FROM_PROJECT_DEFINITION"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "workflow_type",
+        "current_step",
+        "attempt",
+        "writing_mode"
+      ]
+    },
+    "security_context": {
+      "$ref": "../common/security_context.schema.json"
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "target_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "read_only_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "protected_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "target_object_ids",
+        "read_only_object_ids",
+        "protected_object_ids"
+      ]
+    },
+    "freshness": {
+      "$ref": "../common/freshness.schema.json"
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "candidate_sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "section_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "candidate": {
+                "type": "object",
+                "properties": {
+                  "candidate_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "candidate_text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "paragraphs": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "../common/paragraph.schema.json"
+                    },
+                    "minItems": 1
+                  },
+                  "trace_links": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "../common/trace_link.schema.json"
+                    },
+                    "minItems": 1
+                  },
+                  "term_usage": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "term": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "canonical_term": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "paragraph_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "term",
+                        "canonical_term",
+                        "paragraph_ids"
+                      ]
+                    }
+                  },
+                  "unresolved_items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "../common/unresolved_item.schema.json"
+                    }
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "candidate_id",
+                  "candidate_text",
+                  "paragraphs",
+                  "trace_links",
+                  "term_usage",
+                  "unresolved_items"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "section_id",
+              "candidate"
+            ]
+          },
+          "minItems": 1
+        },
+        "document_section_map": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "section_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "level": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "candidate_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "section_id",
+              "title",
+              "level",
+              "candidate_id"
+            ]
+          }
+        },
+        "project_definition": {
+          "$ref": "../inputs/project_definition_package.schema.json"
+        },
+        "fact_package": {
+          "$ref": "../inputs/evidence_fact_package.schema.json"
+        },
+        "scheme_profile": {
+          "$ref": "../inputs/application_scheme_profile.schema.json"
+        },
+        "terminology": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "canonical_term": {
+                "type": "string",
+                "minLength": 1
+              },
+              "aliases": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "definition": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "canonical_term",
+              "aliases",
+              "definition"
+            ]
+          }
+        },
+        "security_policy": {
+          "$ref": "../inputs/security_handling_profile.schema.json"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "candidate_sections",
+        "document_section_map",
+        "project_definition",
+        "fact_package",
+        "scheme_profile",
+        "terminology",
+        "security_policy"
+      ]
+    },
+    "expected_output_schema": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "task",
+    "security_context",
+    "scope",
+    "freshness",
+    "payload",
+    "expected_output_schema"
+  ]
+}

@@ -1,0 +1,161 @@
+{
+  "case_id": "targeted_repair-missing_input",
+  "prompt_id": "P-TARGETED-REPAIR",
+  "case_type": "missing_input",
+  "description": "结构合法但业务信息缺失，应要求用户补充",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-TARGETED-REPAIR",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "TARGETED_REPAIR",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": null,
+      "fact_context_hash": null,
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "original_object": {
+        "object_type": "GENERIC",
+        "object_id": "obj-001",
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "content": {
+          "text": "示例内容"
+        }
+      },
+      "original_producer": "WRITING_AGENT",
+      "findings_to_repair": [
+        {
+          "code": "WRITE_UNSOURCED_CLAIM",
+          "severity": "P1",
+          "category": "CONTENT",
+          "target_type": "WRITING_CANDIDATE",
+          "target_path_or_span": "paragraphs[0]",
+          "description": "存在无来源陈述",
+          "evidence_refs": [],
+          "repairable": true,
+          "repair_instruction": "删除无来源陈述",
+          "suggested_route": "ORIGINAL_PRODUCER",
+          "blocking": true
+        }
+      ],
+      "allowed_paths": [
+        "content.paragraphs[0]"
+      ],
+      "protected_paths": [
+        "metadata"
+      ],
+      "protected_hashes": [
+        {
+          "path": "metadata",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "original_input_refs": [
+        {
+          "object_id": "obj-001",
+          "object_type": "GENERIC",
+          "version": 1,
+          "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "security_level": "INTERNAL",
+          "display_name": "示例对象"
+        }
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/targeted_repair_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-TARGETED-REPAIR",
+    "prompt_version": "2.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "repaired_object": {
+        "content": "已删除无来源陈述"
+      },
+      "changed_paths": [
+        "content.paragraphs[0]"
+      ],
+      "unchanged_protected_hashes": [
+        {
+          "path": "metadata",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "resolved_finding_codes": [
+        "WRITE_UNSOURCED_CLAIM"
+      ],
+      "unresolved_finding_codes": []
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-001",
+        "type": "MISSING",
+        "description": "缺少必需输入",
+        "target_paths": [
+          "payload"
+        ],
+        "required_action": "补充输入",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-001",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充必需输入。",
+        "reason": "当前输入不足",
+        "target_paths": [
+          "payload"
+        ],
+        "answer_schema": {
+          "type": "OBJECT",
+          "allowed_values": []
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

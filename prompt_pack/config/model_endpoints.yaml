@@ -1,0 +1,67 @@
+version: '2.0'
+endpoints:
+- endpoint_id: offline-primary
+  environment: OFFLINE_LOCAL
+  provider: openai-compatible
+  base_url: ${OFFLINE_LLM_BASE_URL}
+  api_key_secret: OFFLINE_LLM_API_KEY
+  enabled: ${OFFLINE_LLM_ENABLED:true}
+  allowed_security_levels:
+  - PUBLIC
+  - INTERNAL
+  - SENSITIVE
+  - CLASSIFIED
+  allowed_task_types:
+  - SECURITY_CLASSIFICATION
+  - SCHEME_EXTRACTION
+  - PROJECT_DEFINITION
+  - FACT_EXTRACTION
+  - TEMPLATE_EXTRACTION
+  - REVISION_PLANNING
+  - BLUEPRINT_WRITING
+  - CONTENT_WRITING
+  - CRITIC
+  - INTEGRATION
+  - TARGETED_REPAIR
+  data_policy:
+    retention: NONE
+    training_usage: DISALLOWED
+    request_logging: METADATA_ONLY
+    response_logging: METADATA_ONLY
+  network_policy:
+    internet_access: false
+  limits:
+    connect_timeout_seconds: 10
+    read_timeout_seconds: 180
+    total_timeout_seconds: 240
+    max_concurrency: 2
+    max_input_tokens: 64000
+    max_output_tokens: 12000
+- endpoint_id: online-public-primary
+  environment: ONLINE_PUBLIC
+  provider: openai-compatible
+  base_url: ${ONLINE_LLM_BASE_URL}
+  api_key_secret: ONLINE_LLM_API_KEY
+  enabled: ${ONLINE_LLM_ENABLED:false}
+  allowed_security_levels:
+  - PUBLIC
+  allowed_task_types:
+  - PUBLIC_RESEARCH_PLAN
+  - PUBLIC_RESEARCH_SYNTHESIS
+  - PUBLIC_RESEARCH_CRITIC
+  - PUBLIC_TEMPLATE_ANALYSIS
+  - GENERIC_LANGUAGE_ASSIST
+  data_policy:
+    retention: PROVIDER_CONFIGURED
+    training_usage: DISALLOWED
+    request_logging: REDACTED
+    response_logging: REDACTED
+  network_policy:
+    internet_access: true
+  limits:
+    connect_timeout_seconds: 15
+    read_timeout_seconds: 180
+    total_timeout_seconds: 240
+    max_concurrency: 4
+    max_input_tokens: 32000
+    max_output_tokens: 8000

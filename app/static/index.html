@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>项目申请书智能体系统</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>项目申请书智能体系统</h1>
+      <p>离线优先 · 在线受控 · 严格 Schema · 人工门禁</p>
+    </div>
+    <div id="health" class="status">连接中</div>
+  </header>
+
+  <main>
+    <aside>
+      <button class="nav active" data-panel="projects">项目与材料</button>
+      <button class="nav" data-panel="workflows">工作流</button>
+      <button class="nav" data-panel="gates">人工门禁</button>
+      <button class="nav" data-panel="prompts">提示词调试</button>
+      <button class="nav" data-panel="runs">运行记录</button>
+      <div class="runtime" id="runtime"></div>
+    </aside>
+
+    <section class="content">
+      <div id="projects" class="panel active">
+        <div class="panel-head"><h2>项目与材料</h2><button id="refreshProjects">刷新</button></div>
+        <div class="grid two">
+          <form id="projectForm" class="card">
+            <h3>新建项目</h3>
+            <label>项目名称<input name="name" required /></label>
+            <label>说明<textarea name="description"></textarea></label>
+            <label>安全等级<select name="security_level"><option>INTERNAL</option><option>PUBLIC</option><option>SENSITIVE</option><option>CLASSIFIED</option></select></label>
+            <label class="check"><input type="checkbox" name="internet_access_allowed" /> 允许经审批后使用在线公共研究</label>
+            <button type="submit">创建</button>
+          </form>
+          <div class="card">
+            <h3>当前项目</h3>
+            <select id="projectSelect"></select>
+            <pre id="projectInfo">尚未选择项目</pre>
+          </div>
+        </div>
+        <form id="uploadForm" class="card">
+          <h3>上传材料</h3>
+          <div class="row">
+            <input type="file" name="file" required />
+            <select name="role">
+              <option>CURRENT_PROPOSAL</option><option>APPLICATION_GUIDE</option><option>PROJECT_BRIEF</option>
+              <option>TECHNICAL_DESIGN</option><option>EVIDENCE_MATERIAL</option><option>REFERENCE_PROPOSAL</option>
+              <option>TEAM_PROFILE</option><option>BUDGET_MATERIAL</option><option>REVIEW_COMMENT</option><option>OTHER</option>
+            </select>
+            <select name="security_level"><option>INTERNAL</option><option>PUBLIC</option><option>SENSITIVE</option><option>CLASSIFIED</option></select>
+            <button type="submit">上传并解析</button>
+          </div>
+        </form>
+        <div class="card"><h3>材料列表</h3><div id="documentList"></div></div>
+      </div>
+
+      <div id="workflows" class="panel">
+        <div class="panel-head"><h2>工作流</h2><button id="refreshWorkflows">刷新</button></div>
+        <div class="card">
+          <select id="workflowType">
+            <option>WF-1_PROJECT_INTAKE</option><option>WF-2_TEMPLATE_EXTRACTION</option>
+            <option>WF-3_HYBRID_ONLINE_ASSIST</option><option>WF-4_PROPOSAL_AUTHORING</option>
+            <option>WF-5_SECURITY_REVIEW_AND_EXPORT</option>
+          </select>
+          <button id="startWorkflow">启动并运行至下一个门禁</button>
+          <button id="advanceWorkflow">继续选中的工作流</button>
+          <button id="exportDocx">导出 DOCX</button><button id="exportPackage">导出审计包</button>
+        </div>
+        <div id="workflowList"></div>
+      </div>
+
+      <div id="gates" class="panel">
+        <div class="panel-head"><h2>人工门禁</h2><button id="refreshGates">刷新</button></div>
+        <div id="gateList"></div>
+      </div>
+
+      <div id="prompts" class="panel">
+        <div class="panel-head"><h2>提示词调试</h2></div>
+        <div class="card row">
+          <select id="promptSelect"></select>
+          <button id="loadPromptInput">生成上下文</button>
+          <button id="executePrompt">执行</button>
+        </div>
+        <div class="grid two">
+          <div class="card"><h3>输入 JSON</h3><textarea id="promptInput" class="jsonbox"></textarea></div>
+          <div class="card"><h3>输出 JSON</h3><pre id="promptOutput"></pre></div>
+        </div>
+      </div>
+
+      <div id="runs" class="panel">
+        <div class="panel-head"><h2>运行记录</h2><button id="refreshRuns">刷新</button></div>
+        <div id="runList"></div>
+      </div>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

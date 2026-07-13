@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "security_context.schema.json",
+  "type": "object",
+  "properties": {
+    "project_security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    },
+    "input_max_security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    },
+    "required_environment": {
+      "type": "string",
+      "enum": [
+        "OFFLINE_LOCAL",
+        "ONLINE_PUBLIC",
+        "SAME_AS_ORIGINAL"
+      ]
+    },
+    "online_transfer_approval_status": {
+      "type": "string",
+      "enum": [
+        "NOT_REQUIRED",
+        "NOT_REQUESTED",
+        "PENDING",
+        "APPROVED",
+        "REJECTED",
+        "EXPIRED"
+      ]
+    },
+    "allowed_model_endpoint_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "prohibited_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "recipient_scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "project_security_level",
+    "input_max_security_level",
+    "required_environment",
+    "online_transfer_approval_status",
+    "allowed_model_endpoint_ids",
+    "prohibited_fields",
+    "recipient_scope",
+    "policy_version"
+  ]
+}

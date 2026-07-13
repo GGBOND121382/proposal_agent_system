@@ -1,0 +1,40 @@
+profile_id: RESEARCH_OBJECTIVE
+version: 2.0.0
+purpose: 描述项目完成后的目标状态与可判断的成功标准。
+must_answer:
+- 总体目标是什么
+- 当前基线是什么
+- 分目标如何对应问题
+- 完成后的目标状态是什么
+- 如何判断成功
+- 哪些内容不在项目范围
+required_item_types:
+- PROBLEM
+- OBJECTIVE
+- METRIC
+recommended_chain:
+- 总体问题
+- 总体目标
+- 分目标
+- 目标状态
+- 成功标准
+- 范围边界
+paragraph_roles:
+- 总体目标
+- 分目标
+- 目标与问题映射
+- 成功标准
+forbidden:
+- 将研究活动当成目标
+- 无测量方法的量化目标
+- 超出指南的目标
+readiness:
+  minimum_confirmed_ratio: 0.75
+  minimum_evidence_ratio: 0.5
+  blocking_item_types:
+  - PROBLEM
+  - OBJECTIVE
+critic_checks:
+- 目标可验证
+- 目标与问题一一对应
+- 不混入任务过程

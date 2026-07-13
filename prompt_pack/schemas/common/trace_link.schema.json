@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trace_link.schema.json",
+  "type": "object",
+  "properties": {
+    "trace_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "target_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_kind": {
+      "type": "string",
+      "enum": [
+        "FACT",
+        "PROJECT_ITEM",
+        "PROJECT_RELATION",
+        "SCHEME_RULE",
+        "TEMPLATE_COMPONENT",
+        "SOURCE_TEXT",
+        "USER_INSTRUCTION",
+        "PUBLIC_CLAIM"
+      ]
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "source_path_or_span": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "support_type": {
+      "type": "string",
+      "enum": [
+        "DIRECT",
+        "DERIVED",
+        "CONSTRAINT",
+        "STYLE_ONLY"
+      ]
+    },
+    "source_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "trace_id",
+    "target_path",
+    "source_kind",
+    "source_id",
+    "source_path_or_span",
+    "support_type",
+    "source_hash"
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project_definition_package.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "parent_version_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/project_item.schema.json"
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/project_relation.schema.json"
+      }
+    },
+    "domain_readiness": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": [
+              "PROJECT_BASIC",
+              "BACKGROUND_AND_DEMAND",
+              "STATE_GAP_ROOT_CAUSE",
+              "CORE_PROBLEMS",
+              "OBJECTIVES",
+              "RESEARCH_CONTENT",
+              "TECHNICAL_ROUTE",
+              "INNOVATION",
+              "OUTPUTS_AND_METRICS",
+              "RESEARCH_FOUNDATION",
+              "TEAM_AND_IMPLEMENTATION",
+              "RESOURCES_BUDGET_RISK_COMPLIANCE"
+            ]
+          },
+          "completeness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confirmation_ratio": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence_ratio": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "open_conflicts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "readiness": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "READY_WITH_WARNINGS",
+              "NEED_USER_INPUT",
+              "BLOCKED",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "missing_item_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "PROJECT_BASIC",
+                "STAKEHOLDER",
+                "DEMAND",
+                "SCENARIO",
+                "CURRENT_STATE",
+                "EXISTING_APPROACH",
+                "GAP",
+                "ROOT_CAUSE",
+                "PROBLEM",
+                "OBJECTIVE",
+                "WORK_PACKAGE",
+                "METHOD",
+                "DATA_RESOURCE",
+                "EXPERIMENT",
+                "INNOVATION",
+                "DELIVERABLE",
+                "METRIC",
+                "ACHIEVEMENT",
+                "CAPABILITY",
+                "TEAM_MEMBER",
+                "SCHEDULE_PHASE",
+                "RISK",
+                "RESOURCE_REQUIREMENT",
+                "BUDGET_ITEM",
+                "COMPLIANCE_ITEM"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "domain",
+          "completeness",
+          "confirmation_ratio",
+          "evidence_ratio",
+          "open_conflicts",
+          "readiness",
+          "missing_item_types"
+        ]
+      },
+      "minItems": 1
+    },
+    "open_conflict_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "REVIEWING",
+        "CONFIRMED",
+        "SUPERSEDED",
+        "INVALID"
+      ]
+    },
+    "security_level": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "SENSITIVE",
+        "CLASSIFIED"
+      ]
+    },
+    "package_hash": {
+      "type": "string",
+      "minLength": 64,
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_id",
+    "version",
+    "parent_version_id",
+    "items",
+    "relations",
+    "domain_readiness",
+    "open_conflict_ids",
+    "status",
+    "security_level",
+    "package_hash"
+  ]
+}

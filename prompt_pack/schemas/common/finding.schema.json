@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "finding.schema.json",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "P0",
+        "P1",
+        "P2",
+        "P3"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "SECURITY",
+        "SOURCE",
+        "FACT",
+        "SCHEME",
+        "PROJECT_DEFINITION",
+        "READINESS",
+        "TEMPLATE",
+        "PLAN",
+        "BLUEPRINT",
+        "CONTENT",
+        "INTEGRATION",
+        "FORMAT",
+        "SYSTEM"
+      ]
+    },
+    "target_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_path_or_span": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "repairable": {
+      "type": "boolean"
+    },
+    "repair_instruction": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "suggested_route": {
+      "type": "string",
+      "enum": [
+        "ORIGINAL_PRODUCER",
+        "PROJECT_KNOWLEDGE_AGENT",
+        "SECURITY_REVIEW_AGENT",
+        "PLANNING_AGENT",
+        "WRITING_AGENT",
+        "INTEGRATION_AGENT",
+        "USER",
+        "BLOCK"
+      ]
+    },
+    "blocking": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "severity",
+    "category",
+    "target_type",
+    "target_path_or_span",
+    "description",
+    "evidence_refs",
+    "repairable",
+    "repair_instruction",
+    "suggested_route",
+    "blocking"
+  ]
+}

@@ -1,0 +1,41 @@
+profile_id: RESEARCH_CONTENT
+version: 2.0.0
+purpose: 将目标分解为边界清楚、输入方法输出完整、相互衔接的研究任务。
+must_answer:
+- 每项内容解决什么问题
+- 研究对象是什么
+- 输入是什么
+- 开展什么研究
+- 采用何种已确认方法方向
+- 输出是什么
+- 与其他任务如何衔接
+required_item_types:
+- OBJECTIVE
+- WORK_PACKAGE
+- METHOD
+- DELIVERABLE
+recommended_chain:
+- 总体分解逻辑
+- 任务一
+- 任务二
+- 任务三
+- 任务关系与闭环
+paragraph_roles:
+- 内容总述
+- 任务定义
+- 方法与输出
+- 任务衔接
+forbidden:
+- 把功能清单当研究内容
+- 新增未确认方法
+- 任务之间无依赖关系
+readiness:
+  minimum_confirmed_ratio: 0.7
+  minimum_evidence_ratio: 0.5
+  blocking_item_types:
+  - OBJECTIVE
+  - WORK_PACKAGE
+critic_checks:
+- 每项任务对应目标
+- 输入方法输出完整
+- 任务边界不重叠

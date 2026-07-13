@@ -1,0 +1,181 @@
+{
+  "case_id": "fact_extract-missing_input",
+  "prompt_id": "P-FACT-EXTRACT",
+  "case_type": "missing_input",
+  "description": "结构合法但业务信息缺失，应要求用户补充",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-FACT-EXTRACT",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "FACT_EXTRACT",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": null,
+      "fact_context_hash": null,
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "source_spans": [
+        {
+          "span_id": "span-001",
+          "text": "项目拟开展研究。",
+          "source_ref": {
+            "source_id": "src-001",
+            "source_type": "USER_CONFIRMATION",
+            "document_version_id": null,
+            "section_id": null,
+            "span_start": null,
+            "span_end": null,
+            "quoted_text": "用户确认的示例内容",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "authority_rank": 100,
+            "security_level": "INTERNAL"
+          }
+        }
+      ],
+      "existing_facts": [],
+      "locked_facts": [],
+      "authority_rules": {
+        "version": "2.0",
+        "ordered_source_types": [
+          "USER_CONFIRMATION",
+          "APPLICATION_GUIDE",
+          "CURRENT_PROPOSAL"
+        ]
+      },
+      "security_constraints": {
+        "project_security_level": "INTERNAL",
+        "input_max_security_level": "INTERNAL",
+        "required_environment": "OFFLINE_LOCAL",
+        "online_transfer_approval_status": "NOT_REQUIRED",
+        "allowed_model_endpoint_ids": [
+          "offline-primary"
+        ],
+        "prohibited_fields": [
+          "真实项目名称"
+        ],
+        "recipient_scope": [
+          "内部用户"
+        ],
+        "policy_version": "2.0"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/fact_extract_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-FACT-EXTRACT",
+    "prompt_version": "2.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "fact_candidates": [
+        {
+          "claim_id": "fact-001",
+          "claim_text": "项目拟开展研究。",
+          "claim_type": "PLAN",
+          "subject_id": "project-001",
+          "temporal_status": "PLANNED",
+          "qualifiers": [
+            "拟"
+          ],
+          "numeric_values": [],
+          "source_refs": [
+            {
+              "source_id": "src-001",
+              "source_type": "USER_CONFIRMATION",
+              "document_version_id": null,
+              "section_id": null,
+              "span_start": null,
+              "span_end": null,
+              "quoted_text": "用户确认的示例内容",
+              "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "authority_rank": 100,
+              "security_level": "INTERNAL"
+            }
+          ],
+          "knowledge_status": "CONFIRMED",
+          "security_level": "INTERNAL"
+        }
+      ],
+      "conflict_candidates": [],
+      "coverage": [
+        {
+          "span_id": "span-001",
+          "claim_ids": [
+            "fact-001"
+          ]
+        }
+      ]
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-001",
+        "type": "MISSING",
+        "description": "缺少必需输入",
+        "target_paths": [
+          "payload"
+        ],
+        "required_action": "补充输入",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-001",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充必需输入。",
+        "reason": "当前输入不足",
+        "target_paths": [
+          "payload"
+        ],
+        "answer_schema": {
+          "type": "OBJECT",
+          "allowed_values": []
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

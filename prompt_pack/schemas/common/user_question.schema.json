@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user_question.schema.json",
+  "type": "object",
+  "properties": {
+    "question_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "question_type": {
+      "type": "string",
+      "enum": [
+        "CONFIRMATION",
+        "MISSING_INFORMATION",
+        "CONFLICT_RESOLUTION",
+        "CHOICE",
+        "SECURITY_APPROVAL_INPUT"
+      ]
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "answer_schema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "STRING",
+            "NUMBER",
+            "BOOLEAN",
+            "ENUM",
+            "OBJECT",
+            "ARRAY"
+          ]
+        },
+        "allowed_values": {
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ]
+    },
+    "blocking": {
+      "type": "boolean"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "P0",
+        "P1",
+        "P2",
+        "P3"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "question_id",
+    "question_type",
+    "question",
+    "reason",
+    "target_paths",
+    "answer_schema",
+    "blocking",
+    "priority"
+  ]
+}

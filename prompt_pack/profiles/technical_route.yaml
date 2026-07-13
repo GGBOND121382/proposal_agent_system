@@ -1,0 +1,50 @@
+profile_id: TECHNICAL_ROUTE
+version: 2.0.0
+purpose: 说明从输入经处理阶段、关键方法和机制到输出与验证的完整可实施链路。
+must_answer:
+- 输入是什么
+- 处理阶段是什么
+- 每阶段采用什么方法
+- 关键机制是什么
+- 阶段输出是什么
+- 数据如何获得
+- 如何实验和验证
+- 方法未确定时如何表达
+- 备选方案是什么
+required_item_types:
+- WORK_PACKAGE
+- METHOD
+- DATA_RESOURCE
+- EXPERIMENT
+- DELIVERABLE
+recommended_chain:
+- 总体路线
+- 输入与数据
+- 阶段一
+- 阶段二
+- 阶段三
+- 集成反馈
+- 实验验证
+paragraph_roles:
+- 路线总述
+- 阶段方法
+- 关键机制
+- 数据与实验
+- 输出与验证
+forbidden:
+- 模型自行选择方法
+- 只有技术名词没有输入输出
+- 未确认方案写成既定方案
+- 验证条件缺失
+readiness:
+  minimum_confirmed_ratio: 0.8
+  minimum_evidence_ratio: 0.55
+  blocking_item_types:
+  - WORK_PACKAGE
+  - METHOD
+  - EXPERIMENT
+critic_checks:
+- 输入处理输出闭环
+- 方法成熟度明确
+- 每阶段可验证
+- 不把备选方案写成既定方案

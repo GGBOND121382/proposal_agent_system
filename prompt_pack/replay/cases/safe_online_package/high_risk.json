@@ -1,0 +1,159 @@
+{
+  "case_id": "safe_online_package-high_risk",
+  "prompt_id": "P-SAFE-ONLINE-PACKAGE",
+  "case_type": "high_risk",
+  "description": "高风险或安全越权场景，应阻断",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-SAFE-ONLINE-PACKAGE",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "SAFE_ONLINE_PACKAGE",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "CLASSIFIED",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": [
+        "obj-secret"
+      ]
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "research_need": {
+        "need_id": "need-001",
+        "question": "公开领域有哪些常用评价方法？",
+        "reason_online_needed": "需要检索公开资料",
+        "desired_output": "来源支持的公开结论"
+      },
+      "source_items": [
+        {
+          "object_id": "obj-001",
+          "object_type": "GENERIC",
+          "version": 1,
+          "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "security_level": "INTERNAL",
+          "display_name": "示例对象"
+        }
+      ],
+      "security_policy": {
+        "schema_version": "2.0",
+        "profile_id": "security-001",
+        "project_id": "project-001",
+        "version": 1,
+        "default_security_level": "INTERNAL",
+        "internet_access_allowed": false,
+        "anonymized_external_processing_allowed": false,
+        "prohibited_external_fields": [
+          "真实项目名称"
+        ],
+        "allowed_public_topics": [
+          "公开政策"
+        ],
+        "allowed_model_endpoint_ids": [
+          "offline-primary"
+        ],
+        "outbound_approval_required": true,
+        "import_approval_required": true,
+        "final_content_approval_required": true,
+        "final_export_approval_required": true,
+        "log_content_policy": "FULL_IN_SECURE_ARTIFACT_ONLY",
+        "retention_days": 365,
+        "profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "allowed_topics": [
+        "公开评价方法"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "target_task_type": "PUBLIC_RESEARCH"
+    },
+    "expected_output_schema": "schemas/prompts/safe_online_package_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-SAFE-ONLINE-PACKAGE",
+    "prompt_version": "2.0.0",
+    "status": "BLOCK",
+    "result": {
+      "package_id": "pkg-001",
+      "task_type": "PUBLIC_RESEARCH",
+      "task_description": "检索公开评价方法",
+      "queries": [
+        "公开评价方法"
+      ],
+      "allowed_context": [
+        "通用研究问题"
+      ],
+      "entity_placeholders": [],
+      "removed_fields": [
+        "真实项目名称"
+      ],
+      "prohibited_inferences": [
+        "不得推断内部项目"
+      ],
+      "prohibited_outputs": [
+        "不得输出内部实体"
+      ],
+      "valid_until": null,
+      "security_level": "PUBLIC"
+    },
+    "findings": [
+      {
+        "code": "SAFE_PACKAGE_EXCESS_CONTEXT",
+        "severity": "P0",
+        "category": "SECURITY",
+        "target_type": "INPUT",
+        "target_path_or_span": "payload",
+        "description": "高风险场景触发阻断规则",
+        "evidence_refs": [
+          "src-001"
+        ],
+        "repairable": false,
+        "repair_instruction": null,
+        "suggested_route": "BLOCK",
+        "blocking": true
+      }
+    ],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "BLOCK"
+  }
+}

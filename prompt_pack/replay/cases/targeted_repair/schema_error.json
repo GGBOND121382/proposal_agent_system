@@ -1,0 +1,90 @@
+{
+  "case_id": "targeted_repair-schema_error",
+  "prompt_id": "P-TARGETED-REPAIR",
+  "case_type": "schema_error",
+  "description": "输入Envelope缺少必需字段，应在调用模型前被Schema拒绝",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-TARGETED-REPAIR",
+    "prompt_version": "2.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "TARGETED_REPAIR",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "original_object": {
+        "object_type": "GENERIC",
+        "object_id": "obj-001",
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "content": {
+          "text": "示例内容"
+        }
+      },
+      "original_producer": "WRITING_AGENT",
+      "findings_to_repair": [
+        {
+          "code": "WRITE_UNSOURCED_CLAIM",
+          "severity": "P1",
+          "category": "CONTENT",
+          "target_type": "WRITING_CANDIDATE",
+          "target_path_or_span": "paragraphs[0]",
+          "description": "存在无来源陈述",
+          "evidence_refs": [],
+          "repairable": true,
+          "repair_instruction": "删除无来源陈述",
+          "suggested_route": "ORIGINAL_PRODUCER",
+          "blocking": true
+        }
+      ],
+      "allowed_paths": [
+        "content.paragraphs[0]"
+      ],
+      "protected_paths": [
+        "metadata"
+      ],
+      "protected_hashes": [
+        {
+          "path": "metadata",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "original_input_refs": [
+        {
+          "object_id": "obj-001",
+          "object_type": "GENERIC",
+          "version": 1,
+          "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "security_level": "INTERNAL",
+          "display_name": "示例对象"
+        }
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/targeted_repair_output.schema.json"
+  },
+  "expected_output": null,
+  "expected_validation": {
+    "input_schema_valid": false,
+    "output_schema_valid": false,
+    "expected_status": null
+  }
+}

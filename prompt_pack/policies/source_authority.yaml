@@ -1,0 +1,24 @@
+version: '2.0'
+priority:
+- rank: 100
+  source_type: USER_CONFIRMATION
+- rank: 90
+  source_type: APPLICATION_GUIDE_TASK_BOOK_CONTRACT
+- rank: 80
+  source_type: LOCKED_FACT
+- rank: 70
+  source_type: CURRENT_PROPOSAL
+- rank: 60
+  source_type: CURRENT_TECHNICAL_OR_EVIDENCE_MATERIAL
+- rank: 40
+  source_type: HISTORICAL_MATERIAL
+- rank: 20
+  source_type: REFERENCE_PROPOSAL
+- rank: 0
+  source_type: MODEL_INFERENCE
+rules:
+  lower_cannot_silently_override_higher: true
+  same_rank_conflict_requires_gate: true
+  reference_proposal_structure_only: true
+  model_inference_cannot_be_formal_fact: true
+  public_claim_cannot_prove_internal_achievement: true

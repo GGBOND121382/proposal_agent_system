@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project_readiness_critic_output.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-PROJECT-READINESS-CRITIC"
+    },
+    "prompt_version": {
+      "const": "2.0.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "REVISE",
+        "NEED_USER_INPUT",
+        "BLOCK"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "domain_scores": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string",
+                "enum": [
+                  "PROJECT_BASIC",
+                  "BACKGROUND_AND_DEMAND",
+                  "STATE_GAP_ROOT_CAUSE",
+                  "CORE_PROBLEMS",
+                  "OBJECTIVES",
+                  "RESEARCH_CONTENT",
+                  "TECHNICAL_ROUTE",
+                  "INNOVATION",
+                  "OUTPUTS_AND_METRICS",
+                  "RESEARCH_FOUNDATION",
+                  "TEAM_AND_IMPLEMENTATION",
+                  "RESOURCES_BUDGET_RISK_COMPLIANCE"
+                ]
+              },
+              "completeness": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "confirmation_ratio": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "evidence_ratio": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "open_conflicts": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "readiness": {
+                "type": "string",
+                "enum": [
+                  "READY",
+                  "READY_WITH_WARNINGS",
+                  "NEED_USER_INPUT",
+                  "BLOCKED",
+                  "NOT_APPLICABLE"
+                ]
+              },
+              "missing_item_types": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "PROJECT_BASIC",
+                    "STAKEHOLDER",
+                    "DEMAND",
+                    "SCENARIO",
+                    "CURRENT_STATE",
+                    "EXISTING_APPROACH",
+                    "GAP",
+                    "ROOT_CAUSE",
+                    "PROBLEM",
+                    "OBJECTIVE",
+                    "WORK_PACKAGE",
+                    "METHOD",
+                    "DATA_RESOURCE",
+                    "EXPERIMENT",
+                    "INNOVATION",
+                    "DELIVERABLE",
+                    "METRIC",
+                    "ACHIEVEMENT",
+                    "CAPABILITY",
+                    "TEAM_MEMBER",
+                    "SCHEDULE_PHASE",
+                    "RISK",
+                    "RESOURCE_REQUIREMENT",
+                    "BUDGET_ITEM",
+                    "COMPLIANCE_ITEM"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "domain",
+              "completeness",
+              "confirmation_ratio",
+              "evidence_ratio",
+              "open_conflicts",
+              "readiness",
+              "missing_item_types"
+            ]
+          },
+          "minItems": 1
+        },
+        "chapter_readiness": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "profile_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "readiness": {
+                "type": "string",
+                "enum": [
+                  "READY",
+                  "READY_WITH_WARNINGS",
+                  "NEED_USER_INPUT",
+                  "BLOCKED",
+                  "NOT_APPLICABLE"
+                ]
+              },
+              "missing_item_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              },
+              "blocking_conflict_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "profile_id",
+              "readiness",
+              "missing_item_ids",
+              "blocking_conflict_ids"
+            ]
+          }
+        },
+        "writeable_section_profiles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "blocked_section_profiles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "missing_inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field_path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required_for": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "suggested_question_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "field_path",
+              "reason",
+              "required_for",
+              "suggested_question_id"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "domain_scores",
+        "chapter_readiness",
+        "writeable_section_profiles",
+        "blocked_section_profiles",
+        "missing_inputs"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/finding.schema.json"
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/unresolved_item.schema.json"
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/user_question.schema.json"
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/source_ref.schema.json"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "status",
+    "result",
+    "findings",
+    "unresolved_items",
+    "user_questions",
+    "source_refs",
+    "warnings"
+  ]
+}
