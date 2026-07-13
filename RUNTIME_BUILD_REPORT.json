@@ -1,32 +1,105 @@
 {
-  "version": "0.1.0",
-  "built_at": "2026-07-13T13:47:28.393335+00:00",
+  "version": "0.3.0",
+  "built_at": "2026-07-13T16:41:56.469103+00:00",
   "status": "PASS",
-  "runtime_mode_tested": "REPLAY",
+  "runtime_mode_tested": "REPLAY_AND_SIMULATED_LLM",
   "prompt_pack_validation": "PASS",
   "inline_output_schemas_validated": 26,
   "workflow_end_to_end": {
-    "WF-1_PROJECT_INTAKE": "PASS",
-    "WF-2_TEMPLATE_EXTRACTION": "PASS",
-    "WF-3_HYBRID_ONLINE_ASSIST": "PASS",
-    "WF-4_PROPOSAL_AUTHORING": "PASS",
-    "WF-5_SECURITY_REVIEW_AND_EXPORT": "PASS"
+    "WF-1_PROJECT_INTAKE": "PASS_SIMULATED_LLM",
+    "WF-2_TEMPLATE_EXTRACTION": "PASS_SIMULATED_LLM",
+    "WF-3_HYBRID_ONLINE_ASSIST": "PASS_WITH_DETERMINISTIC_REDACTION",
+    "WF-4_PROPOSAL_AUTHORING": "PASS_12_SECTION_SIMULATED_LLM",
+    "WF-5_SECURITY_REVIEW_AND_EXPORT": "PASS_SIMULATED_LLM"
   },
-  "http_smoke": "PASS",
   "docx_export_and_audit_package": "PASS",
+  "docx_render_visual_review": "PASS_23_PAGES_TWO_ROUNDS",
   "docker_runtime_test": "NOT_RUN_DOCKER_UNAVAILABLE",
   "live_model_test": "NOT_RUN_ENDPOINTS_NOT_CONFIGURED",
   "counts": {
-    "total_files": 307,
-    "python_files": 19,
     "prompt_files": 30,
     "schema_files": 76,
     "replay_cases": 130,
-    "automated_tests": 5
+    "automated_tests": 8
   },
+  "neutral_material_context": {
+    "package": "outdoor_thermos_test_materials_v2.0",
+    "uploaded_documents": 8,
+    "personal_information_fixtures": 7,
+    "military_test_terms": "REMOVED"
+  },
+  "online_privacy": {
+    "safe_package_deterministic_redaction": "PASS",
+    "online_preflight_block": "PASS",
+    "configured_placeholders": [
+      "[PERSON_1]",
+      "[ORG_1]",
+      "[ADDRESS_1]",
+      "[LOCATION_1]",
+      "[LOCATION_2]"
+    ],
+    "generic_placeholders": [
+      "[PHONE]",
+      "[EMAIL]"
+    ],
+    "online_prompt_runs": 3,
+    "raw_fixture_hits_in_online_inputs": 0
+  },
+  "multi_section_authoring": {
+    "formal_sections": 12,
+    "write_content_runs": 12,
+    "actual_candidate_aggregation": "PASS",
+    "full_document_reviews": "PASS"
+  },
+  "document_quality": {
+    "required_sections": 12,
+    "forbidden_reference_fact_hits": 0,
+    "extracted_text_chars": 12172,
+    "pages": 23,
+    "list_numbering_reset": "PASS",
+    "missing_glyphs": "PASS",
+    "duplicate_paragraphs": "PASS"
+  },
+  "regression_fixes": [
+    {
+      "id": "CTX-001",
+      "description": "Strip upload-only safe_filename metadata before document_context injection",
+      "status": "PASS"
+    },
+    {
+      "id": "WF4-001",
+      "description": "Iterate all formal proposal sections",
+      "status": "PASS"
+    },
+    {
+      "id": "CTX-002",
+      "description": "Aggregate actual candidates for full-document reviews",
+      "status": "PASS"
+    },
+    {
+      "id": "EXP-001",
+      "description": "Generate clean structured multi-section DOCX",
+      "status": "PASS"
+    },
+    {
+      "id": "PRIV-001",
+      "description": "Deterministically redact configured entities, phone numbers and emails before outbound approval",
+      "status": "PASS"
+    },
+    {
+      "id": "PRIV-002",
+      "description": "Block ONLINE_PUBLIC calls when raw sensitive values remain",
+      "status": "PASS"
+    },
+    {
+      "id": "EXP-002",
+      "description": "Reset numbered lists and use CJK-safe table font",
+      "status": "PASS"
+    }
+  ],
   "known_boundaries": [
-    "Replay success does not prove real model semantic quality.",
-    "Unit-specific classification mapping and human identity integration remain deployment tasks.",
+    "Simulated-LLM success does not prove live-model semantic quality.",
+    "Generic person and location detection requires configured entities or deployment DLP/NER.",
     "Complex OOXML sections require deployment-specific patch and integrity validation."
   ]
 }

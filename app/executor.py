@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from .llm import LLMError, ModelGateway
+from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
 from .security import RoutingDenied, SecurityRouter
 from .util import new_id, sha256_json, utc_now
 
@@ -43,10 +44,19 @@ class PromptExecutor:
             if input_errors:
                 raise PromptExecutionError("Input schema validation failed", validation_errors=input_errors)
             route = self.router.route(prompt_id, envelope, original_environment=original_environment)
+            project_config = load_project_config(self.db, project_id)
+            if route.environment == "ONLINE_PUBLIC":
+                assert_online_payload_safe(envelope, project_config)
             output_schema = self.pack.inlined_schema(prompt_id, "output")
             system_prompt = self._system_prompt(prompt_id, output_schema)
             result = await self.gateway.invoke(route, prompt_id, system_prompt, envelope, output_schema)
             output = result.output
+            if prompt_id == "P-SAFE-ONLINE-PACKAGE":
+                output, redactions = sanitize_safe_online_package(output, project_config)
+                if redactions:
+                    output.setdefault("warnings", []).append(
+                        f"Deterministic outbound privacy guard redacted {len(redactions)} sensitive field occurrence(s)."
+                    )
             output_errors = self.pack.validate(prompt_id, "output", output)
             if output_errors:
                 raise PromptExecutionError("Output schema validation failed", validation_errors=output_errors)
@@ -61,7 +71,7 @@ class PromptExecutor:
                 "route": {"environment": route.environment, "model_id": result.model_id, "endpoint_id": result.endpoint_id},
                 "output": output,
             }
-        except (PromptExecutionError, RoutingDenied, LLMError, KeyError, ValueError) as exc:
+        except (PromptExecutionError, RoutingDenied, OutboundPrivacyError, LLMError, KeyError, ValueError) as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
             details = getattr(exc, "validation_errors", [])
             error = str(exc) + ((" | " + "; ".join(details[:20])) if details else "")

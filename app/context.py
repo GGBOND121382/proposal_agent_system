@@ -50,7 +50,7 @@ class ContextBuilder:
             }
         )
         envelope["scope"]["project_id"] = project_id
-        self._apply_common_payload(envelope, prompt_id, project, config, docs, context_hash, workflow_state or {})
+        self._apply_common_payload(envelope, prompt_id, project, config, docs, context_hash, workflow_state or {}, workflow_id)
         if overrides:
             for path, value in overrides.items():
                 self._set_path_if_valid(prompt_id, envelope, path, value)
@@ -71,6 +71,72 @@ class ContextBuilder:
             document.pop("safe_filename", None)
             documents.append(document)
         return documents
+
+
+    def sections(self, project_id: str, role: str | None = None) -> list[dict[str, Any]]:
+        """Return parsed document sections in upload order for workflow orchestration."""
+        return [
+            section
+            for document in self._documents(project_id)
+            if role is None or document.get("document_role") == role
+            for section in document.get("sections", [])
+        ]
+
+    def _content_candidates(self, project_id: str, workflow_id: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT id,input_json,output_json,created_at FROM prompt_runs WHERE project_id=? AND prompt_id='P-WRITE-CONTENT' AND status='PASS'"
+        params: list[Any] = [project_id]
+        if workflow_id:
+            sql += " AND workflow_id=?"
+            params.append(workflow_id)
+        sql += " ORDER BY created_at,id"
+        latest_by_section: dict[str, dict[str, Any]] = {}
+        for row in self.db.fetchall(sql, tuple(params)):
+            if not row.get("output_json"):
+                continue
+            input_data = json.loads(row["input_json"])
+            output_data = json.loads(row["output_json"])
+            section = input_data.get("payload", {}).get("source_section") or {}
+            candidate = output_data.get("result") or {}
+            section_id = section.get("section_id")
+            if not section_id or not candidate.get("candidate_id"):
+                continue
+            latest_by_section[section_id] = {"run_id": row["id"], "section": section, "candidate": candidate}
+        return list(latest_by_section.values())
+
+    @staticmethod
+    def _integration_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+        allowed = ["candidate_id", "candidate_text", "paragraphs", "trace_links", "term_usage", "unresolved_items"]
+        return {key: candidate.get(key, [] if key in {"paragraphs", "trace_links", "term_usage", "unresolved_items"} else "") for key in allowed}
+
+    def _candidate_document(self, project: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:
+        sections = []
+        for item in candidates:
+            source = item["section"]
+            candidate = item["candidate"]
+            text = candidate.get("candidate_text", "")
+            sections.append(
+                {
+                    "section_id": source["section_id"],
+                    "section_key": source.get("section_key") or source.get("title") or source["section_id"],
+                    "title": source.get("title", ""),
+                    "level": source.get("level", 1),
+                    "text": text,
+                    "text_hash": sha256_json({"section_id": source["section_id"], "text": text}),
+                    "block_ids": [paragraph.get("paragraph_id") for paragraph in candidate.get("paragraphs", []) if paragraph.get("paragraph_id")],
+                    "contains_table": any(paragraph.get("text", "").startswith("[[TABLE]]") for paragraph in candidate.get("paragraphs", [])),
+                    "contains_formula": False,
+                    "contains_image": False,
+                    "contains_comment": False,
+                    "contains_revision": False,
+                    "security_level": project["security_level"],
+                }
+            )
+        return {
+            "document_id": f"candidate-{project['id']}",
+            "version": 1,
+            "sections": sections,
+            "security_level": project["security_level"],
+        }
 
     def _latest_output(self, project_id: str, prompt_id: str) -> dict[str, Any] | None:
         row = self.db.fetchone("SELECT content_json FROM artifacts WHERE project_id=? AND prompt_id=? ORDER BY version DESC LIMIT 1", (project_id, prompt_id))
@@ -147,7 +213,7 @@ class ContextBuilder:
                 return doc["sections"][0]
         return None
 
-    def _apply_common_payload(self, envelope: dict[str, Any], prompt_id: str, project: dict[str, Any], config: dict[str, Any], docs: list[dict[str, Any]], context_hash: str, state: dict[str, Any]) -> None:
+    def _apply_common_payload(self, envelope: dict[str, Any], prompt_id: str, project: dict[str, Any], config: dict[str, Any], docs: list[dict[str, Any]], context_hash: str, state: dict[str, Any], workflow_id: str | None) -> None:
         payload = envelope["payload"]
         security_profile = self._security_profile(project, config, context_hash)
         for field in ["security_policy"]:
@@ -159,7 +225,14 @@ class ContextBuilder:
         guide_docs = [d for d in docs if d.get("document_role") == "APPLICATION_GUIDE"] or docs
         source_docs = [d for d in docs if d.get("document_role") != "REFERENCE_PROPOSAL"] or docs
         reference_doc = next((d for d in docs if d.get("document_role") == "REFERENCE_PROPOSAL"), None)
-        current_section = self._first_section(docs, {"CURRENT_PROPOSAL"}) or self._first_section(docs)
+        active_section_id = state.get("active_section_id")
+        current_section = None
+        if active_section_id:
+            current_section = next(
+                (section for doc in docs for section in doc.get("sections", []) if section.get("section_id") == active_section_id),
+                None,
+            )
+        current_section = current_section or self._first_section(docs, {"CURRENT_PROPOSAL"}) or self._first_section(docs)
 
         replacements: list[tuple[str, Any]] = []
         if "guide_documents" in payload and guide_docs:
@@ -236,7 +309,8 @@ class ContextBuilder:
         template = self._result(project["id"], "P-TEMPLATE-EXTRACT", "template")
         plan = self._result(project["id"], "P-REVISION-PLAN", "revision_plan")
         blueprint = self._result(project["id"], "P-WRITE-BLUEPRINT", "blueprint")
-        content = self._result(project["id"], "P-WRITE-CONTENT")
+        content_candidates = self._content_candidates(project["id"], workflow_id if prompt_id == "P-INTEGRATION-CRITIC" else None)
+        content = content_candidates[-1]["candidate"] if content_candidates else self._result(project["id"], "P-WRITE-CONTENT")
         safe_package = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE")
 
         if "project_subgraph" in payload and project_definition:
@@ -256,10 +330,36 @@ class ContextBuilder:
             replacements.append(("payload.safe_online_package", self._object_ref(safe_package.get("package_id", new_id("online")), "SAFE_ONLINE_PACKAGE", "PUBLIC", sha256_json(safe_package), "批准的在线任务包")))
         if "approved_safe_package" in payload and safe_package:
             replacements.append(("payload.approved_safe_package", self._object_ref(safe_package.get("package_id", new_id("online")), "SAFE_ONLINE_PACKAGE", "PUBLIC", sha256_json(safe_package), "批准的在线任务包")))
-        if "trace_links" in payload and content:
+        if "trace_links" in payload and content_candidates:
+            replacements.append(("payload.trace_links", [link for item in content_candidates for link in item["candidate"].get("trace_links", [])]))
+        elif "trace_links" in payload and content:
             replacements.append(("payload.trace_links", content.get("trace_links", [])))
-        if "candidate_sections" in payload and content:
-            replacements.append(("payload.candidate_sections", [{"section_id": current_section["section_id"] if current_section else "sec-generated", "candidate_id": content.get("candidate_id", "candidate"), "text": content.get("candidate_text", ""), "trace_link_ids": [x.get("trace_id") for x in content.get("trace_links", [])]}]))
+        if "candidate_sections" in payload and content_candidates:
+            replacements.append(("payload.candidate_sections", [
+                {"section_id": item["section"]["section_id"], "candidate": self._integration_candidate(item["candidate"])}
+                for item in content_candidates
+            ]))
+        if "document_section_map" in payload:
+            proposal_sections = [
+                section
+                for doc in docs
+                if doc.get("document_role") == "CURRENT_PROPOSAL"
+                for section in doc.get("sections", [])
+                if section.get("level", 0) >= 1 and section.get("title") != "全文"
+            ]
+            candidate_ids = {item["section"]["section_id"]: item["candidate"].get("candidate_id") for item in content_candidates}
+            if proposal_sections:
+                replacements.append(("payload.document_section_map", [
+                    {
+                        "section_id": section["section_id"],
+                        "title": section.get("title", ""),
+                        "level": section.get("level", 1),
+                        "candidate_id": candidate_ids.get(section["section_id"]),
+                    }
+                    for section in proposal_sections
+                ]))
+        if "candidate_document" in payload and content_candidates:
+            replacements.append(("payload.candidate_document", self._candidate_document(project, content_candidates)))
 
         if "task_instruction" in payload and config.get("task_instruction"):
             replacements.append(("payload.task_instruction", config["task_instruction"]))

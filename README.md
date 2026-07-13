@@ -17,6 +17,40 @@
 - 浏览器操作台及 FastAPI 接口文档；
 - Prompt 包静态校验和端到端自动化测试。
 
+## v0.3.0 中性端到端测试与在线隐私防护
+
+本版本使用完全中性的“户外活动便携保温杯研制”材料验证完整申请书生成，并强化在线公共研究的数据最小化：
+
+- 新增确定性出站隐私保护器：按项目配置替换姓名、组织、详细地址和地点，并用通用规则替换电话号码与电子邮箱；
+- `P-SAFE-ONLINE-PACKAGE` 输出在持久化、人工审批和在线调用前执行二次净化，原值不会写入 PUBLIC 任务包；
+- 所有 `ONLINE_PUBLIC` Prompt 在调用模型前再次扫描，发现个人信息或项目专有实体即阻断执行；
+- 新增姓名、组织、地址、地点、电话和邮箱测试夹具，验证内部申请书可保留虚构值、在线任务包必须使用占位符；
+- 修复多章节导出中的列表连续编号、中文表格缺字和重复段落问题；
+- 模拟模型端到端覆盖五条工作流、全部人工 Gate、12 个正式章节、3 次在线 Prompt 调用和最终 DOCX/审计包导出。
+
+运行命令：
+
+```bash
+python scripts/run_outdoor_thermos_simulated_e2e.py \
+  --materials-dir ../outdoor_thermos_test_materials/01_upload_required \
+  --project-json ../outdoor_thermos_test_materials/03_control_and_expected/project_create_online_variant.json \
+  --output-dir data/outdoor_thermos_simulated_e2e \
+  --clean
+```
+
+模拟模型测试用于验证 Prompt 边界、Schema、编排、门禁、隐私隔离、终审和导出，不等同于真实大模型的语义能力测评。
+
+## v0.2.0 完整申请书编制修复
+
+本版本针对完整材料端到端测试中发现的问题进行了修复：
+
+- `WF-4_PROPOSAL_AUTHORING` 按当前申请书的正式章节逐章执行写作蓝图、蓝图 Critic、正文生成和正文 Critic，不再只生成第一个章节；
+- Context Builder 按工作流中的 `active_section_id` 注入当前章节，并从真实 `P-WRITE-CONTENT` 运行记录聚合 `candidate_sections`、`candidate_document` 和追踪关系；
+- 跨章节一致性审查和最终保密审查不再使用 Replay 单节示例，避免“流程通过但实际未审查完整正文”的假阳性；
+- 多章节成果采用清稿方式导出，去除初始模板中的占位语和编写说明；单章节任务仍保留定向补丁能力；
+- DOCX 导出支持二级、三级标题、列表和表格结构块，表格标题行重复显示，行内容不跨页拆分；
+- 新增十二章便携保温杯测试夹具、模拟模型端到端脚本和多章节回归测试。
+
 ## v0.1.1 兼容性修复
 
 修复上传文档解析结果中的内部存储字段 `safe_filename` 被传入严格 Prompt Schema 的问题。该问题会使 `source_documents` 或 `reference_document` 的安全替换失败，并保留 Replay 示例输入。v0.1.1 在 Context Builder 中移除该内部字段，并新增包含该字段的回归测试。
@@ -104,7 +138,7 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 | `WF-1_PROJECT_INTAKE` | 材料、安全分类、申报规则、项目定义、事实和准备度 |
 | `WF-2_TEMPLATE_EXTRACTION` | 参考申请书结构/风格提取与污染检查 |
 | `WF-3_HYBRID_ONLINE_ASSIST` | 经审批的公共研究与结果隔离导入 |
-| `WF-4_PROPOSAL_AUTHORING` | 修改计划、蓝图、正文、Critic 和跨章节一致性 |
+| `WF-4_PROPOSAL_AUTHORING` | 修改计划、逐章蓝图与正文、逐章 Critic 和跨章节一致性 |
 | `WF-5_SECURITY_REVIEW_AND_EXPORT` | 正文保密审查、内容审批和最终导出审批 |
 
 ## 材料角色
@@ -118,13 +152,13 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 - DOCX：仅在 `FINAL_CONTENT_SECURITY_APPROVAL` 和 `FINAL_EXPORT_APPROVAL` 都通过后生成；
 - 审计包 ZIP：包含 DOCX、Manifest 和完整性报告。
 
-存在当前申请书 DOCX 且目标章节为纯文本时，系统尝试按标题做定向补丁；目标章节包含表格、公式、图片、批注或修订时，为避免破坏 OOXML，系统不会声称已安全补丁，而会记录跳过原因并回退为新文档生成。生产部署仍应接入单位专用 DOCX 完整性验证器。
+完整多章节申请书采用清稿方式生成，避免把初始模板中的占位语和编写说明带入正文；单章节修改在目标章节为纯文本时尝试按标题定向补丁。目标章节包含表格、公式、图片、批注或修订时，为避免破坏 OOXML，系统不会声称已安全补丁，而会记录跳过原因并回退为新文档生成。生产部署仍应接入单位专用 DOCX 完整性验证器。
 
 ## 安全设计
 
 - 默认拒绝路由；
 - 输入最高安全等级控制模型环境；
-- 在线只接受 PUBLIC 且已批准的任务包；
+- 在线只接受 PUBLIC、已批准且通过确定性隐私扫描的任务包；
 - 在线回传只进入候选区；
 - Prompt、响应、缓存、日志和导出继承安全标签；
 - 普通审计日志只记录 ID、Hash、状态、耗时等元数据；
@@ -142,8 +176,11 @@ bash scripts/validate.sh
 - 26 个 Prompt 的正常 Replay 输入/输出；
 - 材料解析与 Context Builder；
 - 未审批在线调用阻断；
+- 在线任务包确定性脱敏与调用前个人信息阻断；
 - 工作流门禁暂停；
 - 五条工作流完整运行；
+- 多章节逐章生成、真实候选聚合和终审输入；
+- 十二章模拟模型端到端申请书生成；
 - 最终 DOCX 和审计包生成。
 
 ## 目录
@@ -151,9 +188,10 @@ bash scripts/validate.sh
 ```text
 app/
   context.py       # 最小、Schema 合法上下文构建
-  executor.py      # Prompt 执行与双向校验
+  executor.py      # Prompt 执行、双向校验和在线调用前隐私门禁
   llm.py           # OpenAI-compatible 模型网关
   security.py      # 安全模型路由
+  privacy.py       # 在线出站实体替换、电话邮箱净化和阻断
   workflows.py     # 五条工作流和人工 Gate
   documents.py     # 材料解析
   exporter.py      # DOCX/审计包导出
