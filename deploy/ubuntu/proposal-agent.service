@@ -1,0 +1,21 @@
+[Unit]
+Description=Proposal Agent System
+After=network.target
+
+[Service]
+Type=simple
+User=proposal-agent
+Group=proposal-agent
+WorkingDirectory=/opt/proposal-agent
+EnvironmentFile=/etc/proposal-agent/proposal-agent.env
+ExecStart=/opt/proposal-agent/.venv/bin/uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT} --workers 1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/proposal-agent /var/log/proposal-agent
+
+[Install]
+WantedBy=multi-user.target

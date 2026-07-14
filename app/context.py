@@ -139,7 +139,13 @@ class ContextBuilder:
         }
 
     def _latest_output(self, project_id: str, prompt_id: str) -> dict[str, Any] | None:
-        row = self.db.fetchone("SELECT content_json FROM artifacts WHERE project_id=? AND prompt_id=? ORDER BY version DESC LIMIT 1", (project_id, prompt_id))
+        row = self.db.fetchone(
+            """SELECT content_json FROM artifacts
+               WHERE project_id=? AND prompt_id=?
+                 AND artifact_type IN ('PROMPT_OUTPUT','SKILL_ENRICHED_PROMPT_OUTPUT')
+               ORDER BY version DESC,created_at DESC LIMIT 1""",
+            (project_id, prompt_id),
+        )
         return json.loads(row["content_json"]) if row else None
 
     def _result(self, project_id: str, prompt_id: str, key: str | None = None) -> Any:
@@ -333,7 +339,22 @@ class ContextBuilder:
         if "approved_blueprint" in payload and blueprint:
             replacements.append(("payload.approved_blueprint", self._object_ref(blueprint.get("blueprint_id", new_id("bp")), "BLUEPRINT", project["security_level"], sha256_json(blueprint), "已审查写作蓝图")))
         if "safe_online_package" in payload and safe_package:
-            replacements.append(("payload.safe_online_package", self._object_ref(safe_package.get("package_id", new_id("online")), "SAFE_ONLINE_PACKAGE", "PUBLIC", sha256_json(safe_package), "批准的在线任务包")))
+            display_topics = "、".join((safe_package.get("allowed_context") or [])[:4])
+            display_name = "批准的在线任务包" + (f"（{display_topics}）" if display_topics else "")
+            replacements.append(("payload.safe_online_package", self._object_ref(safe_package.get("package_id", new_id("online")), "SAFE_ONLINE_PACKAGE", "PUBLIC", sha256_json(safe_package), display_name)))
+            # The online planner must receive the approved PUBLIC task content, not merely
+            # an opaque object reference.  This field contains only the deterministic,
+            # sanitized Safe Online Package and is validated by the prompt input schema.
+            replacements.append(("payload.safe_online_package_content", {
+                "package_id": safe_package.get("package_id", new_id("online")),
+                "task_type": safe_package.get("task_type", "PUBLIC_RESEARCH"),
+                "task_description": safe_package.get("task_description", "公开资料检索"),
+                "queries": list(safe_package.get("queries") or []),
+                "allowed_context": list(safe_package.get("allowed_context") or []),
+                "prohibited_inferences": list(safe_package.get("prohibited_inferences") or []),
+                "prohibited_outputs": list(safe_package.get("prohibited_outputs") or []),
+                "security_level": "PUBLIC",
+            }))
         if "approved_safe_package" in payload and safe_package:
             replacements.append(("payload.approved_safe_package", self._object_ref(safe_package.get("package_id", new_id("online")), "SAFE_ONLINE_PACKAGE", "PUBLIC", sha256_json(safe_package), "批准的在线任务包")))
         if "trace_links" in payload and content_candidates:

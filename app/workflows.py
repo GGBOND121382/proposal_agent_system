@@ -13,12 +13,13 @@ from .workflow_repair import WorkflowRepairMixin
 
 
 class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMixin):
-    def __init__(self, db, pack, context_builder, executor, research_service):
+    def __init__(self, db, pack, context_builder, executor, research_service, diagram_enrichment=None):
         self.db = db
         self.pack = pack
         self.context_builder = context_builder
         self.executor = executor
         self.research_service = research_service
+        self.diagram_enrichment = diagram_enrichment
 
     def start(self, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
         if workflow_type not in WORKFLOWS:

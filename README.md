@@ -17,6 +17,33 @@
 - 浏览器操作台及 FastAPI 接口文档；
 - Prompt 包静态校验和端到端自动化测试。
 
+## v0.5.0 离线部署、弱模型 Skill 与可核验公开研究
+
+本版本完成三项生产化改造：
+
+- **离线部署双路径**：外网构建 Ubuntu/Windows 源码依赖包，内网执行 manifest 校验并一键安装；或外网构建并 `docker save` 应用镜像，内网 `docker load` 后启动；
+- **弱模型任务拆分**：将长申请书拆成规则/事实抽取、研究计划、单章蓝图、单章正文、Critic、跨章审查和定向修复；模型只生成 Mermaid 源码，代码负责安全检查、Playwright/Chromium 渲染、缓存、失败重启和 DOCX 插图；
+- **公开研究 Skill**：Research Plan Agent 生成原始查询，`public_research.archive` 调用 SearXNG、批准的连接器或受控记录集，强制覆盖全部查询并保存原始响应、网页/PDF/JSON 快照、提取文本、元数据、URL、访问时间和 SHA-256；已接受 `PUBLIC_CLAIM` 才能进入写作上下文。
+
+复杂物流课题验收命令：
+
+```bash
+python scripts/build_transport_optimization_materials.py data/transport_optimization_materials_v1
+python scripts/run_transport_optimization_complex_e2e.py \
+  --materials-dir data/transport_optimization_materials_v1 \
+  --output-dir data/transport_optimization_complex_e2e
+```
+
+离线部署和模型配置详见：
+
+- `docs/OFFLINE_DEPLOYMENT.md`
+- `docs/HYBRID_DEPLOYMENT.md`
+- `docs/MODEL_API_CONFIGURATION.md`
+- `docs/PUBLIC_RESEARCH_ARCHIVE.md`
+- `docs/SKILLS_AND_MERMAID.md`
+
+本次可重复端到端验收使用 `SIMULATED` 模型边界，因为未配置用户真实模型密钥；公开研究不是模拟：Research Agent 的10个查询通过批准连接器执行，39个去重来源被系统自身归档并完成哈希复核。
+
 ## v0.4.0 复杂申请书、公开证据、图形与全链路Trace
 
 本版本针对复杂科研申请书的真实验收缺口进行系统修复：
@@ -199,7 +226,7 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 bash scripts/validate.sh
 ```
 
-当前自动测试覆盖：
+当前自动测试共19项，覆盖：
 
 - 26 个 Prompt 的正常 Replay 输入/输出；
 - 材料解析与 Context Builder；
@@ -212,6 +239,9 @@ bash scripts/validate.sh
 - 41章复杂申请书、26/26 Prompt覆盖和定向修复闭环；
 - 全量System Prompt、输入、输出Schema、原始响应和路由Trace；
 - 公开证据进入写作上下文、参考文献与图形工件导出；
+- Research Agent 原始查询覆盖、39个公开来源快照和哈希复核；
+- Mermaid 源码安全检查、持久化 Playwright Worker、28组三联工件和弱模型回退；
+- Ubuntu/Windows 离线依赖包、Docker 离线镜像包和 manifest 往返校验；
 - 最终 DOCX 和审计包生成。
 
 ## 目录
@@ -224,12 +254,15 @@ app/
   security.py      # 安全模型路由
   privacy.py       # 在线出站实体替换、电话邮箱净化和阻断
   workflows.py     # 五条工作流和人工 Gate
+  skills/          # Mermaid 与公开研究 Skill、执行日志和注册表
   documents.py     # 材料解析
   exporter.py      # DOCX/审计包导出
   main.py          # FastAPI
   static/          # 浏览器操作台
+deploy/            # Ubuntu、Windows 与 Docker 离线部署脚本
+docs/              # 部署、模型API、研究归档和Skill说明
 prompt_pack/       # 原 V2 Prompt 交接包
-scripts/           # 启动、验证和演示
+scripts/           # 启动、验证和复杂端到端验收
 tests/             # 自动测试
 ```
 

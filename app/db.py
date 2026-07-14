@@ -62,6 +62,21 @@ CREATE TABLE IF NOT EXISTS prompt_runs (
   duration_ms INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS skill_runs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  workflow_id TEXT,
+  skill_id TEXT NOT NULL,
+  skill_version TEXT NOT NULL,
+  status TEXT NOT NULL,
+  input_hash TEXT NOT NULL,
+  output_hash TEXT,
+  input_json TEXT NOT NULL,
+  output_json TEXT,
+  error TEXT,
+  duration_ms INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS workflows (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -101,6 +116,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
 CREATE INDEX IF NOT EXISTS idx_documents_project ON documents(project_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id, prompt_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_runs_project ON prompt_runs(project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_skill_runs_project ON skill_runs(project_id, skill_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_gates_workflow ON gates(workflow_id, status);
 """
 

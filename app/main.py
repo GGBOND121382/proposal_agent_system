@@ -13,12 +13,14 @@ from .api_models import GateDecisionRequest, ProjectCreate, PromptExecuteRequest
 from .config import Settings
 from .context import ContextBuilder
 from .db import Database
+from .diagram_enrichment import DiagramEnrichmentService
 from .documents import ALLOWED_EXTENSIONS, parse_document
 from .executor import PromptExecutionError, PromptExecutor
 from .exporter import DocxExporter, ExportDenied
 from .llm import ModelGateway
 from .pack import PromptPack
 from .research import PublicResearchService
+from .skill_setup import build_skill_executor
 from .security import SecurityRouter
 from .util import new_id, safe_filename, sha256_json, utc_now
 from .workflows import WORKFLOWS, WorkflowEngine
@@ -30,11 +32,13 @@ router = SecurityRouter(pack)
 gateway = ModelGateway(settings, pack)
 context_builder = ContextBuilder(db, pack)
 executor = PromptExecutor(db, pack, router, gateway)
-research = PublicResearchService(settings)
-workflows = WorkflowEngine(db, pack, context_builder, executor, research)
+skill_executor = build_skill_executor(db, settings)
+research = PublicResearchService(settings, skill_executor)
+diagram_enrichment = DiagramEnrichmentService(db, pack, skill_executor)
+workflows = WorkflowEngine(db, pack, context_builder, executor, research, diagram_enrichment)
 exporter = DocxExporter(db, settings)
 
-app = FastAPI(title="项目申请书智能体系统", version="0.1.0")
+app = FastAPI(title="项目申请书智能体系统", version="0.5.0")
 app.mount("/static", StaticFiles(directory=settings.root_dir / "app" / "static"), name="static")
 
 
@@ -62,6 +66,11 @@ def list_prompts() -> list[dict[str, Any]]:
     return [pack.entry(pid) for pid in pack.prompt_ids()]
 
 
+@app.get("/api/skills")
+def list_skills() -> list[dict[str, str]]:
+    return skill_executor.registry.list()
+
+
 @app.get("/api/prompts/{prompt_id}/schema")
 def prompt_schema(prompt_id: str) -> dict[str, Any]:
     try:
@@ -80,7 +89,7 @@ def create_project(req: ProjectCreate) -> dict[str, Any]:
         "allowed_public_topics": req.allowed_public_topics,
         "prohibited_external_fields": req.prohibited_external_fields,
         "recipient_scope": req.recipient_scope,
-        "allowed_model_endpoint_ids": ["offline-primary"],
+        "allowed_model_endpoint_ids": ["offline-primary"] + (["online-public-primary"] if req.internet_access_allowed and req.anonymized_external_processing_allowed else []),
         "retention_days": 365,
         "task_instruction": req.task_instruction,
     }
@@ -224,6 +233,52 @@ def decide_gate(gate_id: str, req: GateDecisionRequest) -> dict[str, Any]:
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/api/skill-runs")
+def list_skill_runs(project_id: str | None = None, workflow_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    sql = "SELECT id,project_id,workflow_id,skill_id,skill_version,status,input_hash,output_hash,error,duration_ms,created_at FROM skill_runs WHERE 1=1"
+    params: list[Any] = []
+    if project_id:
+        sql += " AND project_id=?"; params.append(project_id)
+    if workflow_id:
+        sql += " AND workflow_id=?"; params.append(workflow_id)
+    sql += " ORDER BY created_at DESC LIMIT ?"; params.append(min(max(limit, 1), 500))
+    return db.fetchall(sql, tuple(params))
+
+
+@app.get("/api/projects/{project_id}/research-archives")
+def list_research_archives(project_id: str) -> list[dict[str, Any]]:
+    root = settings.data_dir / "research_archive" / safe_filename(project_id)
+    if not root.exists():
+        return []
+    result = []
+    for manifest in sorted(root.glob("*/manifest.json"), reverse=True):
+        try:
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        result.append({
+            "session_id": payload.get("session_id"),
+            "retrieval_mode": payload.get("retrieval_mode"),
+            "provider": payload.get("provider"),
+            "created_at": payload.get("created_at"),
+            "source_count": payload.get("source_count"),
+            "warning_count": payload.get("warning_count"),
+            "manifest_path": str(manifest),
+        })
+    return result
+
+
+@app.get("/api/projects/{project_id}/research-archives/{session_id}/download")
+def download_research_archive(project_id: str, session_id: str) -> FileResponse:
+    root = settings.data_dir / "research_archive" / safe_filename(project_id) / safe_filename(session_id)
+    manifest = root / "manifest.json"
+    if not manifest.exists():
+        raise HTTPException(404, "Research archive not found")
+    archive = shutil.make_archive(str(settings.exports_dir / f"{safe_filename(project_id)}-{safe_filename(session_id)}"), "zip", root)
+    path = Path(archive)
+    return FileResponse(path, media_type="application/zip", filename=path.name)
 
 
 @app.get("/api/runs")

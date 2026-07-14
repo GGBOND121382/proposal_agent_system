@@ -28,10 +28,16 @@ class WorkflowRepairMixin:
             state["public_search_results"] = {"sources": [], "passages": [], "queries": [], "mode": mode}
             return
         plan = self.context_builder._result(wf["project_id"], "P-PUBLIC-RESEARCH-PLAN") or {}
-        if mode == "SIMULATED":
+        provider = self.executor.gateway.settings.public_search_provider
+        if mode == "SIMULATED" and provider == "disabled":
             state["public_search_results"] = self.research_service.simulated_search(plan)
             return
-        state["public_search_results"] = await self.research_service.search(plan)
+        state["public_search_results"] = await self.research_service.search(
+            plan,
+            project_id=wf["project_id"],
+            workflow_id=wf["id"],
+            security_level="PUBLIC",
+        )
 
     def _can_auto_repair(self, prompt_id: str, state: dict[str, Any]) -> bool:
         if prompt_id not in CRITIC_PRODUCER:

@@ -8,3 +8,5 @@ python-multipart==0.0.29
 python-docx==1.2.0
 pypdf==5.9.0
 beautifulsoup4==4.14.3
+playwright==1.57.0
+Pillow==12.2.0

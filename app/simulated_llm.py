@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from .util import new_id, sha256_text
-from .logistics_application_content import SECTION_TITLES, REF_CATALOG, blocks_for
+from .logistics_application_content import SECTION_TITLES as LOGISTICS_SECTION_TITLES, REF_CATALOG as LOGISTICS_REF_CATALOG, blocks_for as logistics_blocks_for
+from .transport_optimization_application_content import SECTION_TITLES as TRANSPORT_SECTION_TITLES, REF_CATALOG as TRANSPORT_REF_CATALOG, blocks_for as transport_blocks_for
 
 
 class SimulatedLLM:
@@ -41,6 +42,68 @@ class SimulatedLLM:
     def _clean_title(title: str) -> str:
         return re.sub(r"^[#\s]+", "", title or "").strip()
 
+    @classmethod
+    def _is_transport_project(cls, envelope: dict[str, Any]) -> bool:
+        project_name = cls._project_name(envelope)
+        payload_text = json.dumps(envelope.get("payload", {}), ensure_ascii=False)
+        markers = ["物流场景", "运输方案优化", "车辆路径", "多式联运"]
+        return any(marker in project_name or marker in payload_text for marker in markers)
+
+    @classmethod
+    def _section_titles(cls, envelope: dict[str, Any]) -> list[str]:
+        if cls._is_transport_project(envelope):
+            return TRANSPORT_SECTION_TITLES
+        return LOGISTICS_SECTION_TITLES
+
+    @classmethod
+    def _catalog(cls, envelope: dict[str, Any]) -> list[dict[str, Any]]:
+        if cls._is_transport_project(envelope):
+            return TRANSPORT_REF_CATALOG
+        return LOGISTICS_REF_CATALOG
+
+    @classmethod
+    def _blocks_for(cls, title: str, envelope: dict[str, Any]) -> list[str]:
+        if cls._is_transport_project(envelope):
+            return transport_blocks_for(title)
+        return logistics_blocks_for(title)
+
+    @classmethod
+    def _domain_term(cls, envelope: dict[str, Any]) -> str:
+        if cls._is_transport_project(envelope):
+            return "物流运输方案优化系统"
+        return "后勤保障智能体"
+
+    @classmethod
+    def _research_queries(cls, envelope: dict[str, Any]) -> list[str]:
+        if cls._is_transport_project(envelope):
+            return [
+                "vehicle routing problem survey heuristics exact methods time windows",
+                "dynamic vehicle routing online stochastic requests review",
+                "multi depot inventory routing warehouse transportation optimization",
+                "multimodal freight transport optimization timetable intermodal survey",
+                "multi agent reinforcement learning logistics transportation scheduling",
+                "learning to route neural combinatorial optimization vehicle routing",
+                "digital twin logistics transportation real time optimization",
+                "green vehicle routing carbon emissions sustainable logistics review",
+                "large language model agents operations research optimization tool use",
+                "OR-Tools vehicle routing CP-SAT official documentation",
+            ]
+        return [
+            "logistics agent system survey 2023 2024",
+            "multi-agent collaboration workflow orchestration logistics",
+            "knowledge graph RAG enterprise operations",
+            "AI planning scheduling dynamic replanning survey",
+            "human in the loop autonomous agents benchmark",
+        ]
+
+    @staticmethod
+    def _item_number(item: dict[str, Any], fallback: int) -> int:
+        return int(item.get("reference_number") or item.get("id") or fallback)
+
+    @staticmethod
+    def _item_summary(item: dict[str, Any]) -> str:
+        return str(item.get("content_text") or item.get("excerpt") or item.get("note") or item.get("title") or "公开来源")
+
     def _handle_security_classify(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         result = base["result"]
         result["recommended_level"] = "INTERNAL"
@@ -59,7 +122,7 @@ class SimulatedLLM:
         r["scheme_type"] = "RESEARCH"
         r["funding_organization"] = "内部研发计划"
         r["application_year"] = 2026
-        r["guide_direction_name"] = "智能体系统与复杂服务保障"
+        r["guide_direction_name"] = "物流运输优化与智能体系统" if self._is_transport_project(envelope) else "智能体系统与复杂服务保障"
         r["duration_months"] = 36
         return base
 
@@ -69,8 +132,8 @@ class SimulatedLLM:
     def _handle_project_definition_extract(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         pd = base["result"]["project_definition"]
         item = pd["items"][0]
-        item["content"]["statement"] = "构建后勤保障智能体总体架构并形成原型系统。"
-        item["content"]["target_state"] = "形成可在典型场景运行的后勤保障智能体原型系统。"
+        item["content"]["statement"] = ("构建物流运输方案优化系统总体架构并形成原型系统。" if self._is_transport_project(envelope) else "构建后勤保障智能体总体架构并形成原型系统。")
+        item["content"]["target_state"] = ("形成可在城市配送、多仓协同和多式联运场景运行的运输优化原型。" if self._is_transport_project(envelope) else "形成可在典型场景运行的后勤保障智能体原型系统。")
         item["content"]["success_definition"] = "通过典型场景验证并输出完整文档。"
         return base
 
@@ -129,14 +192,8 @@ class SimulatedLLM:
         project_name = self._project_name(envelope)
         result = base["result"]
         result["task_description"] = f"围绕{project_name}检索公开研究、行业报告、标准规范与相关案例，仅用于补充研究现状、技术路线和评价指标。"
-        result["queries"] = [
-            "LLM agent logistics orchestration survey",
-            "multi-agent logistics scheduling digital twin",
-            "retrieval augmented generation enterprise workflow",
-            "human in the loop AI planning public standards",
-            "supply chain control tower intelligent agent",
-        ]
-        result["allowed_context"] = ["智能体系统", "后勤保障", "资源调度", "知识图谱", "流程编排", "系统评估"]
+        result["queries"] = self._research_queries(envelope)
+        result["allowed_context"] = (["车辆路径", "多仓协同", "多式联运", "动态重规划", "多智能体", "绿色物流"] if self._is_transport_project(envelope) else ["智能体系统", "后勤保障", "资源调度", "知识图谱", "流程编排", "系统评估"])
         result["entity_placeholders"] = []
         result["removed_fields"] = ["人员姓名", "组织名称", "详细地址", "联系电话"]
         result["prohibited_inferences"] = ["不得反推内部组织与人员信息", "不得据公开资料推断未提供的内部事实"]
@@ -149,59 +206,82 @@ class SimulatedLLM:
 
     def _handle_public_research_plan(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         result = base["result"]
-        result["research_questions"] = [
-            "大模型智能体的规划、工具调用、记忆、反思和多智能体协同技术发展到什么程度？",
-            "RAG、GraphRAG、知识图谱与可追踪证据链如何支撑专业场景？",
-            "组合优化、车辆路径、排程和动态重规划可采用哪些代表性方法？",
-            "Agent评测、安全治理、人机协同和工程可观测性有哪些公开依据？",
-            "上述方法如何适配后勤保障智能体的任务理解、调度执行和闭环评估？",
-        ]
-        result["queries"] = [
-            "logistics agent system survey 2023 2024",
-            "multi-agent collaboration workflow orchestration logistics",
-            "knowledge graph RAG enterprise operations",
-            "AI planning scheduling dynamic replanning survey",
-            "human in the loop autonomous agents benchmark",
-        ]
-        result["source_priorities"] = ["顶会/期刊论文", "国际标准", "公开技术白皮书", "开源项目文档"]
-        result["evidence_requirements"] = ["覆盖不少于30个可核验公开来源", "研究现状按技术分支比较代表方法、优势与不足", "正文引用与参考文献编号一一对应", "优先论文、标准和官方项目文档"]
+        if self._is_transport_project(envelope):
+            result["research_questions"] = [
+                "车辆路径、时间窗、取送和多仓问题有哪些精确与启发式方法？",
+                "动态订单、交通变化和车辆故障下如何进行在线决策与低扰动重规划？",
+                "多式联运、库存运输联动和绿色物流如何统一建模与评价？",
+                "学习增强优化和多智能体协同可承担哪些任务，如何保证硬约束可行性？",
+                "公开研究、算法运行、Mermaid图形和文档结论如何形成可验证证据链？",
+            ]
+        else:
+            result["research_questions"] = [
+                "大模型智能体的规划、工具调用、记忆、反思和多智能体协同技术发展到什么程度？",
+                "RAG、GraphRAG、知识图谱与可追踪证据链如何支撑专业场景？",
+                "组合优化、车辆路径、排程和动态重规划可采用哪些代表性方法？",
+                "Agent评测、安全治理、人机协同和工程可观测性有哪些公开依据？",
+            ]
+        result["queries"] = self._research_queries(envelope)
+        result["source_priorities"] = ["国际标准与官方规范", "政府/标准机构页面", "协议设计文档", "同行评议论文", "官方开源项目文档"]
+        result["evidence_requirements"] = ["覆盖不少于30个可核验公开来源", "保存来源URL、获取时间、摘录与SHA-256", "正文引用与参考文献编号一一对应", "只使用归档来源形成PUBLIC_CLAIM"]
+        result["prohibited_inferences"] = ["不得从公开资料反推内部组织、人员或部署信息", "不得将外部性能数字直接作为本项目实测结果"]
         return base
 
     def _handle_public_research_synthesis(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        retrieved = [item for item in payload.get("retrieved_sources", []) if isinstance(item, dict)]
+        passages = [item for item in payload.get("extracted_passages", []) if isinstance(item, dict)]
+        passage_by_source = {str(p.get("source_ref", {}).get("source_id")): p for p in passages}
+        catalog = self._catalog(envelope)
+        catalog_by_source = {str(item.get("source_id") or f"public-src-{self._item_number(item, i):03d}"): item for i, item in enumerate(catalog, 1)}
+        if not retrieved:
+            retrieved = [self._source_ref(self._item_number(item, i), item) for i, item in enumerate(catalog, 1)]
+        elif len(retrieved) < 2:
+            existing = {str(item.get("source_id")) for item in retrieved}
+            for i, item in enumerate(catalog, 1):
+                candidate = self._source_ref(self._item_number(item, i), item)
+                if str(candidate.get("source_id")) not in existing:
+                    retrieved.append(candidate)
+                    break
         claims = []
-        for item in REF_CATALOG:
-            idx = int(item["id"])
+        for idx, source_ref in enumerate(retrieved, 1):
+            source_id = str(source_ref.get("source_id") or f"public-src-{idx:03d}")
+            item = catalog_by_source.get(source_id, {})
+            passage = passage_by_source.get(source_id, {})
+            claim_text = str(passage.get("text") or self._item_summary(item))[:6000]
             claims.append({
                 "claim_id": f"pub-claim-{idx:03d}",
-                "claim_text": item["note"],
+                "claim_text": claim_text,
                 "claim_type": "PUBLIC_CLAIM",
                 "subject_id": None,
                 "temporal_status": "TIME_INDEPENDENT",
-                "qualifiers": [item["category"]],
+                "qualifiers": [str(item.get("publisher") or item.get("category") or "PUBLIC_SOURCE")],
                 "numeric_values": [],
-                "source_refs": [self._source_ref(idx, item)],
+                "source_refs": [source_ref],
                 "knowledge_status": "DOCUMENT_EXTRACTED",
                 "security_level": "PUBLIC",
             })
+        source_ids = [str(item.get("source_id")) for item in retrieved]
+        groups = [source_ids[i:i+5] for i in range(0, min(len(source_ids), 20), 5) if len(source_ids[i:i+5]) >= 2]
+        topics = (["车辆路径与混合优化", "动态运输与低扰动重规划", "多仓/多式联运与绿色物流", "多智能体、证据与工程治理"] if self._is_transport_project(envelope) else ["智能体规划与协同", "知识增强与证据追踪", "调度优化与动态重规划", "治理、评测与安全"])
         base["result"]["claims"] = claims
         base["result"]["source_comparisons"] = [
-            {"topic": "智能体规划与协同", "source_ids": ["public-src-001", "public-src-002", "public-src-005", "public-src-008"], "agreement": "PARTIAL", "summary": "代表性研究普遍采用规划、工具调用、记忆或角色协作提升复杂任务能力，但长期稳定性、错误恢复和治理机制仍需工程强化。"},
-            {"topic": "知识增强与证据追踪", "source_ids": ["public-src-011", "public-src-012", "public-src-013", "public-src-014"], "agreement": "AGREE", "summary": "RAG及其图结构扩展能够提升外部知识利用能力，但需要检索质量评估、来源引用和冲突处理。"},
-            {"topic": "调度优化与动态重规划", "source_ids": ["public-src-021", "public-src-022", "public-src-023", "public-src-024"], "agreement": "PARTIAL", "summary": "学习式组合优化提升了复杂调度的求解效率，但工程应用仍需与规则、经典优化器和可行性校验结合。"},
-            {"topic": "治理、评测与安全", "source_ids": ["public-src-015", "public-src-016", "public-src-017", "public-src-030"], "agreement": "AGREE", "summary": "公开研究和标准一致强调任务成功率之外还需评估鲁棒性、安全性、人工监督和过程可观测性。"},
-        ]
+            {"topic": topics[i % len(topics)], "source_ids": group, "agreement": "PARTIAL", "summary": "来源在总体方向上相互支持，但适用场景、成熟度、性能条件和工程边界不同，需在本项目中通过原型与测试进一步验证。"}
+            for i, group in enumerate(groups)
+        ] or [{"topic": topics[0], "source_ids": source_ids[:2], "agreement": "PARTIAL", "summary": "归档来源提供相关公开依据，工程适配仍需项目验证。"}]
         base["result"]["conflicts"] = []
-        base["result"]["limitations"] = ["公开研究多以通用Agent、网络任务或企业供应链为验证对象，需通过项目场景进一步验证。", "部分新近成果尚处于预印本或开源框架阶段，不宜直接等同于成熟生产能力。"]
-        base["result"]["coverage_summary"] = f"综合{len(REF_CATALOG)}项可核验公开来源，覆盖智能体规划、工具调用、多智能体协作、RAG与知识图谱、组合优化、评测、安全治理和标准规范。"
-        base["source_refs"] = [self._source_ref(int(item["id"]), item) for item in REF_CATALOG]
+        base["result"]["limitations"] = ["公开来源说明标准、机制和公开实践，不代表本项目已经完成实测。", "来源真实性由URL、归档记录、摘录和Hash支持；具体主张仍需按正文引用进行人工复核。"]
+        base["result"]["coverage_summary"] = f"综合{len(claims)}项实际归档公开来源，研究输入来自public_research.archive技能而非模型记忆。"
+        base["source_refs"] = retrieved
         return base
 
     def _handle_public_research_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         return base
 
     def _handle_online_result_import_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        claims = envelope.get("payload", {}).get("result_package", {}).get("claims", [])
         base["result"]["import_recommendation"] = "IMPORT_REFERENCE_ONLY"
-        base["result"]["accepted_claim_ids"] = [f"pub-claim-{int(item['id']):03d}" for item in REF_CATALOG]
+        base["result"]["accepted_claim_ids"] = [str(item.get("claim_id")) for item in claims if item.get("claim_id")]
         base["result"]["rejected_claim_ids"] = []
         return base
 
@@ -209,7 +289,7 @@ class SimulatedLLM:
         payload = envelope.get("payload", {})
         linked_sections = payload.get("linked_sections", [])
         by_title = {s.get("title"): s for s in linked_sections if s.get("level", 0) >= 1 and s.get("title")}
-        selected = [by_title[t] for t in SECTION_TITLES if t in by_title]
+        selected = [by_title[t] for t in self._section_titles(envelope) if t in by_title]
         if not selected and payload.get("source_section"):
             selected = [payload["source_section"]]
         plan = base["result"]["revision_plan"]
@@ -266,7 +346,7 @@ class SimulatedLLM:
 
     def _handle_write_blueprint(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         title = self._clean_title(self._section(envelope).get("title", "未命名章节"))
-        content_blocks = blocks_for(title)
+        content_blocks = self._blocks_for(title, envelope)
         functions = [b.removeprefix("[[H2]]").removeprefix("[[H3]]").strip() for b in content_blocks if b.startswith("[[H2]]") or b.startswith("[[H3]]")]
         if not functions:
             functions = ["说明章节定位", "展开核心论证", "给出实施与验收要点"]
@@ -288,7 +368,7 @@ class SimulatedLLM:
         section = self._section(envelope)
         title = self._clean_title(section.get("title", "未命名章节"))
         blueprint = envelope.get("payload", {}).get("blueprint_candidate", {}).get("blueprint", {})
-        blocks = blocks_for(title)
+        blocks = self._blocks_for(title, envelope)
         bp_paragraphs = blueprint.get("paragraphs") or [{}]
         paragraphs, trace_links = [], []
         for seq, text_block in enumerate(blocks, 1):
@@ -297,7 +377,7 @@ class SimulatedLLM:
             role = "正文"
             if text_block.startswith("[[H2]]") or text_block.startswith("[[H3]]"): role = "小节标题"
             elif text_block.startswith("[[TABLE]]"): role = "表格"
-            elif text_block.startswith("[[FIGURE]]"): role = "图示"
+            elif text_block.startswith("[[FIGURE]]") or text_block.startswith("[[MERMAID]]"): role = "图示"
             citation_ids = [int(x) for x in re.findall(r"\[(\d+)\]", text_block)]
             source_kind = "PUBLIC_CLAIM" if citation_ids else "SOURCE_TEXT"
             source_id = f"pub-claim-{citation_ids[0]:03d}" if citation_ids else section.get("section_id", "source-section")
@@ -308,7 +388,8 @@ class SimulatedLLM:
         base["result"]["paragraphs"] = paragraphs
         base["result"]["trace_links"] = trace_links
         all_ids = [p["paragraph_id"] for p in paragraphs]
-        base["result"]["term_usage"] = [{"term": "后勤保障智能体", "canonical_term": "后勤保障智能体", "paragraph_ids": all_ids[:max(1,min(8,len(all_ids)))]}]
+        domain_term = self._domain_term(envelope)
+        base["result"]["term_usage"] = [{"term": domain_term, "canonical_term": domain_term, "paragraph_ids": all_ids[:max(1,min(8,len(all_ids)))]}]
         base["result"]["unresolved_items"] = []
         base["result"]["source_preservation_summary"] = [{"source_span": title, "action": "REPHRASED", "paragraph_id": p["paragraph_id"]} for p in paragraphs[:min(3,len(paragraphs))]]
         return base
@@ -331,7 +412,7 @@ class SimulatedLLM:
         csecs = envelope.get("payload", {}).get("candidate_sections", [])
         base["result"]["verdict"] = "ACCEPT"
         base["result"]["terminology_checks"] = [
-            {"term": "后勤保障智能体", "consistent": True, "sections": [item.get("section_id") for item in csecs]}
+            {"term": self._domain_term(envelope), "consistent": True, "sections": [item.get("section_id") for item in csecs]}
         ]
         base["result"]["mapping_checks"] = [
             {"mapping_type": "OBJECTIVE_TO_WORK_PACKAGE", "source_id": "item-obj-1", "target_ids": ["item-k1", "item-k2", "item-k3"], "complete": True}
@@ -344,10 +425,15 @@ class SimulatedLLM:
         return base
 
     def _source_ref(self, idx: int, item: dict[str, Any]) -> dict[str, Any]:
-        return {"source_id": f"public-src-{idx:03d}", "source_type": "PUBLIC_SOURCE", "document_version_id": None, "section_id": None, "span_start": None, "span_end": None, "quoted_text": f"{item['title']} | {item['venue']} | {item['year']} | {item['url']}", "source_hash": sha256_text(item['title'] + item['url']), "authority_rank": 80 if item['venue'] not in {'arXiv'} else 70, "security_level": "PUBLIC"}
+        title = str(item.get("title") or "公开来源")
+        url = str(item.get("url") or "https://example.invalid")
+        publisher = str(item.get("publisher") or item.get("venue") or "公开发布机构")
+        year = str(item.get("published_at") or item.get("year") or "")
+        source_id = str(item.get("source_id") or f"public-src-{idx:03d}")
+        return {"source_id": source_id, "source_type": "PUBLIC_SOURCE", "document_version_id": None, "section_id": None, "span_start": None, "span_end": None, "quoted_text": f"{title} | {publisher} | {year} | {url}", "source_hash": sha256_text(title + url), "authority_rank": int(item.get("authority_rank") or (70 if publisher == "arXiv" else 80)), "security_level": "PUBLIC"}
 
     def _public_sources(self) -> list[dict[str, Any]]:
-        return REF_CATALOG
+        return LOGISTICS_REF_CATALOG
 
     def _section_outline(self, title: str) -> list[str]:
         mapping = {

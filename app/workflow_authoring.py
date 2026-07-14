@@ -43,6 +43,15 @@ class WorkflowAuthoringMixin:
                     state["last_error"] = f"{section.get('title')}: {exc}"
                     self._update(wf, status="BLOCKED", state=state)
                     return self.get(wf["id"])
+                if prompt_id == "P-WRITE-CONTENT" and self.diagram_enrichment is not None and result["status"] == "PASS":
+                    result["output"] = await self.diagram_enrichment.enrich(
+                        project_id=wf["project_id"],
+                        workflow_id=wf["id"],
+                        run_id=result["run_id"],
+                        section=section,
+                        output=result["output"],
+                        security_level=result["output"].get("source_refs", [{}])[0].get("security_level", "INTERNAL") if result["output"].get("source_refs") else "INTERNAL",
+                    )
                 section_record["runs"].append({"prompt_id": prompt_id, "run_id": result["run_id"], "status": result["status"]})
                 state["original_environment"] = result["route"]["environment"]
                 if result["status"] != "PASS":

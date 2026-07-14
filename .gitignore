@@ -9,3 +9,5 @@ data/uploads/*
 data/exports/*
 !data/uploads/.gitkeep
 !data/exports/.gitkeep
+data/diagram_artifacts/
+data/research_archive/

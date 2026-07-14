@@ -173,6 +173,70 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "safe_online_package_content": {
+          "type": "object",
+          "properties": {
+            "package_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "task_type": {
+              "type": "string",
+              "enum": [
+                "PUBLIC_RESEARCH",
+                "PUBLIC_TEMPLATE_ANALYSIS",
+                "GENERIC_LANGUAGE_ASSIST"
+              ]
+            },
+            "task_description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "queries": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "allowed_context": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "prohibited_inferences": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "prohibited_outputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "security_level": {
+              "const": "PUBLIC"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "package_id",
+            "task_type",
+            "task_description",
+            "queries",
+            "allowed_context",
+            "prohibited_inferences",
+            "prohibited_outputs",
+            "security_level"
+          ]
         }
       },
       "additionalProperties": false,

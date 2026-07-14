@@ -30,6 +30,7 @@ class PromptPack:
             "prompts/shared/business_rules.md",
             "prompts/shared/security_rules.md",
             "prompts/shared/source_authority.md",
+            "prompts/shared/skill_rules.md",
             "prompts/shared/output_protocol.md",
         ]:
             parts.append((self.root / rel).read_text(encoding="utf-8"))

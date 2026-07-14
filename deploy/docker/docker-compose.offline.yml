@@ -1,0 +1,14 @@
+services:
+  proposal-agent:
+    image: proposal-agent:0.5.0-offline
+    container_name: proposal-agent
+    ports:
+      - "8080:8080"
+    env_file:
+      - proposal-agent.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/var/lib/proposal-agent
+      - ./prompt_pack:/app/prompt_pack:ro
+    restart: unless-stopped

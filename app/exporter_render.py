@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from PIL import Image as PILImage
 from docx import Document
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -130,12 +131,38 @@ class ExportRenderMixin:
             run = p.add_run(f"[缺失图片] {caption}: {img_path}")
             self._set_run_font(run, "宋体", 10)
             return
+        section = document.sections[-1]
+        emu_per_cm = 360000.0
+        printable_width_cm = (section.page_width - section.left_margin - section.right_margin) / emu_per_cm
+        printable_height_cm = (section.page_height - section.top_margin - section.bottom_margin) / emu_per_cm
+        target_width_cm = min(width_cm, printable_width_cm)
+        # Keep enough room for the preceding heading, caption and footer. Vertical
+        # Mermaid diagrams can otherwise be taller than an A4 page when only width
+        # is specified, which Word/LibreOffice silently clips instead of scaling.
+        max_figure_height_cm = min(16.5, max(8.0, printable_height_cm - 6.0))
+        try:
+            with PILImage.open(img_path) as image:
+                pixel_width, pixel_height = image.size
+            target_height_cm = target_width_cm * pixel_height / max(pixel_width, 1)
+        except Exception:
+            target_height_cm = 0.0
+
+        if target_height_cm > max_figure_height_cm:
+            scale = max_figure_height_cm / target_height_cm
+            target_width_cm *= scale
+            target_height_cm = max_figure_height_cm
+
         p = document.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.keep_with_next = True
         run = p.add_run()
-        run.add_picture(str(img_path), width=Cm(width_cm))
+        if target_height_cm > 0:
+            run.add_picture(str(img_path), width=Cm(target_width_cm), height=Cm(target_height_cm))
+        else:
+            run.add_picture(str(img_path), width=Cm(target_width_cm))
         c = document.add_paragraph()
         c.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        c.paragraph_format.keep_together = True
         crun = c.add_run(caption)
         self._set_run_font(crun, "宋体", 10)
         c.paragraph_format.space_after = Pt(6)

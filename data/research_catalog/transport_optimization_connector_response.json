@@ -1,0 +1,1189 @@
+{
+  "schema_version": "1.0",
+  "run_id": "transport-research-20260714-001",
+  "connector": "chatgpt-web-primary-source-adapter",
+  "created_at": "2026-07-14T00:00:00Z",
+  "project": "面向复杂物流场景的多智能体运输方案优化关键技术研究",
+  "agent_generated_queries": [
+    "vehicle routing problem survey heuristics exact methods time windows",
+    "dynamic vehicle routing online stochastic requests review",
+    "multi depot inventory routing warehouse transportation optimization",
+    "multimodal freight transport optimization timetable intermodal survey",
+    "multi agent reinforcement learning logistics transportation scheduling",
+    "learning to route neural combinatorial optimization vehicle routing",
+    "digital twin logistics transportation real time optimization",
+    "green vehicle routing carbon emissions sustainable logistics review",
+    "large language model agents operations research optimization tool use",
+    "OR-Tools vehicle routing CP-SAT official documentation"
+  ],
+  "responses": [
+    {
+      "query": "vehicle routing problem survey heuristics exact methods time windows",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "Vehicle Routing Problem",
+          "url": "https://developers.google.com/optimization/routing/vrp",
+          "authors": [
+            "Google OR-Tools Team"
+          ],
+          "published_at": null,
+          "publisher": "Google OR-Tools",
+          "doi": null,
+          "source_type": "OFFICIAL_DOCUMENTATION",
+          "content_text": "Official guide describing the basic vehicle-routing model, distance matrices, route-cost callbacks, dimensions, fleet assignments and solution reporting.",
+          "excerpt": "Official guide describing the basic vehicle-routing model, distance matrices, route-cost callbacks, dimensions, fleet assignments and solution reporting.",
+          "authority_rank": 95,
+          "verification": {
+            "status": "CONNECTOR_PAGE_OPENED",
+            "web_reference": "turn231000view0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "publisher",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Vehicle Routing Problem with Time Windows",
+          "url": "https://developers.google.com/optimization/routing/vrptw",
+          "authors": [
+            "Google OR-Tools Team"
+          ],
+          "published_at": null,
+          "publisher": "Google OR-Tools",
+          "doi": null,
+          "source_type": "OFFICIAL_DOCUMENTATION",
+          "content_text": "Official implementation guide for adding visit time windows, waiting slack and cumulative time dimensions to routing models.",
+          "excerpt": "Official implementation guide for adding visit time windows, waiting slack and cumulative time dimensions to routing models.",
+          "authority_rank": 95,
+          "verification": {
+            "status": "CONNECTOR_PAGE_OPENED",
+            "web_reference": "turn231000view1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "publisher",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Capacity Constraints",
+          "url": "https://developers.google.com/optimization/routing/cvrp",
+          "authors": [
+            "Google OR-Tools Team"
+          ],
+          "published_at": null,
+          "publisher": "Google OR-Tools",
+          "doi": null,
+          "source_type": "OFFICIAL_DOCUMENTATION",
+          "content_text": "Official guide for capacitated routing, demand callbacks, vehicle capacities and capacity dimensions.",
+          "excerpt": "Official guide for capacitated routing, demand callbacks, vehicle capacities and capacity dimensions.",
+          "authority_rank": 95,
+          "verification": {
+            "status": "CONNECTOR_PAGE_OPENED",
+            "web_reference": "turn231000view2",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "publisher",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Vehicle Routing with Pickups and Deliveries",
+          "url": "https://developers.google.com/optimization/routing/pickup_delivery",
+          "authors": [
+            "Google OR-Tools Team"
+          ],
+          "published_at": null,
+          "publisher": "Google OR-Tools",
+          "doi": null,
+          "source_type": "OFFICIAL_DOCUMENTATION",
+          "content_text": "Official guide for pickup-delivery pairing, same-vehicle constraints and precedence constraints in routing models.",
+          "excerpt": "Official guide for pickup-delivery pairing, same-vehicle constraints and precedence constraints in routing models.",
+          "authority_rank": 95,
+          "verification": {
+            "status": "CONNECTOR_PAGE_OPENED",
+            "web_reference": "turn231000view3",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "publisher",
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query": "dynamic vehicle routing online stochastic requests review",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "Solving Large-Scale Dynamic Vehicle Routing Problems with Stochastic Requests",
+          "url": "https://arxiv.org/abs/2202.12983",
+          "authors": [
+            "Jian Zhang",
+            "Kelin Luo",
+            "Alexandre M. Florio",
+            "Tom Van Woensel"
+          ],
+          "published_at": "2022-02-25",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Models dynamic routing with stochastic requests as a multistage problem and combines value approximations with online acceptance and assignment policies on large street-network instances.",
+          "excerpt": "Models dynamic routing with stochastic requests as a multistage problem and combines value approximations with online acceptance and assignment policies on large street-network instances.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn712713academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Dynamic Vehicle Routing Problem: A Monte Carlo approach",
+          "url": "https://arxiv.org/abs/2006.09996",
+          "authors": [
+            "Michał Okulewicz",
+            "Jacek Mańdziuk"
+          ],
+          "published_at": "2020-06-15",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Uses Monte Carlo generation of unknown future requests and hybrid search to balance solution quality and response time in dynamic delivery routing.",
+          "excerpt": "Uses Monte Carlo generation of unknown future requests and hybrid search to balance solution quality and response time in dynamic delivery routing.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn712713academia1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "An Online Approach to Solve the Dynamic Vehicle Routing Problem with Stochastic Trip Requests for Paratransit Services",
+          "url": "https://arxiv.org/abs/2203.15127",
+          "authors": [
+            "Michael Wilbur",
+            "Salah Uddin Kadir",
+            "Youngseo Kim",
+            "Geoffrey Pettet",
+            "Ayan Mukhopadhyay",
+            "Philip Pugliese",
+            "Samitha Samaranayake",
+            "Aron Laszka",
+            "Abhishek Dubey"
+          ],
+          "published_at": "2022-03-28",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Formulates dynamic routing with time windows as an online decision problem and uses Monte Carlo tree search with structured action sampling on real service data.",
+          "excerpt": "Formulates dynamic routing with time windows as an online decision problem and uses Monte Carlo tree search with structured action sampling on real service data.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn712713academia2",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Dynamic Vehicle Routing Problem with Prompt Confirmation of Advance Requests",
+          "url": "https://arxiv.org/abs/2603.07422",
+          "authors": [
+            "Amutheezan Sivagnanam",
+            "Ayan Mukhopadhyay",
+            "Samitha Samaranayake",
+            "Abhishek Dubey",
+            "Aron Laszka"
+          ],
+          "published_at": "2026-03-08",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Combines rapid insertion-based acceptance with continual route optimization so advance requests can be confirmed while later plans remain improvable.",
+          "excerpt": "Combines rapid insertion-based acceptance with continual route optimization so advance requests can be confirmed while later plans remain improvable.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn712713academia3",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query": "multi depot inventory routing warehouse transportation optimization",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "Formulations and algorithms for the multiple depot, fuel-constrained, multiple vehicle routing problem",
+          "url": "https://arxiv.org/abs/1508.05968",
+          "authors": [
+            "Kaarthik Sundar",
+            "Saravanan Venkatachalam",
+            "Sivakumar Rathinam"
+          ],
+          "published_at": "2015-08-24",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Presents mixed-integer formulations for multiple depots, vehicles and refueling constraints and evaluates them on extensive instances.",
+          "excerpt": "Presents mixed-integer formulations for multiple depots, vehicles and refueling constraints and evaluates them on extensive instances.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn544898academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Improved Approximation Algorithms for the Multiple-Depot Split Delivery Vehicle Routing Problem",
+          "url": "https://arxiv.org/abs/2601.01841",
+          "authors": [
+            "Jingyang Zhao",
+            "Yonghang Su",
+            "Mingyu Xiao"
+          ],
+          "published_at": "2026-01-05",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Develops approximation algorithms for capacitated multiple-depot routing where customer demand may be split among vehicles.",
+          "excerpt": "Develops approximation algorithms for capacitated multiple-depot routing where customer demand may be split among vehicles.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn544898academia1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "The Distributionally Robust Cyclic Inventory Routing Problem",
+          "url": "https://arxiv.org/abs/2605.03785",
+          "authors": [
+            "Menglei Jia",
+            "Albert H. Schrotenboer",
+            "Ahmadreza Marandi",
+            "Feng Chen"
+          ],
+          "published_at": "2026-05-05",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Jointly optimizes cyclic replenishment and routing under distributional demand uncertainty using robust reformulations and branch-and-price.",
+          "excerpt": "Jointly optimizes cyclic replenishment and routing under distributional demand uncertainty using robust reformulations and branch-and-price.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn544898academia2",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Optimizing Inventory Routing: A Decision-Focused Learning Approach using Neural Networks",
+          "url": "https://arxiv.org/abs/2311.00983",
+          "authors": [
+            "MD Shafikul Islam",
+            "Azmine Toushik Wasi"
+          ],
+          "published_at": "2023-11-02",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Integrates demand prediction with downstream inventory-routing decisions through decision-focused learning instead of optimizing forecast error alone.",
+          "excerpt": "Integrates demand prediction with downstream inventory-routing decisions through decision-focused learning instead of optimizing forecast error alone.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn947358academia1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query": "multimodal freight transport optimization timetable intermodal survey",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "An Optimization Model for Scheduling Freight Trains on a Single Rail Track",
+          "url": "https://arxiv.org/abs/1912.04454",
+          "authors": [
+            "Marie Alaghband",
+            "Babak Farhang Moghaddam"
+          ],
+          "published_at": "2019-12-10",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Integrates freight allocation and train scheduling with release dates, capacities and tardiness objectives using integer models and a scalable heuristic.",
+          "excerpt": "Integrates freight allocation and train scheduling with release dates, capacities and tardiness objectives using integer models and a scalable heuristic.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn463329academia2",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Digital Twin-Based Simulation for Predictive Decision-Making in Waterway Logistics",
+          "url": "https://arxiv.org/abs/2606.13492",
+          "authors": [
+            "Matthijs Jansen op de Haar",
+            "Daniel Frutos Rodriguez"
+          ],
+          "published_at": "2026-06-11",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Uses time-sliced digital-twin simulation to compare predictive and reactive freight-routing decisions under uncertain water levels.",
+          "excerpt": "Uses time-sliced digital-twin simulation to compare predictive and reactive freight-routing decisions under uncertain water levels.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn463329academia3",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Multi-Depot Multi-Trip Vehicle Routing with Total Completion Time Minimization",
+          "url": "https://arxiv.org/abs/2207.06155",
+          "authors": [
+            "Tiziana Calamoneri",
+            "Federico Corò",
+            "Simona Mancini"
+          ],
+          "published_at": "2022-07-13",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Formulates multi-depot multi-trip routing with completion-time objectives and proposes a matheuristic for larger instances.",
+          "excerpt": "Formulates multi-depot multi-trip routing with completion-time objectives and proposes a matheuristic for larger instances.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn544898academia3",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Adaptive Large Neighborhood Search for Vehicle Routing Problems with Transshipment Facilities Arising in City Logistics",
+          "url": "https://arxiv.org/abs/2107.06086",
+          "authors": [
+            "Christian Friedrich",
+            "Ralf Elbert"
+          ],
+          "published_at": "2021-07-08",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Designs ALNS operators for routing with urban transshipment facilities, heterogeneous fleets and location-dependent time windows.",
+          "excerpt": "Designs ALNS operators for routing with urban transshipment facilities, heterogeneous fleets and location-dependent time windows.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn600028academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query": "multi agent reinforcement learning logistics transportation scheduling",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "Multi-Vehicle Routing Problems with Soft Time Windows: A Multi-Agent Reinforcement Learning Approach",
+          "url": "https://arxiv.org/abs/2002.05513",
+          "authors": [
+            "Ke Zhang",
+            "Meng Li",
+            "Zhengchao Zhang",
+            "Xi Lin",
+            "Fang He"
+          ],
+          "published_at": "2020-02-13",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Introduces a multi-agent attention model for multi-vehicle routing with soft time windows and evaluates transfer across customer and capacity settings.",
+          "excerpt": "Introduces a multi-agent attention model for multi-vehicle routing with soft time windows and evaluates transfer across customer and capacity settings.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn620447academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Reinforcement Learning for Multi-Truck Vehicle Routing Problems",
+          "url": "https://arxiv.org/abs/2211.17078",
+          "authors": [
+            "Joshua Levin",
+            "Randall Correll",
+            "Takanori Ide",
+            "Takafumi Suzuki",
+            "Saito Takaho",
+            "Alan Arai"
+          ],
+          "published_at": "2022-11-30",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Extends attention-based reinforcement learning to multiple trucks and multi-leg demand routes in an industrial supply-chain setting.",
+          "excerpt": "Extends attention-based reinforcement learning to multiple trucks and multi-leg demand routes in an industrial supply-chain setting.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn620447academia1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Multi-Agent Environments for Vehicle Routing Problems",
+          "url": "https://arxiv.org/abs/2411.14411",
+          "authors": [
+            "Ricardo Gama",
+            "Daniel Fuertes",
+            "Carlos R. del-Blanco",
+            "Hugo L. Fernandes"
+          ],
+          "published_at": "2024-11-21",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Provides modular multi-agent vehicle-routing environments, benchmark instances and baseline models for reproducible RL evaluation.",
+          "excerpt": "Provides modular multi-agent vehicle-routing environments, benchmark instances and baseline models for reproducible RL evaluation.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn620447academia2",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Deep Reinforcement Learning for Multi-Truck Vehicle Routing Problems with Multi-Leg Demand Routes",
+          "url": "https://arxiv.org/abs/2401.08669",
+          "authors": [
+            "Joshua Levin",
+            "Randall Correll",
+            "Takanori Ide",
+            "Takafumi Suzuki",
+            "Takaho Saito",
+            "Alan Arai"
+          ],
+          "published_at": "2024-01-08",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Develops deep reinforcement-learning extensions for multiple trucks and multi-leg material flows and tests scaling in a real supply network.",
+          "excerpt": "Develops deep reinforcement-learning extensions for multiple trucks and multi-leg material flows and tests scaling in a real supply network.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn620447academia3",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query": "learning to route neural combinatorial optimization vehicle routing",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "Attention, Learn to Solve Routing Problems!",
+          "url": "https://arxiv.org/abs/1803.08475",
+          "authors": [
+            "Wouter Kool",
+            "Herke van Hoof",
+            "Max Welling"
+          ],
+          "published_at": "2018-03-22",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Uses an attention model trained with policy gradients to learn heuristics for TSP, CVRP and related routing problems.",
+          "excerpt": "Uses an attention model trained with policy gradients to learn heuristics for TSP, CVRP and related routing problems.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn168139academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Neural Combinatorial Optimization with Reinforcement Learning",
+          "url": "https://arxiv.org/abs/1611.09940",
+          "authors": [
+            "Irwan Bello",
+            "Hieu Pham",
+            "Quoc V. Le",
+            "Mohammad Norouzi",
+            "Samy Bengio"
+          ],
+          "published_at": "2016-11-29",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Trains a neural policy by reinforcement learning to construct solutions for combinatorial optimization tasks such as TSP and knapsack.",
+          "excerpt": "Trains a neural policy by reinforcement learning to construct solutions for combinatorial optimization tasks such as TSP and knapsack.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn168139academia1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "POMO: Policy Optimization with Multiple Optima for Reinforcement Learning",
+          "url": "https://arxiv.org/abs/2010.16011",
+          "authors": [
+            "Yeong-Dae Kwon",
+            "Jinho Choo",
+            "Byoungjip Kim",
+            "Iljoo Yoon",
+            "Youngjune Gwon",
+            "Seungjai Min"
+          ],
+          "published_at": "2020-10-30",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Exploits multiple symmetric optima to stabilize policy-gradient training for TSP, CVRP and knapsack.",
+          "excerpt": "Exploits multiple symmetric optima to stabilize policy-gradient training for TSP, CVRP and knapsack.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn168139academia2",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Leader Reward for POMO-Based Neural Combinatorial Optimization",
+          "url": "https://arxiv.org/abs/2405.13947",
+          "authors": [
+            "Chaoyang Wang",
+            "Pengzhi Cheng",
+            "Jingze Li",
+            "Weiwei Sun"
+          ],
+          "published_at": "2024-05-22",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Adds a leader-reward mechanism to POMO-style training to emphasize the best solution generated within an inference budget.",
+          "excerpt": "Adds a leader-reward mechanism to POMO-style training to emphasize the best solution generated within an inference budget.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn168139academia3",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query": "digital twin logistics transportation real time optimization",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "ISOMORPH: A Supply Chain Digital Twin for Simulation, Dataset Generation, and Forecasting Benchmarks",
+          "url": "https://arxiv.org/abs/2605.12768",
+          "authors": [
+            "Zhizhen Zhang",
+            "Hyemin Gu",
+            "Benjamin J. Zhang",
+            "Daniel Elenius",
+            "Michael Tyrrell",
+            "Theo J. Bourdais",
+            "Houman Owhadi",
+            "Markos A. Katsoulakis",
+            "Tuhin Sahai"
+          ],
+          "published_at": "2026-05-12",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Releases a configurable multi-echelon supply-chain digital twin with interpretable state transitions, scenario sweeps and verification laws.",
+          "excerpt": "Releases a configurable multi-echelon supply-chain digital twin with interpretable state transitions, scenario sweeps and verification laws.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn547409academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Supply Chain Digital Twin Framework Design: An Approach of Supply Chain Operations Reference Model and System of Systems",
+          "url": "https://arxiv.org/abs/2107.09485",
+          "authors": [
+            "Jie Zhang",
+            "Alexandra Brintrup",
+            "Anisoara Calinescu",
+            "Edward Kosasih",
+            "Angira Sharma"
+          ],
+          "published_at": "2021-07-19",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Designs a spatio-temporal supply-chain digital-twin framework based on standardized activity blocks and system-of-systems integration.",
+          "excerpt": "Designs a spatio-temporal supply-chain digital-twin framework based on standardized activity blocks and system-of-systems integration.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn547409academia1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "A Theoretical Framework for Graph-based Digital Twins for Supply Chain Management and Optimization",
+          "url": "https://arxiv.org/abs/2504.03692",
+          "authors": [
+            "Azmine Toushik Wasi",
+            "Mahfuz Ahmed Anik",
+            "Abdur Rahman",
+            "Md. Iqramul Hoque",
+            "MD Shafikul Islam",
+            "Md Manjurul Ahsan"
+          ],
+          "published_at": "2025-03-23",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Combines graph modeling, data integration, simulation and sustainability metrics in a real-time supply-chain digital-twin framework.",
+          "excerpt": "Combines graph modeling, data integration, simulation and sustainability metrics in a real-time supply-chain digital-twin framework.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn547409academia2",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Digital Twin-Based Simulation for Predictive Decision-Making in Waterway Logistics",
+          "url": "https://arxiv.org/abs/2606.13492",
+          "authors": [
+            "Matthijs Jansen op de Haar",
+            "Daniel Frutos Rodriguez"
+          ],
+          "published_at": "2026-06-11",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Evaluates predictive freight-routing decisions in a digital-twin simulation under uncertain inland-waterway conditions.",
+          "excerpt": "Evaluates predictive freight-routing decisions in a digital-twin simulation under uncertain inland-waterway conditions.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn463329academia3",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query": "green vehicle routing carbon emissions sustainable logistics review",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "Green vehicle routing problem that jointly optimizes delivery speed and routing based on the characteristics of electric vehicles",
+          "url": "https://arxiv.org/abs/2410.14691",
+          "authors": [
+            "YY. Feng"
+          ],
+          "published_at": "2024-10-04",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Jointly optimizes electric-vehicle speed and route choice using a detailed energy model with load, distance, stops and time windows.",
+          "excerpt": "Jointly optimizes electric-vehicle speed and route choice using a detailed energy model with load, distance, stops and time windows.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn463329academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Green Vehicle Routing Problem: State of the Art and Future Directions",
+          "url": "https://arxiv.org/abs/2202.01695",
+          "authors": [
+            "Saba Sabet",
+            "Bilal Farooq"
+          ],
+          "published_at": "2022-02-03",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Synthesizes green-routing variants involving emissions, alternative fuels, charging, pickup-delivery and energy consumption.",
+          "excerpt": "Synthesizes green-routing variants involving emissions, alternative fuels, charging, pickup-delivery and energy consumption.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn463329academia1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Electric Vehicle Routing and Charging/Discharging under Time-Variant Electricity Prices",
+          "url": "https://arxiv.org/abs/2012.09357",
+          "authors": [
+            "Bo Lin",
+            "Bissan Ghaddar",
+            "Jatin Nathwani"
+          ],
+          "published_at": "2020-12-17",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Jointly optimizes EV routing, time windows, charging and grid discharge under time-varying electricity prices.",
+          "excerpt": "Jointly optimizes EV routing, time windows, charging and grid discharge under time-varying electricity prices.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn349869academia3",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Wireless Mobile Charging for Emergency Electric Vehicle Routing: A Mixed-Integer and Metaheuristic Framework for In-Motion Energy Transfer",
+          "url": "https://arxiv.org/abs/2604.23561",
+          "authors": [
+            "Jingyi Zhao",
+            "Haoxiang Yang",
+            "Youxuan Pan",
+            "Yang Liu"
+          ],
+          "published_at": "2026-04-26",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Formulates routing with in-motion charging and develops hybrid dynamic-programming and large-neighborhood search methods for synchronized fleets.",
+          "excerpt": "Formulates routing with in-motion charging and develops hybrid dynamic-programming and large-neighborhood search methods for synchronized fleets.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn349869academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query": "large language model agents operations research optimization tool use",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "OR-LLM-Agent: Automating Modeling and Solving of Operations Research Optimization Problem with Reasoning Large Language Model",
+          "url": "https://arxiv.org/abs/2503.10009",
+          "authors": [
+            "Bowen Zhang",
+            "Pengcheng Luo"
+          ],
+          "published_at": "2025-03-13",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Builds an agent pipeline that converts natural-language OR problems into mathematical models, solver code, execution and repair traces.",
+          "excerpt": "Builds an agent pipeline that converts natural-language OR problems into mathematical models, solver code, execution and repair traces.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn947358academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "ReAct: Synergizing Reasoning and Acting in Language Models",
+          "url": "https://arxiv.org/abs/2210.03629",
+          "authors": [
+            "Shunyu Yao",
+            "Jeffrey Zhao",
+            "Dian Yu",
+            "Nan Du",
+            "Izhak Shafran",
+            "Karthik Narasimhan",
+            "Yuan Cao"
+          ],
+          "published_at": "2022-10-06",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Interleaves reasoning traces with tool actions so language models can update plans from external observations.",
+          "excerpt": "Interleaves reasoning traces with tool actions so language models can update plans from external observations.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn910233academia1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Toolformer: Language Models Can Teach Themselves to Use Tools",
+          "url": "https://arxiv.org/abs/2302.04761",
+          "authors": [
+            "Timo Schick",
+            "Jane Dwivedi-Yu",
+            "Roberta Dessì",
+            "Roberta Raileanu",
+            "Maria Lomeli",
+            "Luke Zettlemoyer",
+            "Nicola Cancedda",
+            "Thomas Scialom"
+          ],
+          "published_at": "2023-02-09",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Trains a language model to decide when and how to call external APIs and incorporate returned results.",
+          "excerpt": "Trains a language model to decide when and how to call external APIs and incorporate returned results.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn910233academia0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation",
+          "url": "https://arxiv.org/abs/2308.08155",
+          "authors": [
+            "Qingyun Wu",
+            "Gagan Bansal",
+            "Jieyu Zhang",
+            "Yiran Wu",
+            "Beibin Li",
+            "Erkang Zhu",
+            "Li Jiang",
+            "Xiaoyun Zhang",
+            "Shaokun Zhang",
+            "Jiale Liu",
+            "Ahmed Hassan Awadallah",
+            "Ryen W White",
+            "Doug Burger",
+            "Chi Wang"
+          ],
+          "published_at": "2023-08-16",
+          "publisher": "arXiv",
+          "doi": null,
+          "source_type": "RESEARCH_PAPER",
+          "content_text": "Presents a configurable framework for multi-agent conversations that combine language models, tools, code execution and human input.",
+          "excerpt": "Presents a configurable framework for multi-agent conversations that combine language models, tools, code execution and human input.",
+          "authority_rank": 85,
+          "verification": {
+            "status": "CONNECTOR_ABSTRACT_RETRIEVED",
+            "web_reference": "turn910233academia2",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "authors",
+              "published_at",
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "query": "OR-Tools vehicle routing CP-SAT official documentation",
+      "retrieved_at": "2026-07-14T00:00:00Z",
+      "results": [
+        {
+          "title": "CP-SAT Solver",
+          "url": "https://developers.google.com/optimization/cp/cp_solver",
+          "authors": [
+            "Google OR-Tools Team"
+          ],
+          "published_at": null,
+          "publisher": "Google OR-Tools",
+          "doi": null,
+          "source_type": "OFFICIAL_DOCUMENTATION",
+          "content_text": "Official CP-SAT guide covering integer modeling, solver invocation, statuses, limits and solution callbacks.",
+          "excerpt": "Official CP-SAT guide covering integer modeling, solver invocation, statuses, limits and solution callbacks.",
+          "authority_rank": 95,
+          "verification": {
+            "status": "CONNECTOR_PAGE_OPENED",
+            "web_reference": "turn269914view0",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "publisher",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Minimum Cost Flows",
+          "url": "https://developers.google.com/optimization/flow/mincostflow",
+          "authors": [
+            "Google OR-Tools Team"
+          ],
+          "published_at": null,
+          "publisher": "Google OR-Tools",
+          "doi": null,
+          "source_type": "OFFICIAL_DOCUMENTATION",
+          "content_text": "Official guide for minimum-cost flow models used in assignment, shipment and network allocation subproblems.",
+          "excerpt": "Official guide for minimum-cost flow models used in assignment, shipment and network allocation subproblems.",
+          "authority_rank": 95,
+          "verification": {
+            "status": "CONNECTOR_PAGE_OPENED",
+            "web_reference": "turn269914view2",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "publisher",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "The Job Shop Problem",
+          "url": "https://developers.google.com/optimization/scheduling/job_shop",
+          "authors": [
+            "Google OR-Tools Team"
+          ],
+          "published_at": null,
+          "publisher": "Google OR-Tools",
+          "doi": null,
+          "source_type": "OFFICIAL_DOCUMENTATION",
+          "content_text": "Official scheduling guide demonstrating precedence, machine exclusivity, makespan objectives and CP-SAT solution extraction.",
+          "excerpt": "Official scheduling guide demonstrating precedence, machine exclusivity, makespan objectives and CP-SAT solution extraction.",
+          "authority_rank": 95,
+          "verification": {
+            "status": "CONNECTOR_PAGE_OPENED",
+            "web_reference": "turn269914view1",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "publisher",
+              "url"
+            ]
+          }
+        },
+        {
+          "title": "Solving an Assignment Problem",
+          "url": "https://developers.google.com/optimization/assignment/assignment_example",
+          "authors": [
+            "Google OR-Tools Team"
+          ],
+          "published_at": null,
+          "publisher": "Google OR-Tools",
+          "doi": null,
+          "source_type": "OFFICIAL_DOCUMENTATION",
+          "content_text": "Official guide showing alternative solver formulations for assigning tasks to workers under cost and feasibility constraints.",
+          "excerpt": "Official guide showing alternative solver formulations for assigning tasks to workers under cost and feasibility constraints.",
+          "authority_rank": 95,
+          "verification": {
+            "status": "CONNECTOR_PAGE_OPENED",
+            "web_reference": "turn269914view3",
+            "checked_at": "2026-07-14T00:00:00Z",
+            "independent_metadata_fields": [
+              "title",
+              "publisher",
+              "url"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Queries were produced by the project's Public Research Plan agent.",
+    "The connector executed the exact query strings and retained primary paper abstracts or official documentation snapshots.",
+    "Each record preserves the connector reference used for independent replay and verification."
+  ]
+}

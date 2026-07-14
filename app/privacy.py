@@ -80,6 +80,22 @@ def _walk_strings(value: Any, path: str = "$" ) -> Iterable[tuple[str, str]]:
         yield path, value
 
 
+def _is_opaque_machine_field(path: str) -> bool:
+    """Return True for hashes and machine identifiers.
+
+    Exact configured prohibited values are still checked in these fields. Only the
+    generic email/phone regexes are skipped because random IDs and digests can
+    naturally contain 11-digit substrings.
+    """
+    leaf = path.rsplit(".", 1)[-1].lower()
+    leaf = re.sub(r"\[\d+\]$", "", leaf)
+    if leaf.endswith("hash") or leaf.endswith("sha256") or leaf in {"digest", "checksum"}:
+        return True
+    if leaf == "id" or leaf.endswith("_id") or leaf.endswith("_ids"):
+        return True
+    return leaf in {"uuid", "nonce", "etag", "cursor", "token_fingerprint"}
+
+
 def find_sensitive_values(value: Any, config: dict[str, Any], *, include_generic_patterns: bool = True) -> list[PrivacyMatch]:
     matches: list[PrivacyMatch] = []
     rules = redaction_rules(config)
@@ -88,9 +104,13 @@ def find_sensitive_values(value: Any, config: dict[str, Any], *, include_generic
             if rule.value in text:
                 matches.append(PrivacyMatch(path, rule.entity_type, rule.field_label, rule.placeholder))
         if include_generic_patterns:
-            if _EMAIL_RE.search(text):
+            # Cryptographic hashes and opaque identifiers can accidentally contain
+            # an 11-digit substring that resembles a phone number. Generic PII
+            # regexes apply only to content-bearing fields, never integrity fields.
+            opaque_field = _is_opaque_machine_field(path)
+            if not opaque_field and _EMAIL_RE.search(text):
                 matches.append(PrivacyMatch(path, "EMAIL", "电子邮箱", "[EMAIL]"))
-            if _PHONE_RE.search(text):
+            if not opaque_field and _PHONE_RE.search(text):
                 matches.append(PrivacyMatch(path, "PHONE", "联系电话", "[PHONE]"))
     unique: dict[tuple[str, str, str], PrivacyMatch] = {}
     for match in matches:
@@ -131,10 +151,10 @@ def sanitize_safe_online_package(output: dict[str, Any], config: dict[str, Any])
             if rule.value in text:
                 text = text.replace(rule.value, rule.placeholder)
                 matches.append(PrivacyMatch(path, rule.entity_type, rule.field_label, rule.placeholder))
-        if _EMAIL_RE.search(text):
+        if not _is_opaque_machine_field(path) and _EMAIL_RE.search(text):
             text = _EMAIL_RE.sub("[EMAIL]", text)
             matches.append(PrivacyMatch(path, "EMAIL", "电子邮箱", "[EMAIL]"))
-        if _PHONE_RE.search(text):
+        if not _is_opaque_machine_field(path) and _PHONE_RE.search(text):
             text = _PHONE_RE.sub("[PHONE]", text)
             matches.append(PrivacyMatch(path, "PHONE", "联系电话", "[PHONE]"))
         return text

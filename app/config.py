@@ -18,6 +18,14 @@ class Settings:
     max_upload_mb: int
     public_search_provider: str
     public_search_base_url: str
+    public_research_record_file: str
+    public_research_connector_file: str
+    public_search_max_results: int
+    research_fetch_timeout_seconds: int
+    research_max_source_bytes: int
+    mermaid_js_path: Path
+    mermaid_browser_executable: str
+    skill_timeout_seconds: int
 
     @classmethod
     def load(cls) -> "Settings":
@@ -44,4 +52,12 @@ class Settings:
             max_upload_mb=int(os.getenv("MAX_UPLOAD_MB", "50")),
             public_search_provider=os.getenv("PUBLIC_SEARCH_PROVIDER", "disabled").lower(),
             public_search_base_url=os.getenv("PUBLIC_SEARCH_BASE_URL", "").rstrip("/"),
+            public_research_record_file=os.getenv("PUBLIC_RESEARCH_RECORD_FILE", ""),
+            public_research_connector_file=os.getenv("PUBLIC_RESEARCH_CONNECTOR_FILE", ""),
+            public_search_max_results=int(os.getenv("PUBLIC_SEARCH_MAX_RESULTS", "40")),
+            research_fetch_timeout_seconds=int(os.getenv("RESEARCH_FETCH_TIMEOUT_SECONDS", "45")),
+            research_max_source_bytes=int(os.getenv("RESEARCH_MAX_SOURCE_BYTES", str(10 * 1024 * 1024))),
+            mermaid_js_path=Path(os.getenv("MERMAID_JS_PATH", str(root / "third_party" / "mermaid" / "mermaid.min.js"))).resolve(),
+            mermaid_browser_executable=os.getenv("MERMAID_BROWSER_EXECUTABLE", ""),
+            skill_timeout_seconds=int(os.getenv("SKILL_TIMEOUT_SECONDS", "60")),
         )
