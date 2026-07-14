@@ -36,7 +36,7 @@ reg=load_json(ROOT/'config/prompt_registry.json')
 counts['registry_entries']=len(reg['prompts']) if reg else 0
 if reg:
     ids=[x['prompt_id'] for x in reg['prompts']]
-    if len(ids)!=26 or len(set(ids))!=26: errors.append(f'PROMPT_COUNT expected 26 unique, got {len(ids)}/{len(set(ids))}')
+    if len(ids)!=len(set(ids)): errors.append(f'PROMPT_COUNT duplicate IDs: {len(ids)}/{len(set(ids))}')
     profiles=yaml.safe_load((ROOT/'config/prompt_model_profiles.yaml').read_text(encoding='utf-8'))['profiles']
     for p in reg['prompts']:
         for key in ['prompt_file','input_schema','output_schema']:
@@ -69,7 +69,8 @@ valid_in=invalid_in=valid_out=0
 unified_in=unified_out=0
 if reg and manifest:
     by_id={x['prompt_id']:x for x in reg['prompts']}
-    if len(manifest['cases'])!=130: errors.append(f'REPLAY_COUNT expected 130 got {len(manifest["cases"])}')
+    expected_replays=len(reg['prompts'])*5
+    if len(manifest['cases'])!=expected_replays: errors.append(f'REPLAY_COUNT expected {expected_replays} got {len(manifest["cases"])}')
     for entry in manifest['cases']:
         path=ROOT/entry['fixture_path']
         if not path.exists(): errors.append(f'REPLAY_MISSING {entry["fixture_path"]}'); continue

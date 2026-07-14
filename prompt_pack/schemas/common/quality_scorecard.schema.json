@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "quality_scorecard.schema.json",
+  "type": "array",
+  "minItems": 8,
+  "items": {
+    "type": "object",
+    "properties": {
+      "dimension": {"type": "string", "enum": ["DOCUMENT_TYPE_FIT", "CENTRAL_THESIS", "ARGUMENT_CHAIN", "EVIDENCE_SUPPORT", "METHOD_SUBSTANCE", "INNOVATION_BASELINE", "FEASIBILITY_FOUNDATION", "METRIC_JUSTIFICATION", "SECTION_UNIQUENESS", "STYLE_AND_DENSITY", "PAGE_BUDGET", "CROSS_SECTION_CONSISTENCY"]},
+      "score": {"type": "number", "minimum": 0, "maximum": 5},
+      "passed": {"type": "boolean"},
+      "evidence": {"type": "array", "items": {"type": "string", "minLength": 1}},
+      "required_action": {"type": ["string", "null"]}
+    },
+    "additionalProperties": false,
+    "required": ["dimension", "score", "passed", "evidence", "required_action"]
+  }
+}

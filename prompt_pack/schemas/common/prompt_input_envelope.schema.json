@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "prompt_input_envelope.schema.json",
-  "title": "统一Prompt输入Envelope；具体payload由26个Prompt Schema严格约束",
+  "title": "统一Prompt输入Envelope；具体payload由30个Prompt Schema严格约束",
   "oneOf": [
     {
       "$ref": "../prompts/security_classify_input.schema.json"
@@ -80,6 +80,18 @@
     },
     {
       "$ref": "../prompts/targeted_repair_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/argument_architecture_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/argument_architecture_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/expression_polish_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/expression_critic_input.schema.json"
     }
   ]
 }

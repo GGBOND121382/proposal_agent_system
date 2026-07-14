@@ -1,27 +1,24 @@
 # 开发状态与边界
 
-## v0.5.0 已完成
+## v0.6.0 已完成
 
-- 26个Prompt、五条工作流、十三类人工Gate和Producer/Critic分离保持不变；
-- 新增可审计 Skill 运行时，`mermaid.render` 与 `public_research.archive` 均保存输入/输出Hash、工件、状态、耗时和错误；
-- 弱模型不承担图片二进制生成，只输出可编辑 Mermaid；代码完成安全检查、Playwright/Chromium渲染、缓存、Worker轮换、超时重启和DOCX插图；
-- Public Research Plan Agent 的原始查询直接驱动检索，缺少任一查询响应即阻断；原始连接器响应、逐来源快照、文本、元数据和SHA-256全部归档；
-- 支持 `searxng`、`connector` 和明确标识为回放的 `recorded` 三种公开研究模式；
-- Ubuntu/Windows源码依赖离线包和Docker离线镜像包均提供构建、校验、安装/加载、启动、备份、恢复和卸载脚本；
-- 大模型地址、密钥和真实模型名仍通过 `.env`、端点配置、模型映射和Prompt模型Profile四层配置；
-- 完成“面向复杂物流场景的多智能体运输方案优化关键技术研究”54章复杂端到端验收。
+- 基于物流申请书239份Prompt Trace完成智能体责任链审计；
+- Prompt由26个扩展为30个，新增论证架构与表达编辑两组Producer/Critic；
+- 项目知识图谱与申请书论证图谱分离，新增Section Contract、Proposal Contract、Prior Section Digest和12维质量Scorecard；
+- Producer与Critic输入契约统一，Context Builder不再以Replay样例静默替代真实生产结果；
+- 章节写作携带唯一命题、证据ID、新增信息键和章节合同，跨章上下文使用结构化语义摘要；
+- 全篇缺陷按最早责任阶段路由：论证缺陷回到论证架构，规划缺陷回到章节规划，纯表达重复只重写受影响章节；
+- 全篇模型输入与完整质量上下文分离，实际模型输入受限，完整正文继续用于确定性质量计算和审计；
+- 历史167份质量相关Trace全部被新版规则判定为需要修订，解析错误0；
+- 新14章正向端到端五条工作流全部完成，全文12维评价全部通过；
+- 自动测试44项全部通过，Prompt Pack 30个Prompt、150组Replay静态验证通过。
 
 ## 已验证
 
-- Python静态编译、Shell语法和离线包manifest往返校验：PASS；
-- 本地自动测试：19项全部通过；
-- 26/26 Prompt实际触发，239次Prompt Run对应239份完整Trace；
-- `P-TARGETED-REPAIR` 实际经历Critic发现问题、定向修复和再次审查；
-- Research Agent生成10个查询，批准连接器返回40条结果，系统去重并归档39个来源；
-- 39个原始快照Hash、文本Hash及查询覆盖重新计算：PASS；
-- 28次Mermaid Skill执行均保存MMD/SVG/PNG/元数据，连续20图Worker稳定性测试：PASS；
-- 最终申请书182页、54章、40条参考文献、33幅嵌入图片，无实质性长段落精确重复；
-- 182页逐页检查及PDF坐标检测：无空白页、坏字、越界文字或越界图片。
+- 历史Trace负向重放：167/167识别旧缺陷；
+- 正向端到端：108次Prompt调用、14章、完整候选14/14、重复与信息键冲突均为0；
+- 弱模型上下文：单章蓝图/正文/表达输入最高约33/37/38 KB，全篇实际模型输入约88 KB，完整159 KB质量上下文独立保留；
+- Python静态编译、Prompt Pack校验和44项pytest：PASS。
 
 ## 明确边界
 

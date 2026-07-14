@@ -7,7 +7,7 @@ from functools import partial
 from typing import Any
 
 from .skills.executor import SkillExecutionError, SkillExecutor
-from .util import new_id, sha256_json, utc_now
+from .util import new_id, sha256_json, sha256_text, utc_now
 
 
 class DiagramEnrichmentService:
@@ -55,6 +55,16 @@ class DiagramEnrichmentService:
             text = str(paragraph.get("text") or "")
             if not text.startswith("[[MERMAID]]"):
                 continue
+            semantic_fields = [
+                paragraph.get("primary_claim_id"),
+                paragraph.get("novel_content_key"),
+                paragraph.get("section_contract_id"),
+            ]
+            if not all(semantic_fields):
+                output.setdefault("warnings", []).append(
+                    f"章节《{section.get('title')}》的Mermaid段落缺少命题、信息键或章节合同身份，未渲染。"
+                )
+                continue
             caption, width_cm, source = self._parse_marker(text)
             try:
                 skill_result = await self._execute_mermaid(
@@ -63,6 +73,10 @@ class DiagramEnrichmentService:
                         "caption": caption,
                         "width_cm": width_cm,
                         "mermaid_source": source,
+                        "argument_purpose": paragraph.get("paragraph_role") or "图示",
+                        "claim_id": paragraph.get("primary_claim_id"),
+                        "evidence_ids": list(paragraph.get("evidence_ids") or []),
+                        "section_contract_id": paragraph.get("section_contract_id"),
                     },
                     project_id=project_id, workflow_id=workflow_id, security_level=security_level,
                 )
@@ -81,6 +95,10 @@ class DiagramEnrichmentService:
                         "width_cm": width_cm,
                         "mermaid_source": fallback_source,
                         "fallback_reason": "invalid_model_mermaid_source",
+                        "argument_purpose": paragraph.get("paragraph_role") or "图示",
+                        "claim_id": paragraph.get("primary_claim_id"),
+                        "evidence_ids": list(paragraph.get("evidence_ids") or []),
+                        "section_contract_id": paragraph.get("section_contract_id"),
                     },
                     project_id=project_id, workflow_id=workflow_id, security_level=security_level,
                 )
@@ -91,40 +109,47 @@ class DiagramEnrichmentService:
             paragraph["paragraph_role"] = "图示"
             rendered += 1
 
-        # Weak-model fallback: key design chapters must still receive a simple,
-        # editable diagram even when the model omitted the Mermaid block.
+        # Weak-model fallback is allowed only when the approved section output
+        # already contains an explicit diagram-intent paragraph.  A chapter title
+        # alone is not evidence that a figure is needed; automatic title-based
+        # insertion produced decorative diagrams in the historical proposal.
         if rendered == 0:
-            fallback = self._fallback_for_section(str(section.get("title") or ""), project_id)
-            if fallback:
-                caption, source = fallback
-                skill_result = await self._execute_mermaid(
-                    {
-                        "section_id": section.get("section_id") or section.get("title") or "section",
-                        "caption": caption,
-                        "width_cm": 15.5,
-                        "mermaid_source": source,
-                        "fallback_reason": "writing_model_omitted_required_diagram",
-                    },
-                    project_id=project_id, workflow_id=workflow_id, security_level=security_level,
-                )
-                sequence = max([int(p.get("sequence") or 0) for p in paragraphs] or [0]) + 1
-                paragraph_id = new_id("diagram-paragraph")
-                paragraphs.append(
-                    {
-                        "paragraph_id": paragraph_id,
-                        "sequence": sequence,
-                        "paragraph_role": "图示",
-                        "text": skill_result.output["figure_marker"],
-                        "blueprint_paragraph_id": (paragraphs[-1].get("blueprint_paragraph_id") if paragraphs else "bp-diagram"),
-                        "trace_link_ids": [],
-                        "preserved_source_span": None,
-                        "contains_unresolved_placeholder": False,
-                    }
-                )
-                rendered = 1
-                output.setdefault("warnings", []).append(
-                    f"章节《{section.get('title')}》未提供Mermaid源码，系统使用可编辑的确定性模板补充图示。"
-                )
+            intent_paragraph = next((
+                item for item in paragraphs
+                if str(item.get("paragraph_role") or "").upper() in {"图示", "FIGURE", "DIAGRAM"}
+            ), None)
+            if intent_paragraph:
+                semantic_fields = [
+                    intent_paragraph.get("primary_claim_id"),
+                    intent_paragraph.get("novel_content_key"),
+                    intent_paragraph.get("section_contract_id"),
+                ]
+                fallback = self._fallback_for_section(str(section.get("title") or ""), project_id)
+                if fallback and all(semantic_fields):
+                    caption, source = fallback
+                    skill_result = await self._execute_mermaid(
+                        {
+                            "section_id": section.get("section_id") or section.get("title") or "section",
+                            "caption": caption,
+                            "width_cm": 15.5,
+                            "mermaid_source": source,
+                            "fallback_reason": "approved_diagram_intent_without_valid_source",
+                            "argument_purpose": intent_paragraph.get("paragraph_role") or "图示",
+                            "claim_id": intent_paragraph.get("primary_claim_id"),
+                            "evidence_ids": list(intent_paragraph.get("evidence_ids") or []),
+                            "section_contract_id": intent_paragraph.get("section_contract_id"),
+                        },
+                        project_id=project_id, workflow_id=workflow_id, security_level=security_level,
+                    )
+                    intent_paragraph["text"] = skill_result.output["figure_marker"]
+                    rendered = 1
+                    output.setdefault("warnings", []).append(
+                        f"章节《{section.get('title')}》已有经审查的图示意图但未提供有效源码，系统使用可编辑模板完成渲染。"
+                    )
+                elif fallback:
+                    output.setdefault("warnings", []).append(
+                        f"章节《{section.get('title')}》的图示意图缺少命题、信息键或章节合同身份，未自动插图。"
+                    )
 
         if rendered:
             result["paragraphs"] = sorted(paragraphs, key=lambda item: int(item.get("sequence") or 0))
@@ -160,9 +185,11 @@ class DiagramEnrichmentService:
             "UPDATE prompt_runs SET output_json=?,output_hash=? WHERE id=?",
             (output_json, output_hash, run_id),
         )
+        run = self.db.fetchone("SELECT prompt_id FROM prompt_runs WHERE id=?", (run_id,)) or {}
+        prompt_id = str(run.get("prompt_id") or "P-WRITE-CONTENT")
         row = self.db.fetchone(
-            "SELECT COALESCE(MAX(version),0) AS v FROM artifacts WHERE project_id=? AND prompt_id='P-WRITE-CONTENT'",
-            (project_id,),
+            "SELECT COALESCE(MAX(version),0) AS v FROM artifacts WHERE project_id=? AND prompt_id=?",
+            (project_id, prompt_id),
         )
         version = int(row["v"]) + 1 if row else 1
         self.db.execute(
@@ -175,7 +202,7 @@ class DiagramEnrichmentService:
                 project_id,
                 workflow_id,
                 "SKILL_ENRICHED_PROMPT_OUTPUT",
-                "P-WRITE-CONTENT",
+                prompt_id,
                 version,
                 output.get("status", "PASS"),
                 security_level,
@@ -188,7 +215,7 @@ class DiagramEnrichmentService:
             "PROMPT_OUTPUT_ENRICHED",
             project_id=project_id,
             object_id=run_id,
-            metadata={"prompt_id": "P-WRITE-CONTENT", "output_hash": output_hash},
+            metadata={"prompt_id": prompt_id, "output_hash": output_hash},
         )
 
     @staticmethod

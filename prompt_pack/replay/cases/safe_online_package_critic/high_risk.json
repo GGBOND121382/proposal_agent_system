@@ -58,15 +58,19 @@
           "公开评价方法"
         ],
         "allowed_context": [
-          "通用研究场景"
+          "通用研究问题"
         ],
         "entity_placeholders": [],
+        "removed_fields": [
+          "真实项目名称"
+        ],
         "prohibited_inferences": [
           "不得推断内部项目"
         ],
         "prohibited_outputs": [
-          "不得输出内部信息"
+          "不得输出内部实体"
         ],
+        "valid_until": null,
         "security_level": "PUBLIC"
       },
       "source_summary": [

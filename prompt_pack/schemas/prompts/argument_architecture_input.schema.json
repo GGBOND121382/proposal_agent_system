@@ -1,0 +1,422 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "argument_architecture_input.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-ARGUMENT-ARCHITECTURE"
+    },
+    "prompt_version": {
+      "const": "3.1.0"
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "workflow_type": {
+          "type": "string",
+          "enum": [
+            "PROJECT_INTAKE",
+            "TEMPLATE_EXTRACTION",
+            "HYBRID_ONLINE_ASSIST",
+            "PROPOSAL_AUTHORING",
+            "SECURITY_REVIEW_AND_EXPORT"
+          ]
+        },
+        "current_step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "writing_mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "COPY_EDIT_ONLY",
+                "SUBSTANTIVE_REVISION",
+                "DRAFT_FROM_PROJECT_DEFINITION"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "workflow_type",
+        "current_step",
+        "attempt",
+        "writing_mode"
+      ]
+    },
+    "security_context": {
+      "$ref": "../common/security_context.schema.json"
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "target_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "read_only_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "protected_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "target_object_ids",
+        "read_only_object_ids",
+        "protected_object_ids"
+      ]
+    },
+    "freshness": {
+      "$ref": "../common/freshness.schema.json"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proposal_contract": {
+          "$ref": "../common/proposal_contract.schema.json"
+        },
+        "project_subgraph": {
+          "type": "object",
+          "properties": {
+            "item_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "relation_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "../common/project_item.schema.json"
+              }
+            },
+            "relations": {
+              "type": "array",
+              "items": {
+                "$ref": "../common/project_relation.schema.json"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "item_ids",
+            "relation_ids",
+            "items",
+            "relations"
+          ]
+        },
+        "confirmed_facts": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/claim.schema.json"
+          }
+        },
+        "argument_graph_seed": {
+          "$ref": "../common/argument_graph.schema.json"
+        },
+        "template_context": {
+          "type": "object",
+          "properties": {
+            "template_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "global_argument": {
+              "type": "string",
+              "minLength": 1
+            },
+            "components": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "component_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "section_role": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "input_requirements": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "output_function": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "paragraph_patterns": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "forbidden_project_facts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "component_id",
+                  "section_role",
+                  "input_requirements",
+                  "output_function",
+                  "paragraph_patterns",
+                  "forbidden_project_facts"
+                ]
+              }
+            },
+            "format_rules": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "applicability": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "argument_patterns": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "pattern_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sequence": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 2
+                  },
+                  "applicable_profiles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1
+                  },
+                  "evidence": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "pattern_id",
+                  "name",
+                  "sequence",
+                  "applicable_profiles",
+                  "evidence"
+                ]
+              }
+            },
+            "expression_patterns": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "pattern_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "function": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "safe_example": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "anti_copy_rule": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "pattern_id",
+                  "function",
+                  "description",
+                  "safe_example",
+                  "anti_copy_rule"
+                ]
+              }
+            },
+            "quality_anti_patterns": {
+              "type": "array",
+              "minItems": 5,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "detection_hint": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "repair_rule": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "code",
+                  "description",
+                  "detection_hint",
+                  "repair_rule"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "template_id",
+            "global_argument",
+            "components",
+            "format_rules",
+            "applicability",
+            "argument_patterns",
+            "expression_patterns",
+            "quality_anti_patterns"
+          ]
+        },
+        "current_sections": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/document_section.schema.json"
+          }
+        },
+        "task_instruction": {
+          "$ref": "../inputs/task_instruction.schema.json"
+        },
+        "revision_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/finding.schema.json"
+          },
+          "description": "来自上一轮全篇审查、需要当前上游阶段处理的结构化意见；首次运行时为空数组。"
+        }
+      },
+      "required": [
+        "proposal_contract",
+        "project_subgraph",
+        "confirmed_facts",
+        "argument_graph_seed",
+        "template_context",
+        "current_sections",
+        "task_instruction",
+        "revision_findings"
+      ]
+    },
+    "expected_output_schema": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "task",
+    "security_context",
+    "scope",
+    "freshness",
+    "payload",
+    "expected_output_schema"
+  ]
+}

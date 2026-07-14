@@ -23,7 +23,7 @@ from app.workflows import WorkflowEngine
 @pytest.fixture()
 def runtime(tmp_path: Path, monkeypatch):
     root = Path(__file__).resolve().parents[1]
-    monkeypatch.setenv("MODEL_RUNTIME_MODE", "REPLAY")
+    monkeypatch.setenv("MODEL_RUNTIME_MODE", "SIMULATED")
     monkeypatch.setenv("APP_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("PROMPT_PACK_DIR", str(root / "prompt_pack"))
     settings = Settings.load()
@@ -48,7 +48,7 @@ def create_project(db: Database, *, internet: bool = True) -> str:
         "allowed_public_topics": ["公开政策"],
         "prohibited_external_fields": ["真实项目名称"],
         "recipient_scope": ["内部用户"],
-        "allowed_model_endpoint_ids": ["offline-primary"],
+        "allowed_model_endpoint_ids": ["offline-primary", "online-public-primary"],
         "retention_days": 365,
         "task_instruction": None,
     }
@@ -59,9 +59,44 @@ def create_project(db: Database, *, internet: bool = True) -> str:
     return project_id
 
 
+def add_standard_materials(settings: Settings, db: Database, project_id: str, *, current_sections: list[str] | None = None) -> None:
+    materials = [
+        ("guide.md", "APPLICATION_GUIDE", "# 申报指南\n本项目按科研项目申请书评审，主文不超过35页，突出研究问题、方法、创新、验证和研究基础。"),
+        ("brief.md", "PROJECT_BRIEF", "# 项目任务\n研究动态运输优化中的约束映射与低扰动增量重规划，原型仅作为验证载体。"),
+        ("reference.md", "REFERENCE_PROPOSAL", "# 立项依据\n从代表工作能力边界推出具体差距。\n# 研究方案\n每个问题分别绑定方法、基线和实验。"),
+        ("evidence.md", "EVIDENCE_MATERIAL", "# 前期成果\n团队已完成组合优化原型和动态调度实验代码，形成可复现实验记录与初步对照结果，可支撑本项目模型和实验。"),
+    ]
+    titles = current_sections or ["立项依据", "研究目标", "研究内容", "研究方案", "创新点", "研究基础", "参考文献"]
+    draft = "# 全文\n待完善。\n" + "\n".join(f"# {title}\n待编写。" for title in titles)
+    materials.append(("draft.md", "CURRENT_PROPOSAL", draft))
+    for filename, role, text in materials:
+        raw = text.encode("utf-8")
+        parsed = parse_document(filename, raw, role, "INTERNAL")
+        path = settings.uploads_dir / filename
+        path.write_bytes(raw)
+        db.execute(
+            "INSERT INTO documents(id,project_id,filename,role,security_level,document_hash,file_path,parsed_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (parsed["document_id"], project_id, filename, role, "INTERNAL", parsed["document_hash"], str(path), json.dumps(parsed, ensure_ascii=False), utc_now()),
+        )
+
+
+async def finish_workflow(engine: WorkflowEngine, project_id: str, workflow_type: str, *, max_steps: int = 500):
+    wf = engine.start(project_id, workflow_type)
+    for _ in range(max_steps):
+        wf = await engine.advance(wf["id"])
+        if wf["status"] == "WAITING_GATE":
+            gate = next(g for g in engine.list_gates(workflow_id=wf["id"]) if g["status"] == "OPEN")
+            action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
+            engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
+            continue
+        if wf["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+            break
+    return wf
+
+
 def test_prompt_pack_and_all_normal_replays(runtime):
     _, pack, *_ = runtime
-    assert len(pack.prompt_ids()) == 26
+    assert len(pack.prompt_ids()) == 30
     for prompt_id in pack.prompt_ids():
         case = pack.replay_case(prompt_id, "normal")
         assert pack.validate(prompt_id, "input", case["input"]) == []
@@ -111,18 +146,8 @@ def test_project_intake_pauses_at_expected_gate(runtime):
 def test_all_workflows_and_docx_export(runtime):
     _, _, db, _, _, _, engine, exporter = runtime
     project_id = create_project(db)
-
-    async def finish(workflow_type: str):
-        wf = engine.start(project_id, workflow_type)
-        for _ in range(30):
-            wf = await engine.advance(wf["id"])
-            if wf["status"] == "WAITING_GATE":
-                gate = [g for g in engine.list_gates(workflow_id=wf["id"]) if g["status"] == "OPEN"][0]
-                action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
-                engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
-                continue
-            break
-        assert wf["status"] == "COMPLETED", wf["state"].get("last_error")
+    settings = runtime[0]
+    add_standard_materials(settings, db, project_id)
 
     async def run():
         for workflow_type in [
@@ -132,7 +157,8 @@ def test_all_workflows_and_docx_export(runtime):
             "WF-4_PROPOSAL_AUTHORING",
             "WF-5_SECURITY_REVIEW_AND_EXPORT",
         ]:
-            await finish(workflow_type)
+            wf = await finish_workflow(engine, project_id, workflow_type)
+            assert wf["status"] == "COMPLETED", wf["state"].get("last_error")
 
     asyncio.run(run())
     path = exporter.export(project_id)

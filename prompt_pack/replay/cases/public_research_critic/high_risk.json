@@ -74,7 +74,10 @@
         "claims": [],
         "source_comparisons": [],
         "conflicts": [],
-        "limitations": []
+        "limitations": [
+          "仅基于公开资料"
+        ],
+        "coverage_summary": "完成公开范围综合"
       },
       "retrieved_sources": [
         {

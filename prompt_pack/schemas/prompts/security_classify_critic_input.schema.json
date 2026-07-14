@@ -134,8 +134,39 @@
             "sensitive_entities": {
               "type": "array",
               "items": {
-                "type": "string",
-                "minLength": 1
+                "type": "object",
+                "properties": {
+                  "entity_type": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value_or_placeholder": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "span": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "risk": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "entity_type",
+                  "value_or_placeholder",
+                  "span",
+                  "risk"
+                ]
               }
             },
             "sensitive_fields": {
@@ -161,6 +192,21 @@
                   "ONLINE_PUBLIC"
                 ]
               }
+            },
+            "rationale": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "HIGH",
+                "MEDIUM",
+                "LOW"
+              ]
             }
           },
           "additionalProperties": false,
@@ -170,7 +216,9 @@
             "sensitive_entities",
             "sensitive_fields",
             "combination_risks",
-            "allowed_environments"
+            "allowed_environments",
+            "rationale",
+            "confidence"
           ]
         },
         "original_object": {

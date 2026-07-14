@@ -168,7 +168,8 @@
           "security_level": "INTERNAL",
           "display_name": "示例对象"
         }
-      ]
+      ],
+      "prior_section_digest": []
     },
     "expected_output_schema": "schemas/prompts/write_blueprint_critic_output.schema.json"
   },

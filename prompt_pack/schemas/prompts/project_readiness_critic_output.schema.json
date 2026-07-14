@@ -10,7 +10,7 @@
       "const": "P-PROJECT-READINESS-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "status": {
       "type": "string",
@@ -215,6 +215,80 @@
               "suggested_question_id"
             ]
           }
+        },
+        "critical_readiness_checks": {
+          "type": "array",
+          "minItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "check_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "dimension": {
+                "type": "string",
+                "enum": [
+                  "DOCUMENT_CONTRACT",
+                  "CENTRAL_PROPOSITION",
+                  "RESEARCH_GAP",
+                  "RESEARCH_QUESTIONS",
+                  "CLOSEST_PRIOR_WORK",
+                  "METHOD_SUBSTANCE",
+                  "EVALUATION_DESIGN",
+                  "INNOVATION_BASELINE",
+                  "RESEARCH_FOUNDATION",
+                  "METRIC_JUSTIFICATION",
+                  "SCOPE_AND_PAGE_BUDGET"
+                ]
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "missing_node_types": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            },
+            "required": [
+              "check_id",
+              "dimension",
+              "passed",
+              "reason",
+              "missing_node_types",
+              "evidence_ids"
+            ]
+          }
+        },
+        "assessed_stage": {
+          "type": "string",
+          "enum": [
+            "READY_FOR_ARGUMENT_ARCHITECTURE",
+            "READY_FOR_SECTION_PLANNING"
+          ]
+        },
+        "ready_for_argument_architecture": {
+          "type": "boolean"
+        },
+        "ready_for_section_planning": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -223,7 +297,11 @@
         "chapter_readiness",
         "writeable_section_profiles",
         "blocked_section_profiles",
-        "missing_inputs"
+        "missing_inputs",
+        "critical_readiness_checks",
+        "assessed_stage",
+        "ready_for_argument_architecture",
+        "ready_for_section_planning"
       ]
     },
     "findings": {

@@ -59,20 +59,41 @@ def _project(db: Database) -> str:
 
 
 def _draft(settings: Settings, db: Database, project_id: str) -> None:
-    raw = "# 全文\n测试。\n# 项目摘要\n待编写。\n# 参考文献\n待编写。\n".encode("utf-8")
-    parsed = parse_document("draft.md", raw, "CURRENT_PROPOSAL", "INTERNAL")
-    path = settings.uploads_dir / "draft.md"
-    path.write_bytes(raw)
-    db.execute(
-        "INSERT INTO documents(id,project_id,filename,role,security_level,document_hash,file_path,parsed_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        (parsed["document_id"], project_id, path.name, "CURRENT_PROPOSAL", "INTERNAL", parsed["document_hash"], str(path), json.dumps(parsed, ensure_ascii=False), utc_now()),
-    )
+    materials = [
+        ("draft.md", "CURRENT_PROPOSAL", "# 全文\n测试。\n# 项目摘要\n待编写。\n# 研究内容\n待编写。\n# 研究方案\n待编写。\n# 创新点\n待编写。\n# 研究基础\n待编写。\n# 参考文献\n待编写。"),
+        ("guide.md", "APPLICATION_GUIDE", "# 指南\n科研项目申请书，突出问题、方法、验证与基础，主文不超过35页。"),
+        ("reference.md", "REFERENCE_PROPOSAL", "# 立项依据\n差距推出问题。\n# 研究方案\n问题绑定方法和验证。"),
+        ("evidence.md", "EVIDENCE_MATERIAL", "# 前期成果\n已完成相关优化算法代码、原型和可复现实验，具备直接支撑关系。"),
+    ]
+    for filename, role, text in materials:
+        raw = text.encode("utf-8")
+        parsed = parse_document(filename, raw, role, "INTERNAL")
+        path = settings.uploads_dir / filename
+        path.write_bytes(raw)
+        db.execute(
+            "INSERT INTO documents(id,project_id,filename,role,security_level,document_hash,file_path,parsed_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (parsed["document_id"], project_id, path.name, role, "INTERNAL", parsed["document_hash"], str(path), json.dumps(parsed, ensure_ascii=False), utc_now()),
+        )
 
 
-def test_all_26_simulated_outputs_remain_schema_valid(tmp_path, monkeypatch):
+async def _finish(engine: WorkflowEngine, project_id: str, workflow_type: str, *, max_steps: int = 500):
+    wf = engine.start(project_id, workflow_type)
+    for _ in range(max_steps):
+        wf = await engine.advance(wf["id"])
+        if wf["status"] == "WAITING_GATE":
+            gate = next(g for g in engine.list_gates(workflow_id=wf["id"]) if g["status"] == "OPEN")
+            action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
+            engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
+            continue
+        if wf["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+            break
+    return wf
+
+
+def test_all_30_simulated_outputs_remain_schema_valid(tmp_path, monkeypatch):
     _, pack, *_ = _runtime(tmp_path, monkeypatch)
     simulator = SimulatedLLM(pack)
-    assert len(pack.prompt_ids()) == 26
+    assert len(pack.prompt_ids()) == 30
     for prompt_id in pack.prompt_ids():
         envelope = pack.replay_input(prompt_id)
         output = simulator.invoke(prompt_id, envelope)
@@ -80,21 +101,16 @@ def test_all_26_simulated_outputs_remain_schema_valid(tmp_path, monkeypatch):
 
 
 def test_targeted_repair_is_really_executed_and_trace_is_complete(tmp_path, monkeypatch):
+    monkeypatch.setenv("SIMULATED_INJECT_PLAN_REPAIR", "true")
     settings, _, db, _, _, engine = _runtime(tmp_path, monkeypatch)
     project_id = _project(db)
     _draft(settings, db, project_id)
 
     async def finish():
-        wf = engine.start(project_id, "WF-4_PROPOSAL_AUTHORING")
-        for _ in range(200):
-            wf = await engine.advance(wf["id"])
-            if wf["status"] == "WAITING_GATE":
-                gate = next(g for g in engine.list_gates(workflow_id=wf["id"]) if g["status"] == "OPEN")
-                action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
-                engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
-                continue
-            if wf["status"] in {"COMPLETED", "BLOCKED"}:
-                break
+        for workflow_type in ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION"]:
+            prior = await _finish(engine, project_id, workflow_type)
+            assert prior["status"] == "COMPLETED", prior["state"].get("last_error")
+        wf = await _finish(engine, project_id, "WF-4_PROPOSAL_AUTHORING")
         assert wf["status"] == "COMPLETED", wf["state"].get("last_error")
 
     asyncio.run(finish())
@@ -118,16 +134,9 @@ def test_public_research_claims_enter_writing_context_without_private_values(tmp
     _draft(settings, db, project_id)
 
     async def finish_hybrid():
-        wf = engine.start(project_id, "WF-3_HYBRID_ONLINE_ASSIST")
-        for _ in range(100):
-            wf = await engine.advance(wf["id"])
-            if wf["status"] == "WAITING_GATE":
-                gate = next(g for g in engine.list_gates(workflow_id=wf["id"]) if g["status"] == "OPEN")
-                action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
-                engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
-                continue
-            if wf["status"] in {"COMPLETED", "BLOCKED"}:
-                break
+        intake = await _finish(engine, project_id, "WF-1_PROJECT_INTAKE")
+        assert intake["status"] == "COMPLETED", intake["state"].get("last_error")
+        wf = await _finish(engine, project_id, "WF-3_HYBRID_ONLINE_ASSIST")
         assert wf["status"] == "COMPLETED", wf["state"].get("last_error")
 
     asyncio.run(finish_hybrid())

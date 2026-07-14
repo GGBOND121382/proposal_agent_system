@@ -124,7 +124,7 @@
     },
     {
       "prompt_id": "P-PROJECT-DEFINITION-EXTRACT",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/project_definition/project_definition_extract.md",
       "input_schema": "schemas/prompts/project_definition_extract_input.schema.json",
       "output_schema": "schemas/prompts/project_definition_extract_output.schema.json",
@@ -135,7 +135,7 @@
     },
     {
       "prompt_id": "P-PROJECT-DEFINITION-CRITIC",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/project_definition/project_definition_critic.md",
       "input_schema": "schemas/prompts/project_definition_critic_input.schema.json",
       "output_schema": "schemas/prompts/project_definition_critic_output.schema.json",
@@ -146,7 +146,7 @@
     },
     {
       "prompt_id": "P-PROJECT-READINESS-CRITIC",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/project_definition/project_readiness_critic.md",
       "input_schema": "schemas/prompts/project_readiness_critic_input.schema.json",
       "output_schema": "schemas/prompts/project_readiness_critic_output.schema.json",
@@ -179,7 +179,7 @@
     },
     {
       "prompt_id": "P-TEMPLATE-EXTRACT",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/template/template_extract.md",
       "input_schema": "schemas/prompts/template_extract_input.schema.json",
       "output_schema": "schemas/prompts/template_extract_output.schema.json",
@@ -190,7 +190,7 @@
     },
     {
       "prompt_id": "P-TEMPLATE-CRITIC",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/template/template_critic.md",
       "input_schema": "schemas/prompts/template_critic_input.schema.json",
       "output_schema": "schemas/prompts/template_critic_output.schema.json",
@@ -201,7 +201,7 @@
     },
     {
       "prompt_id": "P-REVISION-PLAN",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/planning/revision_plan.md",
       "input_schema": "schemas/prompts/revision_plan_input.schema.json",
       "output_schema": "schemas/prompts/revision_plan_output.schema.json",
@@ -212,7 +212,7 @@
     },
     {
       "prompt_id": "P-REVISION-PLAN-CRITIC",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/planning/revision_plan_critic.md",
       "input_schema": "schemas/prompts/revision_plan_critic_input.schema.json",
       "output_schema": "schemas/prompts/revision_plan_critic_output.schema.json",
@@ -223,7 +223,7 @@
     },
     {
       "prompt_id": "P-WRITE-BLUEPRINT",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/writing/write_blueprint.md",
       "input_schema": "schemas/prompts/write_blueprint_input.schema.json",
       "output_schema": "schemas/prompts/write_blueprint_output.schema.json",
@@ -234,7 +234,7 @@
     },
     {
       "prompt_id": "P-WRITE-BLUEPRINT-CRITIC",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/writing/write_blueprint_critic.md",
       "input_schema": "schemas/prompts/write_blueprint_critic_input.schema.json",
       "output_schema": "schemas/prompts/write_blueprint_critic_output.schema.json",
@@ -245,7 +245,7 @@
     },
     {
       "prompt_id": "P-WRITE-CONTENT",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/writing/write_content.md",
       "input_schema": "schemas/prompts/write_content_input.schema.json",
       "output_schema": "schemas/prompts/write_content_output.schema.json",
@@ -256,7 +256,7 @@
     },
     {
       "prompt_id": "P-WRITE-CRITIC",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/writing/write_critic.md",
       "input_schema": "schemas/prompts/write_critic_input.schema.json",
       "output_schema": "schemas/prompts/write_critic_output.schema.json",
@@ -267,7 +267,7 @@
     },
     {
       "prompt_id": "P-INTEGRATION-CRITIC",
-      "prompt_version": "2.0.0",
+      "prompt_version": "3.0.0",
       "prompt_file": "prompts/integration/integration_critic.md",
       "input_schema": "schemas/prompts/integration_critic_input.schema.json",
       "output_schema": "schemas/prompts/integration_critic_output.schema.json",
@@ -285,6 +285,50 @@
       "model_profile": "extraction",
       "required_environment": "SAME_AS_ORIGINAL",
       "executor_role": "Original Producer",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+      "prompt_version": "3.1.0",
+      "prompt_file": "prompts/argument/argument_architecture.md",
+      "input_schema": "schemas/prompts/argument_architecture_input.schema.json",
+      "output_schema": "schemas/prompts/argument_architecture_output.schema.json",
+      "model_profile": "planning",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Argument Architecture Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
+      "prompt_version": "3.1.0",
+      "prompt_file": "prompts/argument/argument_architecture_critic.md",
+      "input_schema": "schemas/prompts/argument_architecture_critic_input.schema.json",
+      "output_schema": "schemas/prompts/argument_architecture_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "ARGUMENT_ARCHITECTURE_CONFIRMATION"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-POLISH",
+      "prompt_version": "3.1.0",
+      "prompt_file": "prompts/writing/expression_polish.md",
+      "input_schema": "schemas/prompts/expression_polish_input.schema.json",
+      "output_schema": "schemas/prompts/expression_polish_output.schema.json",
+      "model_profile": "formal_writing",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Expression Editor Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-EXPRESSION-CRITIC",
+      "prompt_version": "3.1.0",
+      "prompt_file": "prompts/writing/expression_critic.md",
+      "input_schema": "schemas/prompts/expression_critic_input.schema.json",
+      "output_schema": "schemas/prompts/expression_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
       "next_human_gate": null
     }
   ]

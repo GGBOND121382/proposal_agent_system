@@ -10,7 +10,7 @@
       "const": "P-WRITE-BLUEPRINT"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "status": {
       "type": "string",
@@ -119,6 +119,47 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "argument_role": {
+                    "type": "string",
+                    "enum": [
+                      "CONTEXT",
+                      "PROBLEM",
+                      "EVIDENCE",
+                      "GAP",
+                      "LIMITATION_MECHANISM",
+                      "CENTRAL_CLAIM",
+                      "RESEARCH_QUESTION",
+                      "METHOD",
+                      "WARRANT",
+                      "COUNTERARGUMENT",
+                      "BOUNDARY",
+                      "EVALUATION",
+                      "CONTRIBUTION",
+                      "TRANSITION"
+                    ]
+                  },
+                  "primary_claim_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "required_evidence_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  },
+                  "novel_content_key": {
+                    "type": "string",
+                    "minLength": 8
+                  },
+                  "word_budget": {
+                    "type": "integer",
+                    "minimum": 40,
+                    "maximum": 2000
                   }
                 },
                 "additionalProperties": false,
@@ -133,7 +174,12 @@
                   "metric_slots",
                   "source_strategy",
                   "forbidden_content",
-                  "transition_requirement"
+                  "transition_requirement",
+                  "argument_role",
+                  "primary_claim_id",
+                  "required_evidence_ids",
+                  "novel_content_key",
+                  "word_budget"
                 ]
               },
               "minItems": 1
@@ -145,6 +191,16 @@
                 "minLength": 1,
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
               }
+            },
+            "section_profile_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "section_contract_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
             }
           },
           "additionalProperties": false,
@@ -152,7 +208,9 @@
             "blueprint_id",
             "section_objective",
             "paragraphs",
-            "unresolved_slot_ids"
+            "unresolved_slot_ids",
+            "section_profile_id",
+            "section_contract_id"
           ]
         },
         "plan_task_coverage": {

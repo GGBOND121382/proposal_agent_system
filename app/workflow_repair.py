@@ -7,6 +7,17 @@ from .util import new_id, sha256_json
 from .workflow_defs import CRITIC_PRODUCER
 
 
+
+
+PRODUCER_RESULT_KEY = {
+    "P-SCHEME-EXTRACT": "scheme_profile",
+    "P-PROJECT-DEFINITION-EXTRACT": "project_definition",
+    "P-FACT-EXTRACT": "fact_candidates",
+    "P-TEMPLATE-EXTRACT": "template",
+    "P-ARGUMENT-ARCHITECTURE": "argument_architecture",
+    "P-REVISION-PLAN": "revision_plan",
+    "P-WRITE-BLUEPRINT": "blueprint",
+}
 PRODUCER_ROLE = {
     "P-SECURITY-CLASSIFY": "SECURITY_REVIEW_AGENT",
     "P-SAFE-ONLINE-PACKAGE": "SECURITY_REVIEW_AGENT",
@@ -14,9 +25,11 @@ PRODUCER_ROLE = {
     "P-PROJECT-DEFINITION-EXTRACT": "PROJECT_KNOWLEDGE_AGENT",
     "P-FACT-EXTRACT": "PROJECT_KNOWLEDGE_AGENT",
     "P-TEMPLATE-EXTRACT": "TEMPLATE_AGENT",
+    "P-ARGUMENT-ARCHITECTURE": "ARGUMENT_ARCHITECTURE_AGENT",
     "P-REVISION-PLAN": "PLANNING_AGENT",
     "P-WRITE-BLUEPRINT": "WRITING_AGENT",
     "P-WRITE-CONTENT": "WRITING_AGENT",
+    "P-EXPRESSION-POLISH": "EXPRESSION_EDITOR_AGENT",
     "P-PUBLIC-RESEARCH-SYNTHESIS": "PROJECT_KNOWLEDGE_AGENT",
 }
 
@@ -49,7 +62,8 @@ class WorkflowRepairMixin:
         findings = [item for item in critic_output.get("findings", []) if item.get("repairable", False)]
         if not findings:
             return False
-        original = self.context_builder._result(wf["project_id"], producer)
+        result_key = PRODUCER_RESULT_KEY.get(producer)
+        original = self.context_builder._result(wf["project_id"], producer, result_key)
         if original is None:
             return False
 

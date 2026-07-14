@@ -190,6 +190,123 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "argument_patterns": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "pattern_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sequence": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 2
+                  },
+                  "applicable_profiles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1
+                  },
+                  "evidence": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "pattern_id",
+                  "name",
+                  "sequence",
+                  "applicable_profiles",
+                  "evidence"
+                ]
+              }
+            },
+            "expression_patterns": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "pattern_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "function": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "safe_example": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "anti_copy_rule": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "pattern_id",
+                  "function",
+                  "description",
+                  "safe_example",
+                  "anti_copy_rule"
+                ]
+              }
+            },
+            "quality_anti_patterns": {
+              "type": "array",
+              "minItems": 5,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "detection_hint": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "repair_rule": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "code",
+                  "description",
+                  "detection_hint",
+                  "repair_rule"
+                ]
+              }
             }
           },
           "additionalProperties": false,
@@ -198,7 +315,10 @@
             "global_argument",
             "components",
             "format_rules",
-            "applicability"
+            "applicability",
+            "argument_patterns",
+            "expression_patterns",
+            "quality_anti_patterns"
           ]
         },
         "reference_document": {

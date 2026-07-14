@@ -157,6 +157,12 @@
           "items": {
             "$ref": "../common/finding.schema.json"
           }
+        },
+        "proposal_contract_candidate": {
+          "$ref": "../common/proposal_contract.schema.json"
+        },
+        "argument_graph_candidate": {
+          "$ref": "../common/argument_graph.schema.json"
         }
       },
       "additionalProperties": false,
@@ -165,7 +171,9 @@
         "source_documents",
         "scheme_profile",
         "relation_matrix",
-        "deterministic_findings"
+        "deterministic_findings",
+        "proposal_contract_candidate",
+        "argument_graph_candidate"
       ]
     },
     "expected_output_schema": {

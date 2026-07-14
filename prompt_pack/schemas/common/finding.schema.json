@@ -31,7 +31,9 @@
         "CONTENT",
         "INTEGRATION",
         "FORMAT",
-        "SYSTEM"
+        "SYSTEM",
+        "ARGUMENT",
+        "EXPRESSION"
       ]
     },
     "target_type": {
@@ -85,7 +87,9 @@
         "WRITING_AGENT",
         "INTEGRATION_AGENT",
         "USER",
-        "BLOCK"
+        "BLOCK",
+        "ARGUMENT_ARCHITECTURE_AGENT",
+        "EXPRESSION_EDITOR_AGENT"
       ]
     },
     "blocking": {

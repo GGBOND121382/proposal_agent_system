@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "argument_graph.schema.json",
+  "type": "object",
+  "properties": {
+    "graph_id": {"type": "string", "minLength": 1},
+    "central_proposition": {
+      "type": "object",
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "statement": {"type": "string", "minLength": 1},
+        "proposition_type": {"type": "string", "enum": ["SCIENTIFIC_HYPOTHESIS", "TECHNICAL_PRINCIPLE", "DESIGN_PROPOSITION", "UNKNOWN"]},
+        "falsifiable_or_comparable": {"type": "boolean"},
+        "boundary_conditions": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "source_refs": {"type": "array", "items": {"$ref": "source_ref.schema.json"}}
+      },
+      "additionalProperties": false,
+      "required": ["node_id", "statement", "proposition_type", "falsifiable_or_comparable", "boundary_conditions", "source_refs"]
+    },
+    "research_questions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "properties": {
+          "node_id": {"type": "string", "minLength": 1},
+          "statement": {"type": "string", "minLength": 1},
+          "question_type": {"type": "string", "enum": ["SCIENTIFIC", "TECHNICAL", "ENGINEERING"]},
+          "linked_gap_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "answerability": {"type": "string", "enum": ["TESTABLE", "COMPARABLE", "DESIGN_VERIFIABLE", "UNCLEAR"]},
+          "success_evidence": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        },
+        "additionalProperties": false,
+        "required": ["node_id", "statement", "question_type", "linked_gap_ids", "answerability", "success_evidence"]
+      }
+    },
+    "scope_boundaries": {
+      "type": "object",
+      "properties": {
+        "in_scope": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "out_of_scope": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false,
+      "required": ["in_scope", "out_of_scope"]
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "node_id": {"type": "string", "minLength": 1},
+          "node_type": {"type": "string", "minLength": 1},
+          "statement": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "enum": ["CONFIRMED", "SUPPORTED", "PLANNED", "UNKNOWN", "CONFLICTED"]},
+          "source_refs": {"type": "array", "items": {"$ref": "source_ref.schema.json"}}
+        },
+        "additionalProperties": false,
+        "required": ["node_id", "node_type", "statement", "status", "source_refs"]
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "edge_id": {"type": "string", "minLength": 1},
+          "source_id": {"type": "string", "minLength": 1},
+          "relation": {"type": "string", "minLength": 1},
+          "target_id": {"type": "string", "minLength": 1},
+          "rationale": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false,
+        "required": ["edge_id", "source_id", "relation", "target_id", "rationale"]
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": ["graph_id", "central_proposition", "research_questions", "scope_boundaries", "nodes", "edges"]
+}

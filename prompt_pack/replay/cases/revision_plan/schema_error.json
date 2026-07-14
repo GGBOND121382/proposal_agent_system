@@ -221,7 +221,8 @@
           "内部用户"
         ],
         "policy_version": "2.0"
-      }
+      },
+      "revision_findings": []
     },
     "expected_output_schema": "schemas/prompts/revision_plan_output.schema.json"
   },

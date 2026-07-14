@@ -10,7 +10,7 @@
       "const": "P-WRITE-BLUEPRINT-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "status": {
       "type": "string",
@@ -63,6 +63,49 @@
             "minLength": 1,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           }
+        },
+        "argument_checks": {
+          "type": "array",
+          "minItems": 7,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "dimension": {
+                "type": "string",
+                "enum": [
+                  "SECTION_FUNCTION",
+                  "CLAIM_ADVANCEMENT",
+                  "EVIDENCE_BINDING",
+                  "PARAGRAPH_ROLE_DIVERSITY",
+                  "NOVEL_CONTENT_KEYS",
+                  "WORD_BUDGET",
+                  "NO_GENERIC_SIX_PART_TEMPLATE"
+                ]
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1
+              },
+              "blocking_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            },
+            "required": [
+              "dimension",
+              "passed",
+              "evidence",
+              "blocking_ids"
+            ]
+          }
         }
       },
       "additionalProperties": false,
@@ -71,7 +114,8 @@
         "checked_paragraph_ids",
         "uncovered_revision_task_ids",
         "invalid_slot_refs",
-        "critical_unresolved_slot_ids"
+        "critical_unresolved_slot_ids",
+        "argument_checks"
       ]
     },
     "findings": {

@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "expression_critic_output.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-EXPRESSION-CRITIC"
+    },
+    "prompt_version": {
+      "const": "3.1.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "REVISE",
+        "NEED_USER_INPUT",
+        "BLOCK"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "ACCEPT",
+            "REVISE",
+            "BLOCK"
+          ]
+        },
+        "checked_paragraph_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "unsupported_trace_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "blueprint_deviation_paragraph_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "scope_violations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "profile_acceptance_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rule": {
+                "type": "string",
+                "minLength": 1
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "rule",
+              "passed",
+              "evidence"
+            ]
+          }
+        },
+        "quality_dimensions": {
+          "$ref": "../common/quality_scorecard.schema.json"
+        },
+        "duplicate_signatures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "signature": {
+                "type": "string",
+                "minLength": 1
+              },
+              "paragraph_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 2
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "signature",
+              "paragraph_ids",
+              "reason"
+            ]
+          }
+        },
+        "document_type_drift_terms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "term": {
+                "type": "string",
+                "minLength": 1
+              },
+              "paragraph_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "term",
+              "paragraph_ids",
+              "reason"
+            ]
+          }
+        },
+        "paragraph_reviews": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "paragraph_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "argument_role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "claim_supported": {
+                "type": "boolean"
+              },
+              "new_information_added": {
+                "type": "boolean"
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "paragraph_id",
+              "passed",
+              "argument_role",
+              "claim_supported",
+              "new_information_added",
+              "issues"
+            ]
+          }
+        },
+        "expression_checks": {
+          "type": "array",
+          "minItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "dimension": {
+                "type": "string",
+                "enum": [
+                  "MEANING_PRESERVATION",
+                  "TRACE_PRESERVATION",
+                  "ACADEMIC_TONE",
+                  "SENTENCE_CLARITY",
+                  "TRANSITION_LOGIC",
+                  "REDUNDANCY",
+                  "TERMINOLOGY",
+                  "DOCUMENT_TYPE_FIT"
+                ]
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "paragraph_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "dimension",
+              "passed",
+              "paragraph_ids",
+              "evidence"
+            ]
+          }
+        },
+        "trace_preservation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "input_trace_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "minItems": 1
+            },
+            "output_trace_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "minItems": 1
+            },
+            "missing_trace_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "new_unapproved_trace_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "preserved": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "input_trace_ids",
+            "output_trace_ids",
+            "missing_trace_ids",
+            "new_unapproved_trace_ids",
+            "preserved"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "checked_paragraph_ids",
+        "unsupported_trace_ids",
+        "blueprint_deviation_paragraph_ids",
+        "scope_violations",
+        "profile_acceptance_results",
+        "quality_dimensions",
+        "duplicate_signatures",
+        "document_type_drift_terms",
+        "paragraph_reviews",
+        "expression_checks",
+        "trace_preservation"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/finding.schema.json"
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/unresolved_item.schema.json"
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/user_question.schema.json"
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/source_ref.schema.json"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "status",
+    "result",
+    "findings",
+    "unresolved_items",
+    "user_questions",
+    "source_refs",
+    "warnings"
+  ]
+}

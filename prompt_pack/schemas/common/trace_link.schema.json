@@ -22,7 +22,10 @@
         "TEMPLATE_COMPONENT",
         "SOURCE_TEXT",
         "USER_INSTRUCTION",
-        "PUBLIC_CLAIM"
+        "PUBLIC_CLAIM",
+        "ARGUMENT_NODE",
+        "SECTION_CONTRACT",
+        "SKILL_ARTIFACT"
       ]
     },
     "source_id": {

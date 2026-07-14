@@ -53,16 +53,16 @@
       "classification_candidate": {
         "object_id": "obj-001",
         "recommended_level": "INTERNAL",
-        "sensitive_entities": [
-          "内部系统"
-        ],
-        "sensitive_fields": [
-          "参数"
-        ],
+        "sensitive_entities": [],
+        "sensitive_fields": [],
         "combination_risks": [],
         "allowed_environments": [
           "OFFLINE_LOCAL"
-        ]
+        ],
+        "rationale": [
+          "包含内部项目上下文"
+        ],
+        "confidence": "HIGH"
       },
       "original_object": {
         "object_type": "GENERIC",

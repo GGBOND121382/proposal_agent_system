@@ -1,0 +1,120 @@
+version: '3.0'
+default_profile:
+  profile_id: SECTION_GENERAL
+  version: 3.0.0
+  required_inputs: [PROJECT_BASIC]
+  acceptance_rules:
+    - 本节具有唯一且明确的论证功能
+    - 不重复其他章节内容
+    - 所有实质性结论有证据或明确标记为拟研究内容
+profiles:
+  - profile_id: ABSTRACT
+    title_patterns: ['摘要', '项目摘要']
+    required_inputs: [CENTRAL_PROPOSITION, RESEARCH_QUESTION, OBJECTIVE, METHOD, EXPECTED_CONTRIBUTION]
+    acceptance_rules:
+      - 以一个中心命题统领全文
+      - 明确问题、方法、创新和验证，不写部署与审计细节
+      - 不引入正文未论证的指标或成果
+  - profile_id: PROJECT_OVERVIEW
+    title_patterns: ['项目概述', '总体概述']
+    required_inputs: [PROJECT_BASIC, CENTRAL_PROPOSITION, OBJECTIVE, WORK_PACKAGE]
+    acceptance_rules:
+      - 说明项目边界与主线，不展开系统功能清单
+      - 与后续研究内容和技术路线建立映射
+  - profile_id: BACKGROUND_AND_SIGNIFICANCE
+    title_patterns: ['背景', '意义', '立项依据']
+    required_inputs: [DEMAND, SCENARIO, CURRENT_STATE, GAP, ROOT_CAUSE, RESEARCH_QUESTION]
+    acceptance_rules:
+      - 现状证据自然推出具体研究问题
+      - 不以宏大背景替代问题分析
+      - 价值与研究目标对应
+  - profile_id: LITERATURE_REVIEW
+    title_patterns: ['研究现状', '国内外', '文献综述']
+    required_inputs: [CLOSEST_PRIOR_WORK, EVIDENCE_CLAIM, LIMITATION_MECHANISM, RESEARCH_GAP]
+    acceptance_rules:
+      - 按问题和方法脉络比较代表性工作
+      - 每个不足说明适用条件与失效机制
+      - 综述结论直接导向本项目研究问题
+  - profile_id: NEED_ANALYSIS
+    title_patterns: ['需求分析', '场景', '系统边界']
+    required_inputs: [STAKEHOLDER, DEMAND, SCENARIO, SYSTEM_REQUIREMENT, SCOPE_BOUNDARY]
+    acceptance_rules:
+      - 区分业务需求、研究问题和工程功能
+      - 明确研究范围与非研究范围
+  - profile_id: KEY_ISSUE
+    title_patterns: ['关键科学问题', '关键问题', '技术难点']
+    required_inputs: [RESEARCH_GAP, RESEARCH_QUESTION, CENTRAL_PROPOSITION, ASSUMPTION]
+    acceptance_rules:
+      - 问题可研究、可验证、可证伪或可比较
+      - 不把接口、部署、数据字段等工程事项包装成科学问题
+  - profile_id: RESEARCH_OBJECTIVE
+    title_patterns: ['研究目标', '总体目标', '目标与考核']
+    required_inputs: [CENTRAL_PROPOSITION, RESEARCH_QUESTION, OBJECTIVE, SUCCESS_CRITERION]
+    acceptance_rules:
+      - 每个目标回答一个研究问题
+      - 原型系统仅作为验证载体或成果
+      - 指标有基线、条件和数据来源
+  - profile_id: RESEARCH_CONTENT
+    title_patterns: ['研究内容', '任务分解']
+    required_inputs: [OBJECTIVE, WORK_PACKAGE, METHOD, DELIVERABLE]
+    acceptance_rules:
+      - 每项任务具有问题、对象、方法、输出和依赖
+      - 任务边界不重叠且形成递进闭环
+      - 不把功能列表当研究内容
+  - profile_id: METHOD_AND_ALGORITHM
+    title_patterns: ['研究方案', '算法', '模型', '求解策略', '关键技术', '语义建模', '知识图谱', '协同机制', '路径', '调度', '重规划', '多目标']
+    required_inputs: [RESEARCH_QUESTION, FORMAL_MODEL, ASSUMPTION, DECISION_VARIABLE, OBJECTIVE_FUNCTION, CONSTRAINT, ALGORITHM_COMPONENT, THEORETICAL_PROPERTY]
+    acceptance_rules:
+      - 给出形式化问题、关键变量、约束和机制
+      - 说明为何方法能够解决对应问题
+      - 明确复杂度、收敛、可行性或经验验证路径
+  - profile_id: TECHNICAL_ROUTE
+    title_patterns: ['技术路线', '总体架构设计', '总体架构']
+    required_inputs: [WORK_PACKAGE, METHOD, DATA_RESOURCE, EXPERIMENT, DELIVERABLE]
+    acceptance_rules:
+      - 展示研究任务依赖和验证闭环
+      - 架构服务于研究问题，不以软件层次图替代技术路线
+  - profile_id: EVALUATION
+    title_patterns: ['测试', '评估', '验证', '实验']
+    required_inputs: [EVALUATION_QUESTION, BASELINE, DATASET, EXPERIMENT_DESIGN, ABLATION, SUCCESS_CRITERION]
+    acceptance_rules:
+      - 每项实验对应研究问题和可证伪判断
+      - 明确基线、数据规模、硬件、统计方法和消融
+      - 指标阈值有依据
+  - profile_id: INNOVATION
+    title_patterns: ['创新']
+    required_inputs: [CLOSEST_PRIOR_WORK, LIMITATION_MECHANISM, NOVEL_MECHANISM, EXPECTED_CONTRIBUTION]
+    acceptance_rules:
+      - 逐项对比最接近工作
+      - 创新说明新机制、作用链、适用条件和验证方式
+      - 一般系统集成不得包装为方法创新
+  - profile_id: OUTPUTS_AND_METRICS
+    title_patterns: ['预期成果', '应用价值', '绩效目标']
+    required_inputs: [DELIVERABLE, SUCCESS_CRITERION, METRIC, VALIDATION_EVIDENCE]
+    acceptance_rules:
+      - 区分研究贡献、工程成果和应用产出
+      - 每个指标具有口径、条件、基线和验证数据
+  - profile_id: RESEARCH_FOUNDATION
+    title_patterns: ['研究基础', '保障条件', '团队']
+    required_inputs: [PRELIMINARY_RESULT, ACHIEVEMENT, CAPABILITY, TEAM_MEMBER, RESOURCE_REQUIREMENT]
+    acceptance_rules:
+      - 每项能力由论文、项目、代码、数据或预实验支撑
+      - 不用泛化能力描述替代前期证据
+  - profile_id: PROGRESS_BUDGET_RISK
+    title_patterns: ['进度', '里程碑', '经费', '预算', '风险', '组织管理', '质量保证', '伦理', '合规']
+    required_inputs: [WORK_PACKAGE, SCHEDULE_PHASE, BUDGET_ITEM, RISK, COMPLIANCE_ITEM]
+    acceptance_rules:
+      - 进度、预算和风险均绑定具体任务
+      - 不重复技术方案正文
+  - profile_id: REFERENCES
+    title_patterns: ['参考文献']
+    required_inputs: [EVIDENCE_CLAIM, PUBLIC_SOURCE]
+    acceptance_rules:
+      - 文献元数据完整且与正文引用一一对应
+      - 不含未实际使用或无法核验的来源
+  - profile_id: APPENDIX
+    title_patterns: ['附录', '附件', '部署', '接口', '数据字典', 'Skill', 'Mermaid', '审计']
+    required_inputs: [SYSTEM_REQUIREMENT]
+    acceptance_rules:
+      - 工程和审计细节与主申请书分离
+      - 附录内容不反向主导研究主线

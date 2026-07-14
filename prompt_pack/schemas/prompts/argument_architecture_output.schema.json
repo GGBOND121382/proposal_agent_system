@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "argument_architecture_output.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-ARGUMENT-ARCHITECTURE"
+    },
+    "prompt_version": {
+      "const": "3.1.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "REVISE",
+        "NEED_USER_INPUT",
+        "BLOCK"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "argument_architecture": {
+          "$ref": "../common/argument_graph.schema.json"
+        },
+        "research_design_matrix": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "research_question_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "gap_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "objective_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "work_package_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "method_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "evaluation_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "innovation_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "foundation_evidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              },
+              "closest_prior_work_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "falsification_or_comparison_rule": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "research_question_id",
+              "gap_ids",
+              "objective_ids",
+              "work_package_ids",
+              "method_ids",
+              "evaluation_ids",
+              "innovation_ids",
+              "foundation_evidence_ids",
+              "closest_prior_work_ids",
+              "falsification_or_comparison_rule"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 4
+        },
+        "evidence_gap_report": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gap_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "required_node_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "blocking": {
+                "type": "boolean"
+              },
+              "suggested_source_or_question": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "gap_id",
+              "required_node_type",
+              "reason",
+              "blocking",
+              "suggested_source_or_question"
+            ]
+          }
+        },
+        "scope_decision": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "main_body_focus": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "appendix_topics": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "excluded_topics": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "main_body_focus",
+            "appendix_topics",
+            "excluded_topics"
+          ]
+        },
+        "readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ready": {
+              "type": "boolean"
+            },
+            "blocking_node_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "ready",
+            "blocking_node_ids",
+            "summary"
+          ]
+        }
+      },
+      "required": [
+        "argument_architecture",
+        "research_design_matrix",
+        "evidence_gap_report",
+        "scope_decision",
+        "readiness"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/finding.schema.json"
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/unresolved_item.schema.json"
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/user_question.schema.json"
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/source_ref.schema.json"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "status",
+    "result",
+    "findings",
+    "unresolved_items",
+    "user_questions",
+    "source_refs",
+    "warnings"
+  ]
+}

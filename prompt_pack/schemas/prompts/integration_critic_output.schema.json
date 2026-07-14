@@ -10,7 +10,7 @@
       "const": "P-INTEGRATION-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "status": {
       "type": "string",
@@ -161,6 +161,212 @@
               "reason"
             ]
           }
+        },
+        "quality_dimensions": {
+          "$ref": "../common/quality_scorecard.schema.json"
+        },
+        "central_proposition_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "central_proposition_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "covered": {
+              "type": "boolean"
+            },
+            "supporting_section_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "missing_links": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "central_proposition_id",
+            "covered",
+            "supporting_section_ids",
+            "missing_links"
+          ]
+        },
+        "document_type_drift": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "detected": {
+              "type": "boolean"
+            },
+            "main_body_term_hits": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "affected_section_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "terms": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "detected",
+            "main_body_term_hits",
+            "affected_section_ids",
+            "terms"
+          ]
+        },
+        "redundancy_report": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "exact_duplicate_groups": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "semantic_template_groups": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "affected_section_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "representative_signatures": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "duplicate_information_key_groups": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "claim_overconcentration_groups": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "template_skeleton_groups": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "exact_duplicate_groups",
+            "semantic_template_groups",
+            "affected_section_ids",
+            "representative_signatures",
+            "duplicate_information_key_groups",
+            "claim_overconcentration_groups",
+            "template_skeleton_groups"
+          ]
+        },
+        "page_budget_check": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "main_body_page_budget": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "estimated_main_body_pages": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "within_budget": {
+              "type": "boolean"
+            },
+            "overflow_section_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            }
+          },
+          "required": [
+            "main_body_page_budget",
+            "estimated_main_body_pages",
+            "within_budget",
+            "overflow_section_ids"
+          ]
+        },
+        "argument_chain_checks": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "chain_type": {
+                "type": "string",
+                "enum": [
+                  "GAP_TO_QUESTION",
+                  "QUESTION_TO_OBJECTIVE",
+                  "OBJECTIVE_TO_WORK_PACKAGE",
+                  "WORK_PACKAGE_TO_METHOD",
+                  "METHOD_TO_EVALUATION",
+                  "RESULT_TO_CONTRIBUTION"
+                ]
+              },
+              "source_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "target_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "minItems": 1
+              },
+              "complete": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "chain_type",
+              "source_ids",
+              "target_ids",
+              "complete",
+              "evidence"
+            ]
+          }
         }
       },
       "additionalProperties": false,
@@ -169,7 +375,13 @@
         "terminology_checks",
         "numeric_checks",
         "mapping_checks",
-        "routing_actions"
+        "routing_actions",
+        "quality_dimensions",
+        "central_proposition_coverage",
+        "document_type_drift",
+        "redundancy_report",
+        "page_budget_check",
+        "argument_chain_checks"
       ]
     },
     "findings": {

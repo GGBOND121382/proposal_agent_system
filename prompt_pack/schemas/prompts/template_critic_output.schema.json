@@ -10,7 +10,7 @@
       "const": "P-TEMPLATE-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "status": {
       "type": "string",
@@ -54,6 +54,47 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "logic_pattern_checks": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "dimension": {
+                "type": "string",
+                "enum": [
+                  "ARGUMENT_SEQUENCE",
+                  "SECTION_FUNCTION",
+                  "EXPRESSION_PATTERN",
+                  "ANTI_PATTERN_COVERAGE",
+                  "FACT_CONTAMINATION"
+                ]
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1
+              },
+              "blocking_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            },
+            "required": [
+              "dimension",
+              "passed",
+              "evidence",
+              "blocking_ids"
+            ]
+          }
         }
       },
       "additionalProperties": false,
@@ -61,7 +102,8 @@
         "verdict",
         "checked_component_ids",
         "contaminated_component_ids",
-        "missing_section_functions"
+        "missing_section_functions",
+        "logic_pattern_checks"
       ]
     },
     "findings": {

@@ -10,7 +10,7 @@
       "const": "P-REVISION-PLAN-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "status": {
       "type": "string",
@@ -62,6 +62,50 @@
             "minLength": 1,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           }
+        },
+        "architecture_checks": {
+          "type": "array",
+          "minItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "dimension": {
+                "type": "string",
+                "enum": [
+                  "CENTRAL_PROPOSITION",
+                  "QUESTION_COUNT",
+                  "WORK_PACKAGE_COUNT",
+                  "SECTION_PROFILE_MAPPING",
+                  "PAGE_BUDGET",
+                  "MAIN_BODY_ATTACHMENT_BOUNDARY",
+                  "CLAIM_COVERAGE",
+                  "REDUNDANCY_PREVENTION"
+                ]
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1
+              },
+              "blocking_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                }
+              }
+            },
+            "required": [
+              "dimension",
+              "passed",
+              "evidence",
+              "blocking_ids"
+            ]
+          }
         }
       },
       "additionalProperties": false,
@@ -70,7 +114,8 @@
         "checked_issue_ids",
         "checked_task_ids",
         "scope_excess_paths",
-        "unresolved_required_inputs"
+        "unresolved_required_inputs",
+        "architecture_checks"
       ]
     },
     "findings": {

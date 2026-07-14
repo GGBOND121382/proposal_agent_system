@@ -46,7 +46,13 @@
               "trace-001"
             ],
             "preserved_source_span": null,
-            "contains_unresolved_placeholder": false
+            "contains_unresolved_placeholder": false,
+            "primary_claim_id": "prop-001",
+            "evidence_ids": [
+              "gap-001"
+            ],
+            "novel_content_key": "p-001-unique",
+            "section_contract_id": "contract-sec-001"
           }
         ],
         "trace_links": [
@@ -69,7 +75,18 @@
             ]
           }
         ],
-        "unresolved_items": []
+        "unresolved_items": [],
+        "claim_advancement": {
+          "section_contract_id": "contract-sec-001",
+          "advanced_claim_ids": [
+            "prop-001"
+          ],
+          "new_information_keys": [
+            "p-001-unique"
+          ],
+          "distinguished_from_section_ids": [],
+          "section_contribution": "本章节推进章节合同规定的独有论证。"
+        }
       },
       "approved_blueprint": {
         "object_id": "obj-001",
@@ -238,7 +255,8 @@
           "内部用户"
         ],
         "policy_version": "2.0"
-      }
+      },
+      "prior_section_digest": []
     },
     "expected_output_schema": "schemas/prompts/write_critic_output.schema.json"
   },

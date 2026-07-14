@@ -139,7 +139,8 @@
               "items": {
                 "type": "string",
                 "minLength": 1
-              }
+              },
+              "minItems": 1
             },
             "allowed_context": {
               "type": "array",
@@ -157,7 +158,7 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "original_type": {
+                  "entity_type": {
                     "type": "string",
                     "minLength": 1
                   }
@@ -165,8 +166,15 @@
                 "additionalProperties": false,
                 "required": [
                   "placeholder",
-                  "original_type"
+                  "entity_type"
                 ]
+              }
+            },
+            "removed_fields": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "prohibited_inferences": {
@@ -183,6 +191,17 @@
                 "minLength": 1
               }
             },
+            "valid_until": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "security_level": {
               "const": "PUBLIC"
             }
@@ -195,8 +214,10 @@
             "queries",
             "allowed_context",
             "entity_placeholders",
+            "removed_fields",
             "prohibited_inferences",
             "prohibited_outputs",
+            "valid_until",
             "security_level"
           ]
         },

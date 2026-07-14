@@ -21,6 +21,7 @@ class PromptPack:
         self.models = expand_env(yaml.safe_load((root / "config/models.yaml").read_text(encoding="utf-8")))
         self.profiles = expand_env(yaml.safe_load((root / "config/prompt_model_profiles.yaml").read_text(encoding="utf-8")))
         self.routing = expand_env(yaml.safe_load((root / "policies/model_routing.yaml").read_text(encoding="utf-8")))
+        self.section_profiles = yaml.safe_load((root / "knowledge/section_profiles.yaml").read_text(encoding="utf-8"))
         self.shared_prompt = self._load_shared_prompt()
         self._schema_registry = self._build_schema_registry()
 
@@ -140,6 +141,37 @@ class PromptPack:
 
     def replay_output(self, prompt_id: str, case_type: str = "normal") -> dict[str, Any]:
         return copy.deepcopy(self.replay_case(prompt_id, case_type)["expected_output"])
+
+
+    def section_profile_for(self, title: str | None) -> dict[str, Any]:
+        normalized = str(title or "").strip()
+        # A title can match multiple patterns (for example ``总体技术路线``
+        # contains both ``技术路线`` and the broad algorithm keyword ``路径``).
+        # First-match routing silently assigned the wrong section contract.  Use
+        # deterministic specificity scoring: exact title > longer substring >
+        # earlier profile order.
+        matches: list[tuple[int, int, int, dict[str, Any]]] = []
+        for profile_index, profile in enumerate(self.section_profiles.get("profiles", [])):
+            for pattern in (str(item).strip() for item in profile.get("title_patterns", [])):
+                if not pattern or pattern not in normalized:
+                    continue
+                exact = int(pattern == normalized)
+                matches.append((exact, len(pattern), -profile_index, profile))
+        if matches:
+            profile = max(matches, key=lambda item: item[:3])[3]
+            return {
+                "profile_id": profile["profile_id"],
+                "version": str(profile.get("version", "3.0.0")),
+                "required_inputs": list(profile.get("required_inputs", [])),
+                "acceptance_rules": list(profile.get("acceptance_rules", [])),
+            }
+        profile = self.section_profiles["default_profile"]
+        return {
+            "profile_id": profile["profile_id"],
+            "version": str(profile.get("version", "3.0.0")),
+            "required_inputs": list(profile.get("required_inputs", [])),
+            "acceptance_rules": list(profile.get("acceptance_rules", [])),
+        }
 
     def model_profile(self, prompt_id: str) -> dict[str, Any]:
         profile_id = self.entry(prompt_id)["model_profile"]

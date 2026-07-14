@@ -7,40 +7,30 @@ import pytest
 
 from app.documents import parse_document
 from app.util import utc_now
-from tests.test_runtime import create_project, runtime
+from tests.test_runtime import add_standard_materials, create_project, finish_workflow, runtime
 
 def test_multi_section_authoring_and_real_candidate_aggregation(runtime):
     settings, pack, db, _, builder, _, engine, exporter = runtime
     project_id = create_project(db)
-    draft = "# 全文\nplaceholder\n# Section A\nwrite A\n# Section B\nwrite B\n# Section C\nwrite C\n".encode("utf-8")
-    parsed = parse_document("draft.md", draft, "CURRENT_PROPOSAL", "INTERNAL")
-    path = settings.uploads_dir / "draft.md"
-    path.write_bytes(draft)
-    db.execute(
-        "INSERT INTO documents(id,project_id,filename,role,security_level,document_hash,file_path,parsed_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        (parsed["document_id"], project_id, "draft.md", "CURRENT_PROPOSAL", "INTERNAL", parsed["document_hash"], str(path), json.dumps(parsed), utc_now()),
-    )
+    add_standard_materials(settings, db, project_id, current_sections=["立项依据", "研究内容", "研究方案"])
 
     async def finish(workflow_type: str):
-        wf = engine.start(project_id, workflow_type)
-        for _ in range(40):
-            wf = await engine.advance(wf["id"])
-            if wf["status"] == "WAITING_GATE":
-                gate = [g for g in engine.list_gates(workflow_id=wf["id"]) if g["status"] == "OPEN"][0]
-                action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
-                engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
-                continue
-            break
+        wf = await finish_workflow(engine, project_id, workflow_type)
         assert wf["status"] == "COMPLETED", wf["state"].get("last_error")
         return wf
 
-    authoring = asyncio.run(finish("WF-4_PROPOSAL_AUTHORING"))
+    async def prepare_and_author():
+        for workflow_type in ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION"]:
+            await finish(workflow_type)
+        return await finish("WF-4_PROPOSAL_AUTHORING")
+
+    authoring = asyncio.run(prepare_and_author())
     runs = db.fetchall(
         "SELECT input_json FROM prompt_runs WHERE workflow_id=? AND prompt_id='P-WRITE-CONTENT' AND status='PASS' ORDER BY created_at,id",
         (authoring["id"],),
     )
     titles = [json.loads(row["input_json"])["payload"]["source_section"]["title"] for row in runs]
-    assert titles == ["Section A", "Section B", "Section C"]
+    assert titles == ["立项依据", "研究内容", "研究方案"]
 
     integration_run = db.fetchone(
         "SELECT input_json FROM prompt_runs WHERE workflow_id=? AND prompt_id='P-INTEGRATION-CRITIC' ORDER BY created_at DESC LIMIT 1",

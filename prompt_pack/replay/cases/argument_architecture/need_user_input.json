@@ -1,0 +1,1054 @@
+{
+  "case_id": "argument_architecture-need_user_input",
+  "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+  "case_type": "need_user_input",
+  "description": "P-ARGUMENT-ARCHITECTURE need_user_input回放",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+    "prompt_version": "3.1.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "ARGUMENT_ARCHITECTURE",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "proposal_contract": {
+        "contract_id": "contract-001",
+        "document_type": "RESEARCH_PROPOSAL",
+        "funding_scheme": "测试计划",
+        "primary_evaluation_logic": "SCIENTIFIC_MERIT",
+        "target_evaluators": [
+          "同行专家"
+        ],
+        "max_main_pages": 35,
+        "max_core_research_questions": 3,
+        "mandatory_sections": [
+          "立项依据",
+          "研究目标",
+          "研究内容",
+          "研究方案",
+          "创新点",
+          "研究基础"
+        ],
+        "appendix_only_topics": [
+          "部署脚本",
+          "接口清单",
+          "审计日志",
+          "Prompt与Trace"
+        ],
+        "forbidden_main_body_topics": [
+          "安装步骤",
+          "运行日志",
+          "Manifest校验"
+        ],
+        "status": "CONFIRMED"
+      },
+      "project_subgraph": {
+        "item_ids": [
+          "item-001"
+        ],
+        "relation_ids": [],
+        "items": [
+          {
+            "item_id": "item-001",
+            "item_type": "OBJECTIVE",
+            "domain": "OBJECTIVES",
+            "content": {
+              "statement": "形成可验证能力。",
+              "baseline_state": "尚未形成",
+              "target_state": "形成原型能力",
+              "success_definition": "通过场景验证",
+              "out_of_scope": []
+            },
+            "knowledge_status": "CONFIRMED",
+            "owner_ref": null,
+            "source_refs": [
+              {
+                "source_id": "src-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认的示例内容",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ],
+            "security_level": "INTERNAL",
+            "locked": true,
+            "confidence": "HIGH",
+            "item_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "relations": []
+      },
+      "confirmed_facts": [],
+      "argument_graph_seed": {
+        "graph_id": "argument-001",
+        "central_proposition": {
+          "node_id": "prop-001",
+          "statement": "通过显式建模事件影响范围和计划稳定性，可以在动态运输场景中同时降低重规划时延与非必要方案扰动。",
+          "proposition_type": "TECHNICAL_PRINCIPLE",
+          "falsifiable_or_comparable": true,
+          "boundary_conditions": [
+            "动态订单、交通变化和有限运力场景"
+          ],
+          "source_refs": [
+            {
+              "source_id": "src-real-001",
+              "source_type": "USER_CONFIRMATION",
+              "document_version_id": null,
+              "section_id": null,
+              "span_start": null,
+              "span_end": null,
+              "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+              "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+              "authority_rank": 100,
+              "security_level": "INTERNAL"
+            }
+          ]
+        },
+        "research_questions": [
+          {
+            "node_id": "rq-001",
+            "statement": "如何把不完备业务语义转化为可验证的优化约束？",
+            "question_type": "TECHNICAL",
+            "linked_gap_ids": [
+              "gap-001"
+            ],
+            "answerability": "DESIGN_VERIFIABLE",
+            "success_evidence": [
+              "约束解析正确率和人工复核结果"
+            ]
+          },
+          {
+            "node_id": "rq-002",
+            "statement": "如何在动态事件下联合控制求解时延、方案质量和计划扰动？",
+            "question_type": "SCIENTIFIC",
+            "linked_gap_ids": [
+              "gap-001"
+            ],
+            "answerability": "COMPARABLE",
+            "success_evidence": [
+              "与滚动优化和全量重算基线比较"
+            ]
+          }
+        ],
+        "scope_boundaries": {
+          "in_scope": [
+            "运输任务分配、路径和动态重规划"
+          ],
+          "out_of_scope": [
+            "生产部署与运维细节作为主文研究内容"
+          ]
+        },
+        "nodes": [
+          {
+            "node_id": "gap-001",
+            "node_type": "RESEARCH_GAP",
+            "statement": "动态运输环境下，现有静态优化方法难以同时控制方案质量、响应时间和计划扰动。",
+            "status": "SUPPORTED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "prior-001",
+            "node_type": "CLOSEST_PRIOR_WORK",
+            "statement": "现有动态车辆路径和滚动优化方法能够处理事件更新，但对跨任务扰动传播的统一控制不足。",
+            "status": "SUPPORTED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "obj-001",
+            "node_type": "OBJECTIVE",
+            "statement": "建立面向动态事件的低扰动运输方案优化方法。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "wp-001",
+            "node_type": "WORK_PACKAGE",
+            "statement": "研究不完备业务语义到可验证优化约束的映射。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "wp-002",
+            "node_type": "WORK_PACKAGE",
+            "statement": "研究动态事件下的增量求解与低扰动重规划。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "method-001",
+            "node_type": "FORMAL_MODEL",
+            "statement": "构建含时效、成本、资源与扰动代价的多目标组合优化模型。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "exp-001",
+            "node_type": "EXPERIMENT_DESIGN",
+            "statement": "在静态、动态和故障场景下与代表性基线比较。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "innov-001",
+            "node_type": "NOVEL_MECHANISM",
+            "statement": "通过影响子图和稳定性代价联合约束重规划范围。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "foundation-001",
+            "node_type": "TEAM_EVIDENCE",
+            "statement": "已有相关优化算法与原型验证材料。",
+            "status": "SUPPORTED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "edge_id": "edge-001",
+            "source_id": "gap-001",
+            "relation": "MOTIVATES",
+            "target_id": "rq-001",
+            "rationale": "差距产生约束映射问题"
+          },
+          {
+            "edge_id": "edge-002",
+            "source_id": "gap-001",
+            "relation": "MOTIVATES",
+            "target_id": "rq-002",
+            "rationale": "动态差距产生重规划问题"
+          },
+          {
+            "edge_id": "edge-003",
+            "source_id": "prop-001",
+            "relation": "SUPPORTED_BY",
+            "target_id": "wp-002",
+            "rationale": "任务验证中心命题"
+          },
+          {
+            "edge_id": "edge-004",
+            "source_id": "wp-002",
+            "relation": "USES",
+            "target_id": "method-001",
+            "rationale": "任务使用形式化模型"
+          },
+          {
+            "edge_id": "edge-005",
+            "source_id": "method-001",
+            "relation": "VALIDATED_BY",
+            "target_id": "exp-001",
+            "rationale": "实验验证方法"
+          },
+          {
+            "edge_id": "edge-006",
+            "source_id": "rq-001",
+            "relation": "ADDRESSED_BY",
+            "target_id": "obj-001",
+            "rationale": "研究问题对应项目目标"
+          },
+          {
+            "edge_id": "edge-007",
+            "source_id": "rq-002",
+            "relation": "ADDRESSED_BY",
+            "target_id": "obj-001",
+            "rationale": "研究问题对应项目目标"
+          },
+          {
+            "edge_id": "edge-008",
+            "source_id": "obj-001",
+            "relation": "DECOMPOSES_TO",
+            "target_id": "wp-001",
+            "rationale": "目标分解为任务"
+          },
+          {
+            "edge_id": "edge-009",
+            "source_id": "obj-001",
+            "relation": "DECOMPOSES_TO",
+            "target_id": "wp-002",
+            "rationale": "目标分解为任务"
+          },
+          {
+            "edge_id": "edge-010",
+            "source_id": "prior-001",
+            "relation": "CONTRASTS_WITH",
+            "target_id": "innov-001",
+            "rationale": "创新以最近工作为比较基线"
+          },
+          {
+            "edge_id": "edge-011",
+            "source_id": "foundation-001",
+            "relation": "SUPPORTS",
+            "target_id": "wp-002",
+            "rationale": "前期基础支撑任务可行性"
+          },
+          {
+            "edge_id": "edge-012",
+            "source_id": "exp-001",
+            "relation": "EVIDENCES",
+            "target_id": "innov-001",
+            "rationale": "实验结果用于验证新增机制"
+          }
+        ]
+      },
+      "template_context": {
+        "template_id": "tpl-001",
+        "global_argument": "问题到方案到验证",
+        "components": [
+          {
+            "component_id": "comp-001",
+            "section_role": "研究内容",
+            "input_requirements": [
+              "目标",
+              "任务"
+            ],
+            "output_function": "形成任务分解",
+            "paragraph_patterns": [
+              "总分结构"
+            ],
+            "forbidden_project_facts": [
+              "项目名称"
+            ]
+          }
+        ],
+        "format_rules": [
+          "使用标题1"
+        ],
+        "applicability": [
+          "科研申请书"
+        ],
+        "argument_patterns": [
+          {
+            "pattern_id": "arg-001",
+            "name": "差距到命题",
+            "sequence": [
+              "已有能力",
+              "局限机制",
+              "本项目命题"
+            ],
+            "applicable_profiles": [
+              "BACKGROUND_AND_SIGNIFICANCE",
+              "LITERATURE_REVIEW"
+            ],
+            "evidence": "参考文档结构证据"
+          },
+          {
+            "pattern_id": "arg-002",
+            "name": "问题到验证",
+            "sequence": [
+              "研究问题",
+              "方法机制",
+              "验证证据"
+            ],
+            "applicable_profiles": [
+              "RESEARCH_CONTENT",
+              "METHOD_AND_ALGORITHM"
+            ],
+            "evidence": "参考文档结构证据"
+          },
+          {
+            "pattern_id": "arg-003",
+            "name": "最近工作到创新",
+            "sequence": [
+              "最近工作",
+              "局限",
+              "新增机制",
+              "可比较结果"
+            ],
+            "applicable_profiles": [
+              "INNOVATION"
+            ],
+            "evidence": "参考文档结构证据"
+          }
+        ],
+        "expression_patterns": [
+          {
+            "pattern_id": "expr-001",
+            "function": "问题收束",
+            "description": "由宽背景收束到具体机制缺口",
+            "safe_example": "现有方法能够处理一般情形，但在特定边界下仍受限。",
+            "anti_copy_rule": "不得复制实体和数字"
+          },
+          {
+            "pattern_id": "expr-002",
+            "function": "创新对比",
+            "description": "以最近工作为基线说明新增机制",
+            "safe_example": "与已有机制相比，本项目增加可验证的约束。",
+            "anti_copy_rule": "不得复制技术内容"
+          },
+          {
+            "pattern_id": "expr-003",
+            "function": "方法可行性",
+            "description": "用基础和验证路径支撑方法",
+            "safe_example": "已有结果支持关键环节可行，后续将通过对照实验检验。",
+            "anti_copy_rule": "不得复制成果"
+          }
+        ],
+        "quality_anti_patterns": [
+          {
+            "code": "anti-001",
+            "description": "背景铺陈过长",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          },
+          {
+            "code": "anti-002",
+            "description": "技术名词堆叠",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          },
+          {
+            "code": "anti-003",
+            "description": "系统说明替代研究",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          },
+          {
+            "code": "anti-004",
+            "description": "指标无基线",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          },
+          {
+            "code": "anti-005",
+            "description": "重复六段式",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          }
+        ]
+      },
+      "current_sections": [
+        {
+          "section_id": "sec-001",
+          "section_key": "research_content",
+          "title": "研究内容",
+          "level": 1,
+          "text": "现有正文示例。",
+          "text_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "block_ids": [
+            "block-001"
+          ],
+          "contains_table": false,
+          "contains_formula": false,
+          "contains_image": false,
+          "contains_comment": false,
+          "contains_revision": false,
+          "security_level": "INTERNAL"
+        }
+      ],
+      "task_instruction": {
+        "schema_version": "2.0",
+        "task_instruction_id": "ti-001",
+        "task_type": "SUBSTANTIVE_REVISION",
+        "objective": "完善研究内容",
+        "target_section_ids": [
+          "sec-001"
+        ],
+        "specific_requirements": [
+          "目标与任务对应"
+        ],
+        "must_preserve": [
+          "现有三项任务"
+        ],
+        "forbidden_changes": [
+          "不得新增未确认技术"
+        ],
+        "acceptance_preferences": [
+          "结构清晰"
+        ],
+        "priority_order": [
+          "事实准确",
+          "范围受控"
+        ],
+        "instruction_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "revision_findings": []
+    },
+    "expected_output_schema": "schemas/prompts/revision_plan_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+    "prompt_version": "3.1.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "argument_architecture": {
+        "graph_id": "argument-001",
+        "central_proposition": {
+          "node_id": "prop-001",
+          "statement": "通过显式建模事件影响范围和计划稳定性，可以在动态运输场景中同时降低重规划时延与非必要方案扰动。",
+          "proposition_type": "TECHNICAL_PRINCIPLE",
+          "falsifiable_or_comparable": true,
+          "boundary_conditions": [
+            "动态订单、交通变化和有限运力场景"
+          ],
+          "source_refs": [
+            {
+              "source_id": "src-real-001",
+              "source_type": "USER_CONFIRMATION",
+              "document_version_id": null,
+              "section_id": null,
+              "span_start": null,
+              "span_end": null,
+              "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+              "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+              "authority_rank": 100,
+              "security_level": "INTERNAL"
+            }
+          ]
+        },
+        "research_questions": [
+          {
+            "node_id": "rq-001",
+            "statement": "如何把不完备业务语义转化为可验证的优化约束？",
+            "question_type": "TECHNICAL",
+            "linked_gap_ids": [
+              "gap-001"
+            ],
+            "answerability": "DESIGN_VERIFIABLE",
+            "success_evidence": [
+              "约束解析正确率和人工复核结果"
+            ]
+          },
+          {
+            "node_id": "rq-002",
+            "statement": "如何在动态事件下联合控制求解时延、方案质量和计划扰动？",
+            "question_type": "SCIENTIFIC",
+            "linked_gap_ids": [
+              "gap-001"
+            ],
+            "answerability": "COMPARABLE",
+            "success_evidence": [
+              "与滚动优化和全量重算基线比较"
+            ]
+          }
+        ],
+        "scope_boundaries": {
+          "in_scope": [
+            "运输任务分配、路径和动态重规划"
+          ],
+          "out_of_scope": [
+            "生产部署与运维细节作为主文研究内容"
+          ]
+        },
+        "nodes": [
+          {
+            "node_id": "gap-001",
+            "node_type": "RESEARCH_GAP",
+            "statement": "动态运输环境下，现有静态优化方法难以同时控制方案质量、响应时间和计划扰动。",
+            "status": "SUPPORTED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "prior-001",
+            "node_type": "CLOSEST_PRIOR_WORK",
+            "statement": "现有动态车辆路径和滚动优化方法能够处理事件更新，但对跨任务扰动传播的统一控制不足。",
+            "status": "SUPPORTED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "obj-001",
+            "node_type": "OBJECTIVE",
+            "statement": "建立面向动态事件的低扰动运输方案优化方法。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "wp-001",
+            "node_type": "WORK_PACKAGE",
+            "statement": "研究不完备业务语义到可验证优化约束的映射。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "wp-002",
+            "node_type": "WORK_PACKAGE",
+            "statement": "研究动态事件下的增量求解与低扰动重规划。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "method-001",
+            "node_type": "FORMAL_MODEL",
+            "statement": "构建含时效、成本、资源与扰动代价的多目标组合优化模型。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "exp-001",
+            "node_type": "EXPERIMENT_DESIGN",
+            "statement": "在静态、动态和故障场景下与代表性基线比较。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "innov-001",
+            "node_type": "NOVEL_MECHANISM",
+            "statement": "通过影响子图和稳定性代价联合约束重规划范围。",
+            "status": "PLANNED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          },
+          {
+            "node_id": "foundation-001",
+            "node_type": "TEAM_EVIDENCE",
+            "statement": "已有相关优化算法与原型验证材料。",
+            "status": "SUPPORTED",
+            "source_refs": [
+              {
+                "source_id": "src-real-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认研究动态运输方案优化的核心问题与验证边界。",
+                "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "edge_id": "edge-001",
+            "source_id": "gap-001",
+            "relation": "MOTIVATES",
+            "target_id": "rq-001",
+            "rationale": "差距产生约束映射问题"
+          },
+          {
+            "edge_id": "edge-002",
+            "source_id": "gap-001",
+            "relation": "MOTIVATES",
+            "target_id": "rq-002",
+            "rationale": "动态差距产生重规划问题"
+          },
+          {
+            "edge_id": "edge-003",
+            "source_id": "prop-001",
+            "relation": "SUPPORTED_BY",
+            "target_id": "wp-002",
+            "rationale": "任务验证中心命题"
+          },
+          {
+            "edge_id": "edge-004",
+            "source_id": "wp-002",
+            "relation": "USES",
+            "target_id": "method-001",
+            "rationale": "任务使用形式化模型"
+          },
+          {
+            "edge_id": "edge-005",
+            "source_id": "method-001",
+            "relation": "VALIDATED_BY",
+            "target_id": "exp-001",
+            "rationale": "实验验证方法"
+          },
+          {
+            "edge_id": "edge-006",
+            "source_id": "rq-001",
+            "relation": "ADDRESSED_BY",
+            "target_id": "obj-001",
+            "rationale": "研究问题对应项目目标"
+          },
+          {
+            "edge_id": "edge-007",
+            "source_id": "rq-002",
+            "relation": "ADDRESSED_BY",
+            "target_id": "obj-001",
+            "rationale": "研究问题对应项目目标"
+          },
+          {
+            "edge_id": "edge-008",
+            "source_id": "obj-001",
+            "relation": "DECOMPOSES_TO",
+            "target_id": "wp-001",
+            "rationale": "目标分解为任务"
+          },
+          {
+            "edge_id": "edge-009",
+            "source_id": "obj-001",
+            "relation": "DECOMPOSES_TO",
+            "target_id": "wp-002",
+            "rationale": "目标分解为任务"
+          },
+          {
+            "edge_id": "edge-010",
+            "source_id": "prior-001",
+            "relation": "CONTRASTS_WITH",
+            "target_id": "innov-001",
+            "rationale": "创新以最近工作为比较基线"
+          },
+          {
+            "edge_id": "edge-011",
+            "source_id": "foundation-001",
+            "relation": "SUPPORTS",
+            "target_id": "wp-002",
+            "rationale": "前期基础支撑任务可行性"
+          },
+          {
+            "edge_id": "edge-012",
+            "source_id": "exp-001",
+            "relation": "EVIDENCES",
+            "target_id": "innov-001",
+            "rationale": "实验结果用于验证新增机制"
+          }
+        ]
+      },
+      "research_design_matrix": [
+        {
+          "research_question_id": "rq-001",
+          "gap_ids": [
+            "gap-001"
+          ],
+          "objective_ids": [
+            "obj-001"
+          ],
+          "work_package_ids": [
+            "wp-001"
+          ],
+          "method_ids": [
+            "method-001"
+          ],
+          "evaluation_ids": [
+            "exp-001"
+          ],
+          "innovation_ids": [
+            "innov-001"
+          ],
+          "foundation_evidence_ids": [
+            "foundation-001"
+          ],
+          "closest_prior_work_ids": [
+            "prior-001"
+          ],
+          "falsification_or_comparison_rule": "在统一数据、硬件和时间预算下与最近工作比较，并通过消融检验新增机制。"
+        },
+        {
+          "research_question_id": "rq-002",
+          "gap_ids": [
+            "gap-001"
+          ],
+          "objective_ids": [
+            "obj-001"
+          ],
+          "work_package_ids": [
+            "wp-002"
+          ],
+          "method_ids": [
+            "method-001"
+          ],
+          "evaluation_ids": [
+            "exp-001"
+          ],
+          "innovation_ids": [
+            "innov-001"
+          ],
+          "foundation_evidence_ids": [
+            "foundation-001"
+          ],
+          "closest_prior_work_ids": [
+            "prior-001"
+          ],
+          "falsification_or_comparison_rule": "在统一数据、硬件和时间预算下与最近工作比较，并通过消融检验新增机制。"
+        }
+      ],
+      "evidence_gap_report": [],
+      "scope_decision": {
+        "main_body_focus": [
+          "研究差距",
+          "研究问题",
+          "形式化方法",
+          "对照与消融验证",
+          "创新与可行性"
+        ],
+        "appendix_topics": [
+          "部署",
+          "接口",
+          "Prompt与Trace"
+        ],
+        "excluded_topics": [
+          "安装步骤作为正文研究内容"
+        ]
+      },
+      "readiness": {
+        "ready": true,
+        "blocking_node_ids": [],
+        "summary": "核心论证链、研究设计矩阵和证据关系完整。"
+      }
+    },
+    "findings": [],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

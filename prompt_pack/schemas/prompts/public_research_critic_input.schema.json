@@ -203,8 +203,41 @@
             "source_comparisons": {
               "type": "array",
               "items": {
-                "type": "string",
-                "minLength": 1
+                "type": "object",
+                "properties": {
+                  "topic": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    },
+                    "minItems": 2
+                  },
+                  "agreement": {
+                    "type": "string",
+                    "enum": [
+                      "AGREE",
+                      "PARTIAL",
+                      "CONFLICT"
+                    ]
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "topic",
+                  "source_ids",
+                  "agreement",
+                  "summary"
+                ]
               }
             },
             "conflicts": {
@@ -220,6 +253,10 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "coverage_summary": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "additionalProperties": false,
@@ -227,7 +264,8 @@
             "claims",
             "source_comparisons",
             "conflicts",
-            "limitations"
+            "limitations",
+            "coverage_summary"
           ]
         },
         "retrieved_sources": {

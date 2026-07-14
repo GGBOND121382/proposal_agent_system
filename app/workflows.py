@@ -36,12 +36,61 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             "repair_overrides": {},
             "public_search_results": None,
         }
+        prerequisite_error = self._workflow_prerequisite_error(project_id, workflow_type, options or {})
+        status = "BLOCKED" if prerequisite_error else "RUNNING"
+        if prerequisite_error:
+            state["last_error"] = prerequisite_error
         self.db.execute(
             "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-            (workflow_id, project_id, workflow_type, "RUNNING", 0, json.dumps(state, ensure_ascii=False), now, now),
+            (workflow_id, project_id, workflow_type, status, 0, json.dumps(state, ensure_ascii=False), now, now),
         )
         self.db.audit("WORKFLOW_STARTED", project_id=project_id, object_id=workflow_id, metadata={"workflow_type": workflow_type})
         return self.get(workflow_id)
+
+    def _workflow_prerequisite_error(self, project_id: str, workflow_type: str, options: dict[str, Any]) -> str | None:
+        required: list[str] = []
+        if workflow_type == "WF-3_HYBRID_ONLINE_ASSIST":
+            required = ["WF-1_PROJECT_INTAKE"]
+        elif workflow_type == "WF-4_PROPOSAL_AUTHORING":
+            required = ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION"]
+            project = self.db.fetchone("SELECT config_json FROM projects WHERE id=?", (project_id,)) or {}
+            config = json.loads(project.get("config_json") or "{}")
+            if bool(options.get("require_public_research", config.get("require_public_research", False))):
+                required.append("WF-3_HYBRID_ONLINE_ASSIST")
+        elif workflow_type == "WF-5_SECURITY_REVIEW_AND_EXPORT":
+            required = ["WF-4_PROPOSAL_AUTHORING"]
+        missing = []
+        for required_type in required:
+            row = self.db.fetchone(
+                "SELECT id FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC LIMIT 1",
+                (project_id, required_type),
+            )
+            if not row:
+                missing.append(required_type)
+        if missing:
+            return "工作流前置条件未满足：" + "、".join(missing) + "。不得使用Replay样例或空上下文代替已完成的前序结果。"
+        return None
+
+
+    @staticmethod
+    def _has_nonconfirmable_quality_failure(output: dict[str, Any]) -> bool:
+        """Return true when confirmation cannot repair the generated object.
+
+        QG findings are produced by deterministic proposal-quality validation.  A
+        human may supply missing source material or make an explicit project
+        decision, but merely confirming the unchanged model output cannot repair
+        cloned plans, incomplete critic coverage, document-type drift or invalid
+        source mappings.
+        """
+        for item in output.get("findings", []):
+            if not isinstance(item, dict) or not str(item.get("code", "")).startswith("QG_"):
+                continue
+            if not item.get("blocking", True):
+                continue
+            suggested = str(item.get("suggested_route") or "")
+            if suggested not in {"USER", "PROJECT_OWNER"}:
+                return True
+        return False
 
     def get(self, workflow_id: str) -> dict[str, Any]:
         row = self.db.fetchone("SELECT * FROM workflows WHERE id=?", (workflow_id,))
@@ -104,10 +153,26 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             if result["status"] == "BLOCK":
                 self._update(wf, status="BLOCKED", state=state)
                 return self.get(workflow_id)
+            if prompt_id == "P-INTEGRATION-CRITIC" and result["status"] == "REVISE":
+                repair_state = self._prepare_integration_repair(wf, state, output)
+                if repair_state == "SCHEDULED":
+                    wf = self.get(workflow_id)
+                    state = wf["state"]
+                    continue
+                if repair_state == "EXHAUSTED":
+                    return self.get(workflow_id)
             if result["status"] == "REVISE" and self._can_auto_repair(prompt_id, state):
                 repaired = await self._auto_repair(wf, prompt_id, envelope, output, state)
                 if repaired:
                     continue
+            if result["status"] == "REVISE" and self._has_nonconfirmable_quality_failure(output):
+                codes = [str(item.get("code")) for item in output.get("findings", []) if str(item.get("code", "")).startswith("QG_")]
+                state["last_error"] = (
+                    f"{prompt_id} 未通过确定性质量校验：" + "、".join(codes[:8])
+                    + "。该问题必须由对应生产/审查阶段重新生成或补充证据，不能通过人工空确认覆盖。"
+                )
+                self._update(wf, status="BLOCKED", state=state)
+                return self.get(workflow_id)
             if result["status"] in {"REVISE", "NEED_USER_INPUT"}:
                 gate_type = self.pack.entry(prompt_id).get("next_human_gate") or "PROJECT_GAP_RESOLUTION"
                 self._create_gate(wf, gate_type, target_id=result["run_id"], questions=output.get("user_questions", []))

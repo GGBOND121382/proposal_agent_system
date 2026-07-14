@@ -47,6 +47,28 @@
     },
     "contains_unresolved_placeholder": {
       "type": "boolean"
+    },
+    "primary_claim_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "novel_content_key": {
+      "type": "string",
+      "minLength": 8
+    },
+    "section_contract_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
     }
   },
   "additionalProperties": false,
@@ -58,6 +80,10 @@
     "blueprint_paragraph_id",
     "trace_link_ids",
     "preserved_source_span",
-    "contains_unresolved_placeholder"
+    "contains_unresolved_placeholder",
+    "primary_claim_id",
+    "evidence_ids",
+    "novel_content_key",
+    "section_contract_id"
   ]
 }

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prior_section_digest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "section_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "advanced_claim_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "new_information_keys": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 8
+      }
+    },
+    "paragraph_roles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sentence_signatures": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 8
+      }
+    }
+  },
+  "required": [
+    "section_id",
+    "title",
+    "advanced_claim_ids",
+    "new_information_keys",
+    "paragraph_roles",
+    "sentence_signatures"
+  ]
+}

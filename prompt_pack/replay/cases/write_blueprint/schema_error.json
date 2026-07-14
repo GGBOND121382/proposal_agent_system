@@ -182,7 +182,9 @@
           "内部用户"
         ],
         "policy_version": "2.0"
-      }
+      },
+      "prior_section_digest": [],
+      "revision_findings": []
     },
     "expected_output_schema": "schemas/prompts/write_blueprint_output.schema.json"
   },

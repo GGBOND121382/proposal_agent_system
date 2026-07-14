@@ -123,7 +123,7 @@
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-TEMPLATE-EXTRACT",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "status": "PASS",
     "result": {
       "template": {
@@ -151,6 +151,105 @@
         ],
         "applicability": [
           "科研申请书"
+        ],
+        "argument_patterns": [
+          {
+            "pattern_id": "arg-001",
+            "name": "差距到命题",
+            "sequence": [
+              "已有能力",
+              "局限机制",
+              "本项目命题"
+            ],
+            "applicable_profiles": [
+              "BACKGROUND_AND_SIGNIFICANCE",
+              "LITERATURE_REVIEW"
+            ],
+            "evidence": "参考文档结构证据"
+          },
+          {
+            "pattern_id": "arg-002",
+            "name": "问题到验证",
+            "sequence": [
+              "研究问题",
+              "方法机制",
+              "验证证据"
+            ],
+            "applicable_profiles": [
+              "RESEARCH_CONTENT",
+              "METHOD_AND_ALGORITHM"
+            ],
+            "evidence": "参考文档结构证据"
+          },
+          {
+            "pattern_id": "arg-003",
+            "name": "最近工作到创新",
+            "sequence": [
+              "最近工作",
+              "局限",
+              "新增机制",
+              "可比较结果"
+            ],
+            "applicable_profiles": [
+              "INNOVATION"
+            ],
+            "evidence": "参考文档结构证据"
+          }
+        ],
+        "expression_patterns": [
+          {
+            "pattern_id": "expr-001",
+            "function": "问题收束",
+            "description": "由宽背景收束到具体机制缺口",
+            "safe_example": "现有方法能够处理一般情形，但在特定边界下仍受限。",
+            "anti_copy_rule": "不得复制实体和数字"
+          },
+          {
+            "pattern_id": "expr-002",
+            "function": "创新对比",
+            "description": "以最近工作为基线说明新增机制",
+            "safe_example": "与已有机制相比，本项目增加可验证的约束。",
+            "anti_copy_rule": "不得复制技术内容"
+          },
+          {
+            "pattern_id": "expr-003",
+            "function": "方法可行性",
+            "description": "用基础和验证路径支撑方法",
+            "safe_example": "已有结果支持关键环节可行，后续将通过对照实验检验。",
+            "anti_copy_rule": "不得复制成果"
+          }
+        ],
+        "quality_anti_patterns": [
+          {
+            "code": "anti-001",
+            "description": "背景铺陈过长",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          },
+          {
+            "code": "anti-002",
+            "description": "技术名词堆叠",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          },
+          {
+            "code": "anti-003",
+            "description": "系统说明替代研究",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          },
+          {
+            "code": "anti-004",
+            "description": "指标无基线",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          },
+          {
+            "code": "anti-005",
+            "description": "重复六段式",
+            "detection_hint": "检测模板化文本",
+            "repair_rule": "删除并按论证功能重写"
+          }
         ]
       },
       "source_fact_exclusions": [

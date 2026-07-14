@@ -19,7 +19,7 @@
 - `config/model_endpoints.yaml`：端点环境、安全等级、数据和网络政策；
 - `config/models.yaml`：模型实例和能力；
 - `config/prompt_model_profiles.yaml`：抽取、Critic、规划、写作等参数；
-- `config/prompt_registry.json`：26个Prompt到文件、Schema和Profile的映射；
+- `config/prompt_registry.json`：30个Prompt到文件、Schema和Profile的映射；
 - `policies/model_routing.yaml`：默认拒绝的模型路由。
 
 离线模型失败时不得自动切换在线模型。CI应使用Mock或Replay，禁止默认真实API调用。

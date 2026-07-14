@@ -1,5 +1,5 @@
 {
-  "version": "2.0",
+  "version": "2.1",
   "cases": [
     {
       "prompt_id": "P-SECURITY-CLASSIFY",
@@ -780,6 +780,126 @@
       "case_type": "need_user_input",
       "status": "IMPLEMENTED",
       "fixture_path": "replay/cases/targeted_repair/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture/normal.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture/missing_input.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture/schema_error.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture/high_risk.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture_critic/normal.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture_critic/missing_input.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture_critic/schema_error.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture_critic/high_risk.json"
+    },
+    {
+      "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/argument_architecture_critic/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-POLISH",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_polish/normal.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-POLISH",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_polish/missing_input.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-POLISH",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_polish/schema_error.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-POLISH",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_polish/high_risk.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-POLISH",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_polish/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-CRITIC",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_critic/normal.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-CRITIC",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_critic/missing_input.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-CRITIC",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_critic/schema_error.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-CRITIC",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_critic/high_risk.json"
+    },
+    {
+      "prompt_id": "P-EXPRESSION-CRITIC",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/expression_critic/need_user_input.json"
     }
   ]
 }

@@ -176,6 +176,85 @@
               "items": {
                 "$ref": "../common/unresolved_item.schema.json"
               }
+            },
+            "source_preservation_summary": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source_span": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "PRESERVED",
+                      "REPHRASED",
+                      "REPLACED",
+                      "REMOVED"
+                    ]
+                  },
+                  "paragraph_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "source_span",
+                  "action",
+                  "paragraph_id"
+                ]
+              }
+            },
+            "claim_advancement": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "section_contract_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "advanced_claim_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "minItems": 1
+                },
+                "new_information_keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 8
+                  },
+                  "minItems": 1
+                },
+                "distinguished_from_section_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  }
+                },
+                "section_contribution": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "section_contract_id",
+                "advanced_claim_ids",
+                "new_information_keys",
+                "distinguished_from_section_ids",
+                "section_contribution"
+              ]
             }
           },
           "additionalProperties": false,
@@ -185,11 +264,199 @@
             "paragraphs",
             "trace_links",
             "term_usage",
-            "unresolved_items"
+            "unresolved_items",
+            "source_preservation_summary",
+            "claim_advancement"
           ]
         },
         "approved_blueprint": {
-          "$ref": "../common/object_ref.schema.json"
+          "type": "object",
+          "properties": {
+            "blueprint_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "section_objective": {
+              "type": "string",
+              "minLength": 1
+            },
+            "paragraphs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "paragraph_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "sequence": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "function": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "must_answer": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "fact_slots": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  },
+                  "project_item_slots": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  },
+                  "technical_slots": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  },
+                  "metric_slots": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  },
+                  "source_strategy": {
+                    "type": "string",
+                    "enum": [
+                      "PRESERVE",
+                      "REPLACE",
+                      "INSERT",
+                      "MERGE"
+                    ]
+                  },
+                  "forbidden_content": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "transition_requirement": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "argument_role": {
+                    "type": "string",
+                    "enum": [
+                      "CONTEXT",
+                      "PROBLEM",
+                      "EVIDENCE",
+                      "GAP",
+                      "LIMITATION_MECHANISM",
+                      "CENTRAL_CLAIM",
+                      "RESEARCH_QUESTION",
+                      "METHOD",
+                      "WARRANT",
+                      "COUNTERARGUMENT",
+                      "BOUNDARY",
+                      "EVALUATION",
+                      "CONTRIBUTION",
+                      "TRANSITION"
+                    ]
+                  },
+                  "primary_claim_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "required_evidence_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                    }
+                  },
+                  "novel_content_key": {
+                    "type": "string",
+                    "minLength": 8
+                  },
+                  "word_budget": {
+                    "type": "integer",
+                    "minimum": 40,
+                    "maximum": 2000
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "paragraph_id",
+                  "sequence",
+                  "function",
+                  "must_answer",
+                  "fact_slots",
+                  "project_item_slots",
+                  "technical_slots",
+                  "metric_slots",
+                  "source_strategy",
+                  "forbidden_content",
+                  "transition_requirement",
+                  "argument_role",
+                  "primary_claim_id",
+                  "required_evidence_ids",
+                  "novel_content_key",
+                  "word_budget"
+                ]
+              },
+              "minItems": 1
+            },
+            "unresolved_slot_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "section_profile_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "section_contract_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "blueprint_id",
+            "section_objective",
+            "paragraphs",
+            "unresolved_slot_ids",
+            "section_profile_id",
+            "section_contract_id"
+          ]
         },
         "source_section": {
           "$ref": "../common/document_section.schema.json"
@@ -291,6 +558,26 @@
         },
         "security_constraints": {
           "$ref": "../common/security_context.schema.json"
+        },
+        "proposal_contract": {
+          "$ref": "../common/proposal_contract.schema.json"
+        },
+        "argument_graph": {
+          "$ref": "../common/argument_graph.schema.json"
+        },
+        "narrative_architecture": {
+          "type": "object",
+          "minProperties": 5
+        },
+        "section_contract": {
+          "$ref": "../common/section_contract.schema.json"
+        },
+        "prior_section_digest": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/prior_section_digest.schema.json"
+          },
+          "description": "已完成章节的结构化语义推进摘要，用于跨章节唯一性检查。"
         }
       },
       "additionalProperties": false,
@@ -304,7 +591,12 @@
         "metric_inputs",
         "section_profile",
         "task_instruction",
-        "security_constraints"
+        "security_constraints",
+        "proposal_contract",
+        "argument_graph",
+        "narrative_architecture",
+        "section_contract",
+        "prior_section_digest"
       ]
     },
     "expected_output_schema": {

@@ -10,7 +10,7 @@
       "const": "P-PROJECT-DEFINITION-EXTRACT"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "status": {
       "type": "string",
@@ -80,13 +80,21 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "proposal_contract": {
+          "$ref": "../common/proposal_contract.schema.json"
+        },
+        "argument_graph_seed": {
+          "$ref": "../common/argument_graph.schema.json"
         }
       },
       "additionalProperties": false,
       "required": [
         "project_definition",
         "extraction_coverage",
-        "unmapped_source_spans"
+        "unmapped_source_spans",
+        "proposal_contract",
+        "argument_graph_seed"
       ]
     },
     "findings": {

@@ -250,6 +250,19 @@
         },
         "security_constraints": {
           "$ref": "../common/security_context.schema.json"
+        },
+        "proposal_contract": {
+          "$ref": "../common/proposal_contract.schema.json"
+        },
+        "argument_graph": {
+          "$ref": "../common/argument_graph.schema.json"
+        },
+        "revision_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/finding.schema.json"
+          },
+          "description": "来自上一轮全篇审查、需要当前上游阶段处理的结构化意见；首次运行时为空数组。"
         }
       },
       "additionalProperties": false,
@@ -263,7 +276,10 @@
         "linked_sections",
         "template_context",
         "section_profile",
-        "security_constraints"
+        "security_constraints",
+        "proposal_contract",
+        "argument_graph",
+        "revision_findings"
       ]
     },
     "expected_output_schema": {

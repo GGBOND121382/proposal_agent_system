@@ -49,12 +49,41 @@
     },
     "payload": {
       "approved_blueprint": {
-        "object_id": "obj-001",
-        "object_type": "GENERIC",
-        "version": 1,
-        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "security_level": "INTERNAL",
-        "display_name": "示例对象"
+        "blueprint_id": "bp-001",
+        "section_objective": "说明研究任务",
+        "paragraphs": [
+          {
+            "paragraph_id": "bp-p-001",
+            "sequence": 1,
+            "function": "总述",
+            "must_answer": [
+              "研究内容总体逻辑"
+            ],
+            "fact_slots": [
+              "fact-001"
+            ],
+            "project_item_slots": [
+              "item-001"
+            ],
+            "technical_slots": [],
+            "metric_slots": [],
+            "source_strategy": "REPLACE",
+            "forbidden_content": [
+              "未确认技术"
+            ],
+            "transition_requirement": null,
+            "argument_role": "PROBLEM",
+            "primary_claim_id": "claim-001",
+            "required_evidence_ids": [
+              "fact-001"
+            ],
+            "novel_content_key": "sec-001-novel-001",
+            "word_budget": 180
+          }
+        ],
+        "unresolved_slot_ids": [],
+        "section_profile_id": "RESEARCH_CONTENT",
+        "section_contract_id": "contract-sec-001"
       },
       "source_section": {
         "section_id": "sec-001",
@@ -199,14 +228,302 @@
           "内部用户"
         ],
         "policy_version": "2.0"
-      }
+      },
+      "proposal_contract": {
+        "contract_id": "contract-001",
+        "document_type": "RESEARCH_PROPOSAL",
+        "funding_scheme": "测试计划",
+        "primary_evaluation_logic": "SCIENTIFIC_MERIT",
+        "target_evaluators": [
+          "同行专家"
+        ],
+        "max_main_pages": 35,
+        "max_core_research_questions": 3,
+        "mandatory_sections": [
+          "立项依据",
+          "研究目标",
+          "研究内容",
+          "研究方案",
+          "创新点",
+          "研究基础"
+        ],
+        "appendix_only_topics": [
+          "部署脚本",
+          "接口清单",
+          "审计日志",
+          "Prompt与Trace"
+        ],
+        "forbidden_main_body_topics": [
+          "安装步骤",
+          "运行日志",
+          "Manifest校验"
+        ],
+        "status": "CONFIRMED"
+      },
+      "argument_graph": {
+        "graph_id": "argument-001",
+        "central_proposition": {
+          "node_id": "prop-001",
+          "statement": "通过显式建模事件影响范围和计划稳定性，可以在动态运输场景中同时降低重规划时延与非必要方案扰动。",
+          "proposition_type": "TECHNICAL_PRINCIPLE",
+          "falsifiable_or_comparable": true,
+          "boundary_conditions": [
+            "动态订单、交通变化和有限运力场景"
+          ],
+          "source_refs": []
+        },
+        "research_questions": [
+          {
+            "node_id": "rq-001",
+            "statement": "如何把不完备业务语义转化为可验证的优化约束？",
+            "question_type": "TECHNICAL",
+            "linked_gap_ids": [
+              "gap-001"
+            ],
+            "answerability": "DESIGN_VERIFIABLE",
+            "success_evidence": [
+              "约束解析正确率和人工复核结果"
+            ]
+          },
+          {
+            "node_id": "rq-002",
+            "statement": "如何在动态事件下联合控制求解时延、方案质量和计划扰动？",
+            "question_type": "SCIENTIFIC",
+            "linked_gap_ids": [
+              "gap-001"
+            ],
+            "answerability": "COMPARABLE",
+            "success_evidence": [
+              "与滚动优化和全量重算基线比较"
+            ]
+          }
+        ],
+        "scope_boundaries": {
+          "in_scope": [
+            "运输任务分配、路径和动态重规划"
+          ],
+          "out_of_scope": [
+            "生产部署与运维细节作为主文研究内容"
+          ]
+        },
+        "nodes": [
+          {
+            "node_id": "gap-001",
+            "node_type": "RESEARCH_GAP",
+            "statement": "动态运输环境下，现有静态优化方法难以同时控制方案质量、响应时间和计划扰动。",
+            "status": "SUPPORTED",
+            "source_refs": []
+          },
+          {
+            "node_id": "prior-001",
+            "node_type": "CLOSEST_PRIOR_WORK",
+            "statement": "现有动态车辆路径和滚动优化方法能够处理事件更新，但对跨任务扰动传播的统一控制不足。",
+            "status": "SUPPORTED",
+            "source_refs": []
+          },
+          {
+            "node_id": "obj-001",
+            "node_type": "OBJECTIVE",
+            "statement": "建立面向动态事件的低扰动运输方案优化方法。",
+            "status": "PLANNED",
+            "source_refs": []
+          },
+          {
+            "node_id": "wp-001",
+            "node_type": "WORK_PACKAGE",
+            "statement": "研究不完备业务语义到可验证优化约束的映射。",
+            "status": "PLANNED",
+            "source_refs": []
+          },
+          {
+            "node_id": "wp-002",
+            "node_type": "WORK_PACKAGE",
+            "statement": "研究动态事件下的增量求解与低扰动重规划。",
+            "status": "PLANNED",
+            "source_refs": []
+          },
+          {
+            "node_id": "method-001",
+            "node_type": "FORMAL_MODEL",
+            "statement": "构建含时效、成本、资源与扰动代价的多目标组合优化模型。",
+            "status": "PLANNED",
+            "source_refs": []
+          },
+          {
+            "node_id": "exp-001",
+            "node_type": "EXPERIMENT_DESIGN",
+            "statement": "在静态、动态和故障场景下与代表性基线比较。",
+            "status": "PLANNED",
+            "source_refs": []
+          },
+          {
+            "node_id": "innov-001",
+            "node_type": "NOVEL_MECHANISM",
+            "statement": "通过影响子图和稳定性代价联合约束重规划范围。",
+            "status": "PLANNED",
+            "source_refs": []
+          },
+          {
+            "node_id": "foundation-001",
+            "node_type": "TEAM_EVIDENCE",
+            "statement": "已有相关优化算法与原型验证材料。",
+            "status": "SUPPORTED",
+            "source_refs": []
+          }
+        ],
+        "edges": [
+          {
+            "edge_id": "edge-001",
+            "source_id": "gap-001",
+            "relation": "MOTIVATES",
+            "target_id": "rq-001",
+            "rationale": "差距产生约束映射问题"
+          },
+          {
+            "edge_id": "edge-002",
+            "source_id": "gap-001",
+            "relation": "MOTIVATES",
+            "target_id": "rq-002",
+            "rationale": "动态差距产生重规划问题"
+          },
+          {
+            "edge_id": "edge-003",
+            "source_id": "prop-001",
+            "relation": "SUPPORTED_BY",
+            "target_id": "wp-002",
+            "rationale": "任务验证中心命题"
+          },
+          {
+            "edge_id": "edge-004",
+            "source_id": "wp-002",
+            "relation": "USES",
+            "target_id": "method-001",
+            "rationale": "任务使用形式化模型"
+          },
+          {
+            "edge_id": "edge-005",
+            "source_id": "method-001",
+            "relation": "VALIDATED_BY",
+            "target_id": "exp-001",
+            "rationale": "实验验证方法"
+          }
+        ]
+      },
+      "narrative_architecture": {
+        "architecture_id": "narrative-001",
+        "document_type": "RESEARCH_PROPOSAL",
+        "central_proposition_id": "prop-001",
+        "central_proposition": "通过显式建模事件影响范围和计划稳定性，可以在动态运输场景中同时降低重规划时延与非必要方案扰动。",
+        "research_question_ids": [
+          "rq-001",
+          "rq-002"
+        ],
+        "closest_prior_work_ids": [
+          "prior-001"
+        ],
+        "work_package_ids": [
+          "wp-001",
+          "wp-002"
+        ],
+        "main_body_page_budget": 35,
+        "main_body_word_budget": 25000,
+        "section_contracts": [
+          {
+            "section_contract_id": "contract-sec-001",
+            "section_id": "sec-001",
+            "title": "研究内容",
+            "profile_id": "RESEARCH_CONTENT",
+            "argument_function": "推进本章节独有的研究论证",
+            "must_advance_claim_ids": [
+              "prop-001"
+            ],
+            "must_use_evidence_ids": [
+              "gap-001"
+            ],
+            "must_not_repeat_section_ids": [],
+            "forbidden_topics": [
+              "部署操作说明"
+            ],
+            "word_budget": 800,
+            "placement": "MAIN_BODY",
+            "acceptance_rules": [
+              "推进中心命题",
+              "使用真实证据"
+            ],
+            "unique_information_keys": [
+              "sec-001-RESEARCH_CONTENT-claim",
+              "sec-001-RESEARCH_CONTENT-evidence"
+            ],
+            "required_argument_roles": [
+              "PROBLEM",
+              "METHOD",
+              "EVALUATION"
+            ],
+            "prerequisite_section_ids": [],
+            "allowed_shared_context_ids": [
+              "prop-001"
+            ],
+            "max_overlap_ratio": 0.12
+          }
+        ],
+        "attachments": [
+          {
+            "attachment_id": "att-001",
+            "title": "技术与部署附件",
+            "purpose": "保存实现和部署细节",
+            "content_types": [
+              "部署脚本",
+              "接口和日志"
+            ]
+          }
+        ]
+      },
+      "section_contract": {
+        "section_contract_id": "contract-sec-001",
+        "section_id": "sec-001",
+        "title": "研究内容",
+        "profile_id": "RESEARCH_CONTENT",
+        "argument_function": "推进本章节独有的研究论证",
+        "must_advance_claim_ids": [
+          "prop-001"
+        ],
+        "must_use_evidence_ids": [
+          "gap-001"
+        ],
+        "must_not_repeat_section_ids": [],
+        "forbidden_topics": [
+          "部署操作说明"
+        ],
+        "word_budget": 800,
+        "placement": "MAIN_BODY",
+        "acceptance_rules": [
+          "推进中心命题",
+          "使用真实证据"
+        ],
+        "unique_information_keys": [
+          "sec-001-RESEARCH_CONTENT-claim",
+          "sec-001-RESEARCH_CONTENT-evidence"
+        ],
+        "required_argument_roles": [
+          "PROBLEM",
+          "METHOD",
+          "EVALUATION"
+        ],
+        "prerequisite_section_ids": [],
+        "allowed_shared_context_ids": [
+          "prop-001"
+        ],
+        "max_overlap_ratio": 0.12
+      },
+      "prior_section_digest": [],
+      "revision_findings": []
     },
     "expected_output_schema": "schemas/prompts/write_content_output.schema.json"
   },
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-WRITE-CONTENT",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "status": "NEED_USER_INPUT",
     "result": {
       "candidate_id": "cand-001",
@@ -222,7 +539,13 @@
             "trace-001"
           ],
           "preserved_source_span": null,
-          "contains_unresolved_placeholder": false
+          "contains_unresolved_placeholder": false,
+          "primary_claim_id": "prop-001",
+          "evidence_ids": [
+            "gap-001"
+          ],
+          "novel_content_key": "p-001-unique",
+          "section_contract_id": "contract-sec-001"
         }
       ],
       "trace_links": [
@@ -252,7 +575,18 @@
           "action": "REPHRASED",
           "paragraph_id": "p-001"
         }
-      ]
+      ],
+      "claim_advancement": {
+        "section_contract_id": "contract-sec-001",
+        "advanced_claim_ids": [
+          "prop-001"
+        ],
+        "new_information_keys": [
+          "p-001-unique"
+        ],
+        "distinguished_from_section_ids": [],
+        "section_contribution": "本章节推进章节合同规定的独有论证。"
+      }
     },
     "findings": [],
     "unresolved_items": [

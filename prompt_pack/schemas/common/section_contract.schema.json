@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "section_contract.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "section_contract_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "section_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "argument_function": {
+      "type": "string",
+      "minLength": 1
+    },
+    "must_advance_claim_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      },
+      "minItems": 1
+    },
+    "must_use_evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "unique_information_keys": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 8
+      },
+      "minItems": 1
+    },
+    "required_argument_roles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "prerequisite_section_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "must_not_repeat_section_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "allowed_shared_context_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "forbidden_topics": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "max_overlap_ratio": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 0.3
+    },
+    "word_budget": {
+      "type": "integer",
+      "minimum": 80,
+      "maximum": 12000
+    },
+    "placement": {
+      "type": "string",
+      "enum": [
+        "MAIN_BODY",
+        "APPENDIX",
+        "OMIT"
+      ]
+    },
+    "acceptance_rules": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 2
+    }
+  },
+  "required": [
+    "section_contract_id",
+    "section_id",
+    "title",
+    "profile_id",
+    "argument_function",
+    "must_advance_claim_ids",
+    "must_use_evidence_ids",
+    "unique_information_keys",
+    "required_argument_roles",
+    "prerequisite_section_ids",
+    "must_not_repeat_section_ids",
+    "allowed_shared_context_ids",
+    "forbidden_topics",
+    "max_overlap_ratio",
+    "word_budget",
+    "placement",
+    "acceptance_rules"
+  ]
+}

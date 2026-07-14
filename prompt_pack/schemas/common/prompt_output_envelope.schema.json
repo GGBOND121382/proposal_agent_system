@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "prompt_output_envelope.schema.json",
-  "title": "统一Prompt输出Envelope；具体result由26个Prompt Schema严格约束",
+  "title": "统一Prompt输出Envelope；具体result由30个Prompt Schema严格约束",
   "oneOf": [
     {
       "$ref": "../prompts/security_classify_output.schema.json"
@@ -80,6 +80,18 @@
     },
     {
       "$ref": "../prompts/targeted_repair_output.schema.json"
+    },
+    {
+      "$ref": "../prompts/argument_architecture_output.schema.json"
+    },
+    {
+      "$ref": "../prompts/argument_architecture_critic_output.schema.json"
+    },
+    {
+      "$ref": "../prompts/expression_polish_output.schema.json"
+    },
+    {
+      "$ref": "../prompts/expression_critic_output.schema.json"
     }
   ]
 }

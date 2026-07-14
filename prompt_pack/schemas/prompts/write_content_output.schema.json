@@ -10,7 +10,7 @@
       "const": "P-WRITE-CONTENT"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "status": {
       "type": "string",
@@ -115,6 +115,53 @@
               "paragraph_id"
             ]
           }
+        },
+        "claim_advancement": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "section_contract_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "advanced_claim_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "minItems": 1
+            },
+            "new_information_keys": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 8
+              },
+              "minItems": 1
+            },
+            "distinguished_from_section_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "section_contribution": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "section_contract_id",
+            "advanced_claim_ids",
+            "new_information_keys",
+            "distinguished_from_section_ids",
+            "section_contribution"
+          ]
         }
       },
       "additionalProperties": false,
@@ -125,7 +172,8 @@
         "trace_links",
         "term_usage",
         "unresolved_items",
-        "source_preservation_summary"
+        "source_preservation_summary",
+        "claim_advancement"
       ]
     },
     "findings": {

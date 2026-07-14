@@ -4,9 +4,23 @@ import copy
 import json
 from typing import Any
 
-from .util import new_id, sha256_json
+from .util import new_id, sha256_json, sha256_text
 
 HASH_PLACEHOLDER = "a" * 64
+
+CRITICAL_CONTEXT_PATHS = {
+    "payload.project_definition", "payload.project_subgraph", "payload.proposal_contract",
+    "payload.argument_graph_seed", "payload.argument_graph", "payload.architecture_candidate",
+    "payload.narrative_architecture", "payload.section_contract", "payload.confirmed_plan",
+    "payload.approved_blueprint", "payload.blueprint_candidate",
+    "payload.classification_candidate", "payload.package_candidate", "payload.scheme_candidate",
+    "payload.project_definition_candidate", "payload.proposal_contract_candidate",
+    "payload.fact_candidates", "payload.template_candidate", "payload.revision_plan_candidate",
+    "payload.blueprint_candidate", "payload.synthesis_candidate", "payload.result_package",
+    "payload.content_candidate", "payload.polished_candidate", "payload.candidate_sections",
+    "payload.candidate_document", "payload.document_section_map",
+    "payload.prior_section_digest", "payload.revision_findings",
+}
 
 
 class ContextBuilder:
@@ -53,7 +67,7 @@ class ContextBuilder:
         self._apply_common_payload(envelope, prompt_id, project, config, docs, context_hash, workflow_state or {}, workflow_id)
         if overrides:
             for path, value in overrides.items():
-                self._set_path_if_valid(prompt_id, envelope, path, value)
+                self._set_path_if_valid(prompt_id, envelope, path, value, strict=True)
         errors = self.pack.validate(prompt_id, "input", envelope)
         if errors:
             raise ValueError("Context builder produced invalid input: " + "; ".join(errors[:10]))
@@ -83,7 +97,7 @@ class ContextBuilder:
         ]
 
     def _content_candidates(self, project_id: str, workflow_id: str | None = None) -> list[dict[str, Any]]:
-        sql = "SELECT id,input_json,output_json,created_at FROM prompt_runs WHERE project_id=? AND prompt_id='P-WRITE-CONTENT' AND status='PASS'"
+        sql = "SELECT id,prompt_id,input_json,output_json,created_at FROM prompt_runs WHERE project_id=? AND prompt_id IN ('P-WRITE-CONTENT','P-EXPRESSION-POLISH') AND status='PASS'"
         params: list[Any] = [project_id]
         if workflow_id:
             sql += " AND workflow_id=?"
@@ -100,13 +114,39 @@ class ContextBuilder:
             section_id = section.get("section_id")
             if not section_id or not candidate.get("candidate_id"):
                 continue
-            latest_by_section[section_id] = {"run_id": row["id"], "section": section, "candidate": candidate}
+            latest_by_section[section_id] = {"run_id": row["id"], "prompt_id": row.get("prompt_id"), "section": section, "candidate": candidate}
         return list(latest_by_section.values())
+
+
+    @staticmethod
+    def _prior_section_digest(candidates: list[dict[str, Any]], current_section_id: str | None = None) -> list[dict[str, Any]]:
+        digests: list[dict[str, Any]] = []
+        for item in candidates:
+            section = item.get("section") or {}
+            if current_section_id and section.get("section_id") == current_section_id:
+                continue
+            candidate = item.get("candidate") or {}
+            advancement = candidate.get("claim_advancement") or {}
+            paragraphs = [p for p in candidate.get("paragraphs", []) if isinstance(p, dict)]
+            signatures: list[str] = []
+            for paragraph in paragraphs:
+                text = "".join(str(paragraph.get("text") or "").split())
+                if text:
+                    signatures.append(sha256_text(text)[:16])
+            digests.append({
+                "section_id": str(section.get("section_id") or ""),
+                "title": str(section.get("title") or section.get("section_id") or "已生成章节"),
+                "advanced_claim_ids": [str(x) for x in advancement.get("advanced_claim_ids", []) if x],
+                "new_information_keys": [str(x) for x in advancement.get("new_information_keys", []) if x],
+                "paragraph_roles": [str(p.get("paragraph_role") or "") for p in paragraphs if p.get("paragraph_role")],
+                "sentence_signatures": signatures,
+            })
+        return digests[-30:]
 
     @staticmethod
     def _integration_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-        allowed = ["candidate_id", "candidate_text", "paragraphs", "trace_links", "term_usage", "unresolved_items"]
-        return {key: candidate.get(key, [] if key in {"paragraphs", "trace_links", "term_usage", "unresolved_items"} else "") for key in allowed}
+        allowed = ["candidate_id", "candidate_text", "paragraphs", "trace_links", "term_usage", "unresolved_items", "claim_advancement"]
+        return {key: candidate.get(key, [] if key in {"paragraphs", "trace_links", "term_usage", "unresolved_items"} else ({} if key == "claim_advancement" else "")) for key in allowed}
 
     def _candidate_document(self, project: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:
         sections = []
@@ -137,6 +177,150 @@ class ContextBuilder:
             "sections": sections,
             "security_level": project["security_level"],
         }
+
+    @staticmethod
+    def _scoped_architecture(architecture: dict[str, Any] | None, contract: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not architecture or not contract:
+            return architecture
+        keep_ids = {
+            str(contract.get("section_id") or ""),
+            *[str(x) for x in contract.get("prerequisite_section_ids", []) if x],
+            *[str(x) for x in contract.get("must_not_repeat_section_ids", []) if x],
+        }
+        scoped = copy.deepcopy(architecture)
+        scoped["section_contracts"] = [
+            item for item in architecture.get("section_contracts", [])
+            if str(item.get("section_id") or "") in keep_ids
+        ]
+        if not scoped["section_contracts"]:
+            scoped["section_contracts"] = [copy.deepcopy(contract)]
+        return scoped
+
+    @staticmethod
+    def _scoped_plan(plan: dict[str, Any] | None, architecture: dict[str, Any] | None, contract: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not plan or not contract:
+            return plan
+        relevant_ids = {
+            *[str(x) for x in contract.get("must_advance_claim_ids", []) if x],
+            *[str(x) for x in contract.get("must_use_evidence_ids", []) if x],
+        }
+        scoped = copy.deepcopy(plan)
+        scoped["target_section_ids"] = [str(contract.get("section_id"))]
+        scoped["read_only_section_ids"] = [
+            str(x) for x in plan.get("read_only_section_ids", [])
+            if str(x) in set(contract.get("prerequisite_section_ids", []))
+        ]
+        scoped["protected_section_ids"] = [
+            str(x) for x in plan.get("protected_section_ids", [])
+            if str(x) == str(contract.get("section_id"))
+        ]
+        tasks = [
+            item for item in plan.get("tasks", [])
+            if str(item.get("objective") or "") == str(contract.get("argument_function") or "")
+        ]
+        if not tasks:
+            tasks = [
+                item for item in plan.get("tasks", [])
+                if relevant_ids & {str(x) for x in item.get("required_input_ids", []) if x}
+            ][:2]
+        if not tasks and plan.get("tasks"):
+            tasks = [plan["tasks"][0]]
+        scoped["tasks"] = copy.deepcopy(tasks)
+        task_ids = {str(item.get("revision_task_id")) for item in tasks if item.get("revision_task_id")}
+        scoped["dependencies"] = [
+            item for item in plan.get("dependencies", [])
+            if str(item.get("from_task_id") or item.get("source_task_id") or "") in task_ids
+            and str(item.get("to_task_id") or item.get("target_task_id") or "") in task_ids
+        ]
+        scoped["narrative_architecture"] = copy.deepcopy(architecture or plan.get("narrative_architecture"))
+        return scoped
+
+    @staticmethod
+    def _scoped_project_subgraph(project_definition: dict[str, Any] | None, contract: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not project_definition or not contract:
+            return None
+        seed_ids = {
+            *[str(x) for x in contract.get("must_advance_claim_ids", []) if x],
+            *[str(x) for x in contract.get("must_use_evidence_ids", []) if x],
+        }
+        relations = list(project_definition.get("relations", []))
+        expanded = set(seed_ids)
+        for relation in relations:
+            source = str(relation.get("source_id") or "")
+            target = str(relation.get("target_id") or "")
+            if source in seed_ids or target in seed_ids:
+                expanded.update([source, target])
+        items = [item for item in project_definition.get("items", []) if str(item.get("item_id")) in expanded]
+        if not items:
+            items = list(project_definition.get("items", []))[:6]
+            expanded = {str(item.get("item_id")) for item in items}
+        scoped_relations = [
+            item for item in relations
+            if str(item.get("source_id")) in expanded and str(item.get("target_id")) in expanded
+        ]
+        return {
+            "item_ids": [str(item.get("item_id")) for item in items],
+            "relation_ids": [str(item.get("relation_id")) for item in scoped_relations],
+            "items": copy.deepcopy(items),
+            "relations": copy.deepcopy(scoped_relations),
+        }
+
+    @staticmethod
+    def _scoped_facts(facts: list[dict[str, Any]], contract: dict[str, Any] | None, profile_id: str) -> list[dict[str, Any]]:
+        if not facts:
+            return []
+        relevant_ids = {
+            *[str(x) for x in (contract or {}).get("must_advance_claim_ids", []) if x],
+            *[str(x) for x in (contract or {}).get("must_use_evidence_ids", []) if x],
+        }
+        exact = [item for item in facts if str(item.get("claim_id")) in relevant_ids]
+        internal = [item for item in facts if item.get("claim_type") != "PUBLIC_CLAIM" and item not in exact]
+        public = [item for item in facts if item.get("claim_type") == "PUBLIC_CLAIM" and item not in exact]
+        public_profiles = {"BACKGROUND_AND_SIGNIFICANCE", "LITERATURE_REVIEW", "INNOVATION", "REFERENCES", "EVALUATION"}
+        selected = [*exact, *internal[:6]]
+        # Preserve at least one accepted public claim in every writing context so
+        # non-literature sections can still trace cross-section public evidence.
+        # Evidence-heavy profiles receive a wider public slice, while other
+        # profiles receive only one claim to keep weak-model context bounded.
+        selected.extend(public[:6] if profile_id in public_profiles else public[:1])
+        seen: set[str] = set()
+        result = []
+        for item in selected:
+            claim_id = str(item.get("claim_id") or sha256_json(item))
+            if claim_id not in seen:
+                seen.add(claim_id)
+                result.append(copy.deepcopy(item))
+        return result
+
+    def _compact_read_only_context(self, project: dict[str, Any], candidates: list[dict[str, Any]], current_section_id: str | None) -> list[dict[str, Any]]:
+        sections = []
+        for item in candidates[-12:]:
+            source = item.get("section") or {}
+            if current_section_id and str(source.get("section_id")) == current_section_id:
+                continue
+            candidate = item.get("candidate") or {}
+            advancement = candidate.get("claim_advancement") or {}
+            summary = (
+                f"章节贡献：{advancement.get('section_contribution', '')}；"
+                f"推进命题：{', '.join(str(x) for x in advancement.get('advanced_claim_ids', []))}；"
+                f"新增信息键：{', '.join(str(x) for x in advancement.get('new_information_keys', []))}。"
+            )
+            sections.append({
+                "section_id": str(source.get("section_id") or "section-context"),
+                "section_key": str(source.get("section_key") or source.get("title") or "已生成章节"),
+                "title": str(source.get("title") or "已生成章节"),
+                "level": int(source.get("level") or 1),
+                "text": summary,
+                "text_hash": sha256_text(summary),
+                "block_ids": [],
+                "contains_table": False,
+                "contains_formula": False,
+                "contains_image": False,
+                "contains_comment": False,
+                "contains_revision": False,
+                "security_level": project["security_level"],
+            })
+        return sections
 
     def _latest_output(self, project_id: str, prompt_id: str) -> dict[str, Any] | None:
         row = self.db.fetchone(
@@ -249,8 +433,26 @@ class ContextBuilder:
             replacements.append(("payload.reference_document", reference_doc))
         if "source_section" in payload and current_section:
             replacements.append(("payload.source_section", current_section))
+        if "section_profile" in payload:
+            replacements.append(("payload.section_profile", self.pack.section_profile_for((current_section or {}).get("title"))))
+        if "readiness_stage" in payload:
+            readiness_stage = (
+                "READY_FOR_SECTION_PLANNING"
+                if state.get("workflow_type") == "WF-4_PROPOSAL_AUTHORING"
+                else "READY_FOR_ARGUMENT_ARCHITECTURE"
+            )
+            replacements.append(("payload.readiness_stage", readiness_stage))
         if "linked_sections" in payload and docs:
-            replacements.append(("payload.linked_sections", [s for d in docs for s in d.get("sections", [])][:100]))
+            if prompt_id in {"P-ARGUMENT-ARCHITECTURE", "P-ARGUMENT-ARCHITECTURE-CRITIC", "P-REVISION-PLAN", "P-REVISION-PLAN-CRITIC", "P-WRITE-BLUEPRINT", "P-WRITE-BLUEPRINT-CRITIC", "P-WRITE-CONTENT", "P-WRITE-CRITIC", "P-EXPRESSION-POLISH", "P-EXPRESSION-CRITIC", "P-INTEGRATION-CRITIC"}:
+                linked = [
+                    section for document in docs if document.get("document_role") == "CURRENT_PROPOSAL"
+                    for section in document.get("sections", []) if section.get("title") != "全文"
+                ]
+            else:
+                linked = [section for document in docs for section in document.get("sections", [])]
+            replacements.append(("payload.linked_sections", linked[:100]))
+        if "current_sections" in payload and docs:
+            replacements.append(("payload.current_sections", [s for d in docs if d.get("document_role") == "CURRENT_PROPOSAL" for s in d.get("sections", []) if s.get("title") != "全文"][:100]))
         if "read_only_context" in payload and docs:
             replacements.append(("payload.read_only_context", [s for d in docs for s in d.get("sections", [])][1:100]))
         if "object_context" in payload and docs:
@@ -290,15 +492,22 @@ class ContextBuilder:
             "scheme_profile": ("P-SCHEME-EXTRACT", "scheme_profile"),
             "project_definition_candidate": ("P-PROJECT-DEFINITION-EXTRACT", "project_definition"),
             "project_definition": ("P-PROJECT-DEFINITION-EXTRACT", "project_definition"),
+            "proposal_contract_candidate": ("P-PROJECT-DEFINITION-EXTRACT", "proposal_contract"),
+            "proposal_contract": ("P-PROJECT-DEFINITION-EXTRACT", "proposal_contract"),
+            "argument_graph_seed": ("P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed"),
+            "argument_graph_candidate": ("P-ARGUMENT-ARCHITECTURE", "argument_architecture"),
+            "argument_graph": ("P-ARGUMENT-ARCHITECTURE", "argument_architecture"),
+            "architecture_candidate": ("P-ARGUMENT-ARCHITECTURE", None),
             "fact_candidates": ("P-FACT-EXTRACT", "fact_candidates"),
             "template_candidate": ("P-TEMPLATE-EXTRACT", "template"),
             "revision_plan_candidate": ("P-REVISION-PLAN", "revision_plan"),
             "blueprint_candidate": ("P-WRITE-BLUEPRINT", "blueprint"),
             "content_candidate": ("P-WRITE-CONTENT", None),
-            "candidate_document": ("P-WRITE-CONTENT", None),
+            "polished_candidate": ("P-EXPRESSION-POLISH", None),
+            # candidate_document is assembled from all latest section candidates
+            # below; a single expression result is not a document.
             "research_plan": ("P-PUBLIC-RESEARCH-PLAN", None),
             "synthesis_candidate": ("P-PUBLIC-RESEARCH-SYNTHESIS", None),
-            "result_package": ("P-PUBLIC-RESEARCH-SYNTHESIS", None),
         }
         for field, (producer, key) in result_map.items():
             if field in payload:
@@ -310,6 +519,9 @@ class ContextBuilder:
                     replacements.append((f"payload.{field}", value))
 
         project_definition = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "project_definition")
+        proposal_contract = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "proposal_contract")
+        argument_graph_seed = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed")
+        argument_graph = self._result(project["id"], "P-ARGUMENT-ARCHITECTURE", "argument_architecture") or argument_graph_seed
         internal_facts = self._result(project["id"], "P-FACT-EXTRACT", "fact_candidates") or []
         public_claims = self._result(project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS", "claims") or []
         import_review = self._result(project["id"], "P-ONLINE-RESULT-IMPORT-CRITIC") or {}
@@ -320,24 +532,79 @@ class ContextBuilder:
         scheme = self._result(project["id"], "P-SCHEME-EXTRACT", "scheme_profile")
         template = self._result(project["id"], "P-TEMPLATE-EXTRACT", "template")
         plan = self._result(project["id"], "P-REVISION-PLAN", "revision_plan")
+        narrative_architecture = (plan or {}).get("narrative_architecture") if isinstance(plan, dict) else None
+        section_contract = None
+        if narrative_architecture and current_section:
+            for contract in narrative_architecture.get("section_contracts", []):
+                if contract.get("section_id") == current_section.get("section_id") or contract.get("title") == current_section.get("title"):
+                    section_contract = contract
+                    break
         blueprint = self._result(project["id"], "P-WRITE-BLUEPRINT", "blueprint")
         content_candidates = self._content_candidates(project["id"], workflow_id if prompt_id == "P-INTEGRATION-CRITIC" else None)
-        content = content_candidates[-1]["candidate"] if content_candidates else self._result(project["id"], "P-WRITE-CONTENT")
+        content = content_candidates[-1]["candidate"] if content_candidates else (self._result(project["id"], "P-EXPRESSION-POLISH") or self._result(project["id"], "P-WRITE-CONTENT"))
         safe_package = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE")
+        research_synthesis = self._result(project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS")
 
-        if "project_subgraph" in payload and project_definition:
+        if "proposal_contract" in payload and proposal_contract:
+            replacements.append(("payload.proposal_contract", proposal_contract))
+        if "proposal_contract_candidate" in payload and proposal_contract:
+            replacements.append(("payload.proposal_contract_candidate", proposal_contract))
+        if "argument_graph_seed" in payload and argument_graph_seed:
+            replacements.append(("payload.argument_graph_seed", argument_graph_seed))
+        if "argument_graph" in payload and argument_graph:
+            replacements.append(("payload.argument_graph", argument_graph))
+        if "argument_graph_candidate" in payload and argument_graph:
+            replacements.append(("payload.argument_graph_candidate", argument_graph))
+        if "narrative_architecture" in payload and narrative_architecture:
+            replacements.append(("payload.narrative_architecture", narrative_architecture))
+        if "section_contract" in payload and section_contract:
+            replacements.append(("payload.section_contract", section_contract))
+
+        section_prompt_ids = {
+            "P-WRITE-BLUEPRINT", "P-WRITE-BLUEPRINT-CRITIC", "P-WRITE-CONTENT",
+            "P-WRITE-CRITIC", "P-EXPRESSION-POLISH", "P-EXPRESSION-CRITIC",
+        }
+        if prompt_id in section_prompt_ids:
+            profile_id = str((payload.get("section_profile") or {}).get("profile_id") or (section_contract or {}).get("profile_id") or "")
+            scoped_facts = self._scoped_facts(facts, section_contract, profile_id)
+            # Facts can be scoped even before the planning workflow has produced a
+            # Section Contract.  This keeps accepted public evidence available to
+            # ad-hoc previews while still bounding the context for weak models.
+            for field in ("confirmed_facts", "fact_context", "existing_facts"):
+                if field in payload:
+                    replacements.append((f"payload.{field}", scoped_facts))
+            if section_contract:
+                scoped_architecture = self._scoped_architecture(narrative_architecture, section_contract)
+                scoped_plan = self._scoped_plan(plan, scoped_architecture, section_contract)
+                scoped_subgraph = self._scoped_project_subgraph(project_definition, section_contract)
+                if "narrative_architecture" in payload and scoped_architecture:
+                    replacements.append(("payload.narrative_architecture", scoped_architecture))
+                if "confirmed_plan" in payload and scoped_plan:
+                    replacements.append(("payload.confirmed_plan", scoped_plan))
+                if "project_subgraph" in payload and scoped_subgraph:
+                    replacements.append(("payload.project_subgraph", scoped_subgraph))
+
+        if "project_subgraph" in payload and project_definition and prompt_id not in section_prompt_ids:
             replacements.append(("payload.project_subgraph", {"item_ids": [x["item_id"] for x in project_definition.get("items", [])], "relation_ids": [x["relation_id"] for x in project_definition.get("relations", [])], "items": project_definition.get("items", []), "relations": project_definition.get("relations", [])}))
         for field in ["confirmed_facts", "fact_context", "existing_facts"]:
-            if field in payload and facts:
+            if field in payload and facts and prompt_id not in section_prompt_ids:
                 replacements.append((f"payload.{field}", facts))
         if "fact_package" in payload and facts:
             replacements.append(("payload.fact_package", {"schema_version": "2.0", "project_id": project["id"], "version": 1, "claims": facts, "conflicts": [], "package_hash": context_hash, "security_level": project["security_level"]}))
         if "template_context" in payload and template:
             replacements.append(("payload.template_context", template))
-        if "confirmed_plan" in payload and plan:
-            replacements.append(("payload.confirmed_plan", self._object_ref(plan.get("plan_id", new_id("plan")), "REVISION_PLAN", project["security_level"], sha256_json(plan), "已确认修改计划")))
+        if "confirmed_plan" in payload and plan and prompt_id not in section_prompt_ids:
+            replacements.append(("payload.confirmed_plan", plan))
         if "approved_blueprint" in payload and blueprint:
-            replacements.append(("payload.approved_blueprint", self._object_ref(blueprint.get("blueprint_id", new_id("bp")), "BLUEPRINT", project["security_level"], sha256_json(blueprint), "已审查写作蓝图")))
+            replacements.append(("payload.approved_blueprint", blueprint))
+        if "content_candidate" in payload:
+            raw_content = self._result(project["id"], "P-WRITE-CONTENT")
+            if raw_content:
+                replacements.append(("payload.content_candidate", raw_content))
+        if "polished_candidate" in payload:
+            polished = self._result(project["id"], "P-EXPRESSION-POLISH")
+            if polished:
+                replacements.append(("payload.polished_candidate", polished))
         if "safe_online_package" in payload and safe_package:
             display_topics = "、".join((safe_package.get("allowed_context") or [])[:4])
             display_name = "批准的在线任务包" + (f"（{display_topics}）" if display_topics else "")
@@ -357,10 +624,65 @@ class ContextBuilder:
             }))
         if "approved_safe_package" in payload and safe_package:
             replacements.append(("payload.approved_safe_package", self._object_ref(safe_package.get("package_id", new_id("online")), "SAFE_ONLINE_PACKAGE", "PUBLIC", sha256_json(safe_package), "批准的在线任务包")))
+        if "result_package" in payload and research_synthesis:
+            source_ids = sorted({
+                str(ref.get("source_id"))
+                for claim in research_synthesis.get("claims", [])
+                if isinstance(claim, dict)
+                for ref in claim.get("source_refs", [])
+                if isinstance(ref, dict) and ref.get("source_id")
+            })
+            request_hash = sha256_json(safe_package or {"project_id": project["id"], "task": "PUBLIC_RESEARCH"})
+            result_core = {
+                "claims": research_synthesis.get("claims", []),
+                "raw_text": json.dumps(research_synthesis, ensure_ascii=False, sort_keys=True),
+                "source_ids": source_ids,
+            }
+            package_id = "online-result-" + sha256_json(result_core)[:16]
+            result_package = {
+                "package_id": package_id,
+                "request_hash": request_hash,
+                **result_core,
+                "manifest_hash": sha256_json({"package_id": package_id, "request_hash": request_hash, **result_core}),
+            }
+            replacements.append(("payload.result_package", result_package))
+            if "transfer_manifest" in payload:
+                replacements.append(("payload.transfer_manifest", {
+                    "package_id": package_id,
+                    "request_hash": request_hash,
+                    "content_hash": result_package["manifest_hash"],
+                    "approved_by": "outbound-security-approval",
+                    "approved_at": "2026-01-01T00:00:00Z",
+                    "expires_at": None,
+                }))
         if "trace_links" in payload and content_candidates:
             replacements.append(("payload.trace_links", [link for item in content_candidates for link in item["candidate"].get("trace_links", [])]))
         elif "trace_links" in payload and content:
             replacements.append(("payload.trace_links", content.get("trace_links", [])))
+        if "prior_section_digest" in payload:
+            replacements.append(("payload.prior_section_digest", self._prior_section_digest(
+                content_candidates,
+                str((current_section or {}).get("section_id") or "") or None,
+            )))
+        if "revision_findings" in payload:
+            if prompt_id == "P-ARGUMENT-ARCHITECTURE":
+                findings = list((state or {}).get("argument_revision_findings", []) or [])
+            elif prompt_id == "P-REVISION-PLAN":
+                findings = list((state or {}).get("planning_revision_findings", []) or [])
+            else:
+                active_section_id = str((current_section or {}).get("section_id") or "")
+                repair_ids = {str(x) for x in (state or {}).get("integration_repair_section_ids", []) if x}
+                findings = list((state or {}).get("integration_repair_findings", []) or []) if active_section_id in repair_ids else []
+            replacements.append(("payload.revision_findings", findings))
+        if "read_only_context" in payload and content_candidates:
+            # Only semantic digests of previous chapters are sent to a section
+            # writer.  Full prior prose caused quadratic context growth and made
+            # weak/short-context models repeat text rather than advance claims.
+            replacements.append(("payload.read_only_context", self._compact_read_only_context(
+                project,
+                content_candidates,
+                str((current_section or {}).get("section_id") or "") or None,
+            )))
         if "candidate_sections" in payload and content_candidates:
             replacements.append(("payload.candidate_sections", [
                 {"section_id": item["section"]["section_id"], "candidate": self._integration_candidate(item["candidate"])}
@@ -374,6 +696,16 @@ class ContextBuilder:
                 for section in doc.get("sections", [])
                 if section.get("level", 0) >= 1 and section.get("title") != "全文"
             ]
+            by_id = {str(section.get("section_id")): section for section in proposal_sections if section.get("section_id")}
+            by_title = {str(section.get("title")): section for section in proposal_sections if section.get("title")}
+            planned_sections = []
+            for contract in (narrative_architecture or {}).get("section_contracts", []):
+                if not isinstance(contract, dict) or contract.get("placement") == "OMIT":
+                    continue
+                section = by_id.get(str(contract.get("section_id"))) or by_title.get(str(contract.get("title")))
+                if section:
+                    planned_sections.append(section)
+            proposal_sections = planned_sections or proposal_sections
             candidate_ids = {item["section"]["section_id"]: item["candidate"].get("candidate_id") for item in content_candidates}
             if proposal_sections:
                 replacements.append(("payload.document_section_map", [
@@ -407,7 +739,7 @@ class ContextBuilder:
                 replacements.append(("payload.public_sources", search_results.get("sources", [])))
 
         for path, value in replacements:
-            self._set_path_if_valid(prompt_id, envelope, path, value)
+            self._set_path_if_valid(prompt_id, envelope, path, value, strict=path in CRITICAL_CONTEXT_PATHS)
 
     def _source_ref(self, doc: dict[str, Any], sec: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -429,16 +761,21 @@ class ContextBuilder:
             "security_level": doc["security_level"],
         }
 
-    def _set_path_if_valid(self, prompt_id: str, envelope: dict[str, Any], dotted_path: str, value: Any) -> bool:
+    def _set_path_if_valid(self, prompt_id: str, envelope: dict[str, Any], dotted_path: str, value: Any, *, strict: bool = False) -> bool:
         candidate = copy.deepcopy(envelope)
         parts = dotted_path.split(".")
         node = candidate
         for part in parts[:-1]:
             if part not in node or not isinstance(node[part], dict):
+                if strict:
+                    raise ValueError(f"Critical context path does not exist for {prompt_id}: {dotted_path}")
                 return False
             node = node[part]
         node[parts[-1]] = value
-        if self.pack.validate(prompt_id, "input", candidate):
+        errors = self.pack.validate(prompt_id, "input", candidate)
+        if errors:
+            if strict:
+                raise ValueError(f"Critical context replacement failed for {prompt_id} {dotted_path}: " + "; ".join(errors[:10]))
             return False
         envelope.clear()
         envelope.update(candidate)

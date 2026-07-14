@@ -31,14 +31,14 @@ db = Database(settings.db_path)
 router = SecurityRouter(pack)
 gateway = ModelGateway(settings, pack)
 context_builder = ContextBuilder(db, pack)
-executor = PromptExecutor(db, pack, router, gateway)
+executor = PromptExecutor(db, pack, router, gateway, quality_guard_enabled=settings.proposal_quality_guard_enabled)
 skill_executor = build_skill_executor(db, settings)
 research = PublicResearchService(settings, skill_executor)
 diagram_enrichment = DiagramEnrichmentService(db, pack, skill_executor)
 workflows = WorkflowEngine(db, pack, context_builder, executor, research, diagram_enrichment)
 exporter = DocxExporter(db, settings)
 
-app = FastAPI(title="项目申请书智能体系统", version="0.5.0")
+app = FastAPI(title="项目申请书智能体系统", version="0.6.0")
 app.mount("/static", StaticFiles(directory=settings.root_dir / "app" / "static"), name="static")
 
 

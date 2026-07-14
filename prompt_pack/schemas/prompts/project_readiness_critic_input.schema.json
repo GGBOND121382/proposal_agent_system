@@ -10,7 +10,7 @@
       "const": "P-PROJECT-READINESS-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "task": {
       "type": "object",
@@ -167,6 +167,19 @@
             "minLength": 1,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           }
+        },
+        "proposal_contract": {
+          "$ref": "../common/proposal_contract.schema.json"
+        },
+        "argument_graph": {
+          "$ref": "../common/argument_graph.schema.json"
+        },
+        "readiness_stage": {
+          "type": "string",
+          "enum": [
+            "READY_FOR_ARGUMENT_ARCHITECTURE",
+            "READY_FOR_SECTION_PLANNING"
+          ]
         }
       },
       "additionalProperties": false,
@@ -176,7 +189,10 @@
         "scheme_profile",
         "section_profile",
         "task_instruction",
-        "open_conflicts"
+        "open_conflicts",
+        "proposal_contract",
+        "argument_graph",
+        "readiness_stage"
       ]
     },
     "expected_output_schema": {

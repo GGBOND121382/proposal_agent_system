@@ -1,10 +1,10 @@
 # 项目申请书智能体系统
 
-本项目把附件 `proposal_prompt_pack_v2` 从静态 Prompt 交接包落成一个可运行的多智能体系统。运行时动态读取 26 个 Prompt、52 个输入/输出 Schema、模型路由与安全策略，不在业务代码中复制 Prompt 正文。
+本项目把附件 `proposal_prompt_pack_v2` 从静态 Prompt 交接包落成一个可运行的多智能体系统。运行时动态读取 30 个 Prompt、60 个Prompt专用输入/输出 Schema、模型路由与安全策略，不在业务代码中复制 Prompt 正文。
 
 ## 已实现
 
-- 26 个 Prompt 的动态注册、输入/输出 Schema 严格校验和完整 Schema 内联；
+- 30 个 Prompt 的动态注册、输入/输出 Schema 严格校验和完整 Schema 内联；
 - OpenAI-compatible 离线/在线模型网关，离线失败不会自动切换在线；
 - `REPLAY`、`MOCK`、`SIMULATED`、`LIVE` 四种运行模式；
 - 五条核心工作流状态机与十三类人工 Gate；
@@ -16,6 +16,28 @@
 - DOCX 新文档生成、简单章节定向补丁、完整性报告和导出审计包；
 - 浏览器操作台及 FastAPI 接口文档；
 - Prompt 包静态校验和端到端自动化测试。
+
+## v0.6.0 科研申请书论证质量重构
+
+本版本根据v0.5复杂申请书的239份真实Trace重构智能体底层逻辑，不以页数、章节、图表、引用或Trace数量代替申请书质量：
+
+- 将项目事实图与申请书论证图分离，新增唯一中心命题、研究差距、研究问题、最近工作、局限机制、形式化模型、方法、验证、创新、前期基础和贡献链；
+- 新增 `P-ARGUMENT-ARCHITECTURE` / Critic 与 `P-EXPRESSION-POLISH` / Critic，形成“事实抽取→论证架构→章节合同→证据写作→表达编辑→全文评价”链路；
+- 规划不再按原文标题机械扩写，而是生成有限主文章节、页数预算、附件边界和逐章Section Contract；
+- 每个段落强制绑定章节合同、主命题、证据ID和唯一新增信息键，表达编辑不得改变语义身份；
+- 章节Critic必须逐段读取并执行Profile专用规则；全文Critic必须收到完整候选集合并检查12项质量维度；
+- 新增不依赖模型自评的质量校验，覆盖错误文种、浅图谱、虚假准备度、模板化规划、技术标签堆叠、章节重复、无依据指标、无证据基础和不完整全文审查；
+- 全文模型输入采用完整语义身份与受限文本片段，完整正文由确定性质量校验读取，并在Trace中同时保存实际模型输入和完整质量上下文；
+- 历史239份Trace中167份质量相关Trace全部被新版规则判定为需要修订；新的14章正向端到端链路全部通过。
+
+验证命令：
+
+```bash
+python scripts/replay_proposal_quality_trace.py /path/to/audit_bundle \
+  --json-out trace_replay.json --md-out trace_replay.md
+python scripts/run_v06_quality_e2e.py --output-dir data/v06_quality_e2e
+pytest -q
+```
 
 ## v0.5.0 离线部署、弱模型 Skill 与可核验公开研究
 
