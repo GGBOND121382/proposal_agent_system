@@ -1,0 +1,19 @@
+name: Export v0.5 source artifact
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package source tree
+        run: |
+          zip -r proposal_agent_system_v0.5.0.zip . -x '.git/*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proposal-agent-v05-source
+          path: proposal_agent_system_v0.5.0.zip
+          retention-days: 1
