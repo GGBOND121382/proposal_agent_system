@@ -9,3 +9,5 @@ data/uploads/*
 data/exports/*
 !data/uploads/.gitkeep
 !data/exports/.gitkeep
+
+proposal_agent_system_v0.4.0.patch
