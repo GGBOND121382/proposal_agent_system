@@ -244,9 +244,9 @@ class ContextBuilder:
         if "source_section" in payload and current_section:
             replacements.append(("payload.source_section", current_section))
         if "linked_sections" in payload and docs:
-            replacements.append(("payload.linked_sections", [s for d in docs for s in d.get("sections", [])][:20]))
+            replacements.append(("payload.linked_sections", [s for d in docs for s in d.get("sections", [])][:100]))
         if "read_only_context" in payload and docs:
-            replacements.append(("payload.read_only_context", [s for d in docs for s in d.get("sections", [])][1:20]))
+            replacements.append(("payload.read_only_context", [s for d in docs for s in d.get("sections", [])][1:100]))
         if "object_context" in payload and docs:
             first = docs[0]
             replacements.append(("payload.object_context", self._object_ref(first["document_id"], "SOURCE_DOCUMENT", first["security_level"], first["document_hash"], first["title"])))
@@ -304,7 +304,13 @@ class ContextBuilder:
                     replacements.append((f"payload.{field}", value))
 
         project_definition = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "project_definition")
-        facts = self._result(project["id"], "P-FACT-EXTRACT", "fact_candidates") or []
+        internal_facts = self._result(project["id"], "P-FACT-EXTRACT", "fact_candidates") or []
+        public_claims = self._result(project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS", "claims") or []
+        import_review = self._result(project["id"], "P-ONLINE-RESULT-IMPORT-CRITIC") or {}
+        accepted_public_ids = set(import_review.get("accepted_claim_ids") or [])
+        if accepted_public_ids:
+            public_claims = [claim for claim in public_claims if claim.get("claim_id") in accepted_public_ids]
+        facts = [*internal_facts, *public_claims]
         scheme = self._result(project["id"], "P-SCHEME-EXTRACT", "scheme_profile")
         template = self._result(project["id"], "P-TEMPLATE-EXTRACT", "template")
         plan = self._result(project["id"], "P-REVISION-PLAN", "revision_plan")

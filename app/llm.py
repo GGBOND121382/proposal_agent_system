@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from .security import Route
+from .simulated_llm import SimulatedLLM
 
 
 class LLMError(RuntimeError):
@@ -45,6 +46,7 @@ class ModelGateway:
     def __init__(self, settings, pack):
         self.settings = settings
         self.pack = pack
+        self.simulator = SimulatedLLM(pack)
 
     async def invoke(self, route: Route, prompt_id: str, system_prompt: str, envelope: dict[str, Any], output_schema: dict[str, Any]) -> LLMResult:
         mode = self.settings.runtime_mode
@@ -53,6 +55,10 @@ class ModelGateway:
             if mode == "MOCK":
                 output.setdefault("warnings", []).append("MOCK模式：输出来自静态样例，不代表真实模型质量。")
             return LLMResult(output=output, raw_text=json.dumps(output, ensure_ascii=False), model_id=f"{mode.lower()}-provider", endpoint_id="local-static")
+        if mode == "SIMULATED":
+            output = self.simulator.invoke(prompt_id, envelope)
+            output.setdefault("warnings", []).append("SIMULATED模式：输出由本地确定性智能体模拟器生成，用于端到端测试与审计。")
+            return LLMResult(output=output, raw_text=json.dumps(output, ensure_ascii=False), model_id="simulated-provider", endpoint_id="local-simulated")
         return await self._invoke_live(route, prompt_id, system_prompt, envelope, output_schema)
 
     async def _invoke_live(self, route: Route, prompt_id: str, system_prompt: str, envelope: dict[str, Any], output_schema: dict[str, Any]) -> LLMResult:

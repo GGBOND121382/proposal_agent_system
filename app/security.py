@@ -54,7 +54,7 @@ class SecurityRouter:
         profile = self.pack.model_profile(prompt_id)
         candidates = list(profile.get("preferred_models", [])) + list(profile.get("fallback_models", []))
         reasons: list[str] = []
-        simulation = os.getenv("MODEL_RUNTIME_MODE", "REPLAY").upper() in {"REPLAY", "MOCK"}
+        simulation = os.getenv("MODEL_RUNTIME_MODE", "REPLAY").upper() in {"REPLAY", "MOCK", "SIMULATED"}
         for model_id in candidates:
             model = self.model_by_id.get(model_id)
             if not model or (not model.get("enabled", False) and not simulation):

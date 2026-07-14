@@ -1,0 +1,362 @@
+[
+  {
+    "id": 1,
+    "authors": "Yao S, Zhao J, Yu D, et al.",
+    "title": "ReAct: Synergizing Reasoning and Acting in Language Models",
+    "venue": "ICLR",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2210.03629",
+    "category": "智能体规划与工具调用",
+    "note": "提出交错推理与行动机制，为智能体规划-执行闭环奠定基础。"
+  },
+  {
+    "id": 2,
+    "authors": "Schick T, Dwivedi-Yu J, Dessi R, et al.",
+    "title": "Toolformer: Language Models Can Teach Themselves to Use Tools",
+    "venue": "NeurIPS",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2302.04761",
+    "category": "工具调用",
+    "note": "研究模型自动学习API调用时机与参数的方法。"
+  },
+  {
+    "id": 3,
+    "authors": "Shinn N, Cassano F, Berman E, et al.",
+    "title": "Reflexion: Language Agents with Verbal Reinforcement Learning",
+    "venue": "NeurIPS",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2303.11366",
+    "category": "反思与记忆",
+    "note": "通过语言反馈和情景记忆实现无需更新参数的迭代改进。"
+  },
+  {
+    "id": 4,
+    "authors": "Yao S, Yu D, Zhao J, et al.",
+    "title": "Tree of Thoughts: Deliberate Problem Solving with Large Language Models",
+    "venue": "NeurIPS",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2305.10601",
+    "category": "规划与搜索",
+    "note": "通过多路径搜索、自评估和回溯增强复杂问题求解。"
+  },
+  {
+    "id": 5,
+    "authors": "Wu Q, Bansal G, Zhang J, et al.",
+    "title": "AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation",
+    "venue": "arXiv preprint",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2308.08155",
+    "category": "多智能体编排",
+    "note": "提供可配置的多智能体会话与人机协同框架。"
+  },
+  {
+    "id": 6,
+    "authors": "Hong S, Zhuge M, Chen J, et al.",
+    "title": "MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework",
+    "venue": "ICLR",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2308.00352",
+    "category": "多智能体工作流",
+    "note": "将标准作业流程编码到多智能体协作中，降低级联错误。"
+  },
+  {
+    "id": 7,
+    "authors": "Liu X, Yu H, Zhang H, et al.",
+    "title": "AgentBench: Evaluating LLMs as Agents",
+    "venue": "ICLR",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2308.03688",
+    "category": "智能体评估",
+    "note": "在八类交互环境中评估智能体的推理、决策和指令遵循。"
+  },
+  {
+    "id": 8,
+    "authors": "Mialon G, Fourrier C, Swift C, et al.",
+    "title": "GAIA: a benchmark for General AI Assistants",
+    "venue": "ICLR",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2311.12983",
+    "category": "智能体评估",
+    "note": "评估推理、浏览、多模态与工具使用的综合能力。"
+  },
+  {
+    "id": 9,
+    "authors": "Zhou S, Xu F F, Zhu H, et al.",
+    "title": "WebArena: A Realistic Web Environment for Building Autonomous Agents",
+    "venue": "ICLR",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2307.13854",
+    "category": "智能体环境与评估",
+    "note": "构建真实可复现网站环境，揭示长程任务成功率仍较低。"
+  },
+  {
+    "id": 10,
+    "authors": "Wang G, Xie Y, Jiang Y, et al.",
+    "title": "Voyager: An Open-Ended Embodied Agent with Large Language Models",
+    "venue": "arXiv preprint",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2305.16291",
+    "category": "技能库与长期学习",
+    "note": "结合自动课程、技能库和迭代提示实现持续学习。"
+  },
+  {
+    "id": 11,
+    "authors": "Park J S, O'Brien J C, Cai C J, et al.",
+    "title": "Generative Agents: Interactive Simulacra of Human Behavior",
+    "venue": "UIST",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2304.03442",
+    "category": "记忆与行为模拟",
+    "note": "提出观察、规划、反思和记忆检索相结合的智能体架构。"
+  },
+  {
+    "id": 12,
+    "authors": "Du Y, Li S, Torralba A, et al.",
+    "title": "Improving Factuality and Reasoning in Language Models through Multiagent Debate",
+    "venue": "arXiv preprint",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2305.14325",
+    "category": "多智能体审查",
+    "note": "通过多轮辩论提升事实性和推理质量。"
+  },
+  {
+    "id": 13,
+    "authors": "Wang L, Ma C, Feng X, et al.",
+    "title": "A Survey on Large Language Model based Autonomous Agents",
+    "venue": "Frontiers of Computer Science",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2308.11432",
+    "category": "综述",
+    "note": "从构建、应用和评估三个方面总结LLM智能体。"
+  },
+  {
+    "id": 14,
+    "authors": "Zou H P, Huang W C, Wu Y, et al.",
+    "title": "LLM-Based Human-Agent Collaboration and Interaction Systems: A Survey",
+    "venue": "Findings of ACL",
+    "year": 2026,
+    "url": "https://arxiv.org/abs/2505.00753",
+    "category": "人机协同",
+    "note": "系统总结人类反馈、交互类型、编排、通信与控制机制，并讨论可靠性与安全边界。"
+  },
+  {
+    "id": 15,
+    "authors": "Lewis P, Perez E, Piktus A, et al.",
+    "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+    "venue": "NeurIPS",
+    "year": 2020,
+    "url": "https://arxiv.org/abs/2005.11401",
+    "category": "RAG",
+    "note": "提出结合参数记忆与非参数检索的RAG框架。"
+  },
+  {
+    "id": 16,
+    "authors": "Edge D, Trinh H, Cheng N, et al.",
+    "title": "From Local to Global: A Graph RAG Approach to Query-Focused Summarization",
+    "venue": "arXiv preprint",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2404.16130",
+    "category": "GraphRAG",
+    "note": "通过实体图谱与社区摘要处理全局性问题。"
+  },
+  {
+    "id": 17,
+    "authors": "Huang Y, Huang J.",
+    "title": "A Survey on Retrieval-Augmented Text Generation for Large Language Models",
+    "venue": "arXiv preprint",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2404.10981",
+    "category": "RAG综述",
+    "note": "从检索前、检索、检索后和生成阶段梳理RAG。"
+  },
+  {
+    "id": 18,
+    "authors": "Ru D, Qiu L, Hu X, et al.",
+    "title": "RAGChecker: A Fine-grained Framework for Diagnosing Retrieval-Augmented Generation",
+    "venue": "arXiv preprint",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2408.08067",
+    "category": "RAG评估",
+    "note": "提供面向检索与生成模块的细粒度诊断指标。"
+  },
+  {
+    "id": 19,
+    "authors": "Debenedetti E, Zhang J, Balunovic M, et al.",
+    "title": "AgentDojo: A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for LLM Agents",
+    "venue": "arXiv preprint",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2406.13352",
+    "category": "智能体安全",
+    "note": "构建包含真实工具任务和攻击用例的动态安全评估环境。"
+  },
+  {
+    "id": 20,
+    "authors": "Zhan Q, Liang Z, Ying Z, et al.",
+    "title": "InjecAgent: Benchmarking Indirect Prompt Injections in Tool-Integrated Large Language Model Agents",
+    "venue": "arXiv preprint",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2403.02691",
+    "category": "智能体安全",
+    "note": "评估工具集成智能体面对间接提示注入的风险。"
+  },
+  {
+    "id": 21,
+    "authors": "Jannelli V, Schoepf S, Bickel M, et al.",
+    "title": "Agentic LLMs in the Supply Chain: Towards Autonomous Multi-Agent Consensus-Seeking",
+    "venue": "arXiv preprint",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2411.10184",
+    "category": "供应链智能体",
+    "note": "研究多智能体在供应链共识形成和库存决策中的应用。"
+  },
+  {
+    "id": 22,
+    "authors": "Jahin M A, Naife S A, Saha A K, et al.",
+    "title": "AI in Supply Chain Risk Assessment: A Systematic Literature Review and Bibliometric Analysis",
+    "venue": "arXiv preprint",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2401.10895",
+    "category": "供应链风险",
+    "note": "综述AI/ML在供应链风险评估和韧性管理中的应用。"
+  },
+  {
+    "id": 23,
+    "authors": "Le T V, Fan R.",
+    "title": "Digital Twins for Logistics and Supply Chain Systems: Literature Review, Conceptual Framework, Research Potential, and Practical Challenges",
+    "venue": "arXiv preprint",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2311.17317",
+    "category": "数字孪生与物流",
+    "note": "提出物流与供应链数字孪生概念框架及实施挑战。"
+  },
+  {
+    "id": 24,
+    "authors": "Vinyals O, Fortunato M, Jaitly N.",
+    "title": "Pointer Networks",
+    "venue": "NeurIPS",
+    "year": 2015,
+    "url": "https://arxiv.org/abs/1506.03134",
+    "category": "组合优化学习",
+    "note": "提出通过注意力指向输入位置的可变输出结构。"
+  },
+  {
+    "id": 25,
+    "authors": "Dai H, Khalil E B, Zhang Y, et al.",
+    "title": "Learning Combinatorial Optimization Algorithms over Graphs",
+    "venue": "NeurIPS",
+    "year": 2017,
+    "url": "https://arxiv.org/abs/1704.01665",
+    "category": "组合优化学习",
+    "note": "结合图嵌入与强化学习自动学习图优化启发式策略。"
+  },
+  {
+    "id": 26,
+    "authors": "Nazari M, Oroojlooy A, Snyder L V, et al.",
+    "title": "Reinforcement Learning for Solving the Vehicle Routing Problem",
+    "venue": "arXiv preprint",
+    "year": 2018,
+    "url": "https://arxiv.org/abs/1802.04240",
+    "category": "路径规划",
+    "note": "以策略梯度学习可泛化的车辆路径规划策略。"
+  },
+  {
+    "id": 27,
+    "authors": "Kool W, van Hoof H, Welling M.",
+    "title": "Attention, Learn to Solve Routing Problems!",
+    "venue": "ICLR",
+    "year": 2019,
+    "url": "https://arxiv.org/abs/1803.08475",
+    "category": "路径规划",
+    "note": "使用注意力模型学习TSP、VRP等问题的构造式启发算法。"
+  },
+  {
+    "id": 28,
+    "authors": "Wu Y, Song W, Cao Z, et al.",
+    "title": "Learning Improvement Heuristics for Solving Routing Problems",
+    "venue": "arXiv preprint",
+    "year": 2019,
+    "url": "https://arxiv.org/abs/1912.05784",
+    "category": "路径规划",
+    "note": "学习迭代改进策略以持续优化路径解。"
+  },
+  {
+    "id": 29,
+    "authors": "Foa S, Coppola C, Grani G, et al.",
+    "title": "Solving the Vehicle Routing Problem with Deep Reinforcement Learning",
+    "venue": "arXiv preprint",
+    "year": 2022,
+    "url": "https://arxiv.org/abs/2208.00202",
+    "category": "路径规划",
+    "note": "研究PPO等深度强化学习方法在VRP中的适用性。"
+  },
+  {
+    "id": 30,
+    "authors": "Echeverria I, Murua M, Santana R.",
+    "title": "Solving the Flexible Job-Shop Scheduling Problem through an Enhanced Deep Reinforcement Learning Approach",
+    "venue": "arXiv preprint",
+    "year": 2023,
+    "url": "https://arxiv.org/abs/2310.15706",
+    "category": "动态调度",
+    "note": "通过异构图神经网络和强化学习求解大规模柔性作业调度。"
+  },
+  {
+    "id": 31,
+    "authors": "National Institute of Standards and Technology.",
+    "title": "Artificial Intelligence Risk Management Framework (AI RMF 1.0)",
+    "venue": "NIST AI 100-1",
+    "year": 2023,
+    "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf",
+    "category": "治理与风险",
+    "note": "提出Govern、Map、Measure、Manage等AI风险管理职能。"
+  },
+  {
+    "id": 32,
+    "authors": "International Organization for Standardization.",
+    "title": "ISO/IEC 42001:2023 Information technology - Artificial intelligence - Management system",
+    "venue": "International Standard",
+    "year": 2023,
+    "url": "https://www.iso.org/standard/81230.html",
+    "category": "治理与标准",
+    "note": "规定人工智能管理体系的建立、实施、维护和持续改进要求。"
+  },
+  {
+    "id": 33,
+    "authors": "Anthropic and Model Context Protocol Contributors.",
+    "title": "Model Context Protocol Specification",
+    "venue": "Open Technical Specification",
+    "year": 2024,
+    "url": "https://modelcontextprotocol.io/specification/2024-11-05",
+    "category": "工具互操作",
+    "note": "定义模型、工具与数据源之间的标准化上下文交换机制。"
+  },
+  {
+    "id": 34,
+    "authors": "OWASP Foundation.",
+    "title": "OWASP Top 10 for Large Language Model Applications 2025",
+    "venue": "OWASP GenAI Security Project",
+    "year": 2025,
+    "url": "https://genai.owasp.org/llm-top-10/",
+    "category": "应用安全",
+    "note": "总结提示注入、敏感信息泄漏、过度代理等LLM应用主要风险。"
+  },
+  {
+    "id": 35,
+    "authors": "Wang S, Zhao Y, Hou X, et al.",
+    "title": "Large Language Model Supply Chain: A Research Agenda",
+    "venue": "arXiv preprint",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2404.12736",
+    "category": "LLM系统工程",
+    "note": "从软件工程与安全视角分析LLM系统供应链及研究议程。"
+  },
+  {
+    "id": 36,
+    "authors": "Hu Q, Xie X, Chen S, et al.",
+    "title": "Large Language Model Supply Chain: Open Problems From the Security Perspective",
+    "venue": "arXiv preprint",
+    "year": 2024,
+    "url": "https://arxiv.org/abs/2411.01604",
+    "category": "LLM系统安全",
+    "note": "分析模型、数据、组件和集成链路中的系统性安全风险。"
+  }
+]

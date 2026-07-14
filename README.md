@@ -6,7 +6,7 @@
 
 - 26 个 Prompt 的动态注册、输入/输出 Schema 严格校验和完整 Schema 内联；
 - OpenAI-compatible 离线/在线模型网关，离线失败不会自动切换在线；
-- `REPLAY`、`MOCK`、`LIVE` 三种运行模式；
+- `REPLAY`、`MOCK`、`SIMULATED`、`LIVE` 四种运行模式；
 - 五条核心工作流状态机与十三类人工 Gate；
 - 一次定向修复额度与 Critic/Producer 分离；
 - DOCX、PDF、Markdown、TXT、JSON、CSV 材料解析；
@@ -16,6 +16,29 @@
 - DOCX 新文档生成、简单章节定向补丁、完整性报告和导出审计包；
 - 浏览器操作台及 FastAPI 接口文档；
 - Prompt 包静态校验和端到端自动化测试。
+
+## v0.4.0 复杂申请书、公开证据、图形与全链路Trace
+
+本版本针对复杂科研申请书的真实验收缺口进行系统修复：
+
+- 新增 `SIMULATED` 确定性模型模式：不调用外部模型API，但按26个Prompt各自Schema生成项目相关输出，不再返回通用Replay句子；
+- 26个Prompt在复杂端到端测试中全部实际触发，`P-TARGETED-REPAIR`通过“Critic发现问题→定向修复→再次审查”真实运行；
+- 公开研究综合产出结构化 `PUBLIC_CLAIM`，在导入审查后进入写作事实上下文；
+- 每次模型调用保存安全域内 `PROMPT_TRACE`，包含完整System Prompt、输入Envelope、输出Schema、原始响应、解析输出、路由、模型、端点、状态和耗时；
+- DOCX导出器新增 `[[FIGURE]]` 图形工件协议，支持逻辑结构图、技术路线图、关键执行流图等图示；
+- 新增41章“后勤保障智能体”复杂测试材料、36条公开参考资料、11类核心图示及完整质量门；
+- 自动验收覆盖章节、页数、参考文献、图示、Prompt覆盖、定向修复、Trace完整性、隐私泄漏和重复段落。
+
+复杂端到端运行：
+
+```bash
+python scripts/build_logistics_agent_materials.py data/logistics_agent_materials_v1
+python scripts/run_logistics_agent_complex_e2e.py \
+  --materials-dir data/logistics_agent_materials_v1 \
+  --output-dir data/logistics_agent_complex_e2e
+```
+
+`SIMULATED` 用于验证运行时能力、编排、审计和导出，不代表真实模型语义能力。参考资料元数据来自公开论文和官方标准页面；生产使用仍需配置真实模型与搜索端点。
 
 ## v0.3.0 中性端到端测试与在线隐私防护
 
@@ -98,6 +121,14 @@ MODEL_RUNTIME_MODE=REPLAY
 
 同样不调用模型，输出静态样例并增加 MOCK 警告，适合前后端联调。
 
+### SIMULATED
+
+不调用外部模型API。按Prompt职责生成项目相关、Schema合法的确定性结果，用于覆盖全部智能体、定向修复、公开研究导入、图表导出和全链路Trace测试。
+
+```env
+MODEL_RUNTIME_MODE=SIMULATED
+```
+
 ### LIVE
 
 调用实际 OpenAI-compatible 模型端点。
@@ -178,6 +209,9 @@ bash scripts/validate.sh
 - 五条工作流完整运行；
 - 多章节逐章生成、真实候选聚合和终审输入；
 - 十二章模拟模型端到端申请书生成；
+- 41章复杂申请书、26/26 Prompt覆盖和定向修复闭环；
+- 全量System Prompt、输入、输出Schema、原始响应和路由Trace；
+- 公开证据进入写作上下文、参考文献与图形工件导出；
 - 最终 DOCX 和审计包生成。
 
 ## 目录

@@ -30,8 +30,8 @@ class Settings:
         uploads.mkdir(parents=True, exist_ok=True)
         exports.mkdir(parents=True, exist_ok=True)
         mode = os.getenv("MODEL_RUNTIME_MODE", "REPLAY").upper()
-        if mode not in {"REPLAY", "MOCK", "LIVE"}:
-            raise ValueError("MODEL_RUNTIME_MODE must be REPLAY, MOCK, or LIVE")
+        if mode not in {"REPLAY", "MOCK", "SIMULATED", "LIVE"}:
+            raise ValueError("MODEL_RUNTIME_MODE must be REPLAY, MOCK, SIMULATED, or LIVE")
         return cls(
             root_dir=root,
             data_dir=data_dir,

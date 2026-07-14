@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from docx import Document
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
@@ -33,6 +34,9 @@ class ExportRenderMixin:
             return
         if text.startswith("[[TABLE]]"):
             self._append_table(document, text.removeprefix("[[TABLE]]").strip())
+            return
+        if text.startswith("[[FIGURE]]"):
+            self._append_figure(document, text.removeprefix("[[FIGURE]]").strip())
             return
         if text.startswith("[[BULLET]]"):
             paragraph = document.add_paragraph(style="List Bullet")
@@ -112,3 +116,26 @@ class ExportRenderMixin:
             run._r.extend([begin, instr, end])
             self._set_run_font(run, "宋体", 10)
 
+
+    def _append_figure(self, document: Document, raw: str) -> None:
+        parts = [part.strip() for part in raw.split("|")]
+        if not parts or not parts[0]:
+            return
+        img_path = Path(parts[0])
+        caption = parts[1] if len(parts) > 1 and parts[1] else img_path.stem
+        width_cm = float(parts[2]) if len(parts) > 2 and parts[2] else 15.0
+        if not img_path.exists():
+            p = document.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(f"[缺失图片] {caption}: {img_path}")
+            self._set_run_font(run, "宋体", 10)
+            return
+        p = document.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run()
+        run.add_picture(str(img_path), width=Cm(width_cm))
+        c = document.add_paragraph()
+        c.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        crun = c.add_run(caption)
+        self._set_run_font(crun, "宋体", 10)
+        c.paragraph_format.space_after = Pt(6)

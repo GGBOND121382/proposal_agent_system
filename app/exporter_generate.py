@@ -52,7 +52,6 @@ class ExportGenerateMixin:
                 p.paragraph_format.left_indent = Cm(0.8)
                 run = p.add_run(candidate.get("section_title") or "未命名章节")
                 self._set_run_font(run, "宋体", 12)
-            document.add_page_break()
             for candidate in candidates:
                 document.add_heading(candidate.get("section_title") or "未命名章节", level=1)
                 list_state = {"number": 0}
