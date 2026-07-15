@@ -26,7 +26,7 @@ DIAGRAMS = [
     (
         "argument-architecture",
         "论证架构图",
-        "flowchart LR\n  A[中心命题] --> B[研究问题]\n  B --> C[方法]\n  C --> D[验证]\n  D --> E[贡献]",
+        "flowchart TB\n  A[中心命题] --> B[研究问题]\n  B --> C1[理论机制]\n  B --> C2[技术方法]\n  C1 --> D[验证设计]\n  C2 --> D\n  D --> E[预期贡献]",
     ),
     (
         "technical-route",
