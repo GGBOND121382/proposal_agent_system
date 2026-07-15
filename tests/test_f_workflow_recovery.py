@@ -4,8 +4,6 @@ import asyncio
 import json
 from pathlib import Path
 
-import pytest
-
 from app.config import Settings
 from app.context import ContextBuilder
 from app.db import Database
@@ -161,24 +159,62 @@ def test_workflow_recovers_from_every_persisted_checkpoint(tmp_path: Path, monke
     assert restarted == uninterrupted
 
 
-async def run_authoring_chain(engine: WorkflowEngine, project_id: str):
+async def run_authoring_chain(
+    engine: WorkflowEngine,
+    project_id: str,
+    *,
+    target_section_titles: list[str] | None = None,
+):
     for workflow_type in (
         "WF-1_PROJECT_INTAKE",
         "WF-2_TEMPLATE_EXTRACTION",
         "WF-4_PROPOSAL_AUTHORING",
         "WF-5_SECURITY_REVIEW_AND_EXPORT",
     ):
-        workflow = engine.start(project_id, workflow_type)
+        options = (
+            {"target_section_titles": target_section_titles}
+            if workflow_type == "WF-4_PROPOSAL_AUTHORING" and target_section_titles
+            else None
+        )
+        workflow = engine.start(project_id, workflow_type, options=options)
         workflow, engine = await finish(engine, workflow["id"])
         assert workflow["status"] == "COMPLETED", workflow["state"].get("last_error")
 
 
-@pytest.mark.parametrize("titles", [["研究内容"], ["选题背景", "研究内容", "技术路线"]])
-def test_small_authoring_export_chains(tmp_path: Path, monkeypatch, titles: list[str]):
-    data_dir = tmp_path / f"sections-{len(titles)}"
-    settings, _, db, _, engine, exporter = build_runtime(data_dir, monkeypatch)
-    project_id = seed_project(settings, db, section_titles=titles)
-    asyncio.run(run_authoring_chain(engine, project_id))
+def assert_exported_document(exporter: DocxExporter, project_id: str):
     document = exporter.export(project_id)
     assert document.is_file()
     assert document.stat().st_size > 5_000
+
+
+def test_small_single_section_authoring_export_chain(tmp_path: Path, monkeypatch):
+    # A single-section E2E still needs a valid surrounding proposal architecture.
+    # The WF-4 target option narrows generation to one section without pretending
+    # that a one-heading document is a complete research proposal.
+    data_dir = tmp_path / "single-section"
+    settings, _, db, _, engine, exporter = build_runtime(data_dir, monkeypatch)
+    project_id = seed_project(
+        settings,
+        db,
+        section_titles=["选题背景", "研究内容", "技术路线"],
+    )
+    asyncio.run(
+        run_authoring_chain(
+            engine,
+            project_id,
+            target_section_titles=["研究内容"],
+        )
+    )
+    assert_exported_document(exporter, project_id)
+
+
+def test_small_three_section_authoring_export_chain(tmp_path: Path, monkeypatch):
+    data_dir = tmp_path / "three-sections"
+    settings, _, db, _, engine, exporter = build_runtime(data_dir, monkeypatch)
+    project_id = seed_project(
+        settings,
+        db,
+        section_titles=["选题背景", "研究内容", "技术路线"],
+    )
+    asyncio.run(run_authoring_chain(engine, project_id))
+    assert_exported_document(exporter, project_id)
