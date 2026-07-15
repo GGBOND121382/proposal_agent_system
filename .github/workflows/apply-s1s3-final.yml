@@ -1,0 +1,171 @@
+name: Apply verified S1 main sync
+
+on:
+  push:
+    branches:
+      - agent/integration-v06-single-section
+    paths:
+      - ".github/s1-final/**"
+      - ".github/workflows/apply-s1s3-final.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: apply-s1-main-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Check out payload commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify immutable parents
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "0e980a9de57317f9753a76a4ea763e868ddf5a04"
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "4564e68b8b45a16a2273550fc6306cf7029d7ed4"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Verify and apply fixed S1 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/s1-final/patch.part-* | base64 --decode > /tmp/s1-main-sync.patch.gz
+          echo "887738fb0bb66202d458deee1b408a577880721a35962ed625433196251968f0  /tmp/s1-main-sync.patch.gz" | sha256sum --check --strict
+          gzip -dc /tmp/s1-main-sync.patch.gz > /tmp/s1-main-sync.patch
+          echo "c9062b982b8ff084232dd827fdaadb6e9e3058271c1c83eaa02e3ba27aaef190  /tmp/s1-main-sync.patch" | sha256sum --check --strict
+          git apply --check /tmp/s1-main-sync.patch
+          git apply --index /tmp/s1-main-sync.patch
+          rm -rf .github/s1-final
+          rm -f .github/workflows/apply-s1s3-final.yml
+          git add -A
+          git config user.name "proposal-agent-integration"
+          git config user.email "proposal-agent-integration@users.noreply.github.com"
+          git commit -m "complete G2 single-section full chain"
+
+      - name: Merge current main with deterministic conflict policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          git merge --no-ff --no-commit origin/main
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            printf 'conflicts=%s\n' "${conflicts[*]}"
+            allowed=(.gitignore app/exporter_base.py app/workflows.py)
+            for path in "${conflicts[@]}"; do
+              ok=0
+              for candidate in "${allowed[@]}"; do
+                if [ "$path" = "$candidate" ]; then ok=1; break; fi
+              done
+              if [ "$ok" -ne 1 ]; then
+                echo "Unexpected merge conflict: $path" >&2
+                exit 1
+              fi
+              git checkout --ours -- "$path"
+              git add -- "$path"
+            done
+          fi
+          test -z "$(git diff --name-only --diff-filter=U)"
+
+      - name: Compile and validate contracts
+        run: |
+          python -m compileall -q app scripts tests
+          python scripts/validate_g0.py
+          python prompt_pack/tools/validate_pack.py
+
+      - name: Run S1 S3 and component regressions
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_single_section_chain.py \
+            tests/test_s3_research_mermaid_export.py \
+            tests/test_track_b_agent_prompt.py \
+            tests/test_d_track.py \
+            tests/test_quality_track_e.py \
+            tests/test_research_skill_track_c.py \
+            tests/test_runtime_recovery.py \
+            tests/test_f_components.py \
+            tests/test_f_workflow_recovery.py
+
+      - name: Run full regression
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: python -m pytest -q --tb=short
+
+      - name: Generate S1 and S3 acceptance evidence
+        env:
+          MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
+        run: |
+          rm -rf /tmp/s1-acceptance /tmp/s3-acceptance
+          python scripts/run_single_section_chain_acceptance.py \
+            --evidence-dir /tmp/s1-acceptance
+          python scripts/run_s3_research_mermaid_export.py \
+            --output-dir /tmp/s3-acceptance \
+            --fixture \
+            --source-commit "$(git rev-parse HEAD)"
+          python scripts/verify_s3_evidence.py \
+            /tmp/s3-acceptance/acceptance/S3_ACCEPTANCE.json \
+            --data-dir /tmp/s3-acceptance \
+            --json-out /tmp/s3-acceptance/acceptance/S3_REVERIFY.json
+
+      - name: Commit merge and push without force
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git commit -m "merge main into G2 S1 integration"
+          git push origin HEAD:agent/integration-v06-single-section
+
+      - name: Dispatch final-head validation workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in ci.yml s1-single-section-chain.yml g2-s3.yml; do
+            gh workflow run "$workflow" --ref agent/integration-v06-single-section
+          done
+
+      - name: Upload application evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: s1-main-sync-application-${{ github.sha }}
+          path: |
+            /tmp/s1-acceptance
+            /tmp/s3-acceptance
+          if-no-files-found: warn
+          retention-days: 14
