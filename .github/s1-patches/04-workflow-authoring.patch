@@ -1,0 +1,246 @@
+diff --git a/app/workflow_authoring.py b/app/workflow_authoring.py
+index 4871f6e..123e17b 100644
+--- a/app/workflow_authoring.py
++++ b/app/workflow_authoring.py
+@@ -6,70 +6,199 @@ from .executor import PromptExecutionError
+ 
+ 
+ class WorkflowAuthoringMixin:
++    SECTION_PHASES = {
++        "BLUEPRINT": ("P-WRITE-BLUEPRINT", "BLUEPRINT_CRITIC"),
++        "BLUEPRINT_CRITIC": ("P-WRITE-BLUEPRINT-CRITIC", "CONTENT"),
++        "CONTENT": ("P-WRITE-CONTENT", "CONTENT_CRITIC"),
++        "CONTENT_CRITIC": ("P-WRITE-CRITIC", "POLISH"),
++        "POLISH": ("P-EXPRESSION-POLISH", "EXPRESSION_CRITIC"),
++        "EXPRESSION_CRITIC": ("P-EXPRESSION-CRITIC", "DONE"),
++    }
++    SECTION_REPAIR_CRITICS = {"P-WRITE-BLUEPRINT-CRITIC", "P-WRITE-CRITIC"}
++
++    @staticmethod
++    def _append_section_run(progress: dict[str, Any], result: dict[str, Any], *, prompt_id: str | None = None, role: str | None = None) -> None:
++        run_id = str(result.get("run_id") or "")
++        if run_id and any(str(item.get("run_id") or "") == run_id for item in progress["runs"]):
++            return
++        record = {
++            "prompt_id": prompt_id or result.get("prompt_id"),
++            "run_id": run_id,
++            "status": result.get("status"),
++        }
++        if role:
++            record["role"] = role
++        progress["runs"].append(record)
++
++    def _block_section_chain(
++        self,
++        wf: dict[str, Any],
++        state: dict[str, Any],
++        section: dict[str, Any],
++        message: str,
++    ) -> dict[str, Any]:
++        section_id = str(section.get("section_id") or "")
++        progress = state.setdefault("section_progress", {}).setdefault(section_id, {})
++        progress["status"] = "BLOCKED"
++        progress["last_error"] = message
++        state["last_error"] = f"{section.get('title')}: {message}"
++        self._update(wf, status="BLOCKED", state=state)
++        return self.get(wf["id"])
++
++    async def _execute_section_prompt(
++        self,
++        wf: dict[str, Any],
++        state: dict[str, Any],
++        section: dict[str, Any],
++        progress: dict[str, Any],
++        prompt_id: str,
++        *,
++        role: str | None = None,
++    ) -> tuple[dict[str, Any], dict[str, Any]]:
++        envelope = self.context_builder.build(
++            prompt_id,
++            wf["project_id"],
++            workflow_id=wf["id"],
++            workflow_state=state,
++        )
++        result = await self.executor.execute(
++            prompt_id,
++            envelope,
++            project_id=wf["project_id"],
++            workflow_id=wf["id"],
++            original_environment=state.get("original_environment"),
++        )
++        if prompt_id == "P-WRITE-CONTENT" and self.diagram_enrichment is not None and result["status"] == "PASS":
++            result["output"] = await self.diagram_enrichment.enrich(
++                project_id=wf["project_id"],
++                workflow_id=wf["id"],
++                run_id=result["run_id"],
++                section=section,
++                output=result["output"],
++                security_level=(
++                    result["output"].get("source_refs", [{}])[0].get("security_level", "INTERNAL")
++                    if result["output"].get("source_refs") else "INTERNAL"
++                ),
++            )
++        self._append_section_run(progress, result, prompt_id=prompt_id, role=role)
++        state["original_environment"] = result["route"]["environment"]
++        self._observe_quality_result(wf, state, prompt_id, result)
++        self._update(wf, state=state)
++        return envelope, result
++
+     async def _write_sections(self, wf: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
+-        """Generate and review every requested proposal section before one human review gate.
++        """Run an isolated, recoverable producer/critic/repair chain for each section.
+ 
+-        The V2 prompts are section-oriented.  Running them once for a full-document task
+-        silently produced only one candidate.  This orchestrator keeps the prompt contracts
+-        unchanged while iterating over the CURRENT_PROPOSAL section tree.
++        The chain is:
++        Blueprint -> Blueprint Critic -> at most one Targeted Repair -> re-review
++        -> Content -> Content Critic -> at most one Targeted Repair -> re-review
++        -> Expression Polish -> Expression Critic.
++
++        Progress is persisted after every model run.  A restart re-enters the same
++        phase; the Track-A deterministic call key then reuses an already committed
++        response instead of duplicating model calls or artifacts.
+         """
+-        sections = self._target_sections(wf["project_id"], state.get("options") or {}, state)
+-        completed = {item.get("section_id") for item in state.get("section_results", [])}
++        options = state.get("options") or {}
++        sections = self._target_sections(wf["project_id"], options, state)
++        if bool(options.get("single_section_complete_chain")) and len(sections) != 1:
++            state["last_error"] = (
++                "单章节完整链要求精确选择一个章节；当前匹配 " + str(len(sections)) + " 个。"
++            )
++            self._update(wf, status="BLOCKED", state=state)
++            return self.get(wf["id"])
++
++        completed = {str(item.get("section_id") or "") for item in state.get("section_results", [])}
+         state.setdefault("section_results", [])
++        progress_map = state.setdefault("section_progress", {})
++
+         for section in sections:
+-            section_id = section["section_id"]
++            section_id = str(section["section_id"])
+             if section_id in completed:
+                 continue
+             state["active_section_id"] = section_id
+             state["active_section_title"] = section.get("title")
+-            section_record = {"section_id": section_id, "title": section.get("title"), "runs": []}
+-            for prompt_id in ["P-WRITE-BLUEPRINT", "P-WRITE-BLUEPRINT-CRITIC", "P-WRITE-CONTENT", "P-WRITE-CRITIC", "P-EXPRESSION-POLISH", "P-EXPRESSION-CRITIC"]:
++            progress = progress_map.setdefault(
++                section_id,
++                {
++                    "section_id": section_id,
++                    "title": section.get("title"),
++                    "phase": "BLUEPRINT",
++                    "status": "RUNNING",
++                    "runs": [],
++                },
++            )
++            progress.setdefault("runs", [])
++            progress.setdefault("phase", "BLUEPRINT")
++            progress["status"] = "RUNNING"
++            self._update(wf, state=state)
++
++            while progress["phase"] != "DONE":
++                phase = str(progress["phase"])
++                if phase not in self.SECTION_PHASES:
++                    return self._block_section_chain(wf, state, section, f"未知章节阶段：{phase}")
++                prompt_id, next_phase = self.SECTION_PHASES[phase]
+                 try:
+-                    envelope = self.context_builder.build(
+-                        prompt_id,
+-                        wf["project_id"],
+-                        workflow_id=wf["id"],
+-                        workflow_state=state,
+-                    )
+-                    result = await self.executor.execute(
+-                        prompt_id,
+-                        envelope,
+-                        project_id=wf["project_id"],
+-                        workflow_id=wf["id"],
+-                        original_environment=state.get("original_environment"),
++                    envelope, result = await self._execute_section_prompt(
++                        wf, state, section, progress, prompt_id, role="INITIAL_REVIEW" if prompt_id.endswith("CRITIC") else "PRODUCER",
+                     )
+                 except (PromptExecutionError, ValueError, KeyError) as exc:
+-                    state["last_error"] = f"{section.get('title')}: {exc}"
+-                    self._update(wf, status="BLOCKED", state=state)
+-                    return self.get(wf["id"])
+-                if prompt_id == "P-WRITE-CONTENT" and self.diagram_enrichment is not None and result["status"] == "PASS":
+-                    result["output"] = await self.diagram_enrichment.enrich(
+-                        project_id=wf["project_id"],
+-                        workflow_id=wf["id"],
+-                        run_id=result["run_id"],
+-                        section=section,
+-                        output=result["output"],
+-                        security_level=result["output"].get("source_refs", [{}])[0].get("security_level", "INTERNAL") if result["output"].get("source_refs") else "INTERNAL",
+-                    )
+-                section_record["runs"].append({"prompt_id": prompt_id, "run_id": result["run_id"], "status": result["status"]})
+-                state["original_environment"] = result["route"]["environment"]
+-                self._observe_quality_result(wf, state, prompt_id, result)
+-                if result["status"] != "PASS":
+-                    state["last_error"] = f"{section.get('title')} / {prompt_id} returned {result['status']}"
+-                    self._update(wf, status="BLOCKED", state=state)
+-                    return self.get(wf["id"])
++                    return self._block_section_chain(wf, state, section, str(exc))
++
++                if result["status"] == "PASS":
++                    progress["phase"] = next_phase
++                    self._update(wf, state=state)
++                    continue
++
++                if result["status"] == "REVISE" and prompt_id in self.SECTION_REPAIR_CRITICS:
++                    if not self._can_auto_repair(prompt_id, state):
++                        return self._block_section_chain(
++                            wf, state, section, f"{prompt_id} 在一次定向修复后仍需修改；章节修复额度已耗尽。",
++                        )
++                    repaired = await self._auto_repair(wf, prompt_id, envelope, result["output"], state)
++                    if not repaired:
++                        return self._block_section_chain(
++                            wf, state, section, f"{prompt_id} 返回 REVISE，但没有可执行的局部修复或定向修复失败。",
++                        )
++                    self._append_section_run(progress, repaired, prompt_id="P-TARGETED-REPAIR", role="TARGETED_REPAIR")
++                    self._update(wf, state=state)
++                    try:
++                        _review_envelope, reviewed = await self._execute_section_prompt(
++                            wf, state, section, progress, prompt_id, role="INDEPENDENT_REVIEW",
++                        )
++                    except (PromptExecutionError, ValueError, KeyError) as exc:
++                        return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}")
++                    if reviewed["status"] != "PASS":
++                        return self._block_section_chain(
++                            wf, state, section,
++                            f"{prompt_id} 定向修复后的独立复审返回 {reviewed['status']}；禁止二次自动修复或人工改正文放行。",
++                        )
++                    progress["phase"] = next_phase
++                    self._update(wf, state=state)
++                    continue
++
++                return self._block_section_chain(
++                    wf, state, section, f"{prompt_id} 返回 {result['status']}；该阶段不允许跳过或人工覆盖。",
++                )
++
++            progress["status"] = "COMPLETED"
++            section_record = {
++                "section_id": section_id,
++                "title": section.get("title"),
++                "status": "COMPLETED",
++                "runs": list(progress["runs"]),
++            }
+             state["section_results"].append(section_record)
++            completed.add(section_id)
+             self._update(wf, state=state)
+ 
+         state.pop("active_section_id", None)
+         state.pop("active_section_title", None)
+         state.pop("integration_repair_section_ids", None)
++        state.pop("last_error", None)
+         wf["current_step"] += 1
+         skip_gate = bool(state.pop("skip_candidate_gate_once", False))
+         self._update(wf, current_step=wf["current_step"], state=state)
+         if skip_gate:
+-            # Integration-directed machine repair must be re-evaluated, not
+-            # converted into a human confirmation of an unchanged document.
+             return None
+         refreshed = self.get(wf["id"])
+         self._create_gate(refreshed, "CANDIDATE_REVIEW", target_id=wf["id"], questions=[])
