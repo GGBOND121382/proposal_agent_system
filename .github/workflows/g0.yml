@@ -4,8 +4,14 @@ on:
   push:
     branches:
       - main
-      - "agent/**"
   pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -17,12 +23,12 @@ jobs:
 
     steps:
       - name: Check out complete history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -68,7 +74,7 @@ jobs:
           /tmp/g0-restored/.venv/bin/python -m pytest -q
 
       - name: Upload G0 evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: g0-recovery-${{ github.sha }}
           path: recovery_evidence/g0/${{ github.sha }}

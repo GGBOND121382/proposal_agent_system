@@ -1,0 +1,230 @@
+{
+  "schema_version": "1.0",
+  "gate": "G1",
+  "controller_baseline": "1579fdbcd311c104fcbadd640190d5361804c45a",
+  "acceptance_rule": "Each track must independently pass positive, negative, boundary, and restart tests. Track A must additionally pass raw-response and SHA-256 integrity audit.",
+  "tracks": [
+    {
+      "id": "A",
+      "name": "Runtime and recovery",
+      "pr_number": 5,
+      "branch": "agent/runtime-recovery",
+      "sha": "7b158f882805375fc657dc7d5fc686653d89335f",
+      "required_files": [
+        "app/runtime_gateway.py",
+        "app/runtime_evidence.py",
+        "app/runtime_executor.py",
+        "scripts/capability_runtime_acceptance.py",
+        "scripts/run_runtime_fault_matrix.py",
+        "tests/test_runtime_recovery.py"
+      ],
+      "test_files": ["tests/test_runtime_recovery.py"],
+      "acceptance_commands": [
+        "python scripts/capability_runtime_acceptance.py --self-test > \"$EVIDENCE_DIR/capability-policy.json\"",
+        "python scripts/run_runtime_fault_matrix.py --self-test > \"$EVIDENCE_DIR/fault-matrix.json\""
+      ],
+      "system_packages": [],
+      "categories": {
+        "positive": [
+          {"type": "test", "path": "tests/test_runtime_recovery.py", "symbol": "test_live_context_does_not_read_replay"}
+        ],
+        "negative": [
+          {"type": "test", "path": "tests/test_runtime_recovery.py", "symbol": "test_capability_policy_rejects_replay"},
+          {"type": "test", "path": "tests/test_runtime_recovery.py", "symbol": "test_response_evidence_detects_tampering"}
+        ],
+        "boundary": [
+          {"type": "test", "path": "tests/test_runtime_recovery.py", "symbol": "test_live_context_blocks_unresolved_required_field"}
+        ],
+        "restart": [
+          {"type": "test", "path": "tests/test_runtime_recovery.py", "symbol": "test_executor_reuses_atomic_commit_after_fault"},
+          {"type": "test", "path": "tests/test_runtime_recovery.py", "symbol": "test_recoverable_block_resumes_same_step"}
+        ]
+      },
+      "special_audit": "runtime_raw_response_hash"
+    },
+    {
+      "id": "B",
+      "name": "Agent and Prompt kernel",
+      "pr_number": 7,
+      "branch": "agent/prompt-agents",
+      "sha": "a65422d411094e9139b26b4a9311058dd64d5f1c",
+      "required_files": [
+        "app/track_b.py",
+        "scripts/validate_track_b.py",
+        "tests/test_track_b_agent_prompt.py"
+      ],
+      "test_files": ["tests/test_track_b_agent_prompt.py"],
+      "acceptance_commands": [
+        "python scripts/validate_track_b.py --json-out \"$EVIDENCE_DIR/acceptance.json\" --md-out \"$EVIDENCE_DIR/acceptance.md\""
+      ],
+      "system_packages": [],
+      "categories": {
+        "positive": [
+          {"type": "test", "path": "tests/test_track_b_agent_prompt.py", "symbol": "test_track_b_repository_contract_covers_b1_to_b10"},
+          {"type": "test", "path": "tests/test_track_b_agent_prompt.py", "symbol": "test_production_runtime_enables_track_b_validator"}
+        ],
+        "negative": [
+          {"type": "test", "path": "tests/test_track_b_agent_prompt.py", "symbol": "test_b1_scheme_extrapolation_cannot_be_mandatory"},
+          {"type": "test", "path": "tests/test_track_b_agent_prompt.py", "symbol": "test_b7_targeted_repair_cannot_modify_protected_or_unlisted_paths"}
+        ],
+        "boundary": [
+          {"type": "test", "path": "tests/test_track_b_agent_prompt.py", "symbol": "test_b10_appendix_is_excluded_from_main_body_repetition_statistics"}
+        ],
+        "restart": [
+          {"type": "probe", "name": "deterministic_reexecution"}
+        ]
+      },
+      "special_audit": "deterministic_reexecution"
+    },
+    {
+      "id": "C",
+      "name": "Verifiable public research",
+      "pr_number": 6,
+      "branch": "agent/research-skill",
+      "sha": "8ed2d3e30b121ac2dbded4160912322b8dd16cda",
+      "required_files": [
+        "app/skills/verifiable_public_research.py",
+        "app/skills/research_audit.py",
+        "app/skills/research_claims.py",
+        "tests/test_research_skill_track_c.py"
+      ],
+      "test_files": [
+        "tests/test_research_skill_track_c.py",
+        "tests/test_v05_skills_and_privacy.py"
+      ],
+      "acceptance_commands": [],
+      "system_packages": [],
+      "categories": {
+        "positive": [
+          {"type": "test", "path": "tests/test_research_skill_track_c.py", "symbol": "test_c2_c3_archive_hashes_deduplicates_and_ranks_sources"},
+          {"type": "test", "path": "tests/test_research_skill_track_c.py", "symbol": "test_c4_claim_binding_accepts_archived_hash_and_distinguishes_synthesis"}
+        ],
+        "negative": [
+          {"type": "test", "path": "tests/test_research_skill_track_c.py", "symbol": "test_c1_rejects_broad_unbound_query_before_retrieval"},
+          {"type": "test", "path": "tests/test_research_skill_track_c.py", "symbol": "test_c4_c6_claim_binding_blocks_unknown_source_and_forged_hash"}
+        ],
+        "boundary": [
+          {"type": "test", "path": "tests/test_research_skill_track_c.py", "symbol": "test_legacy_component_mode_warns_instead_of_blocking_broad_query"}
+        ],
+        "restart": [
+          {"type": "test", "path": "tests/test_research_skill_track_c.py", "symbol": "test_c6_restart_verification_detects_tampering"}
+        ]
+      },
+      "special_audit": "archive_restart_hash"
+    },
+    {
+      "id": "D",
+      "name": "Mermaid and delivery",
+      "pr_number": 8,
+      "branch": "agent/mermaid-export",
+      "sha": "a0fdeceffee6dd5999feea7d2dfdcff89ebdbf04",
+      "required_files": [
+        "app/figure_protocol.py",
+        "app/skills/mermaid.py",
+        "app/pdf_exporter.py",
+        "app/delivery_validator.py",
+        "scripts/run_d_track_acceptance.py",
+        "tests/test_d_track.py"
+      ],
+      "test_files": ["tests/test_d_track.py"],
+      "acceptance_commands": [
+        "MERMAID_BROWSER_EXECUTABLE=/usr/bin/chromium python scripts/run_d_track_acceptance.py --output-dir \"$EVIDENCE_DIR/delivery\" > \"$EVIDENCE_DIR/delivery.log\""
+      ],
+      "system_packages": ["chromium", "libreoffice-writer", "poppler-utils", "fonts-noto-cjk"],
+      "categories": {
+        "positive": [
+          {"type": "test", "path": "tests/test_d_track.py", "symbol": "test_consecutive_figure_directives_are_not_merged"},
+          {"type": "test", "path": "tests/test_d_track.py", "symbol": "test_pdf_converter_writes_hash_log"}
+        ],
+        "negative": [
+          {"type": "test", "path": "tests/test_d_track.py", "symbol": "test_figure_reference_is_portable_and_cannot_escape_data_dir"},
+          {"type": "test", "path": "tests/test_d_track.py", "symbol": "test_pdf_converter_fails_closed_without_libreoffice"}
+        ],
+        "boundary": [
+          {"type": "test", "path": "tests/test_d_track.py", "symbol": "test_docx_export_candidates_require_later_expression_critic_pass"}
+        ],
+        "restart": [
+          {"type": "probe", "name": "verified_mermaid_cache_reuse"}
+        ]
+      },
+      "special_audit": "verified_mermaid_cache_reuse"
+    },
+    {
+      "id": "E",
+      "name": "Quality gates and lifecycle",
+      "pr_number": 9,
+      "branch": "agent/quality-gates",
+      "sha": "ce7f7b59035af1faeb89be0b4a7b0288a71969be",
+      "required_files": [
+        "app/quality.py",
+        "app/proposal_quality.py",
+        "scripts/quality_track_e_acceptance.py",
+        "tests/test_quality_track_e.py"
+      ],
+      "test_files": ["tests/test_quality_track_e.py"],
+      "acceptance_commands": [
+        "python scripts/quality_track_e_acceptance.py --output-dir \"$EVIDENCE_DIR/track-e\""
+      ],
+      "system_packages": [],
+      "categories": {
+        "positive": [
+          {"type": "test", "path": "tests/test_quality_track_e.py", "symbol": "test_e5_delivery_findings_route_engineering_and_writing_separately"},
+          {"type": "test", "path": "tests/test_quality_track_e.py", "symbol": "test_e6_p1_requires_repair_and_independent_critic_review"}
+        ],
+        "negative": [
+          {"type": "test", "path": "tests/test_quality_track_e.py", "symbol": "test_e1_relation_fact_metric_and_source_rules_are_deterministic"},
+          {"type": "test", "path": "tests/test_quality_track_e.py", "symbol": "test_e6_export_gate_cannot_override_open_quality_blocker"}
+        ],
+        "boundary": [
+          {"type": "test", "path": "tests/test_quality_track_e.py", "symbol": "test_quality_matrix_is_auditable_and_append_only"}
+        ],
+        "restart": [
+          {"type": "probe", "name": "quality_lifecycle_database_reload"}
+        ]
+      },
+      "special_audit": "quality_lifecycle_database_reload"
+    },
+    {
+      "id": "F",
+      "name": "Tests, evidence, and recovery",
+      "pr_number": 10,
+      "branch": "agent/test-evidence",
+      "sha": "217f69b272a1ad7aac506d40170798408200e6de",
+      "required_files": [
+        "governance/f/test_evidence_manifest.json",
+        "scripts/validate_f.py",
+        "scripts/audit_prompt_traces.py",
+        "scripts/f_recovery_bundle.py",
+        "tests/test_f_agent_matrix.py",
+        "tests/test_f_workflow_recovery.py",
+        "tests/test_f_trace_recovery.py"
+      ],
+      "test_files": [
+        "tests/test_f_agent_matrix.py",
+        "tests/test_f_components.py",
+        "tests/test_f_trace_recovery.py",
+        "tests/test_f_workflow_recovery.py"
+      ],
+      "acceptance_commands": [
+        "python scripts/validate_f.py --report \"$EVIDENCE_DIR/validate-f.json\""
+      ],
+      "system_packages": [],
+      "categories": {
+        "positive": [
+          {"type": "test", "path": "tests/test_f_agent_matrix.py", "symbol": "test_each_agent_has_required_matrix"}
+        ],
+        "negative": [
+          {"type": "test", "path": "tests/test_f_agent_matrix.py", "symbol": "test_each_agent_has_required_matrix"}
+        ],
+        "boundary": [
+          {"type": "test", "path": "tests/test_f_agent_matrix.py", "symbol": "test_each_agent_has_required_matrix"}
+        ],
+        "restart": [
+          {"type": "test", "path": "tests/test_f_workflow_recovery.py", "symbol": "test_workflow_recovers_from_every_persisted_checkpoint"},
+          {"type": "test", "path": "tests/test_f_agent_matrix.py", "symbol": "test_each_agent_has_required_matrix"}
+        ]
+      },
+      "special_audit": "trace_and_recovery_contract"
+    }
+  ]
+}
