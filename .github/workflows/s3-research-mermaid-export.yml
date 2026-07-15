@@ -1,0 +1,122 @@
+name: S3 Research Mermaid Export
+
+on:
+  push:
+    branches:
+      - main
+      - agent/integration-research-mermaid-export
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/research.py"
+      - "app/research_mermaid_export.py"
+      - "app/skill_setup.py"
+      - "app/skills/public_research.py"
+      - "app/skills/research_*.py"
+      - "app/skills/verifiable_public_research.py"
+      - "app/skills/mermaid.py"
+      - "app/figure_protocol.py"
+      - "app/exporter*.py"
+      - "app/pdf_exporter.py"
+      - "app/delivery_validator*.py"
+      - "tests/test_research_skill_track_c.py"
+      - "tests/test_d_track.py"
+      - "tests/test_s3_research_mermaid_export.py"
+      - "scripts/run_s3_research_mermaid_export.py"
+      - ".github/workflows/s3-research-mermaid-export.yml"
+      - "docs/S3_RESEARCH_MERMAID_EXPORT_ACCEPTANCE.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  s3-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install document rendering dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Compile S3 implementation
+        run: |
+          python -m compileall -q \
+            app/research.py \
+            app/research_mermaid_export.py \
+            app/skills \
+            app/figure_protocol.py \
+            app/exporter.py \
+            app/exporter_base.py \
+            app/exporter_render.py \
+            app/pdf_exporter.py \
+            app/delivery_validator.py \
+            app/delivery_validator_runtime.py \
+            scripts/run_s3_research_mermaid_export.py
+
+      - name: Run C D and S3 deterministic tests
+        run: |
+          python -m pytest -q \
+            tests/test_research_skill_track_c.py \
+            tests/test_d_track.py \
+            tests/test_s3_research_mermaid_export.py
+
+      - name: Run real Mermaid DOCX PDF integration acceptance
+        env:
+          MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
+        run: |
+          mkdir -p recovery_evidence/s3
+          python scripts/run_s3_research_mermaid_export.py \
+            --output-dir "recovery_evidence/s3/${GITHUB_SHA}" \
+            2>&1 | tee "recovery_evidence/s3/${GITHUB_SHA}.log"
+
+      - name: Verify acceptance decision
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          path = Path("recovery_evidence/s3") / os.environ["GITHUB_SHA"] / "S3_ACCEPTANCE_REPORT.json"
+          report = json.loads(path.read_text(encoding="utf-8"))
+          assert report["status"] == "PASS", report
+          assert report["semantic_capability_proof"] is False
+          assert report["delivery"]["blocking_finding_count"] == 0
+          PY
+
+      - name: Upload S3 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: s3-research-mermaid-export-${{ github.sha }}
+          path: |
+            recovery_evidence/s3/${{ github.sha }}
+            recovery_evidence/s3/${{ github.sha }}.log
+          if-no-files-found: error
+          retention-days: 30

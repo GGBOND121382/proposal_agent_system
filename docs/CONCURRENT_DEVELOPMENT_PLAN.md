@@ -159,6 +159,8 @@ flowchart LR
 2. 三章节跨章链：背景、研究内容、技术路线；
 3. Research + Mermaid + DOCX/PDF 链。
 
+> 实现与验收入口：`app/research_mermaid_export.py`、`scripts/run_s3_research_mermaid_export.py`、`tests/test_s3_research_mermaid_export.py` 和 `docs/S3_RESEARCH_MERMAID_EXPORT_ACCEPTANCE.md`。工程集成验收使用 recorded connector fixture，不冒充 LIVE 检索或模型语义能力证明。
+
 **通过条件：** 不人工修改正文；发现的问题由责任 Agent 自主返修并复审。
 
 ### G3：完整申请书能力验收

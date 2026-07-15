@@ -11,6 +11,14 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
+from .figure_protocol import (
+    ARTIFACT_SCHEME,
+    FigureDirective,
+    FigureProtocolError,
+    parse_figure_block,
+    resolve_figure_reference,
+)
+
 
 class ExportRenderMixin:
     @staticmethod
@@ -22,6 +30,13 @@ class ExportRenderMixin:
     def _append_block(self, document: Document, text: str, list_state: dict[str, int] | None = None) -> None:
         text = (text or "").strip()
         if not text:
+            return
+        if "[[FIGURE]]" in text:
+            directives = parse_figure_block(text)
+            if not directives:
+                raise FigureProtocolError("Figure marker could not be parsed")
+            for directive in directives:
+                self._append_figure(document, directive)
             return
         if text.startswith("[[H2]]"):
             if list_state is not None:
@@ -36,8 +51,11 @@ class ExportRenderMixin:
         if text.startswith("[[TABLE]]"):
             self._append_table(document, text.removeprefix("[[TABLE]]").strip())
             return
-        if text.startswith("[[FIGURE]]"):
-            self._append_figure(document, text.removeprefix("[[FIGURE]]").strip())
+        if text.startswith("[[FORMULA]]"):
+            self._append_formula(document, text.removeprefix("[[FORMULA]]").strip())
+            return
+        if text.startswith("[[REFERENCE]]"):
+            self._append_reference(document, text.removeprefix("[[REFERENCE]]").strip())
             return
         if text.startswith("[[BULLET]]"):
             paragraph = document.add_paragraph(style="List Bullet")
@@ -95,6 +113,25 @@ class ExportRenderMixin:
                         self._set_run_font(run, "Noto Serif CJK SC", 9.5, bold=row_index == 0)
         document.add_paragraph().paragraph_format.space_after = Pt(0)
 
+    def _append_formula(self, document: Document, formula: str) -> None:
+        if not formula:
+            return
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.paragraph_format.keep_together = True
+        paragraph.paragraph_format.first_line_indent = None
+        run = paragraph.add_run(formula)
+        self._set_run_font(run, "Cambria Math", 11)
+
+    def _append_reference(self, document: Document, reference: str) -> None:
+        if not reference:
+            return
+        paragraph = document.add_paragraph()
+        paragraph.paragraph_format.left_indent = Cm(0.75)
+        paragraph.paragraph_format.first_line_indent = Cm(-0.75)
+        run = paragraph.add_run(reference)
+        self._set_run_font(run, "宋体", 10.5)
+
     @staticmethod
     def _set_run_font(run, font_name: str, size: float, bold: bool = False) -> None:
         run.font.name = font_name
@@ -117,35 +154,30 @@ class ExportRenderMixin:
             run._r.extend([begin, instr, end])
             self._set_run_font(run, "宋体", 10)
 
+    def _append_figure(self, document: Document, directive: FigureDirective | str) -> None:
+        if isinstance(directive, str):
+            parsed = parse_figure_block("[[FIGURE]]" + directive)
+            if len(parsed) != 1:
+                raise FigureProtocolError("Expected exactly one figure directive")
+            directive = parsed[0]
 
-    def _append_figure(self, document: Document, raw: str) -> None:
-        parts = [part.strip() for part in raw.split("|")]
-        if not parts or not parts[0]:
-            return
-        img_path = Path(parts[0])
-        caption = parts[1] if len(parts) > 1 and parts[1] else img_path.stem
-        width_cm = float(parts[2]) if len(parts) > 2 and parts[2] else 15.0
-        if not img_path.exists():
-            p = document.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = p.add_run(f"[缺失图片] {caption}: {img_path}")
-            self._set_run_font(run, "宋体", 10)
-            return
+        data_dir = self._figure_data_dir(directive.reference)
+        img_path = resolve_figure_reference(directive.reference, data_dir)
+        caption = directive.caption
+        width_cm = directive.width_cm
         section = document.sections[-1]
         emu_per_cm = 360000.0
         printable_width_cm = (section.page_width - section.left_margin - section.right_margin) / emu_per_cm
         printable_height_cm = (section.page_height - section.top_margin - section.bottom_margin) / emu_per_cm
         target_width_cm = min(width_cm, printable_width_cm)
-        # Keep enough room for the preceding heading, caption and footer. Vertical
-        # Mermaid diagrams can otherwise be taller than an A4 page when only width
-        # is specified, which Word/LibreOffice silently clips instead of scaling.
         max_figure_height_cm = min(16.5, max(8.0, printable_height_cm - 6.0))
         try:
             with PILImage.open(img_path) as image:
                 pixel_width, pixel_height = image.size
+                image.verify()
             target_height_cm = target_width_cm * pixel_height / max(pixel_width, 1)
-        except Exception:
-            target_height_cm = 0.0
+        except Exception as exc:
+            raise FigureProtocolError(f"Figure image cannot be decoded: {img_path.name}") from exc
 
         if target_height_cm > max_figure_height_cm:
             scale = max_figure_height_cm / target_height_cm
@@ -156,13 +188,19 @@ class ExportRenderMixin:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.keep_with_next = True
         run = p.add_run()
-        if target_height_cm > 0:
-            run.add_picture(str(img_path), width=Cm(target_width_cm), height=Cm(target_height_cm))
-        else:
-            run.add_picture(str(img_path), width=Cm(target_width_cm))
+        run.add_picture(str(img_path), width=Cm(target_width_cm), height=Cm(target_height_cm))
         c = document.add_paragraph()
         c.alignment = WD_ALIGN_PARAGRAPH.CENTER
         c.paragraph_format.keep_together = True
         crun = c.add_run(caption)
         self._set_run_font(crun, "宋体", 10)
         c.paragraph_format.space_after = Pt(6)
+
+    def _figure_data_dir(self, reference: str) -> Path:
+        settings = getattr(self, "settings", None)
+        if settings is not None and getattr(settings, "data_dir", None):
+            return Path(settings.data_dir)
+        if reference.startswith(ARTIFACT_SCHEME):
+            raise FigureProtocolError("APP_DATA_DIR is required for artifact references")
+        path = Path(reference)
+        return path.resolve().parent if path.is_absolute() else Path.cwd()
