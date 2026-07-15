@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - ".github/s1-e-overlay.patch.gz.b64"
-      - ".github/s1-only.patch.gz.b64"
+      - ".github/s1-files.tar.gz.b64"
       - ".github/workflows/apply-s1-integration.yml"
 
 permissions:
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: apply-s1-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   apply:
@@ -89,18 +89,31 @@ jobs:
           test -z "$(git diff --name-only --diff-filter=U)"
           git commit -m "merge G1-pinned Track F into S1 integration"
 
-      - name: Apply reviewed S1 implementation
+      - name: Install reviewed S1 files
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .github/s1-only.patch.gz.b64 | gzip -dc > /tmp/s1-only.patch
-          git apply --index /tmp/s1-only.patch
+          base64 --decode .github/s1-files.tar.gz.b64 | tar -xzf -
+          git add \
+            .github/workflows/s1-single-section.yml \
+            .gitignore \
+            app/context.py \
+            app/runtime_context.py \
+            app/runtime_export.py \
+            app/workflow_authoring.py \
+            app/workflow_repair.py \
+            docs/CONCURRENT_DEVELOPMENT_PLAN.md \
+            docs/S1_SINGLE_SECTION_CHAIN_ACCEPTANCE.md \
+            scripts/run_single_section_chain_acceptance.py \
+            tests/test_f_workflow_recovery.py \
+            tests/test_single_section_chain.py
 
       - name: Remove integration-only transport files
         run: |
           git rm -f \
             .github/s1-e-overlay.patch.gz.b64 \
             .github/s1-only.patch.gz.b64 \
+            .github/s1-files.tar.gz.b64 \
             .github/workflows/apply-s1-integration.yml
           if [[ -f .github/workflows/export-integration-source.yml ]]; then
             git rm -f .github/workflows/export-integration-source.yml
