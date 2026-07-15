@@ -1,0 +1,26 @@
+name: Export E fixed source
+
+on:
+  push:
+    branches:
+      - agent/export-e-fixed-20260715
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Upload source tree
+        uses: actions/upload-artifact@v7
+        with:
+          name: e-fixed-source
+          path: |
+            .
+            !.git/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
