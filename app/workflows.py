@@ -71,12 +71,11 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             return "工作流前置条件未满足：" + "、".join(missing) + "。不得使用Replay样例或空上下文代替已完成的前序结果。"
         return None
 
-
     @staticmethod
     def _has_nonconfirmable_quality_failure(output: dict[str, Any]) -> bool:
         """Return true when confirmation cannot repair the generated object.
 
-        QG findings are produced by deterministic proposal-quality validation.  A
+        QG findings are produced by deterministic proposal-quality validation. A
         human may supply missing source material or make an explicit project
         decision, but merely confirming the unchanged model output cannot repair
         cloned plans, incomplete critic coverage, document-type drift or invalid
@@ -153,6 +152,25 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             if result["status"] == "BLOCK":
                 self._update(wf, status="BLOCKED", state=state)
                 return self.get(workflow_id)
+
+            research_results = state.get("public_search_results") or {}
+            research_mode = str(research_results.get("mode") or "")
+            if (
+                prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS"
+                and result["status"] == "PASS"
+                and research_mode not in {"REPLAY", "MOCK", "SIMULATED_EMPTY"}
+            ):
+                try:
+                    binding_report = self.research_service.validate_synthesis(
+                        output.get("result") or {},
+                        research_results,
+                    )
+                except PublicResearchError as exc:
+                    state["last_error"] = str(exc)
+                    self._update(wf, status="BLOCKED", state=state)
+                    return self.get(workflow_id)
+                state["public_claim_binding_validation"] = binding_report
+
             if prompt_id == "P-INTEGRATION-CRITIC" and result["status"] == "REVISE":
                 repair_state = self._prepare_integration_repair(wf, state, output)
                 if repair_state == "SCHEDULED":
@@ -190,4 +208,3 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         self._update(wf, status="COMPLETED", state=state)
         self.db.audit("WORKFLOW_COMPLETED", project_id=wf["project_id"], object_id=workflow_id, metadata={"workflow_type": wf["workflow_type"]})
         return self.get(workflow_id)
-
