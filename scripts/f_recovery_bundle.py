@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tarfile
 import tempfile
 import zipfile
 from datetime import datetime, timezone
@@ -23,6 +24,17 @@ if str(ROOT / "scripts") not in sys.path:
 
 from audit_prompt_traces import audit
 from validate_f import validate
+
+SOURCE_EXCLUDED_DIRS = {
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "data",
+    "recovery_evidence",
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -41,6 +53,29 @@ def git(*args: str) -> str:
     return result.stdout.strip()
 
 
+def resolve_source_commit() -> str:
+    try:
+        value = git("rev-parse", "HEAD")
+        if value:
+            return value
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+    for key in ("SOURCE_COMMIT", "GITHUB_SHA"):
+        value = str(os.getenv(key) or "").strip()
+        if value:
+            return value
+    for candidate in (ROOT / "source_commit.txt", ROOT.parent / "source_commit.txt"):
+        if candidate.is_file():
+            value = candidate.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+    digest = hashlib.sha256()
+    for path in source_files():
+        digest.update(path.relative_to(ROOT).as_posix().encode("utf-8"))
+        digest.update(sha256_file(path).encode("ascii"))
+    return "snapshot-" + digest.hexdigest()
+
+
 def snapshot_sqlite(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     source_connection = sqlite3.connect(source)
@@ -52,25 +87,73 @@ def snapshot_sqlite(source: Path, destination: Path) -> None:
         source_connection.close()
 
 
+def source_files() -> list[Path]:
+    files: list[Path] = []
+    for path in ROOT.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(ROOT)
+        if any(part in SOURCE_EXCLUDED_DIRS for part in relative.parts):
+            continue
+        if path.suffix in {".pyc", ".pyo"}:
+            continue
+        files.append(path)
+    return sorted(files, key=lambda item: item.relative_to(ROOT).as_posix())
+
+
+def material_paths() -> list[Path]:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", "prompt_pack/replay", "tests", "governance/f"],
+            cwd=ROOT, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        paths = [ROOT / line for line in result.stdout.splitlines() if line]
+        return sorted((path for path in paths if path.is_file()), key=lambda item: item.relative_to(ROOT).as_posix())
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        paths: list[Path] = []
+        for relative in ("prompt_pack/replay", "tests", "governance/f"):
+            directory = ROOT / relative
+            if directory.is_dir():
+                paths.extend(
+                    path for path in directory.rglob("*")
+                    if path.is_file() and "__pycache__" not in path.parts and path.suffix not in {".pyc", ".pyo"}
+                )
+        return sorted(set(paths), key=lambda item: item.relative_to(ROOT).as_posix())
+
+
 def material_manifest(destination: Path) -> dict[str, Any]:
-    result = subprocess.run(
-        ["git", "ls-files", "--", "prompt_pack/replay", "tests", "governance/f"],
-        cwd=ROOT, check=True, text=True, stdout=subprocess.PIPE,
-    )
     files = []
-    for relative in sorted(line for line in result.stdout.splitlines() if line):
-        path = ROOT / relative
+    for path in material_paths():
+        relative = path.relative_to(ROOT).as_posix()
         files.append({"path": relative, "size": path.stat().st_size, "sha256": sha256_file(path)})
     payload = {"version": "1.0", "file_count": len(files), "files": files}
     destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return payload
 
 
+def create_source_archive(destination: Path, source_commit: str) -> str:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with destination.open("wb") as stream:
+            subprocess.run(
+                ["git", "archive", "--format=tar.gz", source_commit],
+                cwd=ROOT, check=True, stdout=stream, stderr=subprocess.PIPE,
+            )
+        return "git-archive"
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        if destination.exists():
+            destination.unlink()
+        with tarfile.open(destination, "w:gz") as archive:
+            for path in source_files():
+                archive.add(path, arcname=path.relative_to(ROOT).as_posix(), recursive=False)
+        return "filesystem-snapshot"
+
+
 def build(database: Path, output: Path, test_logs: list[Path]) -> dict[str, Any]:
     validation = validate()
     if validation["status"] != "PASS":
         raise RuntimeError("F manifest validation failed: " + "; ".join(validation["errors"]))
-    source_commit = git("rev-parse", "HEAD")
+    source_commit = resolve_source_commit()
 
     with tempfile.TemporaryDirectory(prefix="f-recovery-") as temp:
         stage = Path(temp) / "bundle"
@@ -93,11 +176,7 @@ def build(database: Path, output: Path, test_logs: list[Path]) -> dict[str, Any]
         materials = material_manifest(stage / "input_material_manifest.json")
 
         source_archive = stage / "source" / "source.tar.gz"
-        with source_archive.open("wb") as stream:
-            subprocess.run(
-                ["git", "archive", "--format=tar.gz", source_commit],
-                cwd=ROOT, check=True, stdout=stream,
-            )
+        source_archive_mode = create_source_archive(source_archive, source_commit)
 
         checkpoint = stage / "workflow_checkpoint.sqlite"
         snapshot_sqlite(database, checkpoint)
@@ -137,6 +216,7 @@ def build(database: Path, output: Path, test_logs: list[Path]) -> dict[str, Any]
         acceptance = f"""# F 轨道阶段验收报告
 
 - Source commit: `{source_commit}`
+- Source archive mode: `{source_archive_mode}`
 - Manifest validation: `{validation['status']}`
 - Prompt count: `{validation['counts']['prompts']}`
 - Replay count: `{validation['counts']['replay_cases']}`
@@ -155,6 +235,7 @@ def build(database: Path, output: Path, test_logs: list[Path]) -> dict[str, Any]
                 files[relative] = {"size": path.stat().st_size, "sha256": sha256_file(path)}
         manifest = {
             "gate": "F", "format_version": "1.0", "source_commit": source_commit,
+            "source_archive_mode": source_archive_mode,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "trace_count": trace_report["evidence_count"], "files": files,
         }
@@ -170,6 +251,7 @@ def build(database: Path, output: Path, test_logs: list[Path]) -> dict[str, Any]
 
     return {
         "status": "PASS", "bundle": str(output), "source_commit": source_commit,
+        "source_archive_mode": source_archive_mode,
         "trace_count": trace_report["evidence_count"], "size": output.stat().st_size,
         "sha256": sha256_file(output),
     }
@@ -220,6 +302,7 @@ def verify(bundle: Path, extract_dir: Path | None = None) -> dict[str, Any]:
         return {
             "gate": "F5", "status": "PASS" if not errors else "FAIL",
             "bundle": str(bundle), "source_commit": manifest.get("source_commit"),
+            "source_archive_mode": manifest.get("source_archive_mode"),
             "trace_count": manifest.get("trace_count"), "errors": errors,
         }
     finally:
