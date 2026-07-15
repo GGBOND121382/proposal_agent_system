@@ -79,11 +79,15 @@ jobs:
             tests/test_g2_three_section_chain.py \
             tests/test_single_section_chain.py
 
-      - name: Commit and push final integration source
+      - name: Commit and push non-workflow integration source
         shell: bash
         run: |
           set -euo pipefail
+          git restore --staged .github
+          git checkout HEAD -- .github/g2-final .github/workflows/apply-g2-final.yml
+          rm -f .github/workflows/g2.yml .github/workflows/g2-three-sections.yml
+          git add -A
           git config user.name "proposal-agent-integration"
           git config user.email "proposal-agent-integration@users.noreply.github.com"
-          git commit -m "complete G2 small-scale integration gate"
+          git commit -m "complete G2 small-scale integration source"
           git push origin HEAD:agent/integration-v06-g2-final
