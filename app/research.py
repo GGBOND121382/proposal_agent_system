@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .skills.executor import SkillExecutionError, SkillExecutor
+from .skills.research_audit import verify_research_archive
+from .skills.research_claims import validate_public_claims
+from .util import sha256_json, write_json
 
 
 class PublicResearchError(RuntimeError):
@@ -41,6 +45,9 @@ class PublicResearchService:
                     "record_file": self.settings.public_research_record_file,
                     "connector_file": self.settings.public_research_connector_file,
                     "max_results": self.settings.public_search_max_results,
+                    # LIVE capability runs enforce the complete C1 plan contract. Replay,
+                    # mock and simulated orchestration remain backward compatible.
+                    "require_structured_plan": str(self.settings.runtime_mode).upper() == "LIVE",
                     "plan": plan,
                 },
                 project_id=project_id,
@@ -49,7 +56,28 @@ class PublicResearchService:
             )
         except SkillExecutionError as exc:
             raise PublicResearchError(str(exc)) from exc
-        return result.output
+        output = result.output
+        verification = output.get("archive_verification") or verify_research_archive(output.get("archive_manifest", ""))
+        if verification.get("status") != "PASS":
+            raise PublicResearchError("Public research archive failed hash verification")
+        return output
+
+    def validate_synthesis(self, synthesis: dict[str, Any], research_output: dict[str, Any]) -> dict[str, Any]:
+        """Bind every PUBLIC_CLAIM to an archived source before import review.
+
+        The model output is not rewritten. This method only creates a deterministic
+        validation report and blocks unknown, hash-mismatched, unsupported, or
+        innovation-like claims without recent-work/baseline/limitation coverage.
+        """
+        report = validate_public_claims(synthesis, research_output)
+        archive_root = research_output.get("archive_root")
+        if archive_root and report.get("validation_mode") != "ORCHESTRATION_ONLY":
+            report_dir = Path(str(archive_root)) / "claim_bindings"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            report_path = report_dir / f"claim-binding-{sha256_json(synthesis)[:16]}.json"
+            write_json(report_path, report)
+            report["report_path"] = str(report_path)
+        return report
 
     @staticmethod
     def _queries(plan: dict[str, Any]) -> list[str]:
