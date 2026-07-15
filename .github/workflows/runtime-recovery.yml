@@ -1,0 +1,37 @@
+name: Runtime Recovery Gate
+
+on:
+  push:
+    branches:
+      - main
+      - "agent/runtime-recovery"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-recovery-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Compile Track-A runtime
+        run: python -m compileall app scripts
+      - name: Capability hard-gate self-test
+        run: python scripts/capability_runtime_acceptance.py --self-test
+      - name: Durable fault-point self-test
+        run: python scripts/run_runtime_fault_matrix.py --self-test
+      - name: Runtime recovery tests
+        run: python -m pytest -q tests/test_runtime_recovery.py
