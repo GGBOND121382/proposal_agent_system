@@ -71,18 +71,15 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
-      - name: Run public research tests or static fallback
-        shell: bash
+      - name: Run isolated public research archive contracts
         run: |
-          if python -m pytest --collect-only -q | grep -Eiq 'research'; then
-            python -m pytest -q -k 'research'
-          else
-            python -m compileall app/research.py app/skills/public_research.py
-          fi
+          python -m pytest -q \
+            tests/test_f_components.py::test_skill_registry_contains_research_and_mermaid \
+            tests/test_f_components.py::test_recorded_research_archives_verifiable_hashes
 
   mermaid-export-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -91,14 +88,11 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
-      - name: Run Mermaid and export tests or static fallback
-        shell: bash
+      - name: Run Mermaid contract and real DOCX export regression
         run: |
-          if python -m pytest --collect-only -q | grep -Eiq 'mermaid|diagram|export'; then
-            python -m pytest -q -k 'mermaid or diagram or export'
-          else
-            python -m compileall app/diagram_enrichment.py app/exporter.py app/skills/mermaid.py
-          fi
+          python -m pytest -q \
+            tests/test_f_components.py::test_mermaid_source_contract_accepts_safe_and_blocks_active_content \
+            tests/test_runtime.py::test_all_workflows_and_docx_export
 
   quality-validation-tests:
     runs-on: ubuntu-latest
@@ -199,12 +193,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
-      - name: Run workflow chain plus Research/Mermaid/Export component tests
-        shell: bash
+      - name: Run workflow plus isolated Research/Mermaid/Export contracts
         run: |
           python -m pytest -q tests/test_runtime.py::test_all_workflows_and_docx_export
-          if python -m pytest --collect-only -q | grep -Eiq 'research|mermaid|diagram'; then
-            python -m pytest -q -k 'research or mermaid or diagram'
-          else
-            python -m compileall app/research.py app/diagram_enrichment.py app/skills/public_research.py app/skills/mermaid.py app/exporter.py
-          fi
+          python -m pytest -q tests/test_f_components.py
