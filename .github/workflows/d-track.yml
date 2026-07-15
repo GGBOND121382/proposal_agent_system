@@ -1,0 +1,68 @@
+name: D Track Mermaid and Delivery
+
+on:
+  push:
+    branches:
+      - main
+      - "agent/mermaid-export"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  d-track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install document rendering system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Compile D-track modules
+        run: |
+          python -m compileall \
+            app/figure_protocol.py \
+            app/skills/mermaid.py \
+            app/exporter_base.py \
+            app/exporter_render.py \
+            app/pdf_exporter.py \
+            app/delivery_validator.py
+
+      - name: Run D-track regression tests
+        run: python -m pytest -q tests/test_d_track.py
+
+      - name: Run real Mermaid DOCX PDF visual acceptance
+        env:
+          MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
+        run: |
+          python scripts/run_d_track_acceptance.py \
+            --output-dir recovery_evidence/d/${GITHUB_SHA}
+
+      - name: Upload D-track evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: d-track-${{ github.sha }}
+          path: recovery_evidence/d/${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
