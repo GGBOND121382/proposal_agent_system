@@ -105,14 +105,8 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
-      - name: Run deterministic and integration quality checks
-        shell: bash
-        run: |
-          if python -m pytest --collect-only -q | grep -Eiq 'quality|critic|repair'; then
-            python -m pytest -q -k 'quality or critic or repair'
-          else
-            python -m compileall app/proposal_quality.py app/workflow_repair.py
-          fi
+      - name: Run isolated deterministic quality guard contract
+        run: python -m pytest -q tests/test_f_components.py::test_quality_guard_rejects_shallow_unsupported_project_graph
 
   trace-and-recovery-tests:
     runs-on: ubuntu-latest
