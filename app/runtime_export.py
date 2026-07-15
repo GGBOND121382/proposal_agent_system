@@ -14,10 +14,12 @@ class RecoverableDocxExporter(BaseDocxExporter):
 
     def __init__(self, db, settings):
         super().__init__(db, settings)
-        self.runtime_faults = FaultInjector(Path(settings.data_dir) / "model_calls")
+        data_dir = Path(getattr(settings, "data_dir", Path.cwd() / ".runtime-data"))
+        self.runtime_faults = FaultInjector(data_dir / "model_calls")
 
     def _runtime_export_root(self) -> Path:
-        root = Path(os.getenv("RUNTIME_EXPORT_EVIDENCE_DIR", str(Path(self.settings.data_dir) / "runtime_exports")))
+        data_dir = Path(getattr(self.settings, "data_dir", Path.cwd() / ".runtime-data"))
+        root = Path(os.getenv("RUNTIME_EXPORT_EVIDENCE_DIR", str(data_dir / "runtime_exports")))
         root.mkdir(parents=True, exist_ok=True)
         return root
 

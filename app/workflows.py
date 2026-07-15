@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from .executor import PromptExecutionError
+from .quality import QualityGateBlocked, QualityLifecycleManager
 from .research import PublicResearchError
 from .util import new_id, utc_now
 from .workflow_authoring import WorkflowAuthoringMixin
@@ -13,13 +14,25 @@ from .workflow_repair import WorkflowRepairMixin
 
 
 class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMixin):
-    def __init__(self, db, pack, context_builder, executor, research_service, diagram_enrichment=None):
+    def __init__(self, db, pack, context_builder, executor, research_service, diagram_enrichment=None, quality_manager=None):
         self.db = db
         self.pack = pack
         self.context_builder = context_builder
         self.executor = executor
         self.research_service = research_service
         self.diagram_enrichment = diagram_enrichment
+        self.quality_manager = quality_manager or QualityLifecycleManager(db)
+
+    def _observe_quality_result(self, wf: dict[str, Any], state: dict[str, Any], prompt_id: str, result: dict[str, Any]) -> None:
+        self.quality_manager.observe_prompt_result(
+            project_id=wf["project_id"],
+            workflow_id=wf["id"],
+            prompt_id=prompt_id,
+            run_id=result["run_id"],
+            status=result["status"],
+            output=result["output"],
+            workflow_state=state,
+        )
 
     def start(self, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
         if workflow_type not in WORKFLOWS:
@@ -123,7 +136,12 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 self._update(wf, current_step=wf["current_step"], state=state)
                 continue
             if step.get("type") == "WRITE_SECTIONS":
-                result = await self._write_sections(wf, state)
+                try:
+                    result = await self._write_sections(wf, state)
+                except (ValueError, KeyError) as exc:
+                    state["last_error"] = str(exc)
+                    self._update(wf, status="BLOCKED", state=state)
+                    return self.get(workflow_id)
                 if result is not None:
                     return result
                 wf = self.get(workflow_id)
@@ -140,6 +158,8 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             prompt_id = step["prompt_id"]
             try:
                 envelope = self.context_builder.build(prompt_id, wf["project_id"], workflow_id=workflow_id, workflow_state=state)
+                if prompt_id == "P-INTEGRATION-CRITIC":
+                    self._validate_three_section_integration_envelope(state, envelope)
                 result = await self.executor.execute(prompt_id, envelope, project_id=wf["project_id"], workflow_id=workflow_id, original_environment=state.get("original_environment"))
             except (PromptExecutionError, ValueError, KeyError) as exc:
                 state["last_error"] = str(exc)
@@ -164,6 +184,23 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     )
                     self._update(wf, status="BLOCKED", state=state)
                     return self.get(workflow_id)
+                self._update(wf, state=state)
+            self._observe_quality_result(wf, state, prompt_id, result)
+            if prompt_id == "P-INTEGRATION-CRITIC" and self._three_section_mode(state):
+                state.setdefault("cross_section_review_history", []).append({
+                    "run_id": result["run_id"],
+                    "status": result["status"],
+                    "finding_codes": [
+                        str(item.get("code") or "")
+                        for item in output.get("findings") or []
+                        if isinstance(item, dict)
+                    ],
+                    "contract_section_ids": [
+                        str(item.get("section_id"))
+                        for item in (state.get("three_section_contract") or {}).get("sections") or []
+                        if isinstance(item, dict) and item.get("section_id")
+                    ],
+                })
                 self._update(wf, state=state)
             if result["status"] == "BLOCK":
                 self._update(wf, status="BLOCKED", state=state)
@@ -202,6 +239,16 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 self._update(wf, status="WAITING_GATE", state=state)
                 return self.get(workflow_id)
 
+        try:
+            self.quality_manager.assert_no_open_blockers(
+                wf["project_id"],
+                workflow_id=None if wf["workflow_type"] == "WF-5_SECURITY_REVIEW_AND_EXPORT" else workflow_id,
+            )
+        except QualityGateBlocked as exc:
+            state["last_error"] = str(exc) + "。必须记录修复运行并由独立Critic复审，人工确认或直接改库均不能放行。"
+            state["quality_blocker_ids"] = [item.get("finding_id") for item in exc.findings]
+            self._update(wf, status="BLOCKED", state=state)
+            return self.get(workflow_id)
         self._update(wf, status="COMPLETED", state=state)
         self.db.audit("WORKFLOW_COMPLETED", project_id=wf["project_id"], object_id=workflow_id, metadata={"workflow_type": wf["workflow_type"]})
         return self.get(workflow_id)

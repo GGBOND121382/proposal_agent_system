@@ -156,7 +156,7 @@ flowchart LR
 并行运行三组测试：
 
 1. 单章节完整链：Blueprint → Content → Critic → Repair → Polish → Export；
-2. 三章节跨章链：背景、研究内容、技术路线；
+2. 三章节跨章链：背景、研究内容、技术路线（已实现；验收与使用说明见 `docs/G2_THREE_SECTION_CROSS_CHAPTER.md`）；
 3. Research + Mermaid + DOCX/PDF 链。
 
 **通过条件：** 不人工修改正文；发现的问题由责任 Agent 自主返修并复审。
