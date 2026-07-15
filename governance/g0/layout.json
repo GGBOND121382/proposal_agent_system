@@ -1,0 +1,63 @@
+{
+  "contract_version": "1.0.0",
+  "repository": {
+    "default_branch": "main",
+    "track_branches": [
+      "agent/runtime-recovery",
+      "agent/prompt-agents",
+      "agent/research-skill",
+      "agent/mermaid-export",
+      "agent/quality-validation",
+      "agent/test-evidence",
+      "agent/integration-v06"
+    ],
+    "required_directories": [
+      "app",
+      "docs",
+      "prompt_pack",
+      "scripts",
+      "tests",
+      ".github/workflows",
+      "governance/g0",
+      "recovery_evidence"
+    ],
+    "material_roots": [
+      "prompt_pack/replay",
+      "tests"
+    ]
+  },
+  "runtime": {
+    "data_root_env": "APP_DATA_DIR",
+    "default_data_root": "./data",
+    "sqlite_database": "${APP_DATA_DIR}/proposal_agents.sqlite3",
+    "sqlite_sidecars": [
+      "${APP_DATA_DIR}/proposal_agents.sqlite3-wal",
+      "${APP_DATA_DIR}/proposal_agents.sqlite3-shm"
+    ],
+    "uploads": "${APP_DATA_DIR}/uploads",
+    "exports": "${APP_DATA_DIR}/exports",
+    "research_archive": "${APP_DATA_DIR}/research_archive",
+    "diagram_artifacts": "${APP_DATA_DIR}/diagram_artifacts",
+    "trace_store": "SQLite artifacts table where artifact_type='PROMPT_TRACE'",
+    "trace_recovery_export": "trace/prompt_traces.jsonl"
+  },
+  "recovery": {
+    "repository_root": "recovery_evidence",
+    "gate_root": "recovery_evidence/g0/<commit>",
+    "bundle_name": "g0-recovery-<commit>.zip",
+    "required_members": [
+      "manifest.json",
+      "RESTORE.md",
+      "source/source.tar.gz",
+      "dependencies/requirements.txt",
+      "dependencies/requirements-dev.txt",
+      "sqlite/proposal_agents.sqlite3",
+      "trace/prompt_traces.jsonl",
+      "manifests/baseline.json",
+      "manifests/interface_contract.json",
+      "manifests/security_freeze.json",
+      "manifests/layout.json",
+      "manifests/materials_manifest.json"
+    ]
+  }
+}
