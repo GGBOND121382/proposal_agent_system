@@ -7,6 +7,12 @@ on:
     paths:
       - ".github/workflows/apply-s3-bootstrap.yml"
       - ".s3-bootstrap/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/apply-s3-bootstrap.yml"
+      - ".s3-bootstrap/**"
 
 permissions:
   contents: write
@@ -19,6 +25,7 @@ jobs:
       - name: Check out integration branch
         uses: actions/checkout@v7
         with:
+          ref: agent/integration-research-mermaid-export
           fetch-depth: 0
 
       - name: Assemble accepted component and S3 files
