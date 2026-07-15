@@ -303,6 +303,45 @@ def get_run(run_id: str) -> dict[str, Any]:
     return row
 
 
+@app.get("/api/projects/{project_id}/quality-findings")
+def list_quality_findings(
+    project_id: str,
+    workflow_id: str | None = None,
+    state: str | None = None,
+) -> list[dict[str, Any]]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    states = {state.upper()} if state else None
+    return workflows.quality_manager.list_findings(project_id, workflow_id=workflow_id, states=states)
+
+
+@app.get("/api/projects/{project_id}/quality-matrix")
+def get_quality_matrix(project_id: str, workflow_id: str | None = None) -> dict[str, Any]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    return workflows.quality_manager.quality_matrix(project_id, workflow_id=workflow_id)
+
+
+@app.post("/api/projects/{project_id}/quality/delivery-findings")
+def ingest_delivery_findings(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    validation_run_id = str(payload.get("validation_run_id") or "").strip()
+    findings = payload.get("findings")
+    if not validation_run_id or not isinstance(findings, list):
+        raise HTTPException(422, "validation_run_id and findings[] are required")
+    records = workflows.quality_manager.ingest_delivery_findings(
+        project_id=project_id,
+        workflow_id=payload.get("workflow_id"),
+        validation_run_id=validation_run_id,
+        findings=findings,
+    )
+    return {
+        "records": records,
+        "quality_matrix": workflows.quality_manager.quality_matrix(project_id),
+    }
+
+
 @app.post("/api/projects/{project_id}/export")
 def export_project(project_id: str) -> FileResponse:
     try:

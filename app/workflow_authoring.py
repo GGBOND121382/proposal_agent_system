@@ -53,6 +53,7 @@ class WorkflowAuthoringMixin:
                     )
                 section_record["runs"].append({"prompt_id": prompt_id, "run_id": result["run_id"], "status": result["status"]})
                 state["original_environment"] = result["route"]["environment"]
+                self._observe_quality_result(wf, state, prompt_id, result)
                 if result["status"] != "PASS":
                     state["last_error"] = f"{section.get('title')} / {prompt_id} returned {result['status']}"
                     self._update(wf, status="BLOCKED", state=state)
