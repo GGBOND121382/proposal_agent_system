@@ -17,13 +17,13 @@
   "agent_matrix": {
     "positive": ["normal", "high_risk", "need_user_input"],
     "negative": [
-      "missing_input",
       "schema_error",
+      "missing_schema_version",
       "input_prompt_id_mismatch",
       "output_status_invalid",
       "output_prompt_id_mismatch"
     ],
-    "edge": ["need_user_input_non_pass_status"],
+    "edge": ["missing_input_semantic_boundary"],
     "restart": ["prompt_pack_reload_and_revalidate"]
   },
   "workflow_fault_checkpoints": [
