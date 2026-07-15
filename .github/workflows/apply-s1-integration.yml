@@ -1,18 +1,17 @@
-name: Apply S1 integration
+name: Apply S1 component integration
 
 on:
   pull_request:
     branches: [main]
     paths:
       - ".github/s1-e-overlay.patch.gz.b64"
-      - ".github/s1-files.tar.gz.b64"
       - ".github/workflows/apply-s1-integration.yml"
 
 permissions:
   contents: write
 
 concurrency:
-  group: apply-s1-${{ github.event.pull_request.number }}
+  group: apply-s1-components-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -89,50 +88,30 @@ jobs:
           test -z "$(git diff --name-only --diff-filter=U)"
           git commit -m "merge G1-pinned Track F into S1 integration"
 
-      - name: Install reviewed S1 files
+      - name: Remove integration transport files
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .github/s1-files.tar.gz.b64 | tar -xzf -
-          git add \
-            .github/workflows/s1-single-section.yml \
-            .gitignore \
-            app/context.py \
-            app/runtime_context.py \
-            app/runtime_export.py \
-            app/workflow_authoring.py \
-            app/workflow_repair.py \
-            docs/CONCURRENT_DEVELOPMENT_PLAN.md \
-            docs/S1_SINGLE_SECTION_CHAIN_ACCEPTANCE.md \
-            scripts/run_single_section_chain_acceptance.py \
-            tests/test_f_workflow_recovery.py \
-            tests/test_single_section_chain.py
-
-      - name: Remove integration-only transport files
-        run: |
-          git rm -f \
+          rm -f \
             .github/s1-e-overlay.patch.gz.b64 \
             .github/s1-only.patch.gz.b64 \
             .github/s1-files.tar.gz.b64 \
+            .github/s1-archive.part00 \
+            .github/workflows/export-integration-source.yml \
             .github/workflows/apply-s1-integration.yml
-          if [[ -f .github/workflows/export-integration-source.yml ]]; then
-            git rm -f .github/workflows/export-integration-source.yml
-          fi
+          git add -A
 
-      - name: Validate merged source before publishing
+      - name: Validate component integration
         run: |
           python -m compileall -q app scripts
           python prompt_pack/tools/validate_pack.py
           python -m pytest -q \
-            tests/test_single_section_chain.py \
-            tests/test_f_workflow_recovery.py \
             tests/test_quality_track_e.py \
             tests/test_d_track.py \
             tests/test_runtime_recovery.py \
             tests/test_track_b.py
 
-      - name: Commit and push completed integration
+      - name: Commit and push component integration
         run: |
-          git add -A
-          git commit -m "complete G2 single-section full chain"
+          git commit -m "complete G1 component integration for S1"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
