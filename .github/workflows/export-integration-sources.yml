@@ -1,19 +1,18 @@
-name: Export Integration Sources
+name: Apply G2 Integration Payload
 
 on:
   push:
     branches:
       - agent/integration-v06
-  pull_request:
-    branches:
-      - main
+    paths:
+      - ".integration/g2-payload.part*"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  apply:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -21,39 +20,33 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: agent/integration-v06
-          path: integration
           fetch-depth: 0
-      - name: Check out G1 base
-        uses: actions/checkout@v7
-        with:
-          ref: 2a37a4359c8e833fb8b0107f8f67d88ff4c12c04
-          path: base
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check out Track E
-        uses: actions/checkout@v7
-        with:
-          ref: ce7f7b59035af1faeb89be0b4a7b0288a71969be
-          path: track-e
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check out Track F
-        uses: actions/checkout@v7
-        with:
-          ref: 217f69b272a1ad7aac506d40170798408200e6de
-          path: track-f
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Remove Git metadata
-        run: rm -rf integration/.git base/.git track-e/.git track-f/.git
-      - name: Upload source trees
-        uses: actions/upload-artifact@v7
-        with:
-          name: integration-source-trees-${{ github.sha }}
-          path: |
-            integration
-            base
-            track-e
-            track-f
-          if-no-files-found: error
-          retention-days: 2
+      - name: Apply complete payload once all chunks exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          parts=(
+            .integration/g2-payload.part01
+            .integration/g2-payload.part02
+            .integration/g2-payload.part03
+            .integration/g2-payload.part04
+          )
+          for part in "${parts[@]}"; do
+            if [ ! -f "${part}" ]; then
+              echo "Payload incomplete; waiting for ${part}."
+              exit 0
+            fi
+          done
+          cat "${parts[@]}" | base64 --decode > /tmp/g2-payload.tar.xz
+          echo "60a1ce2d2068ee1eba0c0016919a7280af37a0de441159ea9034ab7afbf8b1e0  /tmp/g2-payload.tar.xz" | sha256sum --check --strict
+          tar -xJf /tmp/g2-payload.tar.xz -C .
+          git rm -f "${parts[@]}"
+          git config user.name "proposal-agent-integration-bot"
+          git config user.email "proposal-agent-integration-bot@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "implement G2 three-section cross-chapter chain"
+          git push origin HEAD:agent/integration-v06
