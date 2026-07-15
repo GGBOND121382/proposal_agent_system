@@ -6,6 +6,9 @@ on:
       - agent/integration-v06
     paths:
       - ".integration/g2-payload.part*"
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -13,6 +16,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/integration-v06'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
