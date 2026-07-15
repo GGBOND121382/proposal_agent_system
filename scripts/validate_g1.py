@@ -105,6 +105,7 @@ def matrix_payload(manifest: dict[str, Any]) -> dict[str, Any]:
                 "sha": item["sha"],
                 "test_targets": " ".join(item["test_files"]),
                 "system_packages": " ".join(item["system_packages"]),
+                "acceptance_script": "\n".join(item["acceptance_commands"]),
             }
         )
     return {"include": include}
