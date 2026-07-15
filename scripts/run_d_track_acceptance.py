@@ -3,13 +3,18 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 from dataclasses import replace
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from docx import Document
 
 from app.config import Settings
-from app.delivery_validator import DeliveryValidator
+from app.delivery_validator_runtime import DeliveryValidator
 from app.exporter_render import ExportRenderMixin
 from app.pdf_exporter import PdfConverter
 from app.skills.base import SkillContext
