@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/integration-v06
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
