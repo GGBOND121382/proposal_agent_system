@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,16 @@ TARGETS = [
     "tests/test_d_track.py",
     "tests/test_f_workflow_recovery.py::test_small_single_section_authoring_export_chain",
 ]
+
+
+def _source_commit() -> str:
+    value = os.getenv("GITHUB_SHA")
+    if value:
+        return value
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=False
+    )
+    return completed.stdout.strip() if completed.returncode == 0 else "UNAVAILABLE"
 
 
 def _run(command: list[str], *, cwd: Path, log_path: Path) -> int:
@@ -70,6 +81,7 @@ def build_report(evidence_dir: Path) -> dict[str, Any]:
     report = {
         "schema_version": "1.0",
         "generated_at": utc_now(),
+        "source_commit": _source_commit(),
         "status": status,
         "scope": "G2_S1_SINGLE_SECTION_COMPLETE_CHAIN",
         "chain": [
@@ -105,6 +117,8 @@ def build_report(evidence_dir: Path) -> dict[str, Any]:
             "export_uses_expression_critic_approved_candidate_only": True,
             "open_p0_p1_findings_block_export": True,
             "checkpoint_progress_is_persisted_after_each_run": True,
+            "no_manual_body_edit_is_repair_evidence": True,
+            "responsible_agent_performs_targeted_repair": True,
         },
     }
     write_json(evidence_dir / "S1_ACCEPTANCE.json", report)
