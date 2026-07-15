@@ -378,6 +378,28 @@ def validate_component(args: argparse.Namespace) -> int:
     special, special_errors = verify_special_audit(args.track, evidence_dir)
     errors.extend(special_errors)
 
+    command_statuses: dict[str, int | None] = {}
+    for status_name in (
+        "acceptance.status",
+        "targeted-pytest.status",
+        "full-pytest.status",
+        "probe.status",
+    ):
+        status_path = evidence_dir / status_name
+        if not status_path.is_file():
+            command_statuses[status_name] = None
+            errors.append(f"G1_{args.track}_STATUS_FILE_MISSING:{status_name}")
+            continue
+        try:
+            status_value = int(status_path.read_text(encoding="utf-8").strip())
+        except ValueError:
+            command_statuses[status_name] = None
+            errors.append(f"G1_{args.track}_STATUS_FILE_INVALID:{status_name}")
+            continue
+        command_statuses[status_name] = status_value
+        if status_value != 0:
+            errors.append(f"G1_{args.track}_COMMAND_FAILED:{status_name}:{status_value}")
+
     report = {
         "schema_version": "1.0",
         "gate": "G1",
@@ -392,6 +414,7 @@ def validate_component(args: argparse.Namespace) -> int:
         "full_junit": full,
         "category_evidence": category_evidence,
         "special_audit": special,
+        "command_statuses": command_statuses,
         "errors": errors,
     }
     args.report_json.parent.mkdir(parents=True, exist_ok=True)
