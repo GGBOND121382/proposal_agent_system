@@ -39,6 +39,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The full regression suite includes real DOCX-to-PDF and page-rendering
+      # tests.  Install the same system dependencies as the delivery gates so
+      # those tests cannot fail merely because the Track B runner is incomplete.
       - name: Install document rendering system dependencies
         run: |
           sudo apt-get update
