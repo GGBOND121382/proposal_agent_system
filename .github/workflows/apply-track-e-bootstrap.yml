@@ -1,12 +1,6 @@
 name: Apply Track E Bootstrap
 
 on:
-  push:
-    branches:
-      - agent/quality-gates
-    paths:
-      - ".github/track-e-bootstrap.part-*"
-      - ".github/workflows/apply-track-e-bootstrap.yml"
   pull_request:
     branches:
       - main
@@ -43,13 +37,97 @@ jobs:
           git apply /tmp/track-e.patch
           git diff --check
 
-      - name: Commit Track E implementation
+      - name: Create immutable Track E commit object
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm -f .github/track-e-bootstrap.part-* .github/workflows/track-e-quality.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/track-e-bootstrap.part-* \
+            .github/workflows/apply-track-e-bootstrap.yml \
+            .github/workflows/track-e-quality.yml
           git add -A
-          git commit -m "complete Track E quality gates and lifecycle"
-          git push origin HEAD:agent/quality-gates
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import subprocess
+          import urllib.request
+          from pathlib import Path
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+
+          def run(*args: str) -> str:
+              return subprocess.check_output(args).decode("utf-8").strip()
+
+          def post(path: str, payload: dict) -> dict:
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{repo}{path}",
+                  data=json.dumps(payload).encode("utf-8"),
+                  method="POST",
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {token}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "track-e-bootstrap",
+                  },
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          parent = run("git", "rev-parse", "HEAD")
+          base_tree = run("git", "rev-parse", "HEAD^{tree}")
+          raw = subprocess.check_output(
+              ["git", "diff", "--cached", "--name-status", "-z", "HEAD"]
+          )
+          tokens = [item.decode("utf-8") for item in raw.split(b"\0") if item]
+          entries = []
+          index = 0
+          while index < len(tokens):
+              status = tokens[index]
+              index += 1
+              path = tokens[index]
+              index += 1
+              if status.startswith(("R", "C")):
+                  path = tokens[index]
+                  index += 1
+              if status == "D":
+                  entries.append(
+                      {"path": path, "mode": "100644", "type": "blob", "sha": None}
+                  )
+                  continue
+              stage = run("git", "ls-files", "-s", "--", path)
+              mode = stage.split()[0]
+              data = subprocess.check_output(["git", "show", f":{path}"])
+              blob = post(
+                  "/git/blobs",
+                  {
+                      "content": base64.b64encode(data).decode("ascii"),
+                      "encoding": "base64",
+                  },
+              )
+              entries.append(
+                  {"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]}
+              )
+
+          tree = post("/git/trees", {"base_tree": base_tree, "tree": entries})
+          commit = post(
+              "/git/commits",
+              {
+                  "message": "complete Track E quality gates and lifecycle",
+                  "tree": tree["sha"],
+                  "parents": [parent],
+              },
+          )
+          Path("/tmp/track-e-commit.txt").write_text(commit["sha"] + "\n")
+          print(f"Created immutable commit object {commit['sha']}")
+          PY
+
+      - name: Upload commit reference
+        uses: actions/upload-artifact@v4
+        with:
+          name: track-e-commit-reference
+          path: /tmp/track-e-commit.txt
+          if-no-files-found: error
+          retention-days: 1
