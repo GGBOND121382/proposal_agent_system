@@ -1,0 +1,88 @@
+name: Track B Agent Prompt Gate
+
+on:
+  push:
+    branches:
+      - main
+      - "agent/prompt-agents"
+  pull_request:
+    paths:
+      - "app/agent_prompt_kernel.py"
+      - "app/track_b.py"
+      - "app/main.py"
+      - "prompt_pack/knowledge/**"
+      - "prompt_pack/prompts/**"
+      - "prompt_pack/schemas/**"
+      - "scripts/validate_track_b.py"
+      - "tests/test_track_b_agent_prompt.py"
+      - ".github/workflows/track-b.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  agent-prompt-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install document rendering system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Compile Track B runtime
+        run: python -m compileall app scripts/validate_track_b.py
+
+      - name: Validate Prompt Pack
+        run: python prompt_pack/tools/validate_pack.py
+
+      - name: Validate B1-B10 contracts
+        run: |
+          mkdir -p recovery_evidence/track_b/${GITHUB_SHA}
+          python scripts/validate_track_b.py \
+            --json-out recovery_evidence/track_b/${GITHUB_SHA}/acceptance.json \
+            --md-out recovery_evidence/track_b/${GITHUB_SHA}/acceptance.md
+
+      - name: Run Track B tests
+        run: |
+          python -m pytest -q tests/test_track_b_agent_prompt.py \
+            | tee recovery_evidence/track_b/${GITHUB_SHA}/pytest-track-b.log
+
+      - name: Run full regression suite
+        run: |
+          set +e
+          python -m pytest -q --junitxml=recovery_evidence/track_b/${GITHUB_SHA}/junit-full.xml \
+            > recovery_evidence/track_b/${GITHUB_SHA}/pytest-full.log 2>&1
+          status=$?
+          tail -n 200 recovery_evidence/track_b/${GITHUB_SHA}/pytest-full.log
+          exit $status
+
+      - name: Upload Track B evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: track-b-${{ github.sha }}
+          path: recovery_evidence/track_b/${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14

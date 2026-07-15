@@ -339,6 +339,16 @@ class ContextBuilder:
         result = output.get("result")
         return result.get(key) if key and isinstance(result, dict) else result
 
+    @staticmethod
+    def _repair_override(state: dict[str, Any], producer_prompt: str) -> Any:
+        overrides = state.get("repair_overrides") or {}
+        section_id = str(state.get("active_section_id") or "").strip()
+        if section_id:
+            scoped = f"section:{section_id}:{producer_prompt}"
+            if scoped in overrides:
+                return overrides[scoped]
+        return overrides.get(producer_prompt)
+
     def _replace_seed_values(self, value: Any, project_id: str, context_hash: str) -> Any:
         if isinstance(value, dict):
             return {k: self._replace_seed_values(v, project_id, context_hash) for k, v in value.items()}
@@ -512,7 +522,7 @@ class ContextBuilder:
         for field, (producer, key) in result_map.items():
             if field in payload:
                 value = self._result(project["id"], producer, key)
-                repair_override = (state.get("repair_overrides") or {}).get(producer)
+                repair_override = self._repair_override(state, producer)
                 if repair_override is not None:
                     value = repair_override
                 if value is not None:
@@ -539,7 +549,9 @@ class ContextBuilder:
                 if contract.get("section_id") == current_section.get("section_id") or contract.get("title") == current_section.get("title"):
                     section_contract = contract
                     break
-        blueprint = self._result(project["id"], "P-WRITE-BLUEPRINT", "blueprint")
+        blueprint = self._repair_override(state, "P-WRITE-BLUEPRINT")
+        if blueprint is None:
+            blueprint = self._result(project["id"], "P-WRITE-BLUEPRINT", "blueprint")
         content_candidates = self._content_candidates(project["id"], workflow_id if prompt_id == "P-INTEGRATION-CRITIC" else None)
         content = content_candidates[-1]["candidate"] if content_candidates else (self._result(project["id"], "P-EXPRESSION-POLISH") or self._result(project["id"], "P-WRITE-CONTENT"))
         safe_package = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE")
@@ -598,11 +610,15 @@ class ContextBuilder:
         if "approved_blueprint" in payload and blueprint:
             replacements.append(("payload.approved_blueprint", blueprint))
         if "content_candidate" in payload:
-            raw_content = self._result(project["id"], "P-WRITE-CONTENT")
+            raw_content = self._repair_override(state, "P-WRITE-CONTENT")
+            if raw_content is None:
+                raw_content = self._result(project["id"], "P-WRITE-CONTENT")
             if raw_content:
                 replacements.append(("payload.content_candidate", raw_content))
         if "polished_candidate" in payload:
-            polished = self._result(project["id"], "P-EXPRESSION-POLISH")
+            polished = self._repair_override(state, "P-EXPRESSION-POLISH")
+            if polished is None:
+                polished = self._result(project["id"], "P-EXPRESSION-POLISH")
             if polished:
                 replacements.append(("payload.polished_candidate", polished))
         if "safe_online_package" in payload and safe_package:

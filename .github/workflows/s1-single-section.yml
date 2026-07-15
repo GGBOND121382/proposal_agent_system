@@ -1,0 +1,60 @@
+name: G2 S1 Single Section Chain
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/context.py"
+      - "app/runtime_context.py"
+      - "app/runtime_export.py"
+      - "app/workflow_authoring.py"
+      - "app/workflow_repair.py"
+      - "app/workflows.py"
+      - "tests/test_single_section_chain.py"
+      - "tests/test_f_workflow_recovery.py"
+      - "scripts/run_single_section_chain_acceptance.py"
+      - ".github/workflows/s1-single-section.yml"
+      - "docs/S1_SINGLE_SECTION_CHAIN_ACCEPTANCE.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Run S1 acceptance
+        run: |
+          python scripts/run_single_section_chain_acceptance.py \
+            --evidence-dir "recovery_evidence/s1/${GITHUB_SHA}"
+      - name: Upload S1 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: s1-single-section-${{ github.sha }}
+          path: recovery_evidence/s1/${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
