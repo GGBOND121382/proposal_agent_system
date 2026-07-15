@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from .quality import QualityGateBlocked, QualityLifecycleManager
 from .util import new_id, safe_filename, sha256_bytes, utc_now, write_json
 
 
@@ -16,6 +17,7 @@ class ExportBaseMixin:
     def __init__(self, db, settings):
         self.db = db
         self.settings = settings
+        self.quality_manager = QualityLifecycleManager(db)
 
     def export(self, project_id: str) -> Path:
         project, gates = self._authorized_project(project_id)
@@ -53,6 +55,12 @@ class ExportBaseMixin:
         project = self.db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
         if not project:
             raise KeyError(project_id)
+        try:
+            self.quality_manager.assert_no_open_blockers(project_id)
+        except QualityGateBlocked as exc:
+            raise ExportDenied(
+                str(exc) + "。导出必须等待修复证据与独立复审完成，不能通过批准Gate或手工改库绕过。"
+            ) from exc
         gates: dict[str, str] = {}
         for gate_type in ["FINAL_CONTENT_SECURITY_APPROVAL", "FINAL_EXPORT_APPROVAL"]:
             gate = self.db.fetchone("SELECT id,status FROM gates WHERE project_id=? AND gate_type=? ORDER BY created_at DESC LIMIT 1", (project_id, gate_type))
