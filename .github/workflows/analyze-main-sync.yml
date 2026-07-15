@@ -33,3 +33,5 @@ jobs:
           echo "changed files from main:"
           git diff --name-status HEAD...origin/main || true
           exit ${status}
+
+# registered before the reopened PR event
