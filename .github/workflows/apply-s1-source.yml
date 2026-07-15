@@ -1,0 +1,57 @@
+name: Apply S1 source
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/s1-patches/**"
+      - ".github/workflows/apply-s1-source.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-s1-source-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/integration-v06-single-section'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Apply reviewed source patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t patches < <(find .github/s1-patches -type f -name '*.patch' | sort)
+          test "${#patches[@]}" -eq 8
+          git apply --check "${patches[@]}"
+          git apply --index "${patches[@]}"
+
+      - name: Validate source shape
+        run: |
+          python -m compileall -q app scripts tests/test_single_section_chain.py
+          python prompt_pack/tools/validate_pack.py
+
+      - name: Remove patch transport
+        run: |
+          git rm -r .github/s1-patches
+          git rm .github/workflows/apply-s1-source.yml
+
+      - name: Commit and push completed S1 source
+        run: |
+          git commit -m "complete G2 single-section full chain"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
