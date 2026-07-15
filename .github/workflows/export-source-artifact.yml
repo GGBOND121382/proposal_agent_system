@@ -16,18 +16,18 @@ jobs:
       - name: Check out pinned S1 branch head
         uses: actions/checkout@v7
         with:
-          ref: 0b1ea6e1529db15525089e807db1939e39b857ff
+          ref: 5ccf357638107891d7d79bb7299c8c4a3b31f221
           fetch-depth: 0
           persist-credentials: false
 
       - name: Verify exported identity
         shell: bash
-        run: test "$(git rev-parse HEAD)" = "0b1ea6e1529db15525089e807db1939e39b857ff"
+        run: test "$(git rev-parse HEAD)" = "5ccf357638107891d7d79bb7299c8c4a3b31f221"
 
       - name: Upload source tree
         uses: actions/upload-artifact@v7
         with:
-          name: proposal-agent-current-s1-source
+          name: proposal-agent-current-s1-source-v2
           path: |
             .
             !.git/**
