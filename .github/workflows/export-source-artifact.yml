@@ -25,7 +25,19 @@ jobs:
           git config user.name "proposal-agent-integration"
           git config user.email "proposal-agent-integration@users.noreply.github.com"
           git checkout --detach ce7f7b59035af1faeb89be0b4a7b0288a71969be
+
+          set +e
           git merge --no-ff --no-edit a65422d411094e9139b26b4a9311058dd64d5f1c
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            test "$conflicts" = "app/main.py"
+            git checkout --ours app/main.py
+            git add app/main.py
+            git commit --no-edit
+          fi
+
           set +e
           git merge --no-ff --no-edit a0fdeceffee6dd5999feea7d2dfdcff89ebdbf04
           status=$?
@@ -54,6 +66,7 @@ jobs:
             git add app/exporter_base.py
             git commit --no-edit
           fi
+
           printf '%s\n' "B=a65422d411094e9139b26b4a9311058dd64d5f1c" > INTEGRATION_PINNED_COMMITS.txt
           printf '%s\n' "D=a0fdeceffee6dd5999feea7d2dfdcff89ebdbf04" >> INTEGRATION_PINNED_COMMITS.txt
           printf '%s\n' "E=ce7f7b59035af1faeb89be0b4a7b0288a71969be" >> INTEGRATION_PINNED_COMMITS.txt
