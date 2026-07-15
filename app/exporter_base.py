@@ -5,7 +5,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from .delivery_validator import DeliveryValidationError, DeliveryValidator
+from .delivery_validator import DeliveryValidationError
+from .delivery_validator_runtime import DeliveryValidator
 from .figure_protocol import FigureProtocolError
 from .pdf_exporter import PdfConversionError, PdfConverter
 from .util import new_id, safe_filename, sha256_bytes, utc_now, write_json
