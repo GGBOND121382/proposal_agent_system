@@ -1,0 +1,125 @@
+name: Apply S1 integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/s1-e-overlay.patch.gz.b64"
+      - ".github/s1-only.patch.gz.b64"
+      - ".github/workflows/apply-s1-integration.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-s1-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/integration-v06-single-section'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch G1-pinned component branches
+        run: |
+          git fetch --no-tags origin \
+            agent/quality-gates:refs/remotes/origin/agent/quality-gates \
+            agent/test-evidence:refs/remotes/origin/agent/test-evidence
+          test "$(git rev-parse origin/agent/quality-gates)" = "ce7f7b59035af1faeb89be0b4a7b0288a71969be"
+          test "$(git rev-parse origin/agent/test-evidence)" = "217f69b272a1ad7aac506d40170798408200e6de"
+
+      - name: Merge Track E with reviewed shared-interface resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge --no-ff --no-commit origin/agent/quality-gates || true
+          mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+          allowed=(app/exporter_base.py app/main.py app/workflows.py)
+          for path in "${conflicts[@]}"; do
+            ok=false
+            for expected in "${allowed[@]}"; do
+              if [[ "$path" == "$expected" ]]; then ok=true; break; fi
+            done
+            if [[ "$ok" != true ]]; then
+              echo "Unexpected Track E conflict: $path" >&2
+              exit 1
+            fi
+          done
+          for path in "${allowed[@]}"; do
+            if git diff --name-only --diff-filter=U | grep -Fxq "$path"; then
+              git checkout --ours -- "$path"
+              git add "$path"
+            fi
+          done
+          base64 --decode .github/s1-e-overlay.patch.gz.b64 | gzip -dc > /tmp/s1-e-overlay.patch
+          git apply --index /tmp/s1-e-overlay.patch
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m "merge G1-pinned Track E into S1 integration"
+
+      - name: Merge Track F with reviewed repository-metadata resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge --no-ff --no-commit origin/agent/test-evidence || true
+          mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+          for path in "${conflicts[@]}"; do
+            if [[ "$path" != ".gitignore" ]]; then
+              echo "Unexpected Track F conflict: $path" >&2
+              exit 1
+            fi
+          done
+          if git diff --name-only --diff-filter=U | grep -Fxq .gitignore; then
+            git checkout --ours -- .gitignore
+            grep -qxF 'recovery_evidence/f/' .gitignore || printf '%s\n' 'recovery_evidence/f/' >> .gitignore
+            git add .gitignore
+          fi
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m "merge G1-pinned Track F into S1 integration"
+
+      - name: Apply reviewed S1 implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .github/s1-only.patch.gz.b64 | gzip -dc > /tmp/s1-only.patch
+          git apply --index /tmp/s1-only.patch
+
+      - name: Remove integration-only transport files
+        run: |
+          git rm -f \
+            .github/s1-e-overlay.patch.gz.b64 \
+            .github/s1-only.patch.gz.b64 \
+            .github/workflows/apply-s1-integration.yml
+          if [[ -f .github/workflows/export-integration-source.yml ]]; then
+            git rm -f .github/workflows/export-integration-source.yml
+          fi
+
+      - name: Validate merged source before publishing
+        run: |
+          python -m compileall -q app scripts
+          python prompt_pack/tools/validate_pack.py
+          python -m pytest -q \
+            tests/test_single_section_chain.py \
+            tests/test_f_workflow_recovery.py \
+            tests/test_quality_track_e.py \
+            tests/test_d_track.py \
+            tests/test_runtime_recovery.py \
+            tests/test_track_b.py
+
+      - name: Commit and push completed integration
+        run: |
+          git add -A
+          git commit -m "complete G2 single-section full chain"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
