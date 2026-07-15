@@ -71,7 +71,6 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             return "工作流前置条件未满足：" + "、".join(missing) + "。不得使用Replay样例或空上下文代替已完成的前序结果。"
         return None
 
-
     @staticmethod
     def _has_nonconfirmable_quality_failure(output: dict[str, Any]) -> bool:
         """Return true when confirmation cannot repair the generated object.
@@ -150,6 +149,22 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             state["step_results"][str(wf["current_step"])] = {"prompt_id": prompt_id, "run_id": result["run_id"], "status": result["status"]}
             state["original_environment"] = result["route"]["environment"]
             output = result["output"]
+            if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS" and result["status"] == "PASS":
+                claim_validation = self.research_service.validate_synthesis(
+                    output.get("result") or {},
+                    state.get("public_search_results") or {},
+                )
+                state["public_claim_validation"] = claim_validation
+                if claim_validation.get("status") != "PASS":
+                    codes = [str(item.get("code") or "PUBLIC_CLAIM_INVALID") for item in claim_validation.get("findings", [])]
+                    state["last_error"] = (
+                        "公开研究综合未通过确定性 Claim—来源绑定校验："
+                        + "、".join(codes[:12])
+                        + "。不得进入公开结果导入 Gate。"
+                    )
+                    self._update(wf, status="BLOCKED", state=state)
+                    return self.get(workflow_id)
+                self._update(wf, state=state)
             if result["status"] == "BLOCK":
                 self._update(wf, status="BLOCKED", state=state)
                 return self.get(workflow_id)
@@ -190,4 +205,3 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         self._update(wf, status="COMPLETED", state=state)
         self.db.audit("WORKFLOW_COMPLETED", project_id=wf["project_id"], object_id=workflow_id, metadata={"workflow_type": wf["workflow_type"]})
         return self.get(workflow_id)
-
