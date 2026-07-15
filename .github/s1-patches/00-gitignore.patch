@@ -1,0 +1,9 @@
+diff --git a/.gitignore b/.gitignore
+index 83f44b3..ac32e57 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -15,3 +15,4 @@ recovery_evidence/g0/
+ recovery_evidence/d/
+ 
+ recovery_evidence/f/
++recovery_evidence/s1/
