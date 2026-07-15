@@ -159,7 +159,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
-      - run: python -m pytest -q 'tests/test_f_workflow_recovery.py::test_small_authoring_export_chains[titles0]'
+      - run: python -m pytest -q tests/test_f_workflow_recovery.py::test_small_single_section_authoring_export_chain
 
   small-e2e-three-sections:
     needs: [lint-and-schema, runtime-recovery-tests, agent-prompt-tests, research-skill-tests, mermaid-export-tests, quality-validation-tests, trace-and-recovery-tests]
@@ -173,7 +173,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
-      - run: python -m pytest -q 'tests/test_f_workflow_recovery.py::test_small_authoring_export_chains[titles1]'
+      - run: python -m pytest -q tests/test_f_workflow_recovery.py::test_small_three_section_authoring_export_chain
 
   small-e2e-research-mermaid-export:
     needs: [lint-and-schema, runtime-recovery-tests, agent-prompt-tests, research-skill-tests, mermaid-export-tests, quality-validation-tests, trace-and-recovery-tests]
