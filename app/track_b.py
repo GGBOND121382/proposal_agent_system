@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
+from . import agent_prompt_kernel as _kernel
 from .agent_prompt_kernel import AgentPromptKernelValidator
+
+
+# Python's ``\w`` includes CJK characters.  The base pattern therefore missed
+# values in natural Chinese prose such as “完成2个原型” and “2027年”.  Restrict
+# the left boundary to ASCII identifier characters so Chinese-adjacent numbers
+# still require explicit value/unit/object/condition binding.
+_kernel.NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.])-?\d+(?:\.\d+)?%?")
 
 
 class TrackBAgentPromptValidator(AgentPromptKernelValidator):
