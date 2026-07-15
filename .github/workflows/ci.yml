@@ -50,5 +50,25 @@ jobs:
       - name: Validate Prompt Pack
         run: python prompt_pack/tools/validate_pack.py
 
-      - name: Run test suite
-        run: python -m pytest -q
+      - name: Run test suite with evidence
+        shell: bash
+        run: |
+          mkdir -p test-results
+          set +e
+          python -m pytest -q --junitxml=test-results/ci-junit.xml \
+            2>&1 | tee test-results/pytest.log
+          status=${PIPESTATUS[0]}
+          printf '%s\n' "${status}" > test-results/pytest.status
+          exit 0
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-test-evidence-${{ github.sha }}
+          path: test-results
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce test decision
+        run: test "$(cat test-results/pytest.status)" = "0"
