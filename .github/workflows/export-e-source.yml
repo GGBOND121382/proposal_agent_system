@@ -24,3 +24,5 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
+
+# retrigger after workflow registration
