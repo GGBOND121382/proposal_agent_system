@@ -1,19 +1,73 @@
-name: Export source artifact
+name: Export integrated S1 source artifact
 
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   export-source:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Upload source tree
-        uses: actions/upload-artifact@v4
+      - name: Check out temporary export branch
+        uses: actions/checkout@v7
         with:
-          name: proposal-agent-source
+          fetch-depth: 0
+
+      - name: Assemble pinned B D E integration snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "proposal-agent-integration"
+          git config user.email "proposal-agent-integration@users.noreply.github.com"
+          git fetch --no-tags origin \
+            a65422d411094e9139b26b4a9311058dd64d5f1c \
+            a0fdeceffee6dd5999feea7d2dfdcff89ebdbf04 \
+            ce7f7b59035af1faeb89be0b4a7b0288a71969be
+          git checkout --detach ce7f7b59035af1faeb89be0b4a7b0288a71969be
+          git cherry-pick a65422d411094e9139b26b4a9311058dd64d5f1c
+          set +e
+          git cherry-pick a0fdeceffee6dd5999feea7d2dfdcff89ebdbf04
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            test "$conflicts" = "app/exporter_base.py"
+            git checkout --theirs app/exporter_base.py
+            python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/exporter_base.py")
+          text = path.read_text(encoding="utf-8")
+          import_anchor = "from typing import Any\n"
+          quality_import = "from .quality import QualityGateBlocked, QualityLifecycleManager\n"
+          if quality_import not in text:
+              text = text.replace(import_anchor, import_anchor + "\n" + quality_import, 1)
+          init_anchor = "        self.settings = settings\n"
+          init_line = "        self.quality_manager = QualityLifecycleManager(db)\n"
+          if init_line not in text:
+              text = text.replace(init_anchor, init_anchor + init_line, 1)
+          auth_anchor = "        if not project:\n            raise KeyError(project_id)\n"
+          auth_block = """        if not project:\n            raise KeyError(project_id)\n        try:\n            self.quality_manager.assert_no_open_blockers(project_id)\n        except QualityGateBlocked as exc:\n            raise ExportDenied(\n                str(exc) + \"。导出必须等待修复证据与独立复审完成，不能通过批准Gate或手工改库绕过。\"\n            ) from exc\n"""
+          if "assert_no_open_blockers" not in text:
+              text = text.replace(auth_anchor, auth_block, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+            git add app/exporter_base.py
+            git cherry-pick --continue
+          fi
+          printf '%s\n' "B=$(git rev-parse a65422d411094e9139b26b4a9311058dd64d5f1c)" > INTEGRATION_PINNED_COMMITS.txt
+          printf '%s\n' "D=$(git rev-parse a0fdeceffee6dd5999feea7d2dfdcff89ebdbf04)" >> INTEGRATION_PINNED_COMMITS.txt
+          printf '%s\n' "E=$(git rev-parse ce7f7b59035af1faeb89be0b4a7b0288a71969be)" >> INTEGRATION_PINNED_COMMITS.txt
+
+      - name: Upload integrated source tree
+        uses: actions/upload-artifact@v7
+        with:
+          name: proposal-agent-s1-integration-source
           path: |
             .
             !.git/**
