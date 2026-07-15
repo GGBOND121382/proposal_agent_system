@@ -23,6 +23,13 @@ jobs:
           ref: agent/integration-v06
           path: integration
           fetch-depth: 0
+      - name: Check out G1 base
+        uses: actions/checkout@v7
+        with:
+          ref: 2a37a4359c8e833fb8b0107f8f67d88ff4c12c04
+          path: base
+          fetch-depth: 0
+          persist-credentials: false
       - name: Check out Track E
         uses: actions/checkout@v7
         with:
@@ -38,13 +45,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Remove Git metadata
-        run: rm -rf integration/.git track-e/.git track-f/.git
+        run: rm -rf integration/.git base/.git track-e/.git track-f/.git
       - name: Upload source trees
         uses: actions/upload-artifact@v7
         with:
           name: integration-source-trees-${{ github.sha }}
           path: |
             integration
+            base
             track-e
             track-f
           if-no-files-found: error
