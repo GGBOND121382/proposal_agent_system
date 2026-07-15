@@ -1,0 +1,69 @@
+name: Apply S3 integration bootstrap
+
+on:
+  push:
+    branches:
+      - agent/integration-research-mermaid-export
+    paths:
+      - ".github/workflows/apply-s3-bootstrap.yml"
+      - ".s3-bootstrap/**"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Assemble accepted component and S3 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin \
+            agent/research-skill:refs/remotes/origin/agent/research-skill \
+            agent/mermaid-export:refs/remotes/origin/agent/mermaid-export
+          git checkout origin/agent/research-skill -- \
+            app/research.py app/skill_setup.py \
+            app/skills/research_audit.py app/skills/research_claims.py \
+            app/skills/research_plan.py app/skills/verifiable_public_research.py \
+            app/workflows.py docs/C_RESEARCH_SKILL_ACCEPTANCE.md \
+            scripts/verify_research_archive.py tests/test_research_skill_track_c.py
+          git checkout origin/agent/mermaid-export -- \
+            app/delivery_validator.py app/delivery_validator_runtime.py \
+            app/exporter_base.py app/exporter_manifest.py app/exporter_render.py \
+            app/figure_protocol.py app/pdf_exporter.py app/skills/mermaid.py \
+            docs/D_MERMAID_EXPORT_ACCEPTANCE.md scripts/run_d_track_acceptance.py \
+            tests/test_d_track.py
+          cat .s3-bootstrap/research_mermaid_export.py.part-* > app/research_mermaid_export.py
+          cat .s3-bootstrap/run_s3.py.part-* > scripts/run_s3_research_mermaid_export.py
+          cat .s3-bootstrap/test_s3.py.part-* > tests/test_s3_research_mermaid_export.py
+          cp .s3-bootstrap/S3_ACCEPTANCE.md docs/S3_RESEARCH_MERMAID_EXPORT_ACCEPTANCE.md
+          cp .s3-bootstrap/s3-workflow.yml .github/workflows/s3-research-mermaid-export.yml
+          python - <<'PY'
+          from pathlib import Path
+          ignore = Path('.gitignore')
+          text = ignore.read_text(encoding='utf-8')
+          for line in ('recovery_evidence/d/', 'recovery_evidence/s3/'):
+              if line not in text.splitlines():
+                  text += ('\n' if text and not text.endswith('\n') else '') + line + '\n'
+          ignore.write_text(text, encoding='utf-8')
+          plan = Path('docs/CONCURRENT_DEVELOPMENT_PLAN.md')
+          text = plan.read_text(encoding='utf-8')
+          needle = '3. Research + Mermaid + DOCX/PDF 链。\n\n**通过条件：** 不人工修改正文；发现的问题由责任 Agent 自主返修并复审。'
+          replacement = '3. Research + Mermaid + DOCX/PDF 链。\n\n> 实现与验收入口：`app/research_mermaid_export.py`、`scripts/run_s3_research_mermaid_export.py`、`tests/test_s3_research_mermaid_export.py` 和 `docs/S3_RESEARCH_MERMAID_EXPORT_ACCEPTANCE.md`。工程集成验收使用 recorded connector fixture，不冒充 LIVE 检索或模型语义能力证明。\n\n**通过条件：** 不人工修改正文；发现的问题由责任 Agent 自主返修并复审。'
+          if needle not in text:
+              raise SystemExit('S3 plan insertion point not found')
+          plan.write_text(text.replace(needle, replacement), encoding='utf-8')
+          PY
+          rm -rf .s3-bootstrap .github/workflows/apply-s3-bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "integrate research mermaid export chain"
+          git push origin HEAD:agent/integration-research-mermaid-export

@@ -1,0 +1,68 @@
+def test_finalize_exports_and_bundles_verified_chain(tmp_path: Path):
+    pipeline, exporter = _pipeline(tmp_path)
+    prepared = _prepare(pipeline)
+    exporter.candidates = [
+        {
+            "section_id": "s1",
+            "section_title": "公开研究",
+            "candidate_id": "candidate-1",
+            "run_id": "polish-1",
+            "expression_critic_run_id": "critic-1",
+            "paragraphs": ["公开研究正文。", prepared["required_figure_markers"][0]],
+        }
+    ]
+    result = pipeline.finalize(project_id="project-s3", checkpoint=prepared)
+    assert result["status"] == "PASS"
+    assert result["delivery"]["validation"]["reference"].startswith("artifact://")
+    bundle = pipeline._resolve_reference(result["evidence_bundle"]["reference"])
+    assert bundle.is_file()
+    with zipfile.ZipFile(bundle) as archive:
+        names = set(archive.namelist())
+    assert any(name.endswith("research-manifest.portable.json") for name in names)
+    assert any(name.endswith("raw/src-official.json") for name in names)
+    assert any(name.endswith("text/src-official.txt") for name in names)
+    assert any(name.endswith("metadata/src-official.json") for name in names)
+    assert any(name.endswith("connector/connector_response.json") for name in names)
+    assert any(name.endswith("s3.zip") for name in names)
+
+
+def test_restart_verification_detects_tampered_mermaid_artifact(tmp_path: Path):
+    pipeline, _ = _pipeline(tmp_path)
+    prepared = _prepare(pipeline)
+    png_record = next(
+        record
+        for record in prepared["diagrams"][0]["artifacts"]
+        if record["artifact_type"] == "MERMAID_PNG"
+    )
+    pipeline._resolve_reference(png_record["reference"]).write_bytes(b"tampered")
+    verification = pipeline.verify_prepared(prepared)
+    assert verification["status"] == "FAIL"
+    assert "S3_ARTIFACT_HASH_MISMATCH" in {
+        item["code"] for item in verification["findings"]
+    }
+
+
+def test_final_restart_verification_rechecks_research_artifacts(tmp_path: Path):
+    pipeline, exporter = _pipeline(tmp_path)
+    prepared = _prepare(pipeline)
+    exporter.candidates = [
+        {
+            "section_id": "s1",
+            "section_title": "公开研究",
+            "candidate_id": "candidate-1",
+            "run_id": "polish-1",
+            "expression_critic_run_id": "critic-1",
+            "paragraphs": [prepared["required_figure_markers"][0]],
+        }
+    ]
+    result = pipeline.finalize(project_id="project-s3", checkpoint=prepared)
+    portable = pipeline._resolve_reference(
+        prepared["research"]["portable_manifest"]["reference"]
+    )
+    manifest = json.loads(portable.read_text(encoding="utf-8"))
+    pipeline._resolve_reference(manifest["records"][0]["raw_path"]).write_bytes(b"tampered")
+    verification = pipeline.verify_final(result)
+    assert verification["status"] == "FAIL"
+    assert "S3_FINAL_S3_RESEARCH_ARTIFACT_HASH_MISMATCH" in {
+        item["code"] for item in verification["findings"]
+    }

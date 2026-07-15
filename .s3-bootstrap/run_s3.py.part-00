@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.config import Settings
+from app.db import Database
+from app.research_mermaid_export import ResearchMermaidExportPipeline
+from app.util import new_id, sha256_json, utc_now, write_json
+
+
+PROJECT_ID = "s3-acceptance-project"
+WORKFLOW_ID = "s3-acceptance-workflow"
+
+
+def _research_plan() -> dict[str, Any]:
+    return {
+        "plan_id": "s3-plan-001",
+        "task_type": "PUBLIC_RESEARCH",
+        "research_questions": [
+            "公开研究证据如何通过可复核归档、基线比较和局限记录支撑申请书论证？",
+            "artifact review evidence reproducibility source evaluation process 如何要求工件、来源和评价过程具备可重复核验能力？",
+        ],
+        "queries": [
+            "公开研究证据 可复核归档 基线比较 局限记录 申请书论证",
+            "artifact review evidence reproducibility source evaluation process",
+        ],
+        "source_priorities": ["官方机构页面", "出版组织规范", "同行评议论文"],
+        "time_scope": "2021-01-01/2026-12-31",
+        "evidence_requirements": ["最近工作", "可比较基线", "局限机制"],
+        "prohibited_inferences": ["不得把工程验收夹具表述为实时公开检索结论"],
+    }
+
+
+def _write_connector_fixture(path: Path, plan: dict[str, Any]) -> Path:
+    payload = {
+        "run_id": "s3-approved-connector-001",
+        "connector": "approved-integration-fixture",
+        "created_at": "2026-07-15T00:00:00Z",
+        "agent_generated_queries": plan["queries"],
+        "responses": [
+            {
+                "query": plan["queries"][0],
+                "retrieved_at": "2026-07-15T00:00:00Z",
+                "results": [
+                    {
+                        "source_id": "src-public-evidence",
+                        "title": "Reproducibility and Replicability in Science",
+                        "url": "https://www.nationalacademies.org/publications/25303",
+                        "publisher": "National Academies of Sciences, Engineering, and Medicine",
+                        "published_at": "2025-01-01",
+                        "content_text": (
+                            "This public evidence record is an integration fixture. It describes "
+                            "reproducible evidence retention, comparison baselines, documented "
+                            "limitations, and review mechanisms used to test source traceability."
+                        ),
+                        "verification": {"status": "RECORDED_INTEGRATION_FIXTURE"},
+                    }
+                ],
+            },
+            {
+                "query": plan["queries"][1],
+                "retrieved_at": "2026-07-15T00:00:00Z",
+                "results": [
+                    {
+                        "source_id": "src-artifact-policy",
+                        "title": "Artifact Review and Badging",
+                        "url": "https://www.acm.org/publications/policies/artifact-review-and-badging-current",
+                        "publisher": "Association for Computing Machinery",
+                        "published_at": "2025-01-01",
+                        "content_text": (

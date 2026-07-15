@@ -1,0 +1,70 @@
+            str(item.get("claim_id")): set(item.get("source_ids") or [])
+            for item in claim_report.get("bindings", [])
+        }
+        seen_sections: set[str] = set()
+        records: list[dict[str, Any]] = []
+        for spec in diagrams:
+            section_id = str(spec.get("section_id") or "").strip()
+            claim_ids = [str(value) for value in spec.get("claim_ids") or []]
+            source_ids = [str(value) for value in spec.get("source_ids") or []]
+            if not section_id or section_id in seen_sections:
+                raise ResearchMermaidExportError("Diagram section_id is missing or duplicated")
+            seen_sections.add(section_id)
+            if not claim_ids or not source_ids:
+                raise ResearchMermaidExportError(
+                    f"Diagram {section_id} must declare claim_ids and source_ids"
+                )
+            unknown_claims = [claim_id for claim_id in claim_ids if claim_id not in bindings]
+            if unknown_claims:
+                raise ResearchMermaidExportError(
+                    f"Diagram {section_id} references unknown claims: {unknown_claims}"
+                )
+            allowed_sources = set().union(*(bindings[claim_id] for claim_id in claim_ids))
+            unbound_sources = sorted(set(source_ids) - allowed_sources)
+            if unbound_sources:
+                raise ResearchMermaidExportError(
+                    f"Diagram {section_id} uses sources not bound to its claims: {unbound_sources}"
+                )
+            result = self.skill_executor.execute(
+                "mermaid.render",
+                {
+                    "section_id": section_id,
+                    "caption": str(spec.get("caption") or "结构图"),
+                    "width_cm": float(spec.get("width_cm") or 15.0),
+                    "mermaid_source": str(spec.get("mermaid_source") or ""),
+                    "argument_purpose": spec.get("argument_purpose"),
+                    "claim_id": claim_ids[0] if len(claim_ids) == 1 else None,
+                    "evidence_ids": source_ids,
+                    "section_contract_id": spec.get("section_contract_id"),
+                },
+                project_id=project_id,
+                workflow_id=workflow_id,
+                security_level=security_level,
+            )
+            if result.status != "PASS":
+                raise ResearchMermaidExportError(
+                    f"Mermaid render did not pass for {section_id}: {result.status}"
+                )
+            records.append(
+                {
+                    "section_id": section_id,
+                    "caption": result.output.get("caption"),
+                    "claim_ids": claim_ids,
+                    "source_ids": source_ids,
+                    "figure_marker": result.output["figure_marker"],
+                    "source_reference": result.output.get("source_reference"),
+                    "svg_reference": result.output.get("svg_reference"),
+                    "png_reference": result.output.get("png_reference"),
+                    "source_sha256": result.output.get("source_sha256"),
+                    "svg_sha256": result.output.get("svg_sha256"),
+                    "png_sha256": result.output.get("png_sha256"),
+                    "cache_hit": result.output.get("cache_hit"),
+                    "artifacts": [
+                        self._artifact_record(Path(path), self._diagram_artifact_type(Path(path)))
+                        for path in result.artifacts
+                    ],
+                }
+            )
+        return records
+
+    @staticmethod

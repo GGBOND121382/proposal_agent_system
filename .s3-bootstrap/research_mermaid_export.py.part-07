@@ -1,0 +1,70 @@
+    def _require_markers_in_approved_candidates(
+        markers: list[str], candidates: list[dict[str, Any]]
+    ) -> None:
+        paragraphs = [
+            str(paragraph).strip()
+            for candidate in candidates
+            for paragraph in candidate.get("paragraphs", [])
+        ]
+        for marker in markers:
+            count = sum(1 for paragraph in paragraphs if paragraph == marker)
+            if count != 1:
+                raise ResearchMermaidExportError(
+                    f"Required figure marker must appear exactly once in approved content; found {count}"
+                )
+
+    def _write_portable_research_manifest(
+        self, archive_manifest_path: Path, evidence_dir: Path
+    ) -> Path:
+        manifest = json.loads(archive_manifest_path.read_text(encoding="utf-8"))
+        portable_records = []
+        for record in manifest.get("records", []):
+            item = dict(record)
+            for key in ("raw_path", "text_path", "metadata_path"):
+                item[key] = self._portable_reference(Path(str(record[key])))
+            portable_records.append(item)
+        portable = {
+            **manifest,
+            "portable": True,
+            "records": portable_records,
+            "connector_response": (
+                self._portable_reference(Path(str(manifest["connector_response"])))
+                if manifest.get("connector_response")
+                else None
+            ),
+        }
+        path = evidence_dir / "research-manifest.portable.json"
+        write_json(path, portable)
+        return path
+
+    def _verify_portable_research_manifest(
+        self, manifest_path: Path, findings: list[dict[str, Any]]
+    ) -> None:
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            findings.append({"code": "S3_PORTABLE_RESEARCH_MANIFEST_INVALID", "message": str(exc)})
+            return
+        for record in manifest.get("records", []):
+            for path_key, hash_key in (
+                ("raw_path", "snapshot_sha256"),
+                ("text_path", "text_sha256"),
+            ):
+                path = self._resolve_reference(str(record.get(path_key) or ""))
+                if not path.is_file():
+                    findings.append(
+                        {"code": "S3_RESEARCH_ARTIFACT_MISSING", "reference": record.get(path_key)}
+                    )
+                    continue
+                actual = sha256_bytes(path.read_bytes())
+                if path_key == "text_path":
+                    actual = sha256_bytes(path.read_text(encoding="utf-8").encode("utf-8"))
+                if actual != record.get(hash_key):
+                    findings.append(
+                        {"code": "S3_RESEARCH_ARTIFACT_HASH_MISMATCH", "reference": record.get(path_key)}
+                    )
+            metadata = self._resolve_reference(str(record.get("metadata_path") or ""))
+            if not metadata.is_file():
+                findings.append(
+                    {"code": "S3_RESEARCH_METADATA_MISSING", "reference": record.get("metadata_path")}
+                )

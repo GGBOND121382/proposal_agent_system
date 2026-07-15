@@ -1,0 +1,80 @@
+            "PASS",
+            output,
+            [],
+            [str(mmd), str(svg), str(png), str(metadata)],
+        )
+
+
+class _FakeExporter:
+    def __init__(self, data_dir: Path):
+        self.data_dir = data_dir
+        self.candidates: list[dict] = []
+
+    def _candidate_runs(self, project_id: str):
+        return self.candidates
+
+    def export(self, project_id: str) -> Path:
+        path = self.data_dir / "exports" / "s3.docx"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        document = Document()
+        document.add_heading("S3", level=1)
+        document.add_paragraph("validated")
+        document.save(path)
+        path.with_suffix(".integrity.json").write_text("{}", encoding="utf-8")
+        path.with_suffix(".manifest.json").write_text("{}", encoding="utf-8")
+        return path
+
+    def export_package(self, project_id: str, document_path: Path) -> Path:
+        pdf = document_path.with_suffix(".pdf")
+        pdf.write_bytes(b"%PDF-1.4\n% unit-test\n")
+        validation = {
+            "status": "PASS",
+            "finding_count": 0,
+            "blocking_finding_count": 0,
+        }
+        write_json(document_path.with_suffix(".delivery-validation.json"), validation)
+        package = document_path.with_suffix(".zip")
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.write(document_path, arcname=document_path.name)
+            archive.write(pdf, arcname=pdf.name)
+        return package
+
+
+def _settings(tmp_path: Path) -> SimpleNamespace:
+    return SimpleNamespace(data_dir=tmp_path)
+
+
+def _synthesis(source_id: str = "src-official") -> dict:
+    source_hash = None
+    # Hashes are supplied by the fixture executor; the known raw JSON is deterministic.
+    title = "Official Evaluation Framework"
+    url = "https://example.gov/framework"
+    text = "The official framework retains reproducible evidence, baseline comparisons and documented limitations."
+    raw = json.dumps({"title": title, "url": url, "content_text": text}, ensure_ascii=False, indent=2).encode("utf-8")
+    if source_id == "src-official":
+        source_hash = sha256_bytes(raw)
+    else:
+        source_hash = "0" * 64
+    return {
+        "claims": [
+            {
+                "claim_id": "claim-1",
+                "claim_text": "公开框架要求保留可复核证据。",
+                "claim_type": "PUBLIC_CLAIM",
+                "subject_id": None,
+                "temporal_status": "CURRENT",
+                "qualifiers": [],
+                "numeric_values": [],
+                "source_refs": [
+                    {
+                        "source_id": source_id,
+                        "source_type": "PUBLIC_SOURCE",
+                        "quoted_text": title,
+                        "source_hash": source_hash,
+                    }
+                ],
+                "knowledge_status": "DOCUMENT_EXTRACTED",
+                "security_level": "PUBLIC",
+            }
+        ],
+        "source_comparisons": [],

@@ -1,0 +1,80 @@
+
+def run(output_dir: Path) -> dict[str, Any]:
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    base = Settings.load()
+    settings = replace(
+        base,
+        data_dir=output_dir,
+        db_path=output_dir / "proposal_agents.sqlite3",
+        uploads_dir=output_dir / "uploads",
+        exports_dir=output_dir / "exports",
+        runtime_mode="REPLAY",
+        public_search_provider="connector",
+        mermaid_browser_executable=(
+            base.mermaid_browser_executable
+            or shutil.which("chromium")
+            or shutil.which("chromium-browser")
+            or shutil.which("google-chrome")
+            or ""
+        ),
+    )
+    settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+    settings.exports_dir.mkdir(parents=True, exist_ok=True)
+    db = Database(settings.db_path)
+    _seed_database(db)
+    pipeline = ResearchMermaidExportPipeline(db, settings)
+
+    plan = _research_plan()
+    connector = _write_connector_fixture(output_dir / "inputs" / "connector.json", plan)
+    request = {
+        "provider": "connector",
+        "connector_file": str(connector),
+        "max_results": 20,
+    }
+    research_output = pipeline.research(
+        project_id=PROJECT_ID,
+        workflow_id=WORKFLOW_ID,
+        security_level="PUBLIC",
+        research_plan=plan,
+        research_request=request,
+    )
+    synthesis = _build_synthesis(research_output)
+    prepared = pipeline.prepare(
+        project_id=PROJECT_ID,
+        workflow_id=WORKFLOW_ID,
+        security_level="PUBLIC",
+        research_plan=plan,
+        research_request=request,
+        research_output=research_output,
+        synthesis=synthesis,
+        diagrams=_diagram_specs(),
+        acceptance_mode="RECORDED_CONNECTOR_ENGINEERING_INTEGRATION",
+    )
+    _approve_content(db, prepared["required_figure_markers"])
+    result = pipeline.finalize(project_id=PROJECT_ID, checkpoint=prepared)
+
+    audit_counts = {
+        row["event_type"]: row["count"]
+        for row in db.fetchall(
+            "SELECT event_type, COUNT(*) AS count FROM audit_events GROUP BY event_type"
+        )
+    }
+    report = {
+        "schema_version": "1.0",
+        "status": result["status"],
+        "acceptance_scope": "RECORDED_CONNECTOR_ENGINEERING_INTEGRATION",
+        "semantic_capability_proof": False,
+        "limitation": (
+            "This acceptance uses an approved recorded connector fixture to prove the "
+            "Research + Mermaid + DOCX/PDF integration, restart and hash gates. It does "
+            "not claim LIVE search or model semantic quality."
+        ),
+        "source_count": prepared["research"]["source_count"],
+        "claim_binding_status": prepared["claim_binding"]["status"],
+        "diagram_count": len(prepared["diagrams"]),
+        "delivery": result["delivery"],
+        "evidence_bundle": result["evidence_bundle"],
+        "result_manifest": result["result_manifest"],
+        "audit_counts": audit_counts,

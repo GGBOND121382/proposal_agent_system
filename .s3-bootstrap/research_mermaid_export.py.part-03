@@ -1,0 +1,70 @@
+    def finalize(
+        self,
+        *,
+        project_id: str,
+        checkpoint: str | Path | dict[str, Any],
+    ) -> dict[str, Any]:
+        checkpoint_path, prepared = self._load_checkpoint(checkpoint)
+        if prepared.get("project_id") != project_id:
+            raise ResearchMermaidExportError("Checkpoint project_id does not match finalize target")
+        verification = self.verify_prepared(checkpoint_path)
+        if verification.get("status") != "PASS":
+            codes = [item.get("code", "UNKNOWN") for item in verification.get("findings", [])]
+            raise ResearchMermaidExportError(
+                "Prepared checkpoint verification failed: " + ", ".join(codes[:20])
+            )
+
+        candidates = self.exporter._candidate_runs(project_id)
+        if not candidates:
+            raise ResearchMermaidExportError(
+                "No Expression-Critic-approved content candidate is available for export"
+            )
+        self._require_markers_in_approved_candidates(
+            prepared.get("required_figure_markers", []), candidates
+        )
+
+        try:
+            docx_path = self.exporter.export(project_id)
+            package_path = self.exporter.export_package(project_id, docx_path)
+        except Exception as exc:
+            self._audit_failure("S3_EXPORT_FAILED", project_id, prepared["run_id"], str(exc))
+            raise ResearchMermaidExportError(f"DOCX/PDF delivery stage failed: {exc}") from exc
+
+        pdf_path = docx_path.with_suffix(".pdf")
+        delivery_path = docx_path.with_suffix(".delivery-validation.json")
+        delivery = json.loads(delivery_path.read_text(encoding="utf-8"))
+        if delivery.get("status") != "PASS":
+            raise ResearchMermaidExportError("Delivery validator did not pass")
+
+        final = {
+            "schema_version": self.schema_version,
+            "chain": "RESEARCH_MERMAID_EXPORT",
+            "phase": "FINALIZED",
+            "status": "PASS",
+            "acceptance_mode": prepared.get("acceptance_mode"),
+            "run_id": prepared["run_id"],
+            "project_id": project_id,
+            "workflow_id": prepared.get("workflow_id"),
+            "security_level": prepared.get("security_level"),
+            "prepared_checkpoint": self._artifact_record(
+                checkpoint_path, "S3_PREPARED_CHECKPOINT"
+            ),
+            "research": prepared["research"],
+            "claim_binding": prepared["claim_binding"],
+            "diagrams": prepared["diagrams"],
+            "approved_content": [
+                {
+                    "section_id": item.get("section_id"),
+                    "section_title": item.get("section_title"),
+                    "candidate_id": item.get("candidate_id"),
+                    "expression_polish_run_id": item.get("run_id"),
+                    "expression_critic_run_id": item.get("expression_critic_run_id"),
+                }
+                for item in candidates
+            ],
+            "delivery": {
+                "docx": self._artifact_record(docx_path, "DOCX"),
+                "pdf": self._artifact_record(pdf_path, "PDF"),
+                "package": self._artifact_record(package_path, "DELIVERY_PACKAGE"),
+                "validation": self._artifact_record(
+                    delivery_path, "DELIVERY_VALIDATION_REPORT"

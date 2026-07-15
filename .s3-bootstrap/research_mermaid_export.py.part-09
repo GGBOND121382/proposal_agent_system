@@ -1,0 +1,70 @@
+        verification_path: Path,
+    ) -> Path:
+        records: list[dict[str, Any]] = [
+            prepared["research"]["portable_manifest"],
+            prepared["claim_binding"]["report"],
+            final["prepared_checkpoint"],
+            final["delivery"]["package"],
+            final["final_manifest"],
+            self._artifact_record(verification_path, "S3_FINAL_VERIFICATION"),
+        ]
+        records.extend(
+            self._portable_research_artifact_records(
+                prepared["research"]["portable_manifest"]
+            )
+        )
+        for diagram in prepared.get("diagrams", []):
+            records.extend(diagram.get("artifacts", []))
+        bundle_path = evidence_dir / "s3-research-mermaid-export-evidence.zip"
+        seen: set[str] = set()
+        with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for record in records:
+                reference = str(record.get("reference") or "")
+                if not reference or reference in seen:
+                    continue
+                seen.add(reference)
+                path = self._resolve_reference(reference)
+                if not path.is_file():
+                    raise ResearchMermaidExportError(
+                        f"Required S3 bundle artifact is missing: {reference}"
+                    )
+                archive.write(path, arcname=reference.removeprefix(ARTIFACT_SCHEME))
+        return bundle_path
+
+
+    def _portable_research_artifact_records(
+        self, portable_manifest_record: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        manifest_path = self._resolve_reference(portable_manifest_record["reference"])
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        records: list[dict[str, Any]] = []
+        artifact_types = {
+            "raw_path": "RESEARCH_RAW_SNAPSHOT",
+            "text_path": "RESEARCH_EXTRACTED_TEXT",
+            "metadata_path": "RESEARCH_SOURCE_METADATA",
+        }
+        for source in manifest.get("records", []):
+            for key, artifact_type in artifact_types.items():
+                path = self._resolve_reference(str(source.get(key) or ""))
+                records.append(self._artifact_record(path, artifact_type))
+        connector = manifest.get("connector_response")
+        if connector:
+            records.append(
+                self._artifact_record(
+                    self._resolve_reference(str(connector)),
+                    "RESEARCH_CONNECTOR_RESPONSE",
+                )
+            )
+        return records
+
+    def _artifact_record(self, path: Path, artifact_type: str) -> dict[str, Any]:
+        path = path.resolve()
+        if not path.is_file():
+            raise ResearchMermaidExportError(f"Artifact is missing: {path.name}")
+        return {
+            "artifact_type": artifact_type,
+            "reference": self._portable_reference(path),
+            "sha256": sha256_bytes(path.read_bytes()),
+            "size_bytes": path.stat().st_size,
+        }
+

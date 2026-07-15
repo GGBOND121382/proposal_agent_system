@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+import json
+import zipfile
+from pathlib import Path
+from typing import Any
+
+from .exporter import DocxExporter
+from .research import PublicResearchService
+from .skill_setup import build_skill_executor
+from .skills.research_audit import verify_research_archive
+from .util import new_id, sha256_bytes, sha256_json, utc_now, write_json
+
+
+ARTIFACT_SCHEME = "artifact://"
+
+
+class ResearchMermaidExportError(RuntimeError):
+    """Fail-closed error for the S3 Research + Mermaid + Export chain."""
+
+
+class ResearchMermaidExportPipeline:
+    """Checkpointed G2/S3 integration of research, Mermaid and delivery.
+
+    The pipeline intentionally has two phases. ``prepare`` archives and validates public
+    evidence, binds PUBLIC_CLAIM objects, renders evidence-linked Mermaid artifacts and
+    persists a portable checkpoint. Upstream writing agents may then consume only the
+    returned figure markers. ``finalize`` resumes from that checkpoint, requires the
+    markers to be present in later Expression-Critic-approved candidates, and invokes the
+    production DOCX/PDF delivery hard gate.
+
+    No model output is rewritten here. The integration layer only validates, renders,
+    verifies hashes and packages evidence.
+    """
+
+    schema_version = "1.0"
+
+    def __init__(self, db, settings, *, skill_executor=None, exporter=None):
+        self.db = db
+        self.settings = settings
+        self.skill_executor = skill_executor or build_skill_executor(db, settings)
+        self.exporter = exporter or DocxExporter(db, settings)
+        self.research_service = PublicResearchService(settings, self.skill_executor)
+
+    def research(
+        self,
+        *,
+        project_id: str,
+        workflow_id: str | None,
+        security_level: str,
+        research_plan: dict[str, Any],
+        research_request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute and hash-verify the public-research stage for later synthesis."""
+        payload = {
+            **research_request,
+            "plan": research_plan,
+            "require_structured_plan": True,
+        }
+        try:
+            result = self.skill_executor.execute(
+                "public_research.archive",
+                payload,
+                project_id=project_id,
+                workflow_id=workflow_id,
+                security_level=security_level,
+            )
+        except Exception as exc:
+            self._audit_failure("S3_RESEARCH_FAILED", project_id, "research", str(exc))
+            raise ResearchMermaidExportError(f"Research stage failed: {exc}") from exc

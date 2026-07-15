@@ -1,0 +1,79 @@
+        "conflicts": [],
+        "limitations": [],
+        "coverage_summary": "覆盖完整",
+    }
+
+
+def _diagrams(source_ids=None) -> list[dict]:
+    return [
+        {
+            "section_id": "research-evidence-flow",
+            "caption": "公开研究证据链",
+            "width_cm": 13.5,
+            "mermaid_source": "flowchart LR\n A[Research] --> B[Claim] --> C[Export]",
+            "claim_ids": ["claim-1"],
+            "source_ids": source_ids or ["src-official"],
+        }
+    ]
+
+
+def _pipeline(tmp_path: Path):
+    db = Database(tmp_path / "db.sqlite3")
+    executor = _FakeSkillExecutor(tmp_path)
+    exporter = _FakeExporter(tmp_path)
+    pipeline = ResearchMermaidExportPipeline(
+        db,
+        _settings(tmp_path),
+        skill_executor=executor,
+        exporter=exporter,
+    )
+    return pipeline, exporter
+
+
+def _prepare(pipeline: ResearchMermaidExportPipeline, diagrams=None):
+    return pipeline.prepare(
+        project_id="project-s3",
+        workflow_id="workflow-s3",
+        security_level="PUBLIC",
+        research_plan={"queries": ["official reproducible evidence benchmark limitations"]},
+        research_request={"provider": "connector", "connector_file": "fixture.json"},
+        synthesis=_synthesis(),
+        diagrams=diagrams or _diagrams(),
+        acceptance_mode="RECORDED_CONNECTOR_INTEGRATION",
+    )
+
+
+def test_prepare_writes_portable_restart_verified_checkpoint(tmp_path: Path):
+    pipeline, _ = _pipeline(tmp_path)
+    prepared = _prepare(pipeline)
+    assert prepared["status"] == "WAITING_FOR_EXPRESSION_APPROVED_CONTENT"
+    assert prepared["claim_binding"]["status"] == "PASS"
+    assert prepared["verification"]["reference"].startswith("artifact://")
+    checkpoint_path = pipeline._resolve_reference(prepared["checkpoint"]["reference"])
+    checkpoint_text = checkpoint_path.read_text(encoding="utf-8")
+    assert str(tmp_path.resolve()) not in checkpoint_text
+    assert pipeline.verify_prepared(checkpoint_path)["status"] == "PASS"
+
+
+def test_prepare_blocks_diagram_source_not_bound_to_claim(tmp_path: Path):
+    pipeline, _ = _pipeline(tmp_path)
+    with pytest.raises(ResearchMermaidExportError, match="not bound"):
+        _prepare(pipeline, diagrams=_diagrams(["src-review"]))
+
+
+def test_finalize_requires_each_marker_once_in_approved_content(tmp_path: Path):
+    pipeline, exporter = _pipeline(tmp_path)
+    prepared = _prepare(pipeline)
+    exporter.candidates = [
+        {
+            "section_id": "s1",
+            "section_title": "公开研究",
+            "candidate_id": "candidate-1",
+            "run_id": "polish-1",
+            "expression_critic_run_id": "critic-1",
+            "paragraphs": ["正文中没有图。"],
+        }
+    ]
+    with pytest.raises(ResearchMermaidExportError, match="exactly once"):
+        pipeline.finalize(project_id="project-s3", checkpoint=prepared)
+

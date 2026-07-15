@@ -1,0 +1,70 @@
+            security_level=security_level,
+        )
+        checkpoint = {
+            "schema_version": self.schema_version,
+            "chain": "RESEARCH_MERMAID_EXPORT",
+            "phase": "PREPARED",
+            "status": "WAITING_FOR_EXPRESSION_APPROVED_CONTENT",
+            "acceptance_mode": acceptance_mode,
+            "run_id": run_id,
+            "project_id": project_id,
+            "workflow_id": workflow_id,
+            "security_level": security_level,
+            "created_at": utc_now(),
+            "input_hashes": {
+                "research_plan_sha256": sha256_json(research_plan),
+                "research_request_sha256": sha256_json(research_request),
+                "research_output_sha256": sha256_json(research_output),
+                "synthesis_sha256": sha256_json(synthesis),
+                "diagram_specs_sha256": sha256_json(diagrams),
+            },
+            "research": {
+                "mode": research_output.get("mode"),
+                "plan_validation": research_output.get("plan_validation"),
+                "coverage": research_output.get("coverage"),
+                "issues": research_output.get("issues", []),
+                "source_count": len(research_output.get("source_catalog", [])),
+                "sources": self._portable_sources(research_output),
+                "archive_manifest": self._artifact_record(
+                    Path(str(research_output["archive_manifest"])), "RESEARCH_ARCHIVE_MANIFEST"
+                ),
+                "portable_manifest": self._artifact_record(
+                    portable_research_path, "PORTABLE_RESEARCH_MANIFEST"
+                ),
+            },
+            "claim_binding": {
+                "status": claim_report.get("status"),
+                "validation_mode": claim_report.get("validation_mode"),
+                "claim_count": claim_report.get("claim_count"),
+                "bindings": claim_report.get("bindings", []),
+                "report": self._artifact_record(claim_report_path, "PUBLIC_CLAIM_BINDING_REPORT"),
+            },
+            "diagrams": diagram_records,
+            "required_figure_markers": [item["figure_marker"] for item in diagram_records],
+        }
+        checkpoint_path = evidence_dir / "S3_PREPARED_CHECKPOINT.json"
+        write_json(checkpoint_path, checkpoint)
+        checkpoint["checkpoint"] = self._artifact_record(checkpoint_path, "S3_PREPARED_CHECKPOINT")
+
+        verification = self.verify_prepared(checkpoint_path)
+        if verification.get("status") != "PASS":
+            raise ResearchMermaidExportError("Prepared S3 checkpoint failed restart verification")
+        verification_path = evidence_dir / "S3_PREPARED_VERIFICATION.json"
+        write_json(verification_path, verification)
+        checkpoint["verification"] = self._artifact_record(
+            verification_path, "S3_PREPARED_VERIFICATION"
+        )
+        self.db.audit(
+            "S3_PREPARED",
+            project_id=project_id,
+            object_id=run_id,
+            metadata={
+                "checkpoint": checkpoint["checkpoint"]["reference"],
+                "checkpoint_sha256": checkpoint["checkpoint"]["sha256"],
+                "source_count": checkpoint["research"]["source_count"],
+                "diagram_count": len(diagram_records),
+                "acceptance_mode": acceptance_mode,
+            },
+        )
+        return checkpoint
+

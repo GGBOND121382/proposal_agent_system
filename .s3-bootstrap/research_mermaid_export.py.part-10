@@ -1,0 +1,70 @@
+    def _verify_record(
+        self, record: dict[str, Any] | None, findings: list[dict[str, Any]]
+    ) -> None:
+        if not record:
+            findings.append({"code": "S3_ARTIFACT_RECORD_MISSING"})
+            return
+        try:
+            path = self._resolve_reference(str(record.get("reference") or ""))
+        except Exception as exc:
+            findings.append({"code": "S3_ARTIFACT_REFERENCE_INVALID", "message": str(exc)})
+            return
+        if not path.is_file():
+            findings.append({"code": "S3_ARTIFACT_MISSING", "reference": record.get("reference")})
+            return
+        if sha256_bytes(path.read_bytes()) != record.get("sha256"):
+            findings.append(
+                {"code": "S3_ARTIFACT_HASH_MISMATCH", "reference": record.get("reference")}
+            )
+
+    def _portable_reference(self, path: Path) -> str:
+        root = Path(self.settings.data_dir).resolve()
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(root)
+        except ValueError as exc:
+            raise ResearchMermaidExportError(
+                f"S3 evidence artifact is outside APP_DATA_DIR: {resolved.name}"
+            ) from exc
+        return ARTIFACT_SCHEME + relative.as_posix()
+
+    def _resolve_reference(self, reference: str) -> Path:
+        if not reference.startswith(ARTIFACT_SCHEME):
+            raise ResearchMermaidExportError("Only artifact:// references are accepted")
+        relative = Path(reference.removeprefix(ARTIFACT_SCHEME))
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ResearchMermaidExportError("Unsafe artifact reference")
+        root = Path(self.settings.data_dir).resolve()
+        path = (root / relative).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ResearchMermaidExportError("Artifact reference escapes APP_DATA_DIR") from exc
+        return path
+
+    def _load_checkpoint(
+        self, checkpoint: str | Path | dict[str, Any]
+    ) -> tuple[Path, dict[str, Any]]:
+        return self._load_json_artifact(checkpoint, default_name="S3_PREPARED_CHECKPOINT.json")
+
+    def _load_json_artifact(
+        self,
+        value: str | Path | dict[str, Any],
+        *,
+        default_name: str = "S3_FINAL_ACCEPTANCE.json",
+    ) -> tuple[Path, dict[str, Any]]:
+        if isinstance(value, dict):
+            record = value.get("checkpoint") or value.get("final_manifest")
+            if not record:
+                raise ResearchMermaidExportError(f"Dictionary does not reference {default_name}")
+            path = self._resolve_reference(record["reference"])
+        elif isinstance(value, Path):
+            path = value.resolve()
+        else:
+            raw = str(value)
+            path = self._resolve_reference(raw) if raw.startswith(ARTIFACT_SCHEME) else Path(raw).resolve()
+        if not path.is_file():
+            raise ResearchMermaidExportError(f"JSON artifact is missing: {path.name}")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:

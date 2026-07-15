@@ -1,0 +1,22 @@
+            raise ResearchMermaidExportError(f"JSON artifact is invalid: {path.name}") from exc
+        return path, payload
+
+    def _evidence_root(self, run_id: str) -> Path:
+        return Path(self.settings.data_dir) / "recovery_evidence" / "s3" / run_id
+
+    @staticmethod
+    def _diagram_artifact_type(path: Path) -> str:
+        return {
+            ".mmd": "MERMAID_SOURCE",
+            ".svg": "MERMAID_SVG",
+            ".png": "MERMAID_PNG",
+            ".json": "MERMAID_METADATA",
+        }.get(path.suffix.lower(), "MERMAID_ARTIFACT")
+
+    def _audit_failure(self, event_type: str, project_id: str, run_id: str, error: str) -> None:
+        self.db.audit(
+            event_type,
+            project_id=project_id,
+            object_id=run_id,
+            metadata={"error": error[:4000]},
+        )
