@@ -50,13 +50,13 @@ def test_each_agent_has_required_matrix(prompt_id: str, pack: PromptPack, reload
     schema_error = pack.replay_case(prompt_id, "schema_error")
     assert pack.validate(prompt_id, "input", schema_error["input"])
 
+    missing_envelope_version = copy.deepcopy(normal["input"])
+    missing_envelope_version.pop("schema_version", None)
+    assert pack.validate(prompt_id, "input", missing_envelope_version)
+
     bad_input_id = copy.deepcopy(normal["input"])
     bad_input_id["prompt_id"] = "P-NOT-REGISTERED"
     assert pack.validate(prompt_id, "input", bad_input_id)
-
-    bad_input_version = copy.deepcopy(normal["input"])
-    bad_input_version["prompt_version"] = "0.0.0"
-    assert pack.validate(prompt_id, "input", bad_input_version)
 
     bad_output_status = copy.deepcopy(normal["expected_output"])
     bad_output_status["status"] = "NOT_A_STATUS"
