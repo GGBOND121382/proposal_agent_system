@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import tarfile
 from pathlib import Path
 
 from app.config import Settings
@@ -12,7 +14,7 @@ from app.pack import PromptPack
 from app.security import SecurityRouter
 from app.util import utc_now
 from scripts.audit_prompt_traces import audit
-from scripts.f_recovery_bundle import build, verify
+import scripts.f_recovery_bundle as recovery
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,11 +79,33 @@ def test_trace_audit_and_recovery_bundle(tmp_path: Path, monkeypatch):
     test_log = tmp_path / "pytest.log"
     test_log.write_text("F trace and recovery test evidence\n", encoding="utf-8")
     bundle = tmp_path / "recovery_evidence" / "f-recovery.zip"
-    built = build(settings.db_path, bundle, [test_log])
+    built = recovery.build(settings.db_path, bundle, [test_log])
     assert built["status"] == "PASS"
     restored = tmp_path / "restored"
-    checked = verify(bundle, restored)
+    checked = recovery.verify(bundle, restored)
     assert checked["status"] == "PASS", checked["errors"]
     assert (restored / "workflow_checkpoint.sqlite").is_file()
     assert (restored / "source" / "source.tar.gz").is_file()
     assert (restored / "prompt_traces" / "calls.jsonl").is_file()
+
+
+def test_gitless_source_snapshot_fallback(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SOURCE_COMMIT", "snapshot-test-commit")
+
+    def no_git(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(128, "git")
+
+    monkeypatch.setattr(recovery, "git", no_git)
+    monkeypatch.setattr(recovery.subprocess, "run", no_git)
+
+    assert recovery.resolve_source_commit() == "snapshot-test-commit"
+    assert recovery.material_paths()
+
+    archive = tmp_path / "source.tar.gz"
+    mode = recovery.create_source_archive(archive, "snapshot-test-commit")
+    assert mode == "filesystem-snapshot"
+    assert archive.is_file()
+    with tarfile.open(archive, "r:gz") as stream:
+        names = set(stream.getnames())
+    assert "requirements-dev.txt" in names
+    assert "scripts/f_recovery_bundle.py" in names
