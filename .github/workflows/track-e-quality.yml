@@ -1,0 +1,39 @@
+name: Track E Quality Gate
+
+on:
+  push:
+    branches:
+      - agent/integration-v06
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality-track-e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+      - run: python -m compileall -q app scripts tests
+      - run: python scripts/quality_track_e_acceptance.py
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: track-e-quality-${{ github.sha }}
+          path: recovery_evidence/track_e/
+          if-no-files-found: error
+          retention-days: 14
