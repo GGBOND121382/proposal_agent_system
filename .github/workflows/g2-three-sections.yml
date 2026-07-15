@@ -1,0 +1,59 @@
+name: G2 Three-Section Cross-Chapter Gate
+
+on:
+  push:
+    branches:
+      - agent/integration-v06
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "tests/test_g2_three_section_chain.py"
+      - "scripts/run_g2_three_section_chain.py"
+      - "docs/G2_THREE_SECTION_CROSS_CHAPTER.md"
+      - ".github/workflows/g2-three-sections.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  three-section-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out integration source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Compile and validate Prompt Pack
+        run: |
+          python -m compileall -q app scripts tests
+          python prompt_pack/tools/validate_pack.py
+      - name: Run G2 acceptance and write evidence
+        run: |
+          python scripts/run_g2_three_section_chain.py \
+            --output-dir "recovery_evidence/g2_three_sections/${GITHUB_SHA}"
+      - name: Upload G2 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-three-section-${{ github.sha }}
+          path: recovery_evidence/g2_three_sections/${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30

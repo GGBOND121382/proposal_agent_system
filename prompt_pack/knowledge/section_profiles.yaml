@@ -1,7 +1,7 @@
-version: '3.0'
+version: '3.1'
 default_profile:
   profile_id: SECTION_GENERAL
-  version: 3.0.0
+  version: 3.1.0
   required_inputs: [PROJECT_BASIC]
   acceptance_rules:
     - 本节具有唯一且明确的论证功能
@@ -100,6 +100,15 @@ profiles:
     acceptance_rules:
       - 每项能力由论文、项目、代码、数据或预实验支撑
       - 不用泛化能力描述替代前期证据
+  - profile_id: CONCLUSION
+    version: 3.1.0
+    title_patterns: ['结论', '总结与展望', '研究结论', '项目总结']
+    required_inputs: [CENTRAL_PROPOSITION, RESEARCH_QUESTION, EXPECTED_CONTRIBUTION, SUCCESS_CRITERION]
+    acceptance_rules:
+      - 逐一回答全部研究问题并说明对应验证结论
+      - 综合各研究问题后回扣唯一中心命题及其边界条件
+      - 只总结前文已经论证的贡献、方法和指标，不得引入新的方法、指标、功能或事实
+      - 不以展望替代结论，不重复摘要或逐章目录式复述
   - profile_id: PROGRESS_BUDGET_RISK
     title_patterns: ['进度', '里程碑', '经费', '预算', '风险', '组织管理', '质量保证', '伦理', '合规']
     required_inputs: [WORK_PACKAGE, SCHEDULE_PHASE, BUDGET_ITEM, RISK, COMPLIANCE_ITEM]
@@ -116,5 +125,6 @@ profiles:
     title_patterns: ['附录', '附件', '部署', '接口', '数据字典', 'Skill', 'Mermaid', '审计']
     required_inputs: [SYSTEM_REQUIREMENT]
     acceptance_rules:
-      - 工程和审计细节与主申请书分离
+      - 工程、部署、接口、Trace和审计细节与主申请书分离
       - 附录内容不反向主导研究主线
+      - 附录段落不参与主文重复率、命题集中度和篇幅密度统计

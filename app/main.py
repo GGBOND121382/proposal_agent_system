@@ -22,6 +22,7 @@ from .pack import PromptPack
 from .research import PublicResearchService
 from .skill_setup import build_skill_executor
 from .security import SecurityRouter
+from .track_b import TrackBAgentPromptValidator
 from .util import new_id, safe_filename, sha256_json, utc_now
 from .workflows import WORKFLOWS, WorkflowEngine
 
@@ -31,7 +32,14 @@ db = Database(settings.db_path)
 router = SecurityRouter(pack)
 gateway = ModelGateway(settings, pack)
 context_builder = ContextBuilder(db, pack)
-executor = PromptExecutor(db, pack, router, gateway, quality_guard_enabled=settings.proposal_quality_guard_enabled)
+executor = PromptExecutor(
+    db,
+    pack,
+    router,
+    gateway,
+    quality_guard=TrackBAgentPromptValidator(pack),
+    quality_guard_enabled=settings.proposal_quality_guard_enabled,
+)
 skill_executor = build_skill_executor(db, settings)
 research = PublicResearchService(settings, skill_executor)
 diagram_enrichment = DiagramEnrichmentService(db, pack, skill_executor)
@@ -301,6 +309,45 @@ def get_run(run_id: str) -> dict[str, Any]:
     row["input"] = json.loads(row.pop("input_json"))
     row["output"] = json.loads(row.pop("output_json")) if row.get("output_json") else None
     return row
+
+
+@app.get("/api/projects/{project_id}/quality-findings")
+def list_quality_findings(
+    project_id: str,
+    workflow_id: str | None = None,
+    state: str | None = None,
+) -> list[dict[str, Any]]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    states = {state.upper()} if state else None
+    return workflows.quality_manager.list_findings(project_id, workflow_id=workflow_id, states=states)
+
+
+@app.get("/api/projects/{project_id}/quality-matrix")
+def get_quality_matrix(project_id: str, workflow_id: str | None = None) -> dict[str, Any]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    return workflows.quality_manager.quality_matrix(project_id, workflow_id=workflow_id)
+
+
+@app.post("/api/projects/{project_id}/quality/delivery-findings")
+def ingest_delivery_findings(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    validation_run_id = str(payload.get("validation_run_id") or "").strip()
+    findings = payload.get("findings")
+    if not validation_run_id or not isinstance(findings, list):
+        raise HTTPException(422, "validation_run_id and findings[] are required")
+    records = workflows.quality_manager.ingest_delivery_findings(
+        project_id=project_id,
+        workflow_id=payload.get("workflow_id"),
+        validation_run_id=validation_run_id,
+        findings=findings,
+    )
+    return {
+        "records": records,
+        "quality_matrix": workflows.quality_manager.quality_matrix(project_id),
+    }
 
 
 @app.post("/api/projects/{project_id}/export")

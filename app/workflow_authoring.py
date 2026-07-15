@@ -5,6 +5,13 @@ from typing import Any
 from .executor import PromptExecutionError
 
 
+THREE_SECTION_PROFILE_ORDER = (
+    "BACKGROUND_AND_SIGNIFICANCE",
+    "RESEARCH_CONTENT",
+    "TECHNICAL_ROUTE",
+)
+
+
 class WorkflowAuthoringMixin:
     async def _write_sections(self, wf: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
         """Generate and review every requested proposal section before one human review gate.
@@ -53,6 +60,7 @@ class WorkflowAuthoringMixin:
                     )
                 section_record["runs"].append({"prompt_id": prompt_id, "run_id": result["run_id"], "status": result["status"]})
                 state["original_environment"] = result["route"]["environment"]
+                self._observe_quality_result(wf, state, prompt_id, result)
                 if result["status"] != "PASS":
                     state["last_error"] = f"{section.get('title')} / {prompt_id} returned {result['status']}"
                     self._update(wf, status="BLOCKED", state=state)
@@ -74,6 +82,103 @@ class WorkflowAuthoringMixin:
         self._create_gate(refreshed, "CANDIDATE_REVIEW", target_id=wf["id"], questions=[])
         self._update(refreshed, status="WAITING_GATE", state=state)
         return self.get(wf["id"])
+
+    def _three_section_mode(self, state: dict[str, Any]) -> bool:
+        options = state.get("options") or {}
+        return bool(
+            options.get("three_section_cross_chapter")
+            or options.get("integration_scope") == "THREE_SECTION_CROSS_CHAPTER"
+        )
+
+    def _resolve_three_section_contract(
+        self,
+        sections: list[dict[str, Any]],
+        state: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        by_profile: dict[str, list[dict[str, Any]]] = {profile: [] for profile in THREE_SECTION_PROFILE_ORDER}
+        for section in sections:
+            profile = self.pack.section_profile_for(str(section.get("title") or ""))
+            profile_id = str(profile.get("profile_id") or "")
+            if profile_id in by_profile:
+                by_profile[profile_id].append(section)
+        missing = [profile for profile, values in by_profile.items() if not values]
+        duplicate = [profile for profile, values in by_profile.items() if len(values) > 1]
+        if missing or duplicate:
+            details = []
+            if missing:
+                details.append("缺少章节角色：" + "、".join(missing))
+            if duplicate:
+                details.append("章节角色重复：" + "、".join(duplicate))
+            raise ValueError(
+                "三章节跨章链必须且只能包含背景、研究内容、技术路线三个唯一章节；" + "；".join(details)
+            )
+        resolved = [by_profile[profile][0] for profile in THREE_SECTION_PROFILE_ORDER]
+        state["three_section_contract"] = {
+            "contract_type": "THREE_SECTION_CROSS_CHAPTER",
+            "ordered_profiles": list(THREE_SECTION_PROFILE_ORDER),
+            "sections": [
+                {
+                    "section_id": str(section.get("section_id")),
+                    "title": str(section.get("title") or ""),
+                    "profile_id": profile,
+                    "order": index + 1,
+                }
+                for index, (profile, section) in enumerate(zip(THREE_SECTION_PROFILE_ORDER, resolved))
+            ],
+        }
+        return resolved
+
+    def _validate_three_section_integration_envelope(
+        self,
+        state: dict[str, Any],
+        envelope: dict[str, Any],
+    ) -> None:
+        if not self._three_section_mode(state):
+            return
+        contract = state.get("three_section_contract") or {}
+        expected = [
+            str(item.get("section_id")) for item in contract.get("sections") or []
+            if isinstance(item, dict) and item.get("section_id")
+        ]
+        candidates = (envelope.get("payload") or {}).get("candidate_sections") or []
+        actual = [
+            str(item.get("section_id")) for item in candidates
+            if isinstance(item, dict) and item.get("section_id")
+        ]
+        if len(expected) != 3 or len(actual) != 3 or set(actual) != set(expected):
+            raise ValueError(
+                "三章节跨章审查输入必须与已冻结的背景—研究内容—技术路线合同完全一致；"
+                f"expected={expected}, actual={actual}"
+            )
+
+    @staticmethod
+    def _section_ids_from_integration_output(
+        output: dict[str, Any],
+        known_section_ids: set[str],
+    ) -> set[str]:
+        result = output.get("result") or {}
+        affected: set[str] = set()
+        for key in ("redundancy_report", "document_type_drift", "page_budget_check"):
+            report = result.get(key) or {}
+            affected.update(str(x) for x in report.get("affected_section_ids", []) if x)
+            affected.update(str(x) for x in report.get("overflow_section_ids", []) if x)
+        for check in result.get("terminology_checks") or []:
+            if isinstance(check, dict) and not check.get("consistent", True):
+                affected.update(str(x) for x in check.get("sections", []) if x)
+        evidence_strings: list[str] = []
+        for check in result.get("numeric_checks") or []:
+            if isinstance(check, dict) and not check.get("consistent", True):
+                evidence_strings.extend(str(x) for x in check.get("occurrences", []) if x)
+        for finding in output.get("findings") or []:
+            if not isinstance(finding, dict):
+                continue
+            evidence_strings.append(str(finding.get("target_path_or_span") or ""))
+            evidence_strings.extend(str(x) for x in finding.get("evidence_refs", []) if x)
+        for value in evidence_strings:
+            for section_id in known_section_ids:
+                if section_id and section_id in value:
+                    affected.add(section_id)
+        return affected & known_section_ids
 
     def _prepare_integration_repair(self, wf: dict[str, Any], state: dict[str, Any], output: dict[str, Any]) -> str:
         """Route full-document findings to the earliest stage able to fix them.
@@ -143,12 +248,17 @@ class WorkflowAuthoringMixin:
             self._update(wf, status="RUNNING", current_step=target_step, state=state)
             return "SCHEDULED"
 
-        result = output.get("result") or {}
-        affected: set[str] = set()
-        for key in ("redundancy_report", "document_type_drift", "page_budget_check"):
-            report = result.get(key) or {}
-            affected.update(str(x) for x in report.get("affected_section_ids", []) if x)
-            affected.update(str(x) for x in report.get("overflow_section_ids", []) if x)
+        contract_sections = (state.get("three_section_contract") or {}).get("sections") or []
+        known_section_ids = {
+            str(item.get("section_id")) for item in contract_sections
+            if isinstance(item, dict) and item.get("section_id")
+        }
+        if not known_section_ids:
+            known_section_ids = {
+                str(item.get("section_id")) for item in state.get("section_results", [])
+                if isinstance(item, dict) and item.get("section_id")
+            }
+        affected = self._section_ids_from_integration_output(output, known_section_ids)
         repairable_codes = {
             "QG_DOCUMENT_TEMPLATE_REPETITION", "DOCUMENT_TEMPLATE_REPETITION",
             "QG_DOCUMENT_DOMINATED_BY_AGENT_SYSTEM", "DOCUMENT_TYPE_DRIFT",
@@ -158,6 +268,11 @@ class WorkflowAuthoringMixin:
             if str(item.get("code") or "") in repairable_codes
             or str(item.get("suggested_route") or "") == "WRITING_AGENT"
         ]
+        if writing_findings and not affected and self._three_section_mode(state):
+            # The critic assigned the defect to writing but omitted a section locator.
+            # Fail closed by regenerating the complete three-section set rather than
+            # asking a human to edit prose or silently accepting an unowned finding.
+            affected = set(known_section_ids)
         if not affected or not writing_findings:
             return "NOT_APPLICABLE"
         rounds = int(state.get("integration_repair_rounds", 0))
@@ -168,6 +283,12 @@ class WorkflowAuthoringMixin:
         state["integration_repair_rounds"] = rounds + 1
         state["integration_repair_section_ids"] = sorted(affected)
         state["integration_repair_findings"] = writing_findings
+        state.setdefault("cross_section_repair_history", []).append({
+            "round": rounds + 1,
+            "finding_codes": [str(item.get("code") or "") for item in writing_findings],
+            "responsible_section_ids": sorted(affected),
+            "route": "WRITING_AGENT",
+        })
         state["section_results"] = [
             item for item in state.get("section_results", []) if str(item.get("section_id")) not in affected
         ]
@@ -205,6 +326,8 @@ class WorkflowAuthoringMixin:
                 planned.append(section)
                 planned_ids.add(section_id)
         sections = planned or source_sections
+        if self._three_section_mode(state or {"options": options}):
+            sections = self._resolve_three_section_contract(sections, state or {"options": options})
 
         requested_ids = set(options.get("target_section_ids") or [])
         requested_titles = set(options.get("target_section_titles") or [])

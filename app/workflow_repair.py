@@ -123,6 +123,13 @@ class WorkflowRepairMixin:
             return False
         if repaired["status"] != "PASS":
             return False
+        self.quality_manager.record_targeted_repair(
+            project_id=wf["project_id"],
+            workflow_id=wf["id"],
+            repair_run_id=repaired["run_id"],
+            finding_codes=[str(item.get("code")) for item in findings if item.get("code")],
+            workflow_state=state,
+        )
         state["repair_overrides"][producer] = repaired["output"]["result"]["repaired_object"]
         self._update(wf, state=state)
         return True

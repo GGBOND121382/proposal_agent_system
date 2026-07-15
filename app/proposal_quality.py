@@ -220,6 +220,16 @@ class ProposalQualityGuard:
             ) or {}
             findings.extend(self._audit_project_definition(pd))
 
+        elif prompt_id in {"P-FACT-EXTRACT", "P-FACT-CRITIC"}:
+            fact_package = (
+                output.get("result")
+                if prompt_id == "P-FACT-EXTRACT"
+                else {
+                    "fact_candidates": payload.get("fact_candidates") or [],
+                }
+            ) or {}
+            findings.extend(self._audit_fact_package(fact_package))
+
         elif prompt_id == "P-PROJECT-READINESS-CRITIC":
             findings.extend(self._audit_readiness(payload, output))
 
@@ -329,6 +339,104 @@ class ProposalQualityGuard:
                 "QG_ENGINEERING_OBJECTIVE_MASQUERADES_AS_RESEARCH", "P1", "PROJECT_DEFINITION", "OBJECTIVE",
                 "items", "项目目标仅描述构建系统/原型，未由研究问题、新机制和验证命题支撑，存在文种漂移。",
                 "先形成中心研究命题和可检验研究问题，再把原型系统降为验证载体或成果，而不是研究目标本身。",
+                "PROJECT_KNOWLEDGE_AGENT",
+            ))
+
+        item_by_id = {
+            str(item.get("item_id")): item
+            for item in pd.get("items", [])
+            if isinstance(item, dict) and item.get("item_id")
+        }
+        invalid_relations: list[str] = []
+        unsupported_relations: list[str] = []
+        for relation in pd.get("relations", []):
+            if not isinstance(relation, dict):
+                continue
+            relation_id = str(relation.get("relation_id") or "relation")
+            source = item_by_id.get(str(relation.get("source_item_id") or ""))
+            target = item_by_id.get(str(relation.get("target_item_id") or ""))
+            if source is None or target is None:
+                invalid_relations.append(relation_id)
+                continue
+            if str(source.get("item_type")) != str(relation.get("source_item_type")) or str(target.get("item_type")) != str(relation.get("target_item_type")):
+                invalid_relations.append(relation_id)
+            if relation.get("status") == "CONFIRMED" and not _has_real_source(relation):
+                unsupported_relations.append(relation_id)
+        if invalid_relations:
+            findings.append(QualityFinding(
+                "QG_RELATION_MATRIX_DIRECTION_INVALID", "P1", "PROJECT_DEFINITION", "RELATION_MATRIX",
+                "relations", f"关系矩阵中有{len(invalid_relations)}条关系的端点不存在或类型/方向与项目对象不一致。",
+                "按relation_matrix允许的源类型、关系类型和目标类型重建关系；禁止仅修改显示标签掩盖端点错误。",
+                "PROJECT_KNOWLEDGE_AGENT",
+            ))
+        if unsupported_relations:
+            findings.append(QualityFinding(
+                "QG_CONFIRMED_RELATION_WITHOUT_EVIDENCE", "P1", "SOURCE", "RELATION_MATRIX",
+                "relations", f"关系矩阵中有{len(unsupported_relations)}条CONFIRMED关系缺少可定位来源。",
+                "补充支撑关系方向的原文Span和Hash，或将关系状态降级为USER_ASSERTED/UNKNOWN。",
+                "PROJECT_KNOWLEDGE_AGENT",
+            ))
+
+        unsupported_metrics: list[str] = []
+        for item in pd.get("items", []):
+            if not isinstance(item, dict) or item.get("item_type") != "METRIC":
+                continue
+            content = item.get("content") or {}
+            required_basis = (
+                content.get("measurement_method"),
+                content.get("test_dataset_or_scenario"),
+                content.get("verifier"),
+            )
+            if any(not str(value or "").strip() for value in required_basis):
+                unsupported_metrics.append(str(item.get("item_id") or "metric"))
+        if unsupported_metrics:
+            findings.append(QualityFinding(
+                "QG_METRIC_BASIS_INCOMPLETE", "P1", "PROJECT_DEFINITION", "METRIC",
+                "items", f"指标{unsupported_metrics}缺少测量方法、测试场景或验证主体，不能作为验收依据。",
+                "为每个指标绑定测量方法、数据/场景、测试条件和独立验证主体；没有依据的目标值保持UNKNOWN。",
+                "PROJECT_KNOWLEDGE_AGENT",
+            ))
+        return findings
+
+    def _audit_fact_package(self, fact_package: dict[str, Any]) -> list[QualityFinding]:
+        findings: list[QualityFinding] = []
+        facts = [item for item in fact_package.get("fact_candidates", []) if isinstance(item, dict)]
+        non_atomic: list[str] = []
+        incomplete: list[str] = []
+        for fact in facts:
+            claim_id = str(fact.get("claim_id") or "fact")
+            text = str(fact.get("claim_text") or "").strip()
+            clauses = [part for part in re.split(r"[；;。]", text) if part.strip()]
+            if len(clauses) > 1 or re.search(r"既.+又|不仅.+而且|同时.+并且", text):
+                non_atomic.append(claim_id)
+            if not fact.get("subject_id") or not fact.get("temporal_status") or not fact.get("knowledge_status"):
+                incomplete.append(claim_id)
+        if non_atomic:
+            findings.append(QualityFinding(
+                "QG_FACT_NOT_ATOMIC", "P1", "FACT", "FACT_PACKAGE", "fact_candidates",
+                f"事实{non_atomic}包含多个可独立判真的谓词或跨句陈述，不满足原子事实要求。",
+                "按主体、时间、数值和限定词拆分为一条记录一个命题，并分别绑定来源。",
+                "PROJECT_KNOWLEDGE_AGENT",
+            ))
+        if incomplete:
+            findings.append(QualityFinding(
+                "QG_FACT_CORE_FIELDS_MISSING", "P1", "FACT", "FACT_PACKAGE", "fact_candidates",
+                f"事实{incomplete}缺少主体、时间状态或知识状态。",
+                "补齐主体、时间、限定词、数值和知识状态；不能确定时使用UNKNOWN。",
+                "PROJECT_KNOWLEDGE_AGENT",
+            ))
+        claim_ids = {str(item.get("claim_id")) for item in facts if item.get("claim_id")}
+        covered = {
+            str(claim_id)
+            for item in fact_package.get("coverage", []) if isinstance(item, dict)
+            for claim_id in item.get("claim_ids", [])
+        }
+        uncovered = sorted(claim_ids - covered) if "coverage" in fact_package else []
+        if uncovered:
+            findings.append(QualityFinding(
+                "QG_FACT_SOURCE_COVERAGE_INCOMPLETE", "P1", "SOURCE", "FACT_PACKAGE", "coverage",
+                f"事实{uncovered}未出现在来源覆盖映射中，无法回溯到原文Span。",
+                "为每条事实建立coverage映射；无来源事实降级为USER_ASSERTED/UNKNOWN。",
                 "PROJECT_KNOWLEDGE_AGENT",
             ))
         return findings
@@ -1027,6 +1135,51 @@ class ProposalQualityGuard:
                 "INTEGRATION_AGENT",
             ))
         result = output.get("result") or {}
+        inconsistent_terms = [
+            str(item.get("term")) for item in result.get("terminology_checks") or []
+            if isinstance(item, dict) and not item.get("consistent", False)
+        ]
+        inconsistent_numbers = [
+            str(item.get("value_key")) for item in result.get("numeric_checks") or []
+            if isinstance(item, dict) and not item.get("consistent", False)
+        ]
+        incomplete_mappings = [
+            str(item.get("mapping_type")) for item in result.get("mapping_checks") or []
+            if isinstance(item, dict) and not item.get("complete", False)
+        ]
+        if inconsistent_terms or inconsistent_numbers:
+            findings.append(QualityFinding(
+                "QG_CROSS_SECTION_VALUE_CONFLICT", "P1", "INTEGRATION", "CANDIDATE_DOCUMENT",
+                "result.terminology_checks,result.numeric_checks",
+                f"跨章术语冲突{inconsistent_terms}，数字/指标冲突{inconsistent_numbers}。",
+                "定位冲突章节并返回原责任章节修复；不得由导出器或全文后处理静默统一。",
+                "WRITING_AGENT",
+            ))
+        if incomplete_mappings:
+            findings.append(QualityFinding(
+                "QG_CROSS_SECTION_MAPPING_INCOMPLETE", "P1", "ARGUMENT", "INTEGRATION_REPORT",
+                "result.mapping_checks", f"目标、任务、方法、成果和指标映射未闭合：{incomplete_mappings}。",
+                "返回论证架构或章节规划阶段补齐一一映射，再重新生成受影响章节。",
+                "PLANNING_AGENT",
+            ))
+        required_chains = {
+            "GAP_TO_QUESTION", "QUESTION_TO_OBJECTIVE", "OBJECTIVE_TO_WORK_PACKAGE",
+            "WORK_PACKAGE_TO_METHOD", "METHOD_TO_EVALUATION", "RESULT_TO_CONTRIBUTION",
+        }
+        complete_chains = {
+            str(item.get("chain_type"))
+            for item in result.get("argument_chain_checks") or []
+            if isinstance(item, dict) and item.get("complete", False)
+        }
+        missing_chains = sorted(required_chains - complete_chains)
+        if missing_chains:
+            findings.append(QualityFinding(
+                "QG_ARGUMENT_CHAIN_NOT_CLOSED", "P1", "ARGUMENT", "INTEGRATION_REPORT",
+                "result.argument_chain_checks", f"全文论证链缺少或未通过：{', '.join(missing_chains)}。",
+                "返回最早缺失的论证节点，补齐差距—问题—目标—任务—方法—验证—贡献链。",
+                "ARGUMENT_ARCHITECTURE_AGENT",
+            ))
+
         quality_dimensions = result.get("quality_dimensions") or []
         scorecard = {str(item.get("dimension")): item for item in quality_dimensions if isinstance(item, dict)}
         invalid_dimensions = sorted(
