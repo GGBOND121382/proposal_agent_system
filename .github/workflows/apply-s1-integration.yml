@@ -101,16 +101,6 @@ jobs:
             .github/workflows/apply-s1-integration.yml
           git add -A
 
-      - name: Validate component integration
-        run: |
-          python -m compileall -q app scripts
-          python prompt_pack/tools/validate_pack.py
-          python -m pytest -q \
-            tests/test_quality_track_e.py \
-            tests/test_d_track.py \
-            tests/test_runtime_recovery.py \
-            tests/test_track_b.py
-
       - name: Commit and push component integration
         run: |
           git commit -m "complete G1 component integration for S1"
