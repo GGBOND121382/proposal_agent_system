@@ -31,7 +31,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "0e980a9de57317f9753a76a4ea763e868ddf5a04"
+          test "$(git rev-parse HEAD^)" = "738a630ef9075cce72a5191cc5b51f7e812217c2"
+          test "$(git rev-parse HEAD^^)" = "0e980a9de57317f9753a76a4ea763e868ddf5a04"
           git fetch --no-tags origin main
           test "$(git rev-parse origin/main)" = "4564e68b8b45a16a2273550fc6306cf7029d7ed4"
 
