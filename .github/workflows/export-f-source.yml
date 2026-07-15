@@ -1,9 +1,8 @@
 name: Export F fixed source
 
 on:
-  push:
-    branches:
-      - agent/export-f-fixed-20260715
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -24,5 +23,3 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
-
-# retrigger after workflow registration
