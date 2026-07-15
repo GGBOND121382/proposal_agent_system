@@ -1,0 +1,27 @@
+{
+  "gate": "G0",
+  "status": "FROZEN",
+  "product_version": "0.6.0",
+  "code_baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
+  "governance_seed_commit": "29f988cd9b561428ee4a33f023c6a47d4457673b",
+  "python_runtime": "3.12",
+  "prompt_pack_registry_version": "2.0",
+  "frozen_at": "2026-07-15",
+  "version_sources": {
+    "pyproject.toml": "project.version",
+    "app/main.py": "FastAPI(version=...)",
+    "docker-compose.yml": "services.proposal-agent.image"
+  },
+  "baseline_commands": [
+    "python -m compileall app",
+    "python prompt_pack/tools/validate_pack.py",
+    "python -m pytest -q",
+    "python scripts/validate_g0.py"
+  ],
+  "change_control": {
+    "interface_contract": "governance/g0/interface_contract.json",
+    "security_contract": "governance/g0/security_freeze.json",
+    "change_log": "governance/g0/CHANGELOG.md",
+    "rule": "Frozen interface or security paths may change only when the contract records the exact path, current Git blob SHA, owner, reason, and approval reference."
+  }
+}

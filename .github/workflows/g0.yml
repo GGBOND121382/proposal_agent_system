@@ -1,0 +1,76 @@
+name: G0 Gate
+
+on:
+  push:
+    branches:
+      - main
+      - "agent/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  g0:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Validate frozen baseline and interfaces
+        run: |
+          python scripts/validate_g0.py \
+            --report recovery_evidence/g0/${GITHUB_SHA}/G0_VALIDATION.json
+
+      - name: Run baseline verification
+        run: |
+          python -m compileall app
+          python prompt_pack/tools/validate_pack.py
+          python -m pytest -q
+
+      - name: Build and verify recovery bundle
+        run: |
+          mkdir -p recovery_evidence/g0/${GITHUB_SHA}
+          BUNDLE="recovery_evidence/g0/${GITHUB_SHA}/g0-recovery-${GITHUB_SHA::12}.zip"
+          python scripts/build_g0_recovery_bundle.py --output "${BUNDLE}"
+          python scripts/verify_g0_recovery_bundle.py "${BUNDLE}" \
+            --extract-dir /tmp/g0-restored \
+            --json-out recovery_evidence/g0/${GITHUB_SHA}/G0_RECOVERY_VERIFY.json
+
+      - name: Restore dependencies and tests in a fresh environment
+        run: |
+          python -m venv /tmp/g0-restored/.venv
+          /tmp/g0-restored/.venv/bin/python -m pip install --upgrade pip
+          /tmp/g0-restored/.venv/bin/python -m pip install \
+            -r /tmp/g0-restored/source/requirements-dev.txt
+          cd /tmp/g0-restored/source
+          /tmp/g0-restored/.venv/bin/python scripts/validate_g0.py --skip-git-history
+          /tmp/g0-restored/.venv/bin/python -m compileall app
+          /tmp/g0-restored/.venv/bin/python prompt_pack/tools/validate_pack.py
+          /tmp/g0-restored/.venv/bin/python -m pytest -q
+
+      - name: Upload G0 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: g0-recovery-${{ github.sha }}
+          path: recovery_evidence/g0/${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14

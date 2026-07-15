@@ -1,0 +1,125 @@
+{
+  "contract_version": "1.0.0",
+  "baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
+  "prompt_registry": {
+    "version": "2.0",
+    "entry_count": 30,
+    "required_fields": [
+      "prompt_id",
+      "prompt_version",
+      "prompt_file",
+      "input_schema",
+      "output_schema",
+      "model_profile",
+      "required_environment",
+      "executor_role",
+      "next_human_gate"
+    ],
+    "entries_sha256": "a9104d35ed0ddae781368c1855374604c3c32b0a8b3444ad94f8ba2fcc9a04be",
+    "registry_git_blob_sha": "d187c9882fda6b5e3be00bf5d50a88de63a4c5e7"
+  },
+  "workflow_state_machine": {
+    "workflows": {
+      "WF-1_PROJECT_INTAKE": [
+        {"prompt_id": "P-SECURITY-CLASSIFY"},
+        {"prompt_id": "P-SECURITY-CLASSIFY-CRITIC"},
+        {"prompt_id": "P-SCHEME-EXTRACT"},
+        {"prompt_id": "P-SCHEME-CRITIC"},
+        {"prompt_id": "P-PROJECT-DEFINITION-EXTRACT"},
+        {"prompt_id": "P-PROJECT-DEFINITION-CRITIC"},
+        {"prompt_id": "P-FACT-EXTRACT"},
+        {"prompt_id": "P-FACT-CRITIC"},
+        {"prompt_id": "P-PROJECT-READINESS-CRITIC"}
+      ],
+      "WF-2_TEMPLATE_EXTRACTION": [
+        {"prompt_id": "P-TEMPLATE-EXTRACT"},
+        {"prompt_id": "P-TEMPLATE-CRITIC"}
+      ],
+      "WF-3_HYBRID_ONLINE_ASSIST": [
+        {"prompt_id": "P-SAFE-ONLINE-PACKAGE"},
+        {"prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC"},
+        {"prompt_id": "P-PUBLIC-RESEARCH-PLAN"},
+        {"type": "PUBLIC_SEARCH"},
+        {"prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS"},
+        {"prompt_id": "P-PUBLIC-RESEARCH-CRITIC"},
+        {"prompt_id": "P-ONLINE-RESULT-IMPORT-CRITIC"}
+      ],
+      "WF-4_PROPOSAL_AUTHORING": [
+        {"prompt_id": "P-ARGUMENT-ARCHITECTURE"},
+        {"prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC"},
+        {"prompt_id": "P-PROJECT-READINESS-CRITIC"},
+        {"prompt_id": "P-REVISION-PLAN"},
+        {"prompt_id": "P-REVISION-PLAN-CRITIC"},
+        {"type": "WRITE_SECTIONS"},
+        {"prompt_id": "P-INTEGRATION-CRITIC"}
+      ],
+      "WF-5_SECURITY_REVIEW_AND_EXPORT": [
+        {"prompt_id": "P-FINAL-CONFIDENTIALITY-REVIEW"},
+        {"type": "GATE", "gate_type": "FINAL_EXPORT_APPROVAL"}
+      ]
+    },
+    "workflow_statuses": ["RUNNING", "WAITING_GATE", "BLOCKED", "COMPLETED", "CANCELLED"],
+    "gate_statuses": ["OPEN", "APPROVED", "REJECTED", "CANCELLED"],
+    "prompt_result_statuses": ["PASS", "REVISE", "NEED_USER_INPUT", "BLOCK", "ERROR"],
+    "gate_roles": {
+      "SCHEME_CONFIRMATION": "PROJECT_OWNER",
+      "PROJECT_DEFINITION_CONFIRMATION": "PROJECT_OWNER",
+      "PROJECT_GAP_RESOLUTION": "PROJECT_OWNER",
+      "FACT_CONFIRMATION": "PROJECT_OWNER",
+      "FACT_CONFLICT_RESOLUTION": "PROJECT_OWNER",
+      "TEMPLATE_CONFIRMATION": "CONTENT_OPERATOR",
+      "TECHNICAL_OR_METRIC_INFORMATION": "PROJECT_OWNER",
+      "ARGUMENT_ARCHITECTURE_CONFIRMATION": "PROJECT_OWNER",
+      "PLAN_CONFIRMATION": "PROJECT_OWNER",
+      "CANDIDATE_REVIEW": "CONTENT_OPERATOR",
+      "OUTBOUND_SECURITY_APPROVAL": "SECURITY_REVIEWER",
+      "ONLINE_RESULT_IMPORT_APPROVAL": "SECURITY_REVIEWER",
+      "FINAL_CONTENT_SECURITY_APPROVAL": "SECURITY_REVIEWER",
+      "FINAL_EXPORT_APPROVAL": "EXPORT_APPROVER"
+    },
+    "gate_action_overrides": {
+      "OUTBOUND_SECURITY_APPROVAL": ["APPROVE", "RETURN", "REJECT", "CANCEL"],
+      "ONLINE_RESULT_IMPORT_APPROVAL": ["APPROVE", "RETURN", "REJECT", "CANCEL"],
+      "FINAL_CONTENT_SECURITY_APPROVAL": ["APPROVE", "RETURN", "REJECT", "CANCEL"],
+      "FINAL_EXPORT_APPROVAL": ["APPROVE", "RETURN", "REJECT", "CANCEL"]
+    },
+    "critic_producer": {
+      "P-SECURITY-CLASSIFY-CRITIC": "P-SECURITY-CLASSIFY",
+      "P-SAFE-ONLINE-PACKAGE-CRITIC": "P-SAFE-ONLINE-PACKAGE",
+      "P-PUBLIC-RESEARCH-CRITIC": "P-PUBLIC-RESEARCH-SYNTHESIS",
+      "P-SCHEME-CRITIC": "P-SCHEME-EXTRACT",
+      "P-PROJECT-DEFINITION-CRITIC": "P-PROJECT-DEFINITION-EXTRACT",
+      "P-FACT-CRITIC": "P-FACT-EXTRACT",
+      "P-TEMPLATE-CRITIC": "P-TEMPLATE-EXTRACT",
+      "P-ARGUMENT-ARCHITECTURE-CRITIC": "P-ARGUMENT-ARCHITECTURE",
+      "P-REVISION-PLAN-CRITIC": "P-REVISION-PLAN",
+      "P-WRITE-BLUEPRINT-CRITIC": "P-WRITE-BLUEPRINT",
+      "P-WRITE-CRITIC": "P-WRITE-CONTENT",
+      "P-EXPRESSION-CRITIC": "P-EXPRESSION-POLISH"
+    }
+  },
+  "artifact_interface": {
+    "sqlite_tables": {
+      "projects": ["id", "name", "description", "security_level", "config_json", "created_at", "updated_at"],
+      "documents": ["id", "project_id", "filename", "role", "security_level", "document_hash", "file_path", "parsed_json", "created_at"],
+      "artifacts": ["id", "project_id", "workflow_id", "artifact_type", "prompt_id", "version", "status", "security_level", "context_hash", "content_json", "created_at"],
+      "prompt_runs": ["id", "project_id", "workflow_id", "prompt_id", "status", "model_id", "endpoint_id", "input_hash", "output_hash", "input_json", "output_json", "error", "duration_ms", "created_at"],
+      "skill_runs": ["id", "project_id", "workflow_id", "skill_id", "skill_version", "status", "input_hash", "output_hash", "input_json", "output_json", "error", "duration_ms", "created_at"],
+      "workflows": ["id", "project_id", "workflow_type", "status", "current_step", "state_json", "created_at", "updated_at"],
+      "gates": ["id", "project_id", "workflow_id", "gate_type", "target_id", "target_version", "context_hash", "question_version", "required_role", "allowed_actions_json", "questions_json", "security_level", "status", "decision_json", "created_at", "updated_at"],
+      "audit_events": ["id", "project_id", "event_type", "object_id", "metadata_json", "created_at"]
+    },
+    "required_artifact_types": ["PROMPT_OUTPUT", "PROMPT_TRACE"],
+    "trace_payload_required_fields": ["prompt_id", "version", "status", "duration_ms", "environment", "model_id", "endpoint_id", "system_prompt", "input_envelope", "quality_context_envelope", "quality_context_hash", "input_compaction", "output_schema", "output", "raw_response_text", "error"]
+  },
+  "frozen_pathspecs": [
+    "prompt_pack/prompts",
+    "prompt_pack/schemas",
+    "prompt_pack/config/prompt_registry.json",
+    "app/workflow_defs.py",
+    "app/db.py",
+    "app/api_models.py",
+    "app/executor.py"
+  ],
+  "approved_changes": []
+}

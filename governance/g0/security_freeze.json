@@ -1,0 +1,62 @@
+{
+  "contract_version": "1.0.0",
+  "baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
+  "scope": "Security classification, security-level mapping, outbound package protection, model routing, approval gates, and the security steps in WF-1/WF-3/WF-5.",
+  "security_levels": [
+    "PUBLIC",
+    "INTERNAL",
+    "SENSITIVE",
+    "CLASSIFIED"
+  ],
+  "security_workflow_invariants": {
+    "wf1_prefix": [
+      "P-SECURITY-CLASSIFY",
+      "P-SECURITY-CLASSIFY-CRITIC"
+    ],
+    "wf3_outbound_prefix": [
+      "P-SAFE-ONLINE-PACKAGE",
+      "P-SAFE-ONLINE-PACKAGE-CRITIC"
+    ],
+    "wf5_prefix": [
+      "P-FINAL-CONFIDENTIALITY-REVIEW"
+    ],
+    "security_gate_roles": {
+      "OUTBOUND_SECURITY_APPROVAL": "SECURITY_REVIEWER",
+      "ONLINE_RESULT_IMPORT_APPROVAL": "SECURITY_REVIEWER",
+      "FINAL_CONTENT_SECURITY_APPROVAL": "SECURITY_REVIEWER",
+      "FINAL_EXPORT_APPROVAL": "EXPORT_APPROVER"
+    },
+    "security_gate_actions": [
+      "APPROVE",
+      "RETURN",
+      "REJECT",
+      "CANCEL"
+    ],
+    "offline_environment": "OFFLINE_LOCAL",
+    "public_environment": "ONLINE_PUBLIC",
+    "repair_environment": "SAME_AS_ORIGINAL"
+  },
+  "frozen_pathspecs": [
+    "app/security.py",
+    "app/privacy.py",
+    "app/llm.py",
+    "app/workflow_defs.py",
+    "app/workflow_gates.py",
+    "prompt_pack/prompts/security",
+    "prompt_pack/schemas/prompts/security_classify_input.schema.json",
+    "prompt_pack/schemas/prompts/security_classify_output.schema.json",
+    "prompt_pack/schemas/prompts/security_classify_critic_input.schema.json",
+    "prompt_pack/schemas/prompts/security_classify_critic_output.schema.json",
+    "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+    "prompt_pack/schemas/prompts/safe_online_package_output.schema.json",
+    "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+    "prompt_pack/schemas/prompts/safe_online_package_critic_output.schema.json",
+    "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+    "prompt_pack/schemas/prompts/online_result_import_critic_output.schema.json",
+    "prompt_pack/schemas/prompts/final_confidentiality_review_input.schema.json",
+    "prompt_pack/schemas/prompts/final_confidentiality_review_output.schema.json",
+    "prompt_pack/policies/model_routing.yaml",
+    "prompt_pack/config/model_endpoints.yaml"
+  ],
+  "approved_changes": []
+}

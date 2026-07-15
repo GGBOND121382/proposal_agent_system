@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: proposal-agent:0.5.0-offline
+    image: proposal-agent:0.6.0-offline
     ports:
       - "8080:8080"
     env_file:
