@@ -156,11 +156,13 @@ flowchart LR
 并行运行三组测试：
 
 1. 单章节完整链：Blueprint → Content → Critic → Repair → Polish → Export；  
-   **实施记录：** S1 已在 `agent/integration-v06-single-section` 完成，实际顺序、一次定向修复、独立复审、章节隔离、断点恢复、质量硬门与 DOCX 导出证据见 `docs/S1_SINGLE_SECTION_CHAIN_ACCEPTANCE.md`。
-2. 三章节跨章链：背景、研究内容、技术路线；
-3. Research + Mermaid + DOCX/PDF 链。
+   **实施记录：** S1 已完成，实际顺序、一次定向修复、独立复审、章节隔离、断点恢复、质量硬门与 DOCX 导出证据见 `docs/S1_SINGLE_SECTION_CHAIN_ACCEPTANCE.md`。
+2. 三章节跨章链：背景、研究内容、技术路线；  
+   **实施记录：** S2 已完成唯一角色合同冻结、跨章冲突检测、责任章节定向返修、未受影响章节复用、断点恢复和不同 Integration Critic 独立复审，见 `docs/G2_THREE_SECTION_CROSS_CHAPTER.md`。
+3. Research + Mermaid + DOCX/PDF 链。  
+   **实施记录：** S3 已完成来源归档、Claim 绑定、Mermaid 可重复渲染、DOCX/PDF 转换、结构/视觉检查和重启哈希复核，见 `docs/G2_S3_RESEARCH_MERMAID_EXPORT_ACCEPTANCE.md`。
 
-**通过条件：** 不人工修改正文；发现的问题由责任 Agent 自主返修并复审。
+**通过条件：** 不人工修改正文；发现的问题由责任 Agent 自主返修并复审。三组必须在同一提交上由 `.github/workflows/g2.yml` 并行通过，并生成源码、SQLite、Trace、测试日志和总验收报告组成的恢复包；统一验收说明见 `docs/G2_ACCEPTANCE.md`。
 
 ### G3：完整申请书能力验收
 

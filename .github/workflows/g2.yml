@@ -1,0 +1,273 @@
+name: G2 Small-Scale Integration Gate
+
+on:
+  push:
+    branches:
+      - main
+      - agent/integration-v06-g2-final
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "prompt_pack/**"
+      - "scripts/run_single_section_chain_acceptance.py"
+      - "scripts/run_g2_three_section_chain.py"
+      - "scripts/run_s3_research_mermaid_export.py"
+      - "scripts/verify_s3_evidence.py"
+      - "scripts/validate_g2.py"
+      - "scripts/f_recovery_bundle.py"
+      - "tests/test_single_section_chain.py"
+      - "tests/test_g2_three_section_chain.py"
+      - "tests/test_s3_research_mermaid_export.py"
+      - "tests/test_g2_gate.py"
+      - ".github/workflows/g2.yml"
+      - "docs/G2_ACCEPTANCE.md"
+      - "docs/CONCURRENT_DEVELOPMENT_PLAN.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  s1:
+    name: S1 single-section complete chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install rendering dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Run S1 acceptance
+        env:
+          MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
+        run: |
+          OUT="recovery_evidence/g2/${GITHUB_SHA}/s1"
+          python scripts/run_single_section_chain_acceptance.py --evidence-dir "${OUT}"
+      - name: Upload S1 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-s1-${{ github.sha }}
+          path: recovery_evidence/g2/${{ github.sha }}/s1
+          if-no-files-found: error
+          retention-days: 30
+
+  s2:
+    name: S2 three-section cross-chapter chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Compile and validate contracts
+        run: |
+          python -m compileall -q app scripts tests
+          python scripts/validate_g0.py
+          python prompt_pack/tools/validate_pack.py
+      - name: Run S2 acceptance
+        run: |
+          OUT="recovery_evidence/g2/${GITHUB_SHA}/s2"
+          python scripts/run_g2_three_section_chain.py --output-dir "${OUT}"
+      - name: Upload S2 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-s2-${{ github.sha }}
+          path: recovery_evidence/g2/${{ github.sha }}/s2
+          if-no-files-found: error
+          retention-days: 30
+
+  s3:
+    name: S3 Research Mermaid DOCX PDF chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install rendering dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Compile and validate contracts
+        run: |
+          python -m compileall -q app scripts
+          python scripts/validate_g0.py
+          python prompt_pack/tools/validate_pack.py
+      - name: Run S3 regressions and integration
+        env:
+          MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
+        run: |
+          OUT="recovery_evidence/g2/${GITHUB_SHA}/s3"
+          mkdir -p "${OUT}"
+          python -m pytest -q \
+            tests/test_research_skill_track_c.py \
+            tests/test_d_track.py \
+            tests/test_s3_research_mermaid_export.py
+          python scripts/run_s3_research_mermaid_export.py \
+            --output-dir "${OUT}" \
+            --fixture \
+            --source-commit "${GITHUB_SHA}" \
+            2>&1 | tee "${OUT}/acceptance.log"
+          python scripts/verify_s3_evidence.py \
+            "${OUT}/acceptance/S3_ACCEPTANCE.json" \
+            --data-dir "${OUT}" \
+            --json-out "${OUT}/acceptance/S3_REVERIFY.json"
+      - name: Upload S3 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-s3-${{ github.sha }}
+          path: recovery_evidence/g2/${{ github.sha }}/s3
+          if-no-files-found: error
+          retention-days: 30
+
+  component-regression:
+    name: Integrated component and full regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install rendering dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Validate and run full suite
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
+        run: |
+          mkdir -p "recovery_evidence/g2/${GITHUB_SHA}/regression"
+          python -m compileall -q app scripts tests
+          python scripts/validate_g0.py
+          python prompt_pack/tools/validate_pack.py
+          python -m pytest -q --tb=short \
+            --junitxml="recovery_evidence/g2/${GITHUB_SHA}/regression/full-junit.xml" \
+            2>&1 | tee "recovery_evidence/g2/${GITHUB_SHA}/regression/full-pytest.log"
+      - name: Upload regression evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-regression-${{ github.sha }}
+          path: recovery_evidence/g2/${{ github.sha }}/regression
+          if-no-files-found: error
+          retention-days: 30
+
+  final:
+    name: G2 final decision and recovery bundle
+    needs: [s1, s2, s3, component-regression]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Download all G2 evidence
+        uses: actions/download-artifact@v8
+        with:
+          pattern: g2-*
+          path: collected
+          merge-multiple: false
+      - name: Enforce aggregate G2 gate
+        run: |
+          mkdir -p summary
+          python scripts/validate_g2.py \
+            --reports-dir collected \
+            --report-json summary/G2_ACCEPTANCE.json \
+            --report-md summary/G2_ACCEPTANCE.md
+      - name: Build trace database and recovery package
+        run: |
+          mkdir -p recovery summary/trace
+          python scripts/create_f_trace_smoke.py --database recovery/g2-checkpoint.sqlite
+          python scripts/audit_prompt_traces.py \
+            --database recovery/g2-checkpoint.sqlite \
+            --output-dir summary/trace
+          mkdir -p summary/recovery-logs
+          while IFS= read -r path; do
+            name="$(printf '%s' "$path" | sed 's#[ /]#_#g')"
+            cp "$path" "summary/recovery-logs/${name}"
+          done < <(find collected summary -type f \
+            \( -name '*.log' -o -name '*.json' -o -name '*.xml' -o -name '*.md' \) \
+            ! -path 'summary/recovery-logs/*' | sort)
+          mapfile -t logs < <(find summary/recovery-logs -type f | sort)
+          args=()
+          for path in "${logs[@]}"; do args+=(--test-log "$path"); done
+          python scripts/f_recovery_bundle.py build \
+            --database recovery/g2-checkpoint.sqlite \
+            --output summary/g2-recovery-bundle.zip \
+            "${args[@]}" \
+            | tee summary/recovery-build.json
+          python scripts/f_recovery_bundle.py verify \
+            summary/g2-recovery-bundle.zip \
+            --report summary/recovery-verify.json
+      - name: Verify upstream job conclusions
+        run: |
+          test '${{ needs.s1.result }}' = success
+          test '${{ needs.s2.result }}' = success
+          test '${{ needs.s3.result }}' = success
+          test '${{ needs.component-regression.result }}' = success
+      - name: Upload final G2 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-acceptance-${{ github.sha }}
+          path: summary
+          if-no-files-found: error
+          retention-days: 30
