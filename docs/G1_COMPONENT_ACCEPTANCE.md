@@ -42,6 +42,8 @@ A 轨道还必须保存并复核：
 
 原始响应对象、Gateway 解析对象和消费对象的哈希不一致时，G1 直接失败。
 
+Git 提交标识和内容摘要使用不同的严格规则：组件 Head 必须是 40 位 Git SHA，Trace、Mermaid、DOCX 和 PDF 等内容摘要必须是 64 位 SHA-256。
+
 ## 3. 重启证据
 
 - **A**：数据库事务后故障恢复、可恢复 `BLOCKED` 原步骤继续、响应证据篡改阻断；
@@ -76,7 +78,7 @@ A 轨道还必须保存并复核：
 ## 5. 本地控制器校验
 
 ```bash
-python scripts/validate_g1.py manifest \
+python scripts/validate_g1_runner.py manifest \
   --manifest governance/g1/components.json \
   --report recovery_evidence/g1/G1_MANIFEST.json
 
