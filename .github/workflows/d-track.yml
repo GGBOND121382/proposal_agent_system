@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install document rendering system dependencies
         run: |
@@ -47,7 +49,8 @@ jobs:
             app/exporter_base.py \
             app/exporter_render.py \
             app/pdf_exporter.py \
-            app/delivery_validator.py
+            app/delivery_validator.py \
+            app/delivery_validator_runtime.py
 
       - name: Prepare evidence directory
         run: mkdir -p recovery_evidence/d/${GITHUB_SHA}
