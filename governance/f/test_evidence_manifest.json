@@ -1,0 +1,90 @@
+{
+  "gate": "F",
+  "version": "1.0.0",
+  "prompt_pack": {
+    "registry": "prompt_pack/config/prompt_registry.json",
+    "replay_manifest": "prompt_pack/replay/manifest.json",
+    "expected_prompt_count": 30,
+    "expected_replay_count": 150,
+    "required_replay_case_types": [
+      "normal",
+      "missing_input",
+      "schema_error",
+      "high_risk",
+      "need_user_input"
+    ]
+  },
+  "agent_matrix": {
+    "positive": ["normal", "high_risk", "need_user_input"],
+    "negative": [
+      "schema_error",
+      "missing_schema_version",
+      "input_prompt_id_mismatch",
+      "output_status_invalid",
+      "output_prompt_id_mismatch"
+    ],
+    "edge": ["missing_input_semantic_boundary"],
+    "restart": ["prompt_pack_reload_and_revalidate"]
+  },
+  "workflow_fault_checkpoints": [
+    "after_workflow_start",
+    "after_prompt_and_gate_commit",
+    "while_waiting_on_open_gate",
+    "after_gate_decision_commit",
+    "before_next_resume"
+  ],
+  "trace": {
+    "contract": "governance/g0/interface_contract.json",
+    "required_evidence_fields": [
+      "run_id",
+      "prompt_id",
+      "responsibility_agent",
+      "status",
+      "duration_ms",
+      "environment",
+      "model_id",
+      "endpoint_id",
+      "input_hash",
+      "output_hash",
+      "input_envelope",
+      "raw_response_text",
+      "parsed_output",
+      "trace_artifact_id"
+    ]
+  },
+  "recovery_bundle": {
+    "required_paths": [
+      "source_commit.txt",
+      "environment_manifest.json",
+      "input_material_manifest.json",
+      "workflow_checkpoint.sqlite",
+      "requests/README.txt",
+      "responses/README.txt",
+      "prompt_traces/calls.jsonl",
+      "research_archive/README.txt",
+      "mermaid_artifacts/README.txt",
+      "exports/README.txt",
+      "test_logs/README.txt",
+      "acceptance_report.md",
+      "manifest.json",
+      "source/source.tar.gz"
+    ]
+  },
+  "ci": {
+    "workflow": ".github/workflows/f-track.yml",
+    "parallel_jobs": [
+      "lint-and-schema",
+      "runtime-recovery-tests",
+      "agent-prompt-tests",
+      "research-skill-tests",
+      "mermaid-export-tests",
+      "quality-validation-tests",
+      "trace-and-recovery-tests"
+    ],
+    "integration_jobs": [
+      "small-e2e-single-section",
+      "small-e2e-three-sections",
+      "small-e2e-research-mermaid-export"
+    ]
+  }
+}
