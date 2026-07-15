@@ -1,5 +1,16 @@
 # 开发状态与边界
 
+## G0 基线与接口冻结
+
+- 唯一代码基线固定为 `ac7e3032a51c682c6bee6e2461d3393cc14835d7`，产品版本固定为 `0.6.0`；
+- `pyproject.toml`、FastAPI 版本和 Docker Compose 镜像标签由自动 Gate 校验，已消除 `0.5.0-offline` 镜像标签漂移；
+- 30 个 Prompt/Schema、Agent 责任、五条工作流、Gate、Critic/Producer 映射、SQLite 表结构和 Artifact/Trace 字段已形成机器可校验契约；
+- 安全分类、密级集合、外发保护、模型路由、审批 Gate 与 WF-1/WF-3/WF-5 安全步骤已按代码基线冻结；
+- Git、SQLite、Trace、材料与恢复包目录规范已固定；
+- G0 恢复包包含源码归档、依赖声明、材料清单、SQLite 一致性快照、Trace JSONL、冻结契约和逐文件 SHA-256；
+- `.github/workflows/g0.yml` 在全新 Python 3.12 虚拟环境中恢复依赖、源码、材料并重新执行基线测试；
+- 详细说明见 `docs/G0_BASELINE_AND_INTERFACE_FREEZE.md`。
+
 ## v0.6.0 已完成
 
 - 基于物流申请书239份Prompt Trace完成智能体责任链审计；
