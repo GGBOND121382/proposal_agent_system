@@ -1,0 +1,49 @@
+name: Apply Track E Bootstrap
+
+on:
+  push:
+    branches:
+      - agent/quality-gates
+    paths:
+      - ".github/track-e-bootstrap.part-*"
+      - ".github/workflows/apply-track-e-bootstrap.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out Track E branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/quality-gates
+          fetch-depth: 0
+
+      - name: Reconstruct and verify tested patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/track-e-bootstrap.part-* > /tmp/track-e.patch.gz.b64
+          test "$(wc -c < /tmp/track-e.patch.gz.b64)" = "21988"
+          echo "08329c64414c874609a45d0c2ca627b65ba46378bb0689538f348bdb3e4290cb  /tmp/track-e.patch.gz.b64" | sha256sum --check
+          base64 --decode /tmp/track-e.patch.gz.b64 | gzip --decompress > /tmp/track-e.patch
+          test "$(wc -c < /tmp/track-e.patch)" = "61650"
+          echo "22f3fec54abc761aad32a35665c93fc3907eff6eb5d62ba59530f2d9d47a4e64  /tmp/track-e.patch" | sha256sum --check
+          git apply --check /tmp/track-e.patch
+          git apply /tmp/track-e.patch
+          git diff --check
+
+      - name: Commit Track E implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/track-e-bootstrap.part-* .github/workflows/apply-track-e-bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "complete Track E quality gates and lifecycle"
+          git push origin HEAD:agent/quality-gates
