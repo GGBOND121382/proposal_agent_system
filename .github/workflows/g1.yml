@@ -1,0 +1,249 @@
+name: G1 Component Acceptance
+
+on:
+  push:
+    branches:
+      - main
+      - agent/g1-component-acceptance
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "governance/g1/**"
+      - "scripts/validate_g1.py"
+      - "scripts/run_g1_probes.py"
+      - ".github/workflows/g1.yml"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/g0.yml"
+      - "docs/G1_COMPONENT_ACCEPTANCE.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Freeze G1 component heads
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.manifest.outputs.matrix }}
+    steps:
+      - name: Check out G1 controller
+        uses: actions/checkout@v7
+        with:
+          path: control
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate pinned component manifest
+        id: manifest
+        run: |
+          mkdir -p evidence/manifest
+          python control/scripts/validate_g1.py manifest \
+            --manifest control/governance/g1/components.json \
+            --report evidence/manifest/G1_MANIFEST.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Upload manifest evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: g1-manifest-${{ github.sha }}
+          path: evidence/manifest
+          if-no-files-found: error
+          retention-days: 14
+
+  component:
+    name: Track ${{ matrix.track }} - ${{ matrix.name }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+
+    steps:
+      - name: Check out G1 controller
+        uses: actions/checkout@v7
+        with:
+          path: control
+          fetch-depth: 0
+
+      - name: Check out pinned component
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.sha }}
+          path: component
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install delivery system dependencies
+        if: ${{ matrix.system_packages != '' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ matrix.system_packages }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            component/requirements.txt
+            component/requirements-dev.txt
+
+      - name: Install component dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r component/requirements-dev.txt
+
+      - name: Verify pinned identity
+        run: |
+          actual="$(git -C component rev-parse HEAD)"
+          test "${actual}" = "${{ matrix.sha }}"
+          printf '%s\n' "${actual}" > component-head.txt
+
+      - name: Compile component and validate Prompt Pack
+        working-directory: component
+        run: |
+          python -m compileall -q app scripts
+          python prompt_pack/tools/validate_pack.py
+
+      - name: Prepare evidence directory
+        run: mkdir -p "evidence/${{ matrix.track }}"
+
+      - name: Run component acceptance commands
+        working-directory: component
+        env:
+          EVIDENCE_DIR: ${{ github.workspace }}/evidence/${{ matrix.track }}
+          ACCEPTANCE_SCRIPT: ${{ matrix.acceptance_script }}
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${ACCEPTANCE_SCRIPT}" ]; then
+            printf '%s\n' "${ACCEPTANCE_SCRIPT}" > /tmp/g1-acceptance.sh
+            bash -eo pipefail /tmp/g1-acceptance.sh \
+              2>&1 | tee "${EVIDENCE_DIR}/acceptance.log"
+            status=${PIPESTATUS[0]}
+          else
+            printf '%s\n' "No separate acceptance command; executable tests are authoritative." \
+              | tee "${EVIDENCE_DIR}/acceptance.log"
+            status=0
+          fi
+          printf '%s\n' "${status}" > "${EVIDENCE_DIR}/acceptance.status"
+          exit 0
+
+      - name: Run positive negative boundary and restart tests
+        working-directory: component
+        env:
+          EVIDENCE_DIR: ${{ github.workspace }}/evidence/${{ matrix.track }}
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -q ${{ matrix.test_targets }} \
+            --junitxml="${EVIDENCE_DIR}/targeted-junit.xml" \
+            2>&1 | tee "${EVIDENCE_DIR}/targeted-pytest.log"
+          status=${PIPESTATUS[0]}
+          printf '%s\n' "${status}" > "${EVIDENCE_DIR}/targeted-pytest.status"
+          exit 0
+
+      - name: Run full component-branch regression
+        working-directory: component
+        env:
+          EVIDENCE_DIR: ${{ github.workspace }}/evidence/${{ matrix.track }}
+        shell: bash
+        run: |
+          set +e
+          python -m pytest -q --tb=short \
+            --junitxml="${EVIDENCE_DIR}/full-junit.xml" \
+            2>&1 | tee "${EVIDENCE_DIR}/full-pytest.log"
+          status=${PIPESTATUS[0]}
+          printf '%s\n' "${status}" > "${EVIDENCE_DIR}/full-pytest.status"
+          exit 0
+
+      - name: Run restart and raw-response probes
+        shell: bash
+        run: |
+          set +e
+          python control/scripts/run_g1_probes.py \
+            --track "${{ matrix.track }}" \
+            --component-root component \
+            --evidence-dir "evidence/${{ matrix.track }}" \
+            2>&1 | tee "evidence/${{ matrix.track }}/probe.log"
+          status=${PIPESTATUS[0]}
+          printf '%s\n' "${status}" > "evidence/${{ matrix.track }}/probe.status"
+          exit 0
+
+      - name: Enforce independent component gate
+        run: |
+          python control/scripts/validate_g1.py component \
+            --manifest control/governance/g1/components.json \
+            --track "${{ matrix.track }}" \
+            --component-root component \
+            --evidence-dir "evidence/${{ matrix.track }}" \
+            --targeted-junit "evidence/${{ matrix.track }}/targeted-junit.xml" \
+            --full-junit "evidence/${{ matrix.track }}/full-junit.xml" \
+            --report-json "evidence/${{ matrix.track }}/G1_TRACK_${{ matrix.track }}.json" \
+            --report-md "evidence/${{ matrix.track }}/G1_TRACK_${{ matrix.track }}.md"
+
+      - name: Upload component evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g1-track-${{ matrix.track }}-${{ matrix.sha }}
+          path: evidence/${{ matrix.track }}
+          if-no-files-found: error
+          retention-days: 14
+
+  aggregate:
+    name: G1 final decision
+    needs:
+      - prepare
+      - component
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out G1 controller
+        uses: actions/checkout@v7
+        with:
+          path: control
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download component evidence
+        uses: actions/download-artifact@v8
+        with:
+          pattern: g1-track-*
+          path: collected
+          merge-multiple: false
+
+      - name: Aggregate six independent component reports
+        run: |
+          mkdir -p summary
+          python control/scripts/validate_g1.py aggregate \
+            --manifest control/governance/g1/components.json \
+            --reports-dir collected \
+            --report-json summary/G1_ACCEPTANCE.json \
+            --report-md summary/G1_ACCEPTANCE.md
+
+      - name: Upload G1 acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g1-acceptance-${{ github.sha }}
+          path: summary
+          if-no-files-found: error
+          retention-days: 30
