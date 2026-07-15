@@ -138,6 +138,7 @@ jobs:
           MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
         run: |
           OUT="recovery_evidence/g2/${GITHUB_SHA}/s3"
+          mkdir -p "${OUT}"
           python -m pytest -q \
             tests/test_research_skill_track_c.py \
             tests/test_d_track.py \
