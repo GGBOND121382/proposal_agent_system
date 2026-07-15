@@ -1,18 +1,16 @@
 name: Apply S3 integration bootstrap
 
 on:
-  push:
-    branches:
-      - agent/integration-research-mermaid-export
-    paths:
-      - ".github/workflows/apply-s3-bootstrap.yml"
-      - ".s3-bootstrap/**"
   pull_request:
     branches:
       - main
     paths:
       - ".github/workflows/apply-s3-bootstrap.yml"
       - ".s3-bootstrap/**"
+
+concurrency:
+  group: s3-bootstrap-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -58,7 +56,6 @@ jobs:
           cat .s3-bootstrap/run_s3.py.part-* > scripts/run_s3_research_mermaid_export.py
           cat .s3-bootstrap/test_s3.py.part-* > tests/test_s3_research_mermaid_export.py
           cp .s3-bootstrap/S3_ACCEPTANCE.md docs/S3_RESEARCH_MERMAID_EXPORT_ACCEPTANCE.md
-          cp .s3-bootstrap/s3-workflow.yml .github/workflows/s3-research-mermaid-export.yml
           python -m py_compile \
             app/research_mermaid_export.py \
             scripts/run_s3_research_mermaid_export.py \
@@ -89,7 +86,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
             .gitignore \
-            .github/workflows/s3-research-mermaid-export.yml \
             app \
             docs \
             scripts \
