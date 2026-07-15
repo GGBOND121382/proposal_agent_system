@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
-from scripts.validate_g1 import TRACK_IDS, matrix_payload, parse_junit, validate_manifest
+from scripts.validate_g1 import TRACK_IDS, matrix_payload, parse_junit
+from scripts.validate_g1_runner import GIT_SHA_RE, SHA256_RE, validate_manifest_strict
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,12 +15,26 @@ def test_g1_manifest_pins_all_six_components():
     manifest = json.loads(
         (ROOT / "governance" / "g1" / "components.json").read_text(encoding="utf-8")
     )
-    assert validate_manifest(manifest) == []
+    assert validate_manifest_strict(manifest) == []
     assert [item["id"] for item in manifest["tracks"]] == TRACK_IDS
     assert len({item["sha"] for item in manifest["tracks"]}) == 6
     matrix = matrix_payload(manifest)
     assert [item["track"] for item in matrix["include"]] == TRACK_IDS
-    assert all(len(item["sha"]) == 40 for item in matrix["include"])
+    assert all(GIT_SHA_RE.fullmatch(item["sha"]) for item in matrix["include"])
+
+
+def test_g1_distinguishes_git_sha_from_sha256_content_digest():
+    assert GIT_SHA_RE.fullmatch("a" * 40)
+    assert not GIT_SHA_RE.fullmatch("a" * 64)
+    assert SHA256_RE.fullmatch("b" * 64)
+    assert not SHA256_RE.fullmatch("b" * 40)
+
+    manifest = json.loads(
+        (ROOT / "governance" / "g1" / "components.json").read_text(encoding="utf-8")
+    )
+    invalid = copy.deepcopy(manifest)
+    invalid["tracks"][0]["sha"] = "c" * 64
+    assert "G1_A_SHA" in validate_manifest_strict(invalid)
 
 
 def test_g1_and_baseline_workflows_use_node24_actions_and_concurrency():
