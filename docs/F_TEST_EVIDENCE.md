@@ -23,6 +23,7 @@ python scripts/validate_g0.py
 python scripts/validate_f.py
 python prompt_pack/tools/validate_pack.py
 python -m pytest -q tests/test_f_agent_matrix.py
+python -m pytest -q tests/test_f_components.py
 python -m pytest -q tests/test_f_workflow_recovery.py
 python -m pytest -q tests/test_f_trace_recovery.py
 ```
@@ -50,11 +51,11 @@ python scripts/f_recovery_bundle.py verify \
 每个注册 Prompt 固定执行以下矩阵：
 
 - 正向：`normal`、`high_risk`、`need_user_input`；
-- 负向：`missing_input`、`schema_error`、输入 `prompt_id` 错配、输出非法状态、输出 `prompt_id` 错配；
-- 边界：`need_user_input` Fixture 的期望状态与实际输出状态一致；
+- 负向：`schema_error`、删除输入 `schema_version`、输入 `prompt_id` 错配、输出非法状态、输出 `prompt_id` 错配；
+- 边界：`missing_input` 的输入和输出在 Schema 上合法，但必须返回 Fixture 声明的补充信息状态；
 - 重启：重新加载 Prompt Pack 后 Prompt 元数据、正文、输入/输出 Schema 和 Replay 完全一致。
 
-该矩阵由 `prompt_registry.json` 驱动，新增 Agent 未补齐五类 Replay 时，`validate_f.py` 直接失败。
+该矩阵由 `prompt_registry.json` 驱动；每个 Agent 仍必须具备 `normal`、`missing_input`、`schema_error`、`high_risk` 和 `need_user_input` 五类 Replay，缺失时 `validate_f.py` 直接失败。
 
 ## 4. 故障恢复边界
 
@@ -102,4 +103,4 @@ small-e2e-three-sections
 small-e2e-research-mermaid-export
 ```
 
-`trace-and-recovery-tests` 上传完整 F 证据 Artifact，保留 14 天。正式 LIVE 能力验收仍需固定材料、固定模型配置、真实端点和人工启动 Gate，不纳入每次普通提交的自动 CI。
+Research、Mermaid 和质量 Job 使用独立、确定性的组件契约测试，避免依赖测试收集文本或执行顺序。`trace-and-recovery-tests` 上传完整 F 证据 Artifact，保留 14 天。正式 LIVE 能力验收仍需固定材料、固定模型配置、真实端点和人工启动 Gate，不纳入每次普通提交的自动 CI。
