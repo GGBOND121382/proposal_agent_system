@@ -28,8 +28,14 @@ jobs:
           parts=(
             .integration/g2-payload.part01
             .integration/g2-payload.part02
-            .integration/g2-payload.part03
-            .integration/g2-payload.part04
+            .integration/g2-payload.part03a
+            .integration/g2-payload.part03b
+            .integration/g2-payload.part03c
+            .integration/g2-payload.part03d
+            .integration/g2-payload.part04a
+            .integration/g2-payload.part04b
+            .integration/g2-payload.part04c
+            .integration/g2-payload.part04d
           )
           for part in "${parts[@]}"; do
             if [ ! -f "${part}" ]; then
