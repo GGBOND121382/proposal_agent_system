@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .skills.executor import SkillExecutionError, SkillExecutor
+from .skills.public_research import PublicResearchArchiveSkill
+from .util import write_json
 
 
 class PublicResearchError(RuntimeError):
@@ -17,8 +20,14 @@ class PublicResearchService:
         self.skill_executor = skill_executor
 
     def simulated_search(self, plan: dict[str, Any]) -> dict[str, Any]:
-        # Kept for old REPLAY/MOCK tests. New complex runs use recorded or live archives.
-        return {"sources": [], "passages": [], "queries": self._queries(plan), "mode": "SIMULATED_EMPTY"}
+        # Kept for old REPLAY/MOCK tests. New capability tests must use archived sources.
+        return {
+            "sources": [],
+            "passages": [],
+            "queries": self._queries(plan),
+            "mode": "SIMULATED_EMPTY",
+            "blocking_issues": [],
+        }
 
     async def search(
         self,
@@ -49,7 +58,36 @@ class PublicResearchService:
             )
         except SkillExecutionError as exc:
             raise PublicResearchError(str(exc)) from exc
+        if result.status != "PASS":
+            issues = result.output.get("blocking_issues") or result.output.get("issues") or []
+            codes = [str(item.get("code")) for item in issues if isinstance(item, dict)]
+            suffix = "、".join(codes[:8]) if codes else result.status
+            raise PublicResearchError(
+                "Public research archive did not pass deterministic evidence validation: " + suffix
+            )
         return result.output
+
+    def validate_synthesis(
+        self,
+        synthesis: dict[str, Any],
+        research_output: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not research_output:
+            raise PublicResearchError("Public research synthesis has no archived research output")
+        report = PublicResearchArchiveSkill.validate_claim_bindings(synthesis, research_output)
+        archive_root = str(research_output.get("archive_root") or "").strip()
+        if archive_root:
+            report_path = Path(archive_root) / "claim_bindings.json"
+            write_json(report_path, report)
+            research_output["claim_binding_report"] = str(report_path)
+        research_output["claim_binding_validation"] = report
+        if report["status"] != "PASS":
+            codes = [str(item.get("code")) for item in report.get("findings", [])]
+            raise PublicResearchError(
+                "Public research synthesis contains unbound or tampered claims: "
+                + "、".join(codes[:8])
+            )
+        return report
 
     @staticmethod
     def _queries(plan: dict[str, Any]) -> list[str]:
