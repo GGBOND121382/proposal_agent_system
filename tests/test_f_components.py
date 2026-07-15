@@ -7,6 +7,7 @@ import pytest
 
 from app.config import Settings
 from app.db import Database
+from app.proposal_quality import ProposalQualityGuard
 from app.skill_setup import build_skill_executor
 from app.skills.base import SkillContext
 from app.skills.mermaid import MermaidRenderError, MermaidRenderSkill
@@ -83,3 +84,36 @@ def test_mermaid_source_contract_accepts_safe_and_blocks_active_content(tmp_path
             skill._validate_source("flowchart LR\nA --> B\nclick A javascript:alert(1)")
     finally:
         skill.close()
+
+
+def test_quality_guard_rejects_shallow_unsupported_project_graph():
+    output = {
+        "status": "PASS",
+        "result": {
+            "project_definition": {
+                "items": [
+                    {
+                        "item_id": "objective-1",
+                        "item_type": "OBJECTIVE",
+                        "knowledge_status": "CONFIRMED",
+                        "content": "构建一个系统原型",
+                        "source_refs": [],
+                    }
+                ],
+                "relations": [],
+            }
+        },
+        "findings": [],
+        "unresolved_items": [],
+        "user_questions": [],
+        "source_refs": [],
+        "warnings": [],
+    }
+    checked = ProposalQualityGuard().apply(
+        "P-PROJECT-DEFINITION-EXTRACT", {"payload": {}}, output
+    )
+    codes = {item["code"] for item in checked["findings"]}
+    assert checked["status"] == "REVISE"
+    assert "QG_PROJECT_GRAPH_INCOMPLETE" in codes
+    assert "QG_PROJECT_GRAPH_TOO_SHALLOW" in codes
+    assert "QG_CONFIRMED_ITEM_WITHOUT_EVIDENCE" in codes
