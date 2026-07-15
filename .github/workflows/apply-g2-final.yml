@@ -7,12 +7,18 @@ on:
     paths:
       - ".github/g2-final/**"
       - ".github/workflows/apply-g2-final.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/g2-final/**"
+      - ".github/workflows/apply-g2-final.yml"
 
 permissions:
   contents: write
 
 concurrency:
-  group: apply-g2-final-${{ github.ref }}
+  group: apply-g2-final-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -24,6 +30,7 @@ jobs:
       - name: Check out staged branch
         uses: actions/checkout@v7
         with:
+          ref: agent/integration-v06-g2-final
           fetch-depth: 0
 
       - name: Verify current main ancestry
