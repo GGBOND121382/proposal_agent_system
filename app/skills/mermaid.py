@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import SkillContext, SkillResult
+from ..figure_protocol import FigureDirective, artifact_reference
 from ..util import safe_filename, sha256_bytes, sha256_text, utc_now, write_json
 
 
@@ -25,7 +26,7 @@ class MermaidRenderError(RuntimeError):
 
 class MermaidRenderSkill:
     skill_id = "mermaid.render"
-    version = "1.1.0"
+    version = "1.2.0"
     description = "Validate, archive and render Mermaid source into editable .mmd, SVG and PNG artifacts."
 
     _ALLOWED_STARTS = (
@@ -44,9 +45,6 @@ class MermaidRenderSkill:
         self._responses: queue.Queue[dict[str, Any]] = queue.Queue()
         self._reader_thread: threading.Thread | None = None
         self._worker_request_count = 0
-        # Keep one browser for a complete proposal.  All calls are dispatched by
-        # DiagramEnrichmentService to one dedicated thread, avoiding Playwright
-        # and pipe ownership changes between asyncio worker threads.
         self._max_requests_per_worker = 10
         atexit.register(self.close)
 
@@ -59,8 +57,10 @@ class MermaidRenderSkill:
             raise MermaidRenderError("mermaid_source is empty")
         self._validate_source(source)
 
+        input_source_sha256 = sha256_text(source)
         digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
-        root = Path(context.data_dir) / "diagram_artifacts" / safe_filename(context.project_id) / section_id
+        data_dir = Path(context.data_dir)
+        root = data_dir / "diagram_artifacts" / safe_filename(context.project_id) / section_id
         root.mkdir(parents=True, exist_ok=True)
         stem = safe_filename(f"{section_id}-{digest}")
         mmd_path = root / f"{stem}.mmd"
@@ -70,16 +70,16 @@ class MermaidRenderSkill:
         mmd_path.write_text(source + "\n", encoding="utf-8")
 
         warnings: list[str] = []
-        cache_hit = False
-        if svg_path.exists() and png_path.exists() and meta_path.exists() and png_path.stat().st_size >= 100:
-            try:
-                previous = json.loads(meta_path.read_text(encoding="utf-8"))
-                cache_hit = previous.get("source_sha256") == sha256_text(source)
-            except (OSError, json.JSONDecodeError):
-                cache_hit = False
+        cache_hit = self._verified_cache_hit(
+            source,
+            mmd_path=mmd_path,
+            svg_path=svg_path,
+            png_path=png_path,
+            meta_path=meta_path,
+        )
         if cache_hit:
             svg_text = svg_path.read_text(encoding="utf-8")
-            warnings.append("命中Mermaid渲染缓存，复用同一源码的SVG/PNG工件。")
+            warnings.append("命中经哈希复核的Mermaid渲染缓存，复用同一源码的SVG/PNG工件。")
         else:
             try:
                 svg_text = self._render(source, svg_path, png_path)
@@ -92,8 +92,15 @@ class MermaidRenderSkill:
                 source = repaired
                 svg_text = self._render(source, svg_path, png_path)
 
+        source_ref = artifact_reference(mmd_path, data_dir)
+        svg_ref = artifact_reference(svg_path, data_dir)
+        png_ref = artifact_reference(png_path, data_dir)
+        metadata_ref = artifact_reference(meta_path, data_dir)
+        source_sha256 = sha256_text(source)
+        svg_sha256 = sha256_text(svg_text)
+        png_sha256 = sha256_bytes(png_path.read_bytes())
         metadata = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "skill_id": self.skill_id,
             "skill_version": self.version,
             "project_id": context.project_id,
@@ -108,24 +115,63 @@ class MermaidRenderSkill:
             "fallback_reason": payload.get("fallback_reason"),
             "created_at": utc_now(),
             "mermaid_version": self._mermaid_version(),
-            "source_path": str(mmd_path),
-            "source_sha256": sha256_text(source),
-            "svg_path": str(svg_path),
-            "svg_sha256": sha256_text(svg_text),
-            "png_path": str(png_path),
-            "png_sha256": sha256_bytes(png_path.read_bytes()),
-            "browser": self._browser_executable(),
+            "input_source_sha256": input_source_sha256,
+            "source_reference": source_ref,
+            "source_sha256": source_sha256,
+            "svg_reference": svg_ref,
+            "svg_sha256": svg_sha256,
+            "png_reference": png_ref,
+            "png_sha256": png_sha256,
+            "browser": Path(self._browser_executable()).name,
             "cache_hit": cache_hit,
             "worker_rotation_limit": self._max_requests_per_worker,
             "warnings": warnings,
         }
         write_json(meta_path, metadata)
+        figure_marker = FigureDirective(
+            reference=png_ref,
+            caption=caption,
+            width_cm=width_cm,
+            source_reference=source_ref,
+        ).marker()
         output = {
             **metadata,
-            "metadata_path": str(meta_path),
-            "figure_marker": f"[[FIGURE]]{png_path.as_posix()}|{caption}|{width_cm}|source={mmd_path.as_posix()}",
+            "metadata_reference": metadata_ref,
+            "figure_marker": figure_marker,
         }
-        return SkillResult(status="PASS", output=output, warnings=warnings, artifacts=[str(mmd_path), str(svg_path), str(png_path), str(meta_path)])
+        return SkillResult(
+            status="PASS",
+            output=output,
+            warnings=warnings,
+            artifacts=[str(mmd_path), str(svg_path), str(png_path), str(meta_path)],
+        )
+
+    @staticmethod
+    def _verified_cache_hit(
+        source: str,
+        *,
+        mmd_path: Path,
+        svg_path: Path,
+        png_path: Path,
+        meta_path: Path,
+    ) -> bool:
+        if not all(path.is_file() for path in (mmd_path, svg_path, png_path, meta_path)):
+            return False
+        if png_path.stat().st_size < 100:
+            return False
+        try:
+            previous = json.loads(meta_path.read_text(encoding="utf-8"))
+            current_mmd = mmd_path.read_text(encoding="utf-8").strip()
+            current_svg = svg_path.read_text(encoding="utf-8")
+            current_png = png_path.read_bytes()
+        except (OSError, json.JSONDecodeError):
+            return False
+        return (
+            previous.get("source_sha256") == sha256_text(source)
+            and previous.get("source_sha256") == sha256_text(current_mmd)
+            and previous.get("svg_sha256") == sha256_text(current_svg)
+            and previous.get("png_sha256") == sha256_bytes(current_png)
+        )
 
     def _render(self, source: str, svg_path: Path, png_path: Path) -> str:
         timeout_seconds = max(10, int(self.settings.skill_timeout_seconds))
