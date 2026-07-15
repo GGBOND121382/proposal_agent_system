@@ -260,7 +260,11 @@ class LiveContextBuilder(BaseContextBuilder):
 
         task = envelope.setdefault("task", {})
         active_section = str(state.get("active_section_id") or "")
-        attempt = int((state.get("repair_attempts") or {}).get(prompt_id, 0)) + 1
+        repair_attempts = state.get("repair_attempts") or {}
+        section_attempt_key = (
+            f"section:{active_section}:{prompt_id}" if active_section else prompt_id
+        )
+        attempt = int(repair_attempts.get(section_attempt_key, repair_attempts.get(prompt_id, 0))) + 1
         task["task_id"] = "task-" + sha256_json(
             {
                 "prompt_id": prompt_id,
