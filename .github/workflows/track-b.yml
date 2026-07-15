@@ -4,8 +4,11 @@ on:
   push:
     branches:
       - main
-      - "agent/prompt-agents"
+      - agent/prompt-agents
+      - agent/integration-v06
   pull_request:
+    branches:
+      - main
     paths:
       - "app/agent_prompt_kernel.py"
       - "app/track_b.py"
@@ -16,6 +19,11 @@ on:
       - "scripts/validate_track_b.py"
       - "tests/test_track_b_agent_prompt.py"
       - ".github/workflows/track-b.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -23,16 +31,22 @@ permissions:
 jobs:
   agent-prompt-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      - name: Install document rendering system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
+
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -74,7 +88,7 @@ jobs:
 
       - name: Upload Track B evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: track-b-${{ github.sha }}
           path: recovery_evidence/track_b/${{ github.sha }}
