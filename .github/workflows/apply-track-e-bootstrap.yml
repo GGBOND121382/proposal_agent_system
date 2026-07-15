@@ -7,6 +7,12 @@ on:
     paths:
       - ".github/track-e-bootstrap.part-*"
       - ".github/workflows/apply-track-e-bootstrap.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/track-e-bootstrap.part-*"
+      - ".github/workflows/apply-track-e-bootstrap.yml"
 
 permissions:
   contents: write
