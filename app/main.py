@@ -186,3 +186,192 @@ async def execute_replay(prompt_id: str, case_type: str, project_id: str = Query
         return await executor.execute(prompt_id, case["input"], project_id=project_id)
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/workflows")
+async def start_workflow(req: WorkflowStartRequest) -> dict[str, Any]:
+    try:
+        wf = workflows.start(req.project_id, req.workflow_type, req.options)
+        return await workflows.advance(wf["id"]) if req.auto_advance else wf
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/advance")
+async def advance_workflow(workflow_id: str) -> dict[str, Any]:
+    try:
+        return await workflows.advance(workflow_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/workflows")
+def list_workflows(project_id: str | None = None) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM workflows"
+    params: tuple[Any, ...] = ()
+    if project_id:
+        sql += " WHERE project_id=?"; params = (project_id,)
+    sql += " ORDER BY created_at DESC"
+    rows = db.fetchall(sql, params)
+    for row in rows:
+        row["state"] = json.loads(row.pop("state_json"))
+    return rows
+
+
+@app.get("/api/workflows/{workflow_id}")
+def get_workflow(workflow_id: str) -> dict[str, Any]:
+    try:
+        return workflows.get(workflow_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/gates")
+def list_gates(project_id: str | None = None, workflow_id: str | None = None) -> list[dict[str, Any]]:
+    return workflows.list_gates(project_id, workflow_id)
+
+
+@app.post("/api/gates/{gate_id}/decide")
+def decide_gate(gate_id: str, req: GateDecisionRequest) -> dict[str, Any]:
+    try:
+        return workflows.decide_gate(gate_id, action=req.action, decided_by=req.decided_by, decided_role=req.decided_role, comment=req.comment, answers=req.answers, context_hash=req.context_hash)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/api/skill-runs")
+def list_skill_runs(project_id: str | None = None, workflow_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    sql = "SELECT id,project_id,workflow_id,skill_id,skill_version,status,input_hash,output_hash,error,duration_ms,created_at FROM skill_runs WHERE 1=1"
+    params: list[Any] = []
+    if project_id:
+        sql += " AND project_id=?"; params.append(project_id)
+    if workflow_id:
+        sql += " AND workflow_id=?"; params.append(workflow_id)
+    sql += " ORDER BY created_at DESC LIMIT ?"; params.append(min(max(limit, 1), 500))
+    return db.fetchall(sql, tuple(params))
+
+
+@app.get("/api/projects/{project_id}/research-archives")
+def list_research_archives(project_id: str) -> list[dict[str, Any]]:
+    root = settings.data_dir / "research_archive" / safe_filename(project_id)
+    if not root.exists():
+        return []
+    result = []
+    for manifest in sorted(root.glob("*/manifest.json"), reverse=True):
+        try:
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        result.append({
+            "session_id": payload.get("session_id"),
+            "retrieval_mode": payload.get("retrieval_mode"),
+            "provider": payload.get("provider"),
+            "created_at": payload.get("created_at"),
+            "source_count": payload.get("source_count"),
+            "warning_count": payload.get("warning_count"),
+            "manifest_path": str(manifest),
+        })
+    return result
+
+
+@app.get("/api/projects/{project_id}/research-archives/{session_id}/download")
+def download_research_archive(project_id: str, session_id: str) -> FileResponse:
+    root = settings.data_dir / "research_archive" / safe_filename(project_id) / safe_filename(session_id)
+    manifest = root / "manifest.json"
+    if not manifest.exists():
+        raise HTTPException(404, "Research archive not found")
+    archive = shutil.make_archive(str(settings.exports_dir / f"{safe_filename(project_id)}-{safe_filename(session_id)}"), "zip", root)
+    path = Path(archive)
+    return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
+@app.get("/api/runs")
+def list_runs(project_id: str | None = None, workflow_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    sql = "SELECT id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,input_hash,output_hash,error,duration_ms,created_at FROM prompt_runs WHERE 1=1"
+    params: list[Any] = []
+    if project_id:
+        sql += " AND project_id=?"; params.append(project_id)
+    if workflow_id:
+        sql += " AND workflow_id=?"; params.append(workflow_id)
+    sql += " ORDER BY created_at DESC LIMIT ?"; params.append(min(max(limit, 1), 500))
+    return db.fetchall(sql, tuple(params))
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str) -> dict[str, Any]:
+    row = db.fetchone("SELECT * FROM prompt_runs WHERE id=?", (run_id,))
+    if not row:
+        raise HTTPException(404, "Run not found")
+    row["input"] = json.loads(row.pop("input_json"))
+    row["output"] = json.loads(row.pop("output_json")) if row.get("output_json") else None
+    return row
+
+
+@app.get("/api/projects/{project_id}/quality-findings")
+def list_quality_findings(
+    project_id: str,
+    workflow_id: str | None = None,
+    state: str | None = None,
+) -> list[dict[str, Any]]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    states = {state.upper()} if state else None
+    return workflows.quality_manager.list_findings(project_id, workflow_id=workflow_id, states=states)
+
+
+@app.get("/api/projects/{project_id}/quality-matrix")
+def get_quality_matrix(project_id: str, workflow_id: str | None = None) -> dict[str, Any]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    return workflows.quality_manager.quality_matrix(project_id, workflow_id=workflow_id)
+
+
+@app.post("/api/projects/{project_id}/quality/delivery-findings")
+def ingest_delivery_findings(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    validation_run_id = str(payload.get("validation_run_id") or "").strip()
+    findings = payload.get("findings")
+    if not validation_run_id or not isinstance(findings, list):
+        raise HTTPException(422, "validation_run_id and findings[] are required")
+    records = workflows.quality_manager.ingest_delivery_findings(
+        project_id=project_id,
+        workflow_id=payload.get("workflow_id"),
+        validation_run_id=validation_run_id,
+        findings=findings,
+    )
+    return {
+        "records": records,
+        "quality_matrix": workflows.quality_manager.quality_matrix(project_id),
+    }
+
+
+@app.post("/api/projects/{project_id}/export")
+def export_project(project_id: str) -> FileResponse:
+    try:
+        path = exporter.export(project_id)
+        return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=path.name)
+    except KeyError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    except ExportDenied as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+@app.post("/api/projects/{project_id}/export-package")
+def export_project_package(project_id: str) -> FileResponse:
+    try:
+        path = exporter.export_package(project_id)
+        return FileResponse(path, media_type="application/zip", filename=path.name)
+    except KeyError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    except ExportDenied as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+@app.get("/api/workflow-types")
+def workflow_types() -> dict[str, Any]:
+    return WORKFLOWS
