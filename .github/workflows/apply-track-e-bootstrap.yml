@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .github/track-e-bootstrap.part-* .github/workflows/apply-track-e-bootstrap.yml
+          rm -f .github/track-e-bootstrap.part-* .github/workflows/track-e-quality.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
