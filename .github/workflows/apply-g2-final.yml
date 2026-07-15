@@ -80,14 +80,38 @@ jobs:
             tests/test_single_section_chain.py
 
       - name: Commit and push non-workflow integration source
+        id: publish
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
+          exec > >(tee /tmp/g2-publication.log) 2>&1
           git restore --staged .github
           git checkout HEAD -- .github/g2-final .github/workflows/apply-g2-final.yml
           rm -f .github/workflows/g2.yml .github/workflows/g2-three-sections.yml
           git add -A
+          echo '=== status ==='
+          git status --short
+          echo '=== cached paths ==='
+          git diff --cached --name-only
           git config user.name "proposal-agent-integration"
           git config user.email "proposal-agent-integration@users.noreply.github.com"
           git commit -m "complete G2 small-scale integration source"
-          git push origin HEAD:agent/integration-v06-g2-final
+          commit_status=$?
+          echo "commit_status=${commit_status}"
+          if [ "${commit_status}" -eq 0 ]; then
+            git push origin HEAD:agent/integration-v06-g2-final
+            push_status=$?
+          else
+            push_status=99
+          fi
+          echo "push_status=${push_status}"
+          exit "${push_status}"
+
+      - name: Upload publication diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g2-publication-diagnostics-${{ github.sha }}
+          path: /tmp/g2-publication.log
+          if-no-files-found: warn
+          retention-days: 3
