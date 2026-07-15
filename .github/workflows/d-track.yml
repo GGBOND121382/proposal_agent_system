@@ -49,20 +49,42 @@ jobs:
             app/pdf_exporter.py \
             app/delivery_validator.py
 
+      - name: Prepare evidence directory
+        run: mkdir -p recovery_evidence/d/${GITHUB_SHA}
+
       - name: Run D-track regression tests
         run: python -m pytest -q tests/test_d_track.py
 
-      - name: Run real Mermaid DOCX PDF visual acceptance
+      - name: Capture full repository test result
+        run: |
+          set +e
+          python -m pytest -q --tb=short 2>&1 | tee recovery_evidence/d/${GITHUB_SHA}/full-pytest.log
+          status=${PIPESTATUS[0]}
+          echo "${status}" > recovery_evidence/d/${GITHUB_SHA}/full-pytest.status
+          exit 0
+
+      - name: Capture real Mermaid DOCX PDF visual acceptance
         env:
           MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
         run: |
+          set +e
           python scripts/run_d_track_acceptance.py \
-            --output-dir recovery_evidence/d/${GITHUB_SHA}
+            --output-dir recovery_evidence/d/${GITHUB_SHA} \
+            2>&1 | tee recovery_evidence/d/${GITHUB_SHA}/acceptance.log
+          status=${PIPESTATUS[0]}
+          echo "${status}" > recovery_evidence/d/${GITHUB_SHA}/acceptance.status
+          exit 0
 
       - name: Upload D-track evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: d-track-${{ github.sha }}
           path: recovery_evidence/d/${{ github.sha }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Enforce D-track gates
+        run: |
+          test "$(cat recovery_evidence/d/${GITHUB_SHA}/full-pytest.status)" = "0"
+          test "$(cat recovery_evidence/d/${GITHUB_SHA}/acceptance.status)" = "0"
