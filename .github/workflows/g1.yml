@@ -11,6 +11,7 @@ on:
     paths:
       - "governance/g1/**"
       - "scripts/validate_g1.py"
+      - "scripts/validate_g1_runner.py"
       - "scripts/run_g1_probes.py"
       - ".github/workflows/g1.yml"
       - ".github/workflows/ci.yml"
@@ -48,7 +49,7 @@ jobs:
         id: manifest
         run: |
           mkdir -p evidence/manifest
-          python control/scripts/validate_g1.py manifest \
+          python control/scripts/validate_g1_runner.py manifest \
             --manifest control/governance/g1/components.json \
             --report evidence/manifest/G1_MANIFEST.json \
             --github-output "$GITHUB_OUTPUT"
@@ -184,7 +185,7 @@ jobs:
 
       - name: Enforce independent component gate
         run: |
-          python control/scripts/validate_g1.py component \
+          python control/scripts/validate_g1_runner.py component \
             --manifest control/governance/g1/components.json \
             --track "${{ matrix.track }}" \
             --component-root component \
@@ -233,7 +234,7 @@ jobs:
       - name: Aggregate six independent component reports
         run: |
           mkdir -p summary
-          python control/scripts/validate_g1.py aggregate \
+          python control/scripts/validate_g1_runner.py aggregate \
             --manifest control/governance/g1/components.json \
             --reports-dir collected \
             --report-json summary/G1_ACCEPTANCE.json \
