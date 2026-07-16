@@ -15,6 +15,11 @@ class Settings:
     exports_dir: Path
     runtime_mode: str
     request_timeout_seconds: int
+    model_max_output_tokens: int
+    model_min_request_interval_seconds: float
+    model_max_input_characters: int
+    model_response_format: str
+    model_schema_prompt_mode: str
     max_upload_mb: int
     public_search_provider: str
     public_search_base_url: str
@@ -50,6 +55,11 @@ class Settings:
             exports_dir=exports,
             runtime_mode=mode,
             request_timeout_seconds=int(os.getenv("MODEL_REQUEST_TIMEOUT_SECONDS", "240")),
+            model_max_output_tokens=int(os.getenv("MODEL_MAX_OUTPUT_TOKENS", "0")),
+            model_min_request_interval_seconds=float(os.getenv("MODEL_MIN_REQUEST_INTERVAL_SECONDS", "0")),
+            model_max_input_characters=int(os.getenv("MODEL_MAX_INPUT_CHARACTERS", "80000")),
+            model_response_format=os.getenv("MODEL_RESPONSE_FORMAT", "json_schema").strip().lower(),
+            model_schema_prompt_mode=os.getenv("MODEL_SCHEMA_PROMPT_MODE", "full").strip().lower(),
             max_upload_mb=int(os.getenv("MAX_UPLOAD_MB", "50")),
             public_search_provider=os.getenv("PUBLIC_SEARCH_PROVIDER", "disabled").lower(),
             public_search_base_url=os.getenv("PUBLIC_SEARCH_BASE_URL", "").rstrip("/"),
