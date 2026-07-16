@@ -297,3 +297,19 @@ tests/             # 自动测试
 5. 接入单位文件病毒扫描、DLP、密钥管理和日志平台；
 6. 对复杂 DOCX 模板实现部署单位专用的 OOXML 补丁与完整性验证；
 7. 对在线模型、搜索服务和回传材料完成正式外发/导入审批。
+
+### 生成与恢复模式
+
+智能体区分两种可审计运行模式：
+
+```bash
+# 生产续跑：仅当 Prompt 版本、输入哈希、工作流、模型路由完全一致时复用
+PROPOSAL_GENERATION_MODE=RESUME_FROM_CHECKPOINT
+
+# 跨模型冷启动验收：拒绝数据库和文件证据中的既有模型响应
+PROPOSAL_GENERATION_MODE=FRESH_GENERATION
+```
+
+`RESUME_FROM_CHECKPOINT` 是安全中断后的正常恢复能力，不是模拟或预写正文注入。复用记录必须回溯到已提交的 `prompt_runs`、原始响应证据和来源 Run。更换模型 ID、端点 ID、供应商模型名、Prompt 版本或输入内容后，复用键都会变化，必须重新调用模型。生产代码不读取松散的 `prior_section_content.json`。
+
+WF-5、最终导出和后验收必须显式绑定同一冻结 WF-4；项目中其他失败或重跑版本不能污染该候选集合。

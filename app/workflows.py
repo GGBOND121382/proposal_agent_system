@@ -6,7 +6,7 @@ from typing import Any
 from .executor import PromptExecutionError
 from .quality import QualityGateBlocked, QualityLifecycleManager
 from .research import PublicResearchError
-from .util import new_id, utc_now
+from .util import new_id, sha256_json, utc_now
 from .workflow_authoring import WorkflowAuthoringMixin
 from .workflow_defs import WORKFLOWS
 from .workflow_gates import WorkflowGateMixin
@@ -51,6 +51,16 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             "repair_overrides": {},
             "public_search_results": None,
         }
+        if workflow_type == "WF-5_SECURITY_REVIEW_AND_EXPORT":
+            source = self._resolve_source_wf4(
+                project_id,
+                str((options or {}).get("source_workflow_id") or "") or None,
+            )
+            if source:
+                state["source_workflow_id"] = source["id"]
+                state["source_candidate_set_hash"] = source["candidate_set_hash"]
+                state["source_binding_mode"] = source.get("binding_mode", "FULL_INTEGRATION_MANIFEST")
+                state["source_section_manifest"] = source.get("section_manifest") or []
         prerequisite_error = self._workflow_prerequisite_error(project_id, workflow_type, options or {})
         status = "BLOCKED" if prerequisite_error else "RUNNING"
         if prerequisite_error:
@@ -61,6 +71,102 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         )
         self.db.audit("WORKFLOW_STARTED", project_id=project_id, object_id=workflow_id, metadata={"workflow_type": workflow_type})
         return self.get(workflow_id)
+
+    def _resolve_source_wf4(
+        self,
+        project_id: str,
+        requested_workflow_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        params: tuple[Any, ...]
+        if requested_workflow_id:
+            rows = self.db.fetchall(
+                "SELECT id,state_json,status,updated_at FROM workflows "
+                "WHERE project_id=? AND workflow_type='WF-4_PROPOSAL_AUTHORING' AND id=?",
+                (project_id, requested_workflow_id),
+            )
+        else:
+            rows = self.db.fetchall(
+                "SELECT id,state_json,status,updated_at FROM workflows "
+                "WHERE project_id=? AND workflow_type='WF-4_PROPOSAL_AUTHORING' "
+                "AND status='COMPLETED' ORDER BY updated_at DESC,id DESC",
+                (project_id,),
+            )
+        for row in rows:
+            state = json.loads(row.get("state_json") or "{}")
+            if state.get("parent_workflow_id") or row.get("status") != "COMPLETED":
+                continue
+            reviews = [
+                item for item in state.get("full_proposal_review_history") or []
+                if isinstance(item, dict) and item.get("status") == "PASS"
+            ]
+            if reviews:
+                review = reviews[-1]
+                manifest = review.get("section_manifest") or []
+                if not manifest:
+                    continue
+                return {
+                    "id": row["id"],
+                    "candidate_set_hash": str(review.get("candidate_set_hash") or ""),
+                    "section_manifest": manifest,
+                    "binding_mode": "FULL_INTEGRATION_MANIFEST",
+                }
+
+            # Backward-compatible recovery for a completed pre-concurrent WF-4.
+            # It is accepted only when the persisted workflow contains a PASS
+            # Integration Critic and every completed section has exact PASS polish
+            # and expression-critic run IDs.  This is checkpoint migration, not a
+            # project-wide latest-candidate fallback.
+            integration_pass = any(
+                isinstance(item, dict)
+                and item.get("prompt_id") == "P-INTEGRATION-CRITIC"
+                and item.get("status") == "PASS"
+                for item in (state.get("step_results") or {}).values()
+            )
+            if not integration_pass:
+                continue
+            manifest: list[dict[str, str]] = []
+            for section in state.get("section_results") or []:
+                if not isinstance(section, dict) or section.get("status") != "COMPLETED":
+                    continue
+                runs = [item for item in section.get("runs") or [] if isinstance(item, dict)]
+                polish = next(
+                    (item for item in reversed(runs) if item.get("prompt_id") == "P-EXPRESSION-POLISH" and item.get("status") == "PASS"),
+                    None,
+                )
+                critic = next(
+                    (item for item in reversed(runs) if item.get("prompt_id") == "P-EXPRESSION-CRITIC" and item.get("status") == "PASS"),
+                    None,
+                )
+                if not polish or not critic:
+                    manifest = []
+                    break
+                polish_row = self.db.fetchone(
+                    "SELECT output_json,status FROM prompt_runs WHERE project_id=? AND workflow_id=? AND id=? ",
+                    (project_id, row["id"], str(polish.get("run_id") or "")),
+                )
+                if not polish_row or polish_row.get("status") != "PASS" or not polish_row.get("output_json"):
+                    manifest = []
+                    break
+                output = json.loads(polish_row.get("output_json") or "{}")
+                candidate_id = str((output.get("result") or {}).get("candidate_id") or "")
+                if not candidate_id:
+                    manifest = []
+                    break
+                manifest.append({
+                    "section_id": str(section.get("section_id") or ""),
+                    "candidate_id": candidate_id,
+                    "polish_run_id": str(polish.get("run_id") or ""),
+                    "expression_critic_run_id": str(critic.get("run_id") or ""),
+                })
+            if not manifest:
+                continue
+            return {
+                "id": row["id"],
+                "candidate_set_hash": sha256_json({"sections": manifest}),
+                "section_manifest": manifest,
+                "binding_mode": "MIGRATED_LEGACY_CHECKPOINT",
+            }
+        return None
 
     def _workflow_prerequisite_error(self, project_id: str, workflow_type: str, options: dict[str, Any]) -> str | None:
         required: list[str] = []
@@ -77,19 +183,9 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         missing = []
         for required_type in required:
             if required_type == "WF-4_PROPOSAL_AUTHORING":
-                # Concurrent authoring groups reuse the frozen WF-4 state machine
-                # but are explicitly marked as child workflows.  A completed
-                # group is not a completed proposal and must never unlock WF-5.
-                rows = self.db.fetchall(
-                    "SELECT id,state_json FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC",
-                    (project_id, required_type),
-                )
-                row = next(
-                    (
-                        item for item in rows
-                        if not json.loads(item.get("state_json") or "{}").get("parent_workflow_id")
-                    ),
-                    None,
+                row = self._resolve_source_wf4(
+                    project_id,
+                    str(options.get("source_workflow_id") or "") or None,
                 )
             else:
                 row = self.db.fetchone(

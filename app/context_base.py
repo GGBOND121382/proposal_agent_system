@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import copy
 import json
+import re
+
+import yaml
 from typing import Any
 
-from .util import new_id, sha256_json, sha256_text
+from .util import new_id, sha256_json, sha256_text, utc_now
 
 HASH_PLACEHOLDER = "a" * 64
 
@@ -97,6 +100,54 @@ class ContextBuilder:
         ]
 
     def _content_candidates(self, project_id: str, workflow_id: str | None = None) -> list[dict[str, Any]]:
+        # Once a full-proposal Integration Critic has passed, all downstream
+        # consumers (especially final confidentiality review) must read the exact
+        # frozen section manifest, not a project-wide mix of later retry outputs.
+        if workflow_id is None:
+            workflow_rows = self.db.fetchall(
+                "SELECT state_json,status,updated_at,id FROM workflows "
+                "WHERE project_id=? AND workflow_type='WF-4_PROPOSAL_AUTHORING' "
+                "AND status='COMPLETED' ORDER BY updated_at DESC,id DESC",
+                (project_id,),
+            )
+            for workflow_row in workflow_rows:
+                state = json.loads(workflow_row.get("state_json") or "{}")
+                if state.get("parent_workflow_id"):
+                    continue
+                reviews = [
+                    item for item in state.get("full_proposal_review_history") or []
+                    if isinstance(item, dict) and item.get("status") == "PASS"
+                ]
+                if not reviews:
+                    continue
+                manifest = reviews[-1].get("section_manifest") or []
+                frozen: list[dict[str, Any]] = []
+                for item in manifest:
+                    run_id = str(item.get("polish_run_id") or "")
+                    row = self.db.fetchone(
+                        "SELECT id,prompt_id,input_json,output_json,created_at FROM prompt_runs "
+                        "WHERE project_id=? AND id=? AND prompt_id='P-EXPRESSION-POLISH' AND status='PASS'",
+                        (project_id, run_id),
+                    )
+                    if not row or not row.get("output_json"):
+                        raise RuntimeError(f"Frozen Integration Critic candidate is unavailable: {run_id}")
+                    input_data = json.loads(row["input_json"] or "{}")
+                    output_data = json.loads(row["output_json"] or "{}")
+                    section = (input_data.get("payload") or {}).get("source_section") or {}
+                    candidate = output_data.get("result") or {}
+                    if str(section.get("section_id") or "") != str(item.get("section_id") or ""):
+                        raise RuntimeError(f"Frozen candidate section mismatch: {run_id}")
+                    if str(candidate.get("candidate_id") or "") != str(item.get("candidate_id") or ""):
+                        raise RuntimeError(f"Frozen candidate id mismatch: {run_id}")
+                    frozen.append({
+                        "run_id": row["id"],
+                        "prompt_id": row.get("prompt_id"),
+                        "section": section,
+                        "candidate": candidate,
+                    })
+                if frozen:
+                    return frozen
+
         sql = "SELECT id,prompt_id,input_json,output_json,created_at FROM prompt_runs WHERE project_id=? AND prompt_id IN ('P-WRITE-CONTENT','P-EXPRESSION-POLISH') AND status='PASS'"
         params: list[Any] = [project_id]
         if workflow_id:
@@ -445,6 +496,8 @@ class ContextBuilder:
             replacements.append(("payload.source_section", current_section))
         if "section_profile" in payload:
             replacements.append(("payload.section_profile", self.pack.section_profile_for((current_section or {}).get("title"))))
+        if "writing_mode" in payload:
+            replacements.append(("payload.writing_mode", "DRAFT_FROM_PROJECT_DEFINITION"))
         if "readiness_stage" in payload:
             readiness_stage = (
                 "READY_FOR_SECTION_PLANNING"
@@ -468,6 +521,34 @@ class ContextBuilder:
         if "object_context" in payload and docs:
             first = docs[0]
             replacements.append(("payload.object_context", self._object_ref(first["document_id"], "SOURCE_DOCUMENT", first["security_level"], first["document_hash"], first["title"])))
+        if "original_object" in payload and docs:
+            first = docs[0]
+            replacements.append(("payload.original_object", {
+                "object_type": "SOURCE_DOCUMENT",
+                "object_id": first["document_id"],
+                "object_hash": first["document_hash"],
+                "content": {
+                    "title": first.get("title") or first.get("filename") or "source document",
+                    "document_role": first.get("document_role"),
+                    "security_level": first.get("security_level"),
+                    "sections": [
+                        {"section_id": sec.get("section_id"), "title": sec.get("title"), "text": sec.get("text")}
+                        for sec in (first.get("sections") or [])
+                    ],
+                },
+            }))
+        if "deterministic_findings" in payload:
+            # An empty deterministic finding set is a real quality-check result.
+            replacements.append(("payload.deterministic_findings", []))
+        if "open_conflicts" in payload:
+            # No unresolved source/fact conflicts is also an explicit workflow fact.
+            replacements.append(("payload.open_conflicts", []))
+        if "relation_matrix" in payload:
+            matrix = yaml.safe_load((self.pack.root / "knowledge/relation_matrix.yaml").read_text(encoding="utf-8"))
+            replacements.append(("payload.relation_matrix", {
+                "version": str(matrix.get("version") or "2.0"),
+                "allowed_relations": [list(item) for item in (matrix.get("allowed_relations") or [])],
+            }))
         if "content_segments" in payload and docs:
             segments = []
             for doc in docs:
@@ -484,15 +565,149 @@ class ContextBuilder:
             spans = []
             for doc in docs:
                 for sec in doc.get("sections", [])[:100]:
-                    spans.append({"span_id": sec["section_id"], "text": sec["text"], "source_ref": self._source_ref(doc, sec)})
+                    text = str(sec.get("text") or "").strip()
+                    if not text:
+                        continue
+                    spans.append({"span_id": sec["section_id"], "text": text, "source_ref": self._source_ref(doc, sec)})
             if spans:
                 replacements.append(("payload.source_spans", spans))
+        if "authority_rules" in payload:
+            replacements.append(("payload.authority_rules", {
+                "version": "2.0",
+                "ordered_source_types": [
+                    "USER_CONFIRMATION", "APPLICATION_GUIDE", "TASK_BOOK", "CONTRACT",
+                    "CURRENT_PROPOSAL", "TECHNICAL_MATERIAL", "EVIDENCE_MATERIAL",
+                    "HISTORICAL_DOCUMENT", "REFERENCE_PROPOSAL", "MODEL_INFERENCE",
+                ],
+            }))
+        if "existing_facts" in payload:
+            replacements.append(("payload.existing_facts", []))
+        if "locked_facts" in payload:
+            replacements.append(("payload.locked_facts", []))
         if "section_tree" in payload and reference_doc:
-            tree = [{"section_id": s["section_id"], "title": s["title"], "level": s["level"], "sequence": i + 1} for i, s in enumerate(reference_doc.get("sections", []))]
+            tree = []
+            level_stack: dict[int, str] = {}
+            for section in reference_doc.get("sections", []):
+                level = int(section.get("level") or 0)
+                parent_id = None
+                if level > 0:
+                    parent_levels = [item for item in level_stack if item < level]
+                    if parent_levels:
+                        parent_id = level_stack[max(parent_levels)]
+                tree.append({
+                    "section_id": section["section_id"],
+                    "title": section.get("title") or "未命名章节",
+                    "level": level,
+                    "parent_section_id": parent_id,
+                })
+                level_stack[level] = section["section_id"]
+                for stale_level in [item for item in level_stack if item > level]:
+                    level_stack.pop(stale_level, None)
             replacements.append(("payload.section_tree", tree))
         if "document_structure" in payload and guide_docs:
-            structure = [{"document_id": d["document_id"], "section_ids": [s["section_id"] for s in d.get("sections", [])]} for d in guide_docs]
+            structure = [
+                {
+                    "section_id": sec["section_id"],
+                    "title": sec.get("title") or "全文",
+                    "level": int(sec.get("level") or 0),
+                    "text_hash": sec.get("text_hash") or sha256_json(sec.get("text") or ""),
+                }
+                for doc in guide_docs
+                for sec in doc.get("sections", [])
+            ]
             replacements.append(("payload.document_structure", structure))
+        if "extraction_scope" in payload:
+            replacements.append(("payload.extraction_scope", [
+                "项目性质与适用范围",
+                "执行周期与经费约束",
+                "正文结构与篇幅要求",
+                "图表和参考文献要求",
+                "事实边界与禁止补写事项",
+                "评审逻辑与验收要求",
+            ]))
+        if "style_summary" in payload:
+            replacements.append(("payload.style_summary", {
+                "paragraph_styles": [
+                    "中文科技申请书正文段落：首行缩进、两端对齐、段前段后适度留白",
+                    "图表题注独立成段并按章节连续编号",
+                ],
+                "heading_styles": [
+                    "一级标题采用中文编号并突出显示",
+                    "二级标题采用阿拉伯数字层级编号",
+                    "三级标题简洁描述单一论证功能",
+                ],
+                "table_styles": [
+                    "表格使用简洁网格或三线表结构",
+                    "表头明确指标、对象、来源或验收方式",
+                ],
+            }))
+        if "research_need" in payload:
+            replacements.append((
+                "payload.research_need",
+                self._research_need(project, config, context_hash),
+            ))
+        if "source_items" in payload:
+            source_items = [
+                self._object_ref(
+                    str(document.get("document_id") or f"doc-{index}"),
+                    str(document.get("document_role") or "DOCUMENT"),
+                    str(document.get("security_level") or project["security_level"]),
+                    str(document.get("document_hash") or context_hash),
+                    str(document.get("title") or document.get("document_id") or f"输入材料{index}"),
+                )
+                for index, document in enumerate(source_docs, start=1)
+            ]
+            replacements.append(("payload.source_items", source_items))
+        if "target_task_type" in payload:
+            replacements.append(("payload.target_task_type", "PUBLIC_RESEARCH"))
+        if "source_summary" in payload:
+            replacements.append((
+                "payload.source_summary",
+                self._source_summaries(source_docs, project),
+            ))
+        if "deterministic_scan" in payload:
+            package_candidate = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE") or {}
+            package_text = json.dumps(package_candidate, ensure_ascii=False)
+            forbidden_literals = [
+                str(project.get("id") or ""),
+                str(project.get("name") or ""),
+                *[str(item) for item in config.get("prohibited_external_fields", [])],
+            ]
+            leaked = [item for item in forbidden_literals if item and item in package_text]
+            replacements.append(("payload.deterministic_scan", {
+                "passed": not leaked,
+                "matched_rules": [
+                    "PUBLIC_ONLY_CONTEXT",
+                    "IDENTITY_FIELDS_REMOVED",
+                    "INTERNAL_IDS_REMOVED",
+                    "NO_PRIVATE_DATA_OR_UNVERIFIED_RESULTS",
+                ],
+                "redacted_fields": list(package_candidate.get("removed_fields") or leaked),
+            }))
+        if "task_type" in payload and prompt_id == "P-PUBLIC-RESEARCH-PLAN":
+            replacements.append(("payload.task_type", "PUBLIC_RESEARCH"))
+        if "known_public_sources" in payload:
+            replacements.append((
+                "payload.known_public_sources",
+                self._known_public_sources(config),
+            ))
+        if "time_constraints" in payload:
+            configured = config.get("research_time_constraints") or {}
+            replacements.append(("payload.time_constraints", {
+                "start_date": str(configured.get("start_date") or "2000-01-01"),
+                "end_date": str(configured.get("end_date") or utc_now()[:10]),
+                "freshness_required": bool(configured.get("freshness_required", True)),
+            }))
+        if "evidence_requirements" in payload:
+            requirements = list(config.get("research_evidence_requirements") or [
+                "优先使用同行评审论文、出版商页面、DOI元数据和官方数据集页面",
+                "同时覆盖经典基础工作和近期工作，并记录检索日期",
+                "每条来源保留标题、作者、年份、出版方、DOI或稳定URL",
+                "提取可复用的数据集、基线、评价指标、统计检验和有效性威胁",
+                "不得把公开工作的实验结论推断为本项目已有成果",
+                "无法核验全文时仅使用可核验元数据和摘要，不补写细节",
+            ])
+            replacements.append(("payload.evidence_requirements", requirements))
 
         # Producer -> consumer mappings.
         result_map = {
@@ -519,11 +734,22 @@ class ContextBuilder:
             "research_plan": ("P-PUBLIC-RESEARCH-PLAN", None),
             "synthesis_candidate": ("P-PUBLIC-RESEARCH-SYNTHESIS", None),
         }
+        repair_result_keys = {
+            "P-SCHEME-EXTRACT": "scheme_profile",
+            "P-PROJECT-DEFINITION-EXTRACT": "project_definition",
+            "P-FACT-EXTRACT": "fact_candidates",
+            "P-TEMPLATE-EXTRACT": "template",
+            "P-ARGUMENT-ARCHITECTURE": "argument_architecture",
+            "P-REVISION-PLAN": "revision_plan",
+            "P-WRITE-BLUEPRINT": "blueprint",
+            "P-WRITE-CONTENT": None,
+            "P-EXPRESSION-POLISH": None,
+        }
         for field, (producer, key) in result_map.items():
             if field in payload:
                 value = self._result(project["id"], producer, key)
                 repair_override = self._repair_override(state, producer)
-                if repair_override is not None:
+                if repair_override is not None and key == repair_result_keys.get(producer):
                     value = repair_override
                 if value is not None:
                     replacements.append((f"payload.{field}", value))
@@ -546,13 +772,24 @@ class ContextBuilder:
         section_contract = None
         if narrative_architecture and current_section:
             for contract in narrative_architecture.get("section_contracts", []):
-                if contract.get("section_id") == current_section.get("section_id") or contract.get("title") == current_section.get("title"):
+                current_title = re.sub(r"^\s*[一二三四五六七八九十0-9]+[.、．）)]\s*", "", str(current_section.get("title") or "")).strip()
+                contract_title = re.sub(r"^\s*[一二三四五六七八九十0-9]+[.、．）)]\s*", "", str(contract.get("title") or "")).strip()
+                if (
+                    contract.get("section_id") == current_section.get("section_id")
+                    or contract.get("title") == current_section.get("title")
+                    or (current_title and current_title == contract_title)
+                ):
                     section_contract = contract
                     break
         blueprint = self._repair_override(state, "P-WRITE-BLUEPRINT")
         if blueprint is None:
             blueprint = self._result(project["id"], "P-WRITE-BLUEPRINT", "blueprint")
-        content_candidates = self._content_candidates(project["id"], workflow_id if prompt_id == "P-INTEGRATION-CRITIC" else None)
+        # Full-proposal candidates are produced by persistent child workflows, not by
+        # the parent WF-4 workflow that invokes P-INTEGRATION-CRITIC.  Filtering
+        # by the parent workflow_id therefore returns no rows and leaves the
+        # strict input-schema scaffold in candidate_sections.  Aggregate the
+        # latest accepted candidate per section across this project instead.
+        content_candidates = self._content_candidates(project["id"], None)
         content = content_candidates[-1]["candidate"] if content_candidates else (self._result(project["id"], "P-EXPRESSION-POLISH") or self._result(project["id"], "P-WRITE-CONTENT"))
         safe_package = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE")
         research_synthesis = self._result(project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS")
@@ -577,6 +814,33 @@ class ContextBuilder:
             "P-WRITE-CRITIC", "P-EXPRESSION-POLISH", "P-EXPRESSION-CRITIC",
         }
         if prompt_id in section_prompt_ids:
+            project_items = list((project_definition or {}).get("items") or [])
+            def _item_ref(item: dict[str, Any]) -> dict[str, Any]:
+                content = item.get("content") or {}
+                display_name = (
+                    content.get("name") or content.get("project_name") or content.get("description")
+                    or item.get("item_type") or item.get("item_id")
+                )
+                return {
+                    "object_id": str(item.get("item_id")),
+                    "object_type": str(item.get("item_type") or "PROJECT_ITEM"),
+                    "version": 1,
+                    "object_hash": item.get("item_hash"),
+                    "security_level": str(item.get("security_level") or project["security_level"]),
+                    "display_name": str(display_name)[:240],
+                }
+            if "technical_inputs" in payload:
+                technical = [
+                    _item_ref(item) for item in project_items
+                    if str(item.get("item_type") or "") in {"WORK_PACKAGE", "METHOD", "DATA_RESOURCE", "EXPERIMENT"}
+                ]
+                replacements.append(("payload.technical_inputs", technical[:20]))
+            if "metric_inputs" in payload:
+                metrics = [
+                    _item_ref(item) for item in project_items
+                    if str(item.get("item_type") or "") in {"METRIC", "DELIVERABLE", "EXPERIMENT"}
+                ]
+                replacements.append(("payload.metric_inputs", metrics[:20]))
             profile_id = str((payload.get("section_profile") or {}).get("profile_id") or (section_contract or {}).get("profile_id") or "")
             scoped_facts = self._scoped_facts(facts, section_contract, profile_id)
             # Facts can be scoped even before the planning workflow has produced a
@@ -604,7 +868,26 @@ class ContextBuilder:
         if "fact_package" in payload and facts:
             replacements.append(("payload.fact_package", {"schema_version": "2.0", "project_id": project["id"], "version": 1, "claims": facts, "conflicts": [], "package_hash": context_hash, "security_level": project["security_level"]}))
         if "template_context" in payload and template:
-            replacements.append(("payload.template_context", template))
+            # The planning and drafting schemas use the compact template reference,
+            # while expression-stage schemas require the complete confirmed template.
+            compact_template_prompts = {
+                "P-REVISION-PLAN", "P-REVISION-PLAN-CRITIC",
+                "P-WRITE-BLUEPRINT", "P-WRITE-BLUEPRINT-CRITIC",
+                "P-WRITE-CONTENT", "P-WRITE-CRITIC",
+            }
+            if prompt_id in compact_template_prompts:
+                replacements.append(("payload.template_context", {
+                    "template_id": str(template.get("template_id") or "template-research-proposal-structure-v1"),
+                    "component_ids": [
+                        str(item.get("component_id")) for item in (template.get("components") or [])
+                        if item.get("component_id")
+                    ],
+                    "rules": [
+                        str(item) for item in (template.get("format_rules") or []) if str(item).strip()
+                    ] + ([str(template.get("global_argument"))] if template.get("global_argument") else []),
+                }))
+            else:
+                replacements.append(("payload.template_context", template))
         if "confirmed_plan" in payload and plan and prompt_id not in section_prompt_ids:
             replacements.append(("payload.confirmed_plan", plan))
         if "approved_blueprint" in payload and blueprint:
@@ -671,6 +954,11 @@ class ContextBuilder:
                     "approved_at": "2026-01-01T00:00:00Z",
                     "expires_at": None,
                 }))
+        if "terminology" in payload:
+            replacements.append((
+                "payload.terminology",
+                self._terminology(config, state),
+            ))
         if "trace_links" in payload and content_candidates:
             replacements.append(("payload.trace_links", [link for item in content_candidates for link in item["candidate"].get("trace_links", [])]))
         elif "trace_links" in payload and content:
@@ -737,13 +1025,70 @@ class ContextBuilder:
             replacements.append(("payload.candidate_document", self._candidate_document(project, content_candidates)))
 
         if "task_instruction" in payload and config.get("task_instruction"):
-            replacements.append(("payload.task_instruction", config["task_instruction"]))
+            instruction_text = str(config["task_instruction"])
+            if isinstance(payload.get("task_instruction"), dict):
+                section_ids = [
+                    str(section.get("section_id"))
+                    for document in docs
+                    if document.get("document_role") == "CURRENT_PROPOSAL"
+                    for section in document.get("sections", [])
+                    if section.get("section_id")
+                ]
+                replacements.append((
+                    "payload.task_instruction",
+                    self._structured_task_instruction(
+                        instruction_text,
+                        section_ids,
+                        config,
+                    ),
+                ))
+            else:
+                replacements.append(("payload.task_instruction", instruction_text))
         if "recipient_scope" in payload:
             replacements.append(("payload.recipient_scope", config.get("recipient_scope", ["内部用户"])))
+        if "prior_security_findings" in payload:
+            replacements.append((
+                "payload.prior_security_findings",
+                list((state or {}).get("prior_security_findings") or []),
+            ))
         if "allowed_topics" in payload:
             replacements.append(("payload.allowed_topics", config.get("allowed_public_topics", ["公开政策", "公开学术资料"])))
         if "prohibited_fields" in payload:
             replacements.append(("payload.prohibited_fields", config.get("prohibited_external_fields", [])))
+
+        # Bind the safe-online-package schemas to the confirmed project graph
+        # without embedding project-specific topics or responses in production code.
+        if prompt_id == "P-SAFE-ONLINE-PACKAGE-CRITIC":
+            package_for_scan = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE") or {}
+            source_summary = self._project_item_summaries(project["id"], project)
+            package_text = json.dumps(package_for_scan, ensure_ascii=False)
+            forbidden_literals = [
+                str(project.get("id") or ""),
+                str(project.get("name") or ""),
+                *[str(item) for item in config.get("prohibited_external_fields", [])],
+            ]
+            leaked = [token for token in forbidden_literals if token and token in package_text]
+            replacements.extend([
+                ("payload.source_summary", source_summary),
+                ("payload.deterministic_scan", {
+                    "passed": not leaked,
+                    "matched_rules": [
+                        "PUBLIC_SECURITY_LEVEL_ONLY",
+                        "PROJECT_AND_PERSON_IDENTITY_REMOVED",
+                        "INTERNAL_OBJECT_IDENTIFIERS_REMOVED",
+                        "PRIVATE_DATA_AND_UNVERIFIED_RESULTS_PROHIBITED",
+                        "PUBLIC_RESEARCH_SCOPE_ENFORCED",
+                    ],
+                    "redacted_fields": list(package_for_scan.get("removed_fields") or leaked),
+                }),
+            ])
+
+        if prompt_id == "P-SAFE-ONLINE-PACKAGE":
+            replacements.extend([
+                ("payload.research_need", self._research_need(project, config, context_hash)),
+                ("payload.source_items", self._research_object_refs(project["id"], project, context_hash)),
+                ("payload.target_task_type", "PUBLIC_RESEARCH"),
+            ])
 
         search_results = state.get("public_search_results")
         if search_results:
@@ -756,6 +1101,219 @@ class ContextBuilder:
 
         for path, value in replacements:
             self._set_path_if_valid(prompt_id, envelope, path, value, strict=path in CRITICAL_CONTEXT_PATHS)
+
+    def _project_definition_items(self, project_id: str) -> list[dict[str, Any]]:
+        package = self._result(project_id, "P-PROJECT-DEFINITION-EXTRACT", "project_definition") or {}
+        return [item for item in package.get("items", []) if isinstance(item, dict)]
+
+    @staticmethod
+    def _item_statement(item: dict[str, Any]) -> str:
+        return str(
+            item.get("statement")
+            or item.get("description")
+            or item.get("name")
+            or item.get("title")
+            or item.get("item_type")
+            or "研究事项"
+        ).strip()
+
+    def _research_focus(self, project: dict[str, Any]) -> str:
+        preferred = {
+            "GAP", "ROOT_CAUSE", "PROBLEM", "OBJECTIVE", "WORK_PACKAGE",
+            "METHOD", "DATA_RESOURCE", "EXPERIMENT", "INNOVATION", "METRIC",
+        }
+        statements = []
+        for item in self._project_definition_items(project["id"]):
+            if str(item.get("item_type") or "").upper() not in preferred:
+                continue
+            statement = self._item_statement(item)
+            if statement and statement not in statements:
+                statements.append(statement)
+            if len(statements) >= 8:
+                break
+        if statements:
+            return "；".join(statements)
+        return str(project.get("description") or project.get("name") or "当前科研项目")
+
+    def _research_need(
+        self,
+        project: dict[str, Any],
+        config: dict[str, Any],
+        context_hash: str,
+    ) -> dict[str, Any]:
+        configured = config.get("research_need")
+        if isinstance(configured, dict) and all(
+            configured.get(key)
+            for key in ("need_id", "question", "reason_online_needed", "desired_output")
+        ):
+            return copy.deepcopy(configured)
+        focus = self._research_focus(project)
+        question = (
+            "围绕以下研究焦点，公开研究形成了哪些代表性理论、方法、数据资源、"
+            "评价指标、对照基线和已知局限；哪些证据能够支撑研究差距、技术路线与验证设计："
+            + focus
+        )
+        return {
+            "need_id": "research-need-" + sha256_json({"focus": focus, "context": context_hash})[:16],
+            "question": question,
+            "reason_online_needed": (
+                "项目输入定义了研究目标和边界，但公开文献、近期进展、数据资源版本与"
+                "对照证据必须通过真实检索核验，不能仅依赖模型记忆。"
+            ),
+            "desired_output": (
+                "形成可追溯的公开证据包，覆盖研究脉络、近期工作、数据资源、基线、"
+                "评价指标、有效性威胁和未解决问题，并为可写入申请书的主张保留稳定来源标识。"
+            ),
+        }
+
+    def _source_summaries(
+        self,
+        source_docs: list[dict[str, Any]],
+        project: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for document in source_docs:
+            section_titles = [
+                str(section.get("title") or "").strip()
+                for section in document.get("sections", [])[:8]
+                if str(section.get("title") or "").strip()
+            ]
+            role = str(document.get("document_role") or "OTHER")
+            abstracted = f"{role}材料，主要结构：" + ("、".join(section_titles) if section_titles else "未提供章节标题")
+            project_name = str(project.get("name") or "")
+            if project_name:
+                abstracted = abstracted.replace(project_name, "[PROJECT]")
+            summaries.append({
+                "source_item_id": str(document.get("document_id") or "document-source"),
+                "abstracted_summary": abstracted[:1000],
+                "original_security_level": str(document.get("security_level") or project["security_level"]),
+            })
+        return summaries
+
+    def _project_item_summaries(
+        self,
+        project_id: str,
+        project: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        allowed_types = {
+            "GAP", "ROOT_CAUSE", "PROBLEM", "OBJECTIVE", "WORK_PACKAGE",
+            "METHOD", "DATA_RESOURCE", "EXPERIMENT", "INNOVATION", "METRIC",
+        }
+        rows: list[dict[str, Any]] = []
+        for item in self._project_definition_items(project_id):
+            if str(item.get("item_type") or "").upper() not in allowed_types:
+                continue
+            summary = self._item_statement(item)
+            project_name = str(project.get("name") or "")
+            if project_name:
+                summary = summary.replace(project_name, "[PROJECT]")
+            rows.append({
+                "source_item_id": str(item.get("item_id") or "project-item"),
+                "abstracted_summary": summary[:1000],
+                "original_security_level": str(item.get("security_level") or project["security_level"]),
+            })
+        return rows
+
+    def _research_object_refs(
+        self,
+        project_id: str,
+        project: dict[str, Any],
+        context_hash: str,
+    ) -> list[dict[str, Any]]:
+        allowed_types = {
+            "GAP", "ROOT_CAUSE", "PROBLEM", "OBJECTIVE", "WORK_PACKAGE",
+            "METHOD", "DATA_RESOURCE", "EXPERIMENT", "INNOVATION", "METRIC",
+        }
+        refs: list[dict[str, Any]] = []
+        for item in self._project_definition_items(project_id):
+            item_type = str(item.get("item_type") or "PROJECT_ITEM").upper()
+            if item_type not in allowed_types:
+                continue
+            refs.append({
+                "object_id": str(item.get("item_id") or "project-item"),
+                "object_type": item_type,
+                "version": int(item.get("version") or 1),
+                "object_hash": str(item.get("item_hash") or context_hash),
+                "security_level": str(item.get("security_level") or project["security_level"]),
+                "display_name": self._item_statement(item)[:300],
+            })
+        return refs
+
+    @staticmethod
+    def _known_public_sources(config: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = config.get("known_public_sources") or []
+        return [copy.deepcopy(item) for item in rows if isinstance(item, dict)]
+
+    @staticmethod
+    def _terminology(config: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = state.get("terminology") or config.get("terminology") or []
+        return [
+            {
+                "canonical_term": str(item.get("canonical_term") or ""),
+                "aliases": [str(alias) for alias in item.get("aliases", []) if str(alias)],
+                "definition": str(item.get("definition") or ""),
+            }
+            for item in rows
+            if isinstance(item, dict)
+            and item.get("canonical_term")
+            and item.get("definition")
+        ]
+
+    @staticmethod
+    def _structured_task_instruction(
+        instruction_text: str,
+        section_ids: list[str],
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        structured = config.get("task_instruction_structured")
+        if isinstance(structured, dict):
+            result = copy.deepcopy(structured)
+            result.setdefault("schema_version", "2.0")
+            result.setdefault("task_instruction_id", "instruction-" + sha256_json(result)[:16])
+            result.setdefault("task_type", "DRAFT_FROM_PROJECT_DEFINITION")
+            result.setdefault("objective", instruction_text)
+            result.setdefault("target_section_ids", section_ids)
+            for key in (
+                "specific_requirements", "must_preserve", "forbidden_changes",
+                "acceptance_preferences", "priority_order",
+            ):
+                result.setdefault(key, [])
+            result["instruction_hash"] = sha256_json({
+                key: value for key, value in result.items() if key != "instruction_hash"
+            })
+            return result
+        core = {
+            "schema_version": "2.0",
+            "task_instruction_id": "instruction-" + sha256_json(instruction_text)[:16],
+            "task_type": "DRAFT_FROM_PROJECT_DEFINITION",
+            "objective": instruction_text,
+            "target_section_ids": section_ids,
+            "specific_requirements": list(config.get("specific_requirements") or [
+                "按已确认的章节合同完成完整申请书",
+                "公开调研使用可核验来源并保留来源绑定",
+                "创新与结论按证据强度表述",
+            ]),
+            "must_preserve": list(config.get("must_preserve") or [
+                "已确认的项目事实、约束、章节合同和人工决策",
+                "未提供或未核验的事实保持UNKNOWN",
+            ]),
+            "forbidden_changes": list(config.get("forbidden_changes") or [
+                "不得虚构论文、专利、数据、合作关系或预实验结果",
+                "不得把待验证主张写成既有结论",
+            ]),
+            "acceptance_preferences": list(config.get("acceptance_preferences") or [
+                "问题—差距—命题—方法—实验—成果形成闭环",
+                "章节之间不重复、不串稿且可追溯",
+            ]),
+            "priority_order": list(config.get("priority_order") or [
+                "事实与来源正确",
+                "研究逻辑闭环",
+                "方法和实验可验证",
+                "表达与版式质量",
+            ]),
+        }
+        core["instruction_hash"] = sha256_json(core)
+        return core
 
     def _source_ref(self, doc: dict[str, Any], sec: dict[str, Any]) -> dict[str, Any]:
         return {

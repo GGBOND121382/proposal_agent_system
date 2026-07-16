@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .generation_mode import CHECKPOINT_RESPONSE_REUSE, MODEL_GENERATED, GenerationMode
 from .llm import LLMResult, ModelGateway as BaseModelGateway, _extract_json
 from .runtime_evidence import ModelCallEvidenceStore
 from .runtime_policy import CapabilityPolicy
@@ -16,6 +17,8 @@ class RuntimeLLMResult(LLMResult):
     call_key: str = ""
     evidence: dict[str, Any] = field(default_factory=dict)
     reused_response: bool = False
+    generation_origin: str = MODEL_GENERATED
+    source_call_key: str | None = None
 
 
 class AuditedModelGateway(BaseModelGateway):
@@ -27,6 +30,7 @@ class AuditedModelGateway(BaseModelGateway):
         super().__init__(settings, pack)
         self.policy = CapabilityPolicy.from_environment()
         self.policy.assert_environment(settings.runtime_mode)
+        self.generation_mode = GenerationMode.from_environment()
         evidence_root = Path(
             os.getenv("MODEL_CALL_EVIDENCE_DIR", str(Path(settings.data_dir) / "model_calls"))
         ).resolve()
@@ -61,6 +65,10 @@ class AuditedModelGateway(BaseModelGateway):
         self.evidence_store.faults.hit("after_request_persist", call_key, prompt_id=prompt_id)
 
         if self.evidence_store.has_response(call_key):
+            if not self.generation_mode.allow_reuse:
+                raise RuntimeError(
+                    f"Fresh generation refused pre-existing response evidence: {call_key}"
+                )
             verified = self.evidence_store.load_verified_response(call_key)
             return RuntimeLLMResult(
                 output=verified.parsed_output,
@@ -70,6 +78,8 @@ class AuditedModelGateway(BaseModelGateway):
                 call_key=call_key,
                 evidence={**request_meta, **verified.metadata},
                 reused_response=True,
+                generation_origin=CHECKPOINT_RESPONSE_REUSE,
+                source_call_key=call_key,
             )
 
         self.evidence_store.faults.hit("before_model_request", call_key, prompt_id=prompt_id)
@@ -98,4 +108,6 @@ class AuditedModelGateway(BaseModelGateway):
             call_key=call_key,
             evidence={**request_meta, **response_meta},
             reused_response=False,
+            generation_origin=MODEL_GENERATED,
+            source_call_key=None,
         )

@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from .executor import PromptExecutionError, PromptExecutor as BasePromptExecutor
+from .generation_mode import (
+    COMMITTED_RESULT_REUSE,
+    MODEL_GENERATED,
+    GenerationMode,
+)
 from .llm import LLMError
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
 from .runtime_evidence import EvidenceIntegrityError, InjectedFailure, ModelCallEvidenceStore
@@ -36,6 +41,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         runtime_mode = str(getattr(getattr(gateway, "settings", None), "runtime_mode", os.getenv("MODEL_RUNTIME_MODE", "REPLAY"))).upper()
         self.policy.assert_environment(runtime_mode)
         self.runtime_mode = runtime_mode
+        self.generation_mode = GenerationMode.from_environment()
         store = getattr(gateway, "evidence_store", None)
         if store is None:
             root = Path(os.getenv("MODEL_CALL_EVIDENCE_DIR", "data/model_calls")).resolve()
@@ -46,35 +52,111 @@ class RuntimePromptExecutor(BasePromptExecutor):
         self,
         *,
         prompt_id: str,
+        prompt_version: str,
         project_id: str,
         workflow_id: str | None,
         input_hash: str,
+        model_id: str,
+        endpoint_id: str,
+        provider_model_name: str,
         requested_call_key: str | None,
     ) -> str:
         if requested_call_key:
             return requested_call_key
-        if workflow_id:
-            return "call-" + sha256_json(
-                {
-                    "workflow_id": workflow_id,
-                    "prompt_id": prompt_id,
-                    "input_hash": input_hash,
-                }
-            )[:32]
-        return new_id("call")
+        return "call-" + sha256_json(
+            {
+                "project_id": project_id,
+                "workflow_id": workflow_id,
+                "prompt_id": prompt_id,
+                "prompt_version": prompt_version,
+                "input_hash": input_hash,
+                "model_id": model_id,
+                "endpoint_id": endpoint_id,
+                "provider_model_name": provider_model_name,
+            }
+        )[:32]
 
-    def _committed_result(self, call_key: str) -> dict[str, Any] | None:
+    def _committed_result(
+        self,
+        call_key: str,
+        *,
+        project_id: str,
+        workflow_id: str | None,
+        prompt_id: str,
+        prompt_version: str,
+        input_hash: str,
+        model_id: str,
+        endpoint_id: str,
+        provider_model_name: str,
+    ) -> dict[str, Any] | None:
         event = self.db.fetchone(
             "SELECT metadata_json FROM audit_events WHERE event_type='MODEL_CALL_COMMITTED' AND object_id=? ORDER BY id DESC LIMIT 1",
             (call_key,),
         )
         if not event:
             return None
+        if not self.generation_mode.allow_reuse:
+            raise EvidenceIntegrityError(
+                f"Fresh generation refused committed result reuse: {call_key}"
+            )
         metadata = json.loads(event["metadata_json"])
         run = self.db.fetchone("SELECT * FROM prompt_runs WHERE id=?", (metadata.get("run_id"),))
         if not run or not run.get("output_json"):
             raise EvidenceIntegrityError(f"Committed call {call_key} has no matching prompt run")
+        try:
+            committed_input = json.loads(run.get("input_json") or "{}")
+        except json.JSONDecodeError as exc:
+            raise EvidenceIntegrityError(f"Committed call {call_key} has invalid input JSON") from exc
+        expected = {
+            "project_id": project_id,
+            "workflow_id": workflow_id,
+            "prompt_id": prompt_id,
+            "prompt_version": prompt_version,
+            "input_hash": input_hash,
+            "model_id": model_id,
+            "endpoint_id": endpoint_id,
+            "provider_model_name": provider_model_name,
+        }
+        actual = {
+            "project_id": run.get("project_id"),
+            "workflow_id": run.get("workflow_id"),
+            "prompt_id": run.get("prompt_id"),
+            # Older prompt envelopes may omit prompt_version. Treat an omitted
+            # version and the canonical empty version as the same identity; a
+            # non-empty version still participates in the exact reuse key.
+            "prompt_version": str(
+                committed_input.get("prompt_version")
+                or metadata.get("prompt_version")
+                or ""
+            ),
+            "input_hash": run.get("input_hash"),
+            # Compare the configured request route, not a provider-reported
+            # response model alias.  Both are retained in the trace.
+            "model_id": metadata.get("route_model_id") or metadata.get("model_id") or run.get("model_id"),
+            "endpoint_id": metadata.get("route_endpoint_id") or metadata.get("endpoint_id") or run.get("endpoint_id"),
+            # Legacy commits predate this field; their deterministic call key
+            # already included the provider model name. New commits persist it.
+            "provider_model_name": metadata.get("provider_model_name") or provider_model_name,
+        }
+        if actual != expected:
+            raise EvidenceIntegrityError(
+                f"Committed result identity mismatch for {call_key}: expected={expected}, actual={actual}"
+            )
         output = json.loads(run["output_json"])
+        self.db.audit(
+            "MODEL_CALL_REUSED_FROM_CHECKPOINT",
+            project_id=project_id,
+            object_id=call_key,
+            metadata={
+                "source_run_id": run["id"],
+                "workflow_id": workflow_id,
+                "prompt_id": prompt_id,
+                "input_hash": input_hash,
+                "model_id": model_id,
+                "endpoint_id": endpoint_id,
+                "provider_model_name": provider_model_name,
+            },
+        )
         return {
             "run_id": run["id"],
             "prompt_id": run["prompt_id"],
@@ -87,6 +169,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "output": output,
             "call_key": call_key,
             "reused_committed_result": True,
+            "generation_origin": COMMITTED_RESULT_REUSE,
+            "source_run_id": run["id"],
         }
 
     async def execute(
@@ -103,16 +187,6 @@ class RuntimePromptExecutor(BasePromptExecutor):
         quality_context_envelope = envelope
         model_envelope, input_compaction = self._prepare_model_envelope(prompt_id, envelope)
         input_hash = sha256_json(model_envelope)
-        call_key = self._call_key(
-            prompt_id=prompt_id,
-            project_id=project_id,
-            workflow_id=workflow_id,
-            input_hash=input_hash,
-            requested_call_key=call_key,
-        )
-        committed = self._committed_result(call_key)
-        if committed:
-            return committed
         if self.policy.enabled and not LIVE_ENVELOPE_REGISTRY.contains_hash(sha256_json(envelope)):
             raise PromptExecutionError(
                 "Capability acceptance rejected an unattested input envelope. "
@@ -121,6 +195,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
 
         run_id = new_id("run")
         route = None
+        resolved_call_key = call_key or new_id("call-pending")
         system_prompt = None
         output_schema: dict[str, Any] | None = None
         raw_response_text: str | None = None
@@ -136,11 +211,36 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 if compact_errors:
                     raise PromptExecutionError("Compacted model input schema validation failed", validation_errors=compact_errors)
             route = self.router.route(prompt_id, model_envelope, original_environment=original_environment)
+            output_schema = self.pack.inlined_schema(prompt_id, "output")
+            system_prompt = self._system_prompt(prompt_id, output_schema)
+            prompt_version = str(model_envelope.get("prompt_version") or self.pack.entry(prompt_id).get("version") or "")
+            resolved_call_key = self._call_key(
+                prompt_id=prompt_id,
+                prompt_version=prompt_version,
+                project_id=project_id,
+                workflow_id=workflow_id,
+                input_hash=input_hash,
+                model_id=route.model_id,
+                endpoint_id=route.endpoint_id,
+                provider_model_name=str(route.provider_model_name or ""),
+                requested_call_key=call_key,
+            )
+            committed = self._committed_result(
+                resolved_call_key,
+                project_id=project_id,
+                workflow_id=workflow_id,
+                prompt_id=prompt_id,
+                prompt_version=prompt_version,
+                input_hash=input_hash,
+                model_id=route.model_id,
+                endpoint_id=route.endpoint_id,
+                provider_model_name=str(route.provider_model_name or ""),
+            )
+            if committed:
+                return committed
             project_config = load_project_config(self.db, project_id)
             if route.environment == "ONLINE_PUBLIC":
                 assert_online_payload_safe(model_envelope, project_config)
-            output_schema = self.pack.inlined_schema(prompt_id, "output")
-            system_prompt = self._system_prompt(prompt_id, output_schema)
             if getattr(self.gateway, "supports_runtime_evidence", False):
                 result = await self.gateway.invoke(
                     route,
@@ -148,7 +248,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     system_prompt,
                     model_envelope,
                     output_schema,
-                    call_key=call_key,
+                    call_key=resolved_call_key,
                 )
             else:
                 result = await self.gateway.invoke(route, prompt_id, system_prompt, model_envelope, output_schema)
@@ -176,16 +276,19 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 raise PromptExecutionError("Output schema validation failed", validation_errors=output_errors)
             status = consumed_output.get("status", "ERROR")
             duration_ms = int((time.perf_counter() - started) * 1000)
-            self.evidence_store.faults.hit("before_db_transaction", call_key, prompt_id=prompt_id)
+            self.evidence_store.faults.hit("before_db_transaction", resolved_call_key, prompt_id=prompt_id)
             self._commit_success(
                 run_id=run_id,
-                call_key=call_key,
+                call_key=resolved_call_key,
                 project_id=project_id,
                 workflow_id=workflow_id,
                 prompt_id=prompt_id,
                 status=status,
                 model_id=result.model_id,
                 endpoint_id=result.endpoint_id,
+                route_model_id=route.model_id,
+                route_endpoint_id=route.endpoint_id,
+                provider_model_name=str(route.provider_model_name or ""),
                 input_hash=input_hash,
                 model_envelope=model_envelope,
                 consumed_output=consumed_output,
@@ -198,14 +301,16 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
                 evidence=getattr(result, "evidence", {}),
+                generation_origin=getattr(result, "generation_origin", MODEL_GENERATED),
+                source_call_key=getattr(result, "source_call_key", None),
             )
-            self.evidence_store.faults.hit("after_db_transaction", call_key, prompt_id=prompt_id)
+            self.evidence_store.faults.hit("after_db_transaction", resolved_call_key, prompt_id=prompt_id)
             if prompt_id.endswith("CRITIC"):
-                self.evidence_store.faults.hit("after_critic_commit", call_key, prompt_id=prompt_id)
+                self.evidence_store.faults.hit("after_critic_commit", resolved_call_key, prompt_id=prompt_id)
             if (model_envelope.get("payload") or {}).get("revision_findings"):
-                self.evidence_store.faults.hit("after_repair_commit", call_key, prompt_id=prompt_id)
+                self.evidence_store.faults.hit("after_repair_commit", resolved_call_key, prompt_id=prompt_id)
             self.evidence_store.mark_committed(
-                call_key,
+                resolved_call_key,
                 {
                     "run_id": run_id,
                     "prompt_id": prompt_id,
@@ -213,6 +318,13 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     "workflow_id": workflow_id,
                     "input_sha256": input_hash,
                     "output_sha256": sha256_json(consumed_output),
+                    "prompt_version": prompt_version,
+                    "model_id": result.model_id,
+                    "endpoint_id": result.endpoint_id,
+                    "route_model_id": route.model_id,
+                    "route_endpoint_id": route.endpoint_id,
+                    "provider_model_name": str(route.provider_model_name or ""),
+                    "generation_origin": getattr(result, "generation_origin", MODEL_GENERATED),
                 },
             )
             return {
@@ -223,10 +335,15 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     "environment": route.environment,
                     "model_id": result.model_id,
                     "endpoint_id": result.endpoint_id,
+                    "configured_model_id": route.model_id,
+                    "configured_endpoint_id": route.endpoint_id,
+                    "provider_model_name": str(route.provider_model_name or ""),
                 },
                 "output": consumed_output,
-                "call_key": call_key,
+                "call_key": resolved_call_key,
                 "reused_committed_result": False,
+                "generation_origin": getattr(result, "generation_origin", MODEL_GENERATED),
+                "source_call_key": getattr(result, "source_call_key", None),
             }
         except InjectedFailure as exc:
             raise RecoverablePromptExecutionError(str(exc)) from exc
@@ -236,12 +353,15 @@ class RuntimePromptExecutor(BasePromptExecutor):
             error = str(exc) + ((" | " + "; ".join(details[:20])) if details else "")
             self._commit_error(
                 run_id=run_id,
-                call_key=call_key,
+                call_key=resolved_call_key,
                 project_id=project_id,
                 workflow_id=workflow_id,
                 prompt_id=prompt_id,
                 model_id=getattr(result, "model_id", None) or (route.model_id if route else None),
                 endpoint_id=getattr(result, "endpoint_id", None) or (route.endpoint_id if route else None),
+                route_model_id=route.model_id if route else None,
+                route_endpoint_id=route.endpoint_id if route else None,
+                provider_model_name=str(route.provider_model_name or "") if route else None,
                 input_hash=input_hash,
                 model_envelope=model_envelope,
                 provider_output=provider_output,
@@ -254,6 +374,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
                 evidence=getattr(result, "evidence", {}) if result else {},
+                generation_origin=getattr(result, "generation_origin", None) if result else None,
+                source_call_key=getattr(result, "source_call_key", None) if result else None,
             )
             raise PromptExecutionError(error, validation_errors=details) from exc
 
@@ -273,6 +395,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "environment": kwargs.get("environment"),
             "model_id": kwargs.get("model_id"),
             "endpoint_id": kwargs.get("endpoint_id"),
+            "configured_model_id": kwargs.get("route_model_id"),
+            "configured_endpoint_id": kwargs.get("route_endpoint_id"),
+            "provider_model_name": kwargs.get("provider_model_name"),
             "system_prompt": kwargs.get("system_prompt"),
             "input_envelope": kwargs["model_envelope"],
             "quality_context_envelope": kwargs.get("quality_context_envelope"),
@@ -290,6 +415,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "original_response_immutable": True,
             "capability_acceptance_mode": self.policy.enabled,
             "model_call_evidence": kwargs.get("evidence") or {},
+            "generation_mode": self.generation_mode.value,
+            "generation_origin": kwargs.get("generation_origin") or MODEL_GENERATED,
+            "source_call_key": kwargs.get("source_call_key"),
         }
 
     def _commit_success(self, **kwargs: Any) -> None:
@@ -335,6 +463,15 @@ class RuntimePromptExecutor(BasePromptExecutor):
                             "run_id": kwargs["run_id"], "prompt_id": kwargs["prompt_id"], "workflow_id": kwargs["workflow_id"],
                             "environment": kwargs.get("environment"), "input_hash": kwargs["input_hash"],
                             "output_hash": sha256_json(kwargs["consumed_output"]),
+                            "model_id": kwargs.get("model_id"),
+                            "endpoint_id": kwargs.get("endpoint_id"),
+                            "route_model_id": kwargs.get("route_model_id"),
+                            "route_endpoint_id": kwargs.get("route_endpoint_id"),
+                            "provider_model_name": kwargs.get("provider_model_name"),
+                            "prompt_version": (kwargs.get("model_envelope") or {}).get("prompt_version"),
+                            "generation_mode": self.generation_mode.value,
+                            "generation_origin": kwargs.get("generation_origin") or MODEL_GENERATED,
+                            "source_call_key": kwargs.get("source_call_key"),
                         },
                         ensure_ascii=False,
                     ),

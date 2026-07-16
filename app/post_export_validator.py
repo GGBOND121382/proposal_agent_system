@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +119,11 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         actual_normalized = self._normalize(actual_text)
         missing_units: list[dict[str, str]] = []
         for unit in expected["units"]:
+            # Formula directives are rendered as native OMML equations. python-docx
+            # intentionally excludes OMML tokens from paragraph.text, so formula
+            # preservation is checked structurally by formula_count below.
+            if unit.get("kind") == "FORMULA":
+                continue
             normalized = self._normalize(unit["text"])
             if len(normalized) >= 4 and normalized not in actual_normalized:
                 missing_units.append(unit)
@@ -133,6 +140,21 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
                     target_type="DOCX_RENDER",
                     responsible_section_ids=affected,
                     evidence={"missing_units": missing_units[:20]},
+                )
+            )
+
+        actual_formulas = len(document.element.xpath(".//m:oMathPara"))
+        if actual_formulas != expected["formula_count"]:
+            findings.append(
+                self._finding(
+                    "D5_FORMULA_COUNT_MISMATCH",
+                    "P0",
+                    f"公式数量与已审查指令不一致：期望 {expected['formula_count']}，实际 {actual_formulas}。",
+                    location="DOCX formulas",
+                    blocking=True,
+                    category="FORMAT",
+                    target_type="DOCX_RENDER",
+                    evidence={"expected": expected["formula_count"], "actual": actual_formulas},
                 )
             )
 
@@ -167,9 +189,18 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
 
         pdf_text = self._pdf_text(pdf_path)
         pdf_normalized = self._normalize(pdf_text)
+        # PDF text extractors linearize tables column-by-column or interleave cells,
+        # so an individual DOCX cell is not guaranteed to survive as one contiguous
+        # text unit even when the rendered table is complete. Table preservation is
+        # verified independently by DOCX table structure/count and page visual QA.
+        # Keep PDF text-layer parity for prose-like units only.
+        pdf_parity_units = [
+            unit for unit in expected["units"]
+            if unit.get("kind") not in {"TABLE_CELL", "FORMULA"}
+        ]
         pdf_missing = [
             unit
-            for unit in expected["units"]
+            for unit in pdf_parity_units
             if len(self._normalize(unit["text"])) >= 4
             and not self._fuzzy_unit_present(self._normalize(unit["text"]), pdf_normalized)
         ]
@@ -283,6 +314,7 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         units: list[dict[str, str]] = []
         figure_count = 0
         table_count = 0
+        formula_count = 0
         for candidate in candidates:
             section_id = str(candidate.get("section_id") or "")
             for block in candidate.get("paragraphs") or []:
@@ -320,11 +352,21 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
                 ):
                     if text.startswith(marker):
                         text = text.removeprefix(marker).strip()
-                        units.append({"section_id": section_id, "kind": kind, "text": text})
+                        if kind == "FORMULA":
+                            formula_count += 1
+                        unit = {"section_id": section_id, "kind": kind, "text": text}
+                        if kind == "HEADING" and units and units[-1] == unit:
+                            break
+                        units.append(unit)
                         break
                 else:
                     units.append({"section_id": section_id, "kind": "PARAGRAPH", "text": text})
-        return {"units": units, "figure_count": figure_count, "table_count": table_count}
+        return {
+            "units": units,
+            "figure_count": figure_count,
+            "table_count": table_count,
+            "formula_count": formula_count,
+        }
 
     @staticmethod
     def _fuzzy_unit_present(unit: str, document: str) -> bool:
@@ -350,6 +392,18 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
 
     @staticmethod
     def _pdf_text(pdf_path: Path) -> str:
+        # Poppler preserves the logical Chinese text layer produced by LibreOffice
+        # more reliably than pypdf for CID/subset fonts.  pypdf may visually split
+        # or reorder glyphs and create false content-loss findings even though the
+        # rendered PDF and Poppler text are complete.
+        pdftotext = shutil.which("pdftotext")
+        if pdftotext:
+            completed = subprocess.run(
+                [pdftotext, "-layout", str(pdf_path), "-"],
+                check=True,
+                capture_output=True,
+            )
+            return completed.stdout.decode("utf-8", errors="replace")
         reader = PdfReader(str(pdf_path))
         return "\n".join((page.extract_text() or "") for page in reader.pages)
 

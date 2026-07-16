@@ -106,20 +106,36 @@ class PostExportAcceptanceManager:
         project_id: str,
         *,
         workflow_id: str | None = None,
+        approval_workflow_id: str | None = None,
         engineering_repair_id: str | None = None,
         expected_candidate_set_hash: str | None = None,
         reuse_verified: bool = True,
     ) -> dict[str, Any]:
+        if not workflow_id:
+            raise PostExportAcceptanceError(
+                "workflow_id must identify the frozen PASS WF-4 candidate set"
+            )
+        approval_workflow_id = approval_workflow_id or self._approval_workflow_for_source(
+            project_id, workflow_id
+        )
+        if not approval_workflow_id:
+            raise PostExportAcceptanceError(
+                f"No completed WF-5 approval workflow is bound to WF-4 {workflow_id}"
+            )
         if reuse_verified and not engineering_repair_id:
-            reused = self._reusable_pass(project_id)
+            reused = self._reusable_pass(project_id, workflow_id)
             if reused:
                 return {**reused, "reused_after_restart": True}
 
+        # Bind every export/validation read to the exact WF-4 snapshot supplied by
+        # the caller; multiple recoverable attempts may coexist in the same project.
+        self.exporter.review_workflow_id = workflow_id
+        self.exporter.approval_workflow_id = approval_workflow_id
         snapshot = self.exporter.candidate_snapshot(project_id)
         if not snapshot["sections"]:
             raise PostExportAcceptanceError("No final Expression-Critic-approved candidates are available")
         integration_review = self._integration_review_snapshot(project_id, workflow_id, snapshot)
-        previous_attempt = self.latest_attempt(project_id)
+        previous_attempt = self.latest_attempt(project_id, workflow_id)
         if (
             not engineering_repair_id
             and previous_attempt
@@ -131,7 +147,7 @@ class PostExportAcceptanceManager:
                 "A post-export content finding requires a new reviewed candidate set before re-export"
             )
 
-        prior_blockers = self.quality_manager.open_blockers(project_id)
+        prior_blockers = self.quality_manager.open_blockers(project_id, workflow_id=workflow_id)
         if engineering_repair_id:
             if not expected_candidate_set_hash:
                 previous = self.latest_attempt(project_id)
@@ -196,7 +212,7 @@ class PostExportAcceptanceManager:
                 )
                 verified_engineering.append(finding_id)
 
-        open_blockers = self.quality_manager.open_blockers(project_id)
+        open_blockers = self.quality_manager.open_blockers(project_id, workflow_id=workflow_id)
         owner_counts: dict[str, int] = {}
         for item in open_blockers:
             owner = str((item.get("responsibility") or {}).get("owner") or "UNROUTED")
@@ -220,6 +236,7 @@ class PostExportAcceptanceManager:
             "attempt_id": new_id("post-export"),
             "project_id": project_id,
             "workflow_id": workflow_id,
+            "approval_workflow_id": approval_workflow_id,
             "created_at": utc_now(),
             "status": status,
             "candidate_snapshot": snapshot,
@@ -343,21 +360,60 @@ class PostExportAcceptanceManager:
             "section_manifest_hash": sha256_json(expected),
         }
 
-    def latest_attempt(self, project_id: str) -> dict[str, Any] | None:
-        row = self.db.fetchone(
-            """SELECT content_json FROM artifacts
-               WHERE project_id=? AND artifact_type=?
-               ORDER BY version DESC, created_at DESC LIMIT 1""",
-            (project_id, self.artifact_type),
+    def _approval_workflow_for_source(
+        self,
+        project_id: str,
+        source_workflow_id: str,
+    ) -> str | None:
+        rows = self.db.fetchall(
+            "SELECT id,state_json,status FROM workflows "
+            "WHERE project_id=? AND workflow_type='WF-5_SECURITY_REVIEW_AND_EXPORT' "
+            "AND status='COMPLETED' ORDER BY updated_at DESC,id DESC",
+            (project_id,),
         )
+        for row in rows:
+            try:
+                state = json.loads(row.get("state_json") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if str(state.get("source_workflow_id") or "") != source_workflow_id:
+                continue
+            if not state.get("source_candidate_set_hash"):
+                continue
+            return str(row["id"])
+        return None
+
+    def latest_attempt(
+        self,
+        project_id: str,
+        workflow_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if workflow_id:
+            row = self.db.fetchone(
+                """SELECT content_json FROM artifacts
+                   WHERE project_id=? AND workflow_id=? AND artifact_type=?
+                   ORDER BY version DESC, created_at DESC LIMIT 1""",
+                (project_id, workflow_id, self.artifact_type),
+            )
+        else:
+            row = self.db.fetchone(
+                """SELECT content_json FROM artifacts
+                   WHERE project_id=? AND artifact_type=?
+                   ORDER BY version DESC, created_at DESC LIMIT 1""",
+                (project_id, self.artifact_type),
+            )
         return json.loads(row["content_json"]) if row else None
 
-    def _reusable_pass(self, project_id: str) -> dict[str, Any] | None:
+    def _reusable_pass(
+        self,
+        project_id: str,
+        workflow_id: str,
+    ) -> dict[str, Any] | None:
         row = self.db.fetchone(
             """SELECT content_json FROM artifacts
-               WHERE project_id=? AND artifact_type=? AND status='PASS'
+               WHERE project_id=? AND workflow_id=? AND artifact_type=? AND status='PASS'
                ORDER BY version DESC, created_at DESC LIMIT 1""",
-            (project_id, self.artifact_type),
+            (project_id, workflow_id, self.artifact_type),
         )
         if not row:
             return None
@@ -373,7 +429,7 @@ class PostExportAcceptanceManager:
             self._verify_file_record(item) for item in record["screenshots"]
         ):
             return None
-        if self.quality_manager.open_blockers(project_id):
+        if self.quality_manager.open_blockers(project_id, workflow_id=workflow_id):
             return None
         return record
 
