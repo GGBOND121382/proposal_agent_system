@@ -1,0 +1,92 @@
++        children = state.setdefault("full_proposal_children", {})
++        group_id = str(group["group_id"])
++        existing = children.get(group_id)
++        if existing:
++            return existing
++
++        child_id = new_id("wf-group")
++        now = utc_now()
++        parent_options = copy.deepcopy(state.get("options") or {})
++        parent_options.update({
++            "full_proposal_concurrent": False,
++            "integration_scope": "FULL_PROPOSAL_GROUP_CHILD",
++            "concurrent_group_child": True,
++            "suppress_candidate_gate": True,
++            "target_section_ids": list(group.get("section_ids") or []),
++            "target_section_titles": [],
++        })
++        child_state = {
++            "workflow_type": "WF-4_PROPOSAL_AUTHORING",
++            "options": parent_options,
++            "step_results": {},
++            "repair_attempts": {},
++            "repair_overrides": {},
++            "section_results": [],
++            "section_progress": {},
++            "public_search_results": state.get("public_search_results"),
++            "original_environment": state.get("original_environment"),
++            "parent_workflow_id": wf["id"],
++            "quality_parent_workflow_id": wf["id"],
++            "full_proposal_group_id": group_id,
++            "full_proposal_group_title": group.get("title"),
++            "full_proposal_contract_hash": (state.get("full_proposal_contract") or {}).get("contract_hash"),
++        }
++        self.db.execute(
++            "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
++            (
++                child_id,
++                wf["project_id"],
++                "WF-4_PROPOSAL_AUTHORING",
++                "RUNNING",
++                5,
++                json.dumps(child_state, ensure_ascii=False),
++                now,
++                now,
++            ),
++        )
++        record = {
++            "group_id": group_id,
++            "title": group.get("title"),
++            "workflow_id": child_id,
++            "section_ids": list(group.get("section_ids") or []),
++            "status": "RUNNING",
++            "created_at": now,
++        }
++        children[group_id] = record
++        self.db.audit(
++            "FULL_PROPOSAL_GROUP_STARTED",
++            project_id=wf["project_id"],
++            object_id=child_id,
++            metadata={"parent_workflow_id": wf["id"], "group_id": group_id, "section_ids": record["section_ids"]},
++        )
++        self._update(wf, state=state)
++        return record
++
++    def _reset_full_proposal_child_for_repair(
++        self,
++        child: dict[str, Any],
++        parent_state: dict[str, Any],
++        parent_workflow_id: str,
++        affected: set[str],
++    ) -> None:
++        child_state = child["state"]
++        group_ids = {str(x) for x in (child_state.get("options") or {}).get("target_section_ids", [])}
++        responsible = sorted(group_ids & affected)
++        if not responsible:
++            return
++        child_state["section_results"] = [
++            item for item in child_state.get("section_results", [])
++            if str(item.get("section_id")) not in set(responsible)
++        ]
++        progress = child_state.setdefault("section_progress", {})
++        overrides = child_state.setdefault("repair_overrides", {})
++        for section_id in responsible:
++            progress.pop(section_id, None)
++            for key in list(overrides):
++                if key.startswith(f"section:{section_id}:"):
++                    overrides.pop(key, None)
++        child_state["integration_repair_section_ids"] = responsible
++        child_state["integration_repair_findings"] = copy.deepcopy(parent_state.get("integration_repair_findings") or [])
++        child_state["quality_parent_workflow_id"] = parent_workflow_id
++        child["current_step"] = 5
++        child["status"] = "RUNNING"
