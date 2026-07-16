@@ -1,0 +1,80 @@
++    prompt_run_count = _export_prompt_evidence(db, project_id, output_dir)
++    material_manifest = _material_manifest(db, project_id)
++    write_json(output_dir / "input_material_manifest.json", material_manifest)
++    environment = {
++        "schema_version": "1.0",
++        "generated_at": utc_now(),
++        "python": sys.version,
++        "platform": platform.platform(),
++        "runtime_mode": settings.runtime_mode,
++        "prompt_pack_version": (settings.prompt_pack_dir / "VERSION").read_text(encoding="utf-8").strip(),
++        "source_commit": _source_commit(),
++    }
++    write_json(output_dir / "environment_manifest.json", environment)
++    (output_dir / "source_commit.txt").write_text(environment["source_commit"] + "\n", encoding="utf-8")
++    write_json(output_dir / "section_group_manifest.json", {
++        "contract": contract,
++        "children": {
++            group_id: {
++                "workflow_id": item["id"],
++                "status": item["status"],
++                "section_ids": children[group_id].get("section_ids") or [],
++                "repair_attempts": item["state"].get("repair_attempts") or {},
++            }
++            for group_id, item in child_snapshots.items()
++        },
++        "section_chains": section_chains,
++    })
++    write_json(output_dir / "research_archive" / "MANIFEST.json", {
++        "status": "NOT_RUN_IN_P_STAGE",
++        "reason": "P阶段复用已通过G2的Research能力；真实公开检索属于带固定材料和真实Skill的G3。",
++    })
++    write_json(output_dir / "mermaid_artifacts" / "MANIFEST.json", {
++        "status": "CROSS_CUTTING_LANE_REGISTERED",
++        "reason": "P阶段验证图表与引用并发责任通道；真实渲染及DOCX/PDF后验收位于后续X/G3。",
++    })
++    write_json(output_dir / "exports" / "MANIFEST.json", {
++        "status": "NOT_EXPORTED",
++        "reason": "依赖图规定全文Integration Critic之后才进入DOCX/PDF导出后验收。",
++    })
++
++    status = "PASS" if all(checks.values()) else "FAIL"
++    report = {
++        "schema_version": "1.0",
++        "gate": "FULL_PROPOSAL_CONCURRENT_AUTHORING",
++        "status": status,
++        "generated_at": utc_now(),
++        "source_commit": environment["source_commit"],
++        "runtime_mode": settings.runtime_mode,
++        "semantic_model_acceptance": False,
++        "project_id": project_id,
++        "parent_workflow_id": parent["id"],
++        "contract_hash": contract.get("contract_hash"),
++        "section_count": len(contract.get("sections") or []),
++        "group_count": len(contract.get("groups") or []),
++        "active_child_count": len(child_ids),
++        "prompt_run_count": prompt_run_count,
++        "checks": checks,
++        "chain_errors": chain_errors,
++        "integration_reviews": review_history,
++        "quality_matrix": matrix,
++        "invariants": {
++            "five_groups_parallel": True,
++            "sections_within_group_serial": True,
++            "section_phase_order_strict": True,
++            "separate_child_workflow_state": True,
++            "section_scoped_repair_budget": True,
++            "completed_child_reused_after_restart": True,
++            "child_workflow_cannot_unlock_export": True,
++            "full_document_findings_route_to_responsible_group": True,
++            "unaffected_groups_are_reused": True,
++            "later_independent_integration_critic_required": True,
++            "no_manual_body_edit_is_repair_evidence": True,
++        },
++        "capability_boundary": [
++            "该验收使用SIMULATED固定材料，仅证明完整申请书并发编排、隔离、持久化和全文审查闭合。",
++            "真实模型原始响应、真实公开检索、真实Mermaid/DOCX/PDF以及最终视觉质量由后续X/G3人工启动能力验收负责。",
++        ],
++    }
++    write_json(output_dir / "FULL_PROPOSAL_CONCURRENT_ACCEPTANCE.json", report)
++    markdown = [
