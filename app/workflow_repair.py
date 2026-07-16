@@ -82,7 +82,16 @@ class WorkflowRepairMixin:
         if not findings:
             return None
         result_key = PRODUCER_RESULT_KEY.get(producer)
-        original = self.context_builder._result(wf["project_id"], producer, result_key)
+        if hasattr(self.context_builder, "_section_prompt_result"):
+            original = self.context_builder._section_prompt_result(
+                wf["project_id"],
+                producer,
+                workflow_id=wf.get("id"),
+                section_id=str(state.get("active_section_id") or "") or None,
+                key=result_key,
+            )
+        else:
+            original = self.context_builder._result(wf["project_id"], producer, result_key)
         if original is None:
             return None
 
@@ -147,7 +156,7 @@ class WorkflowRepairMixin:
             return None
         self.quality_manager.record_targeted_repair(
             project_id=wf["project_id"],
-            workflow_id=wf["id"],
+            workflow_id=str(state.get("quality_parent_workflow_id") or wf["id"]),
             repair_run_id=repaired["run_id"],
             finding_codes=[str(item.get("code")) for item in findings if item.get("code")],
             workflow_state=state,
