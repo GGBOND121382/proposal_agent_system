@@ -1,0 +1,118 @@
++        f"- 源提交：`{report['source_commit']}`",
++        f"- 父工作流：`{parent['id']}`",
++        f"- Section Contract：`{contract.get('contract_hash')}`",
++        f"- 章节数：`{report['section_count']}`",
++        f"- 并发组数：`{report['group_count']}`",
++        f"- 独立子工作流数：`{report['active_child_count']}`",
++        f"- Prompt Run 数：`{prompt_run_count}`",
++        "",
++        "## 检查结果",
++        "",
++        *[f"- `{name}`：{'PASS' if passed else 'FAIL'}" for name, passed in checks.items()],
++        "",
++        "## 能力边界",
++        "",
++        *[f"- {item}" for item in report["capability_boundary"]],
++        "",
++    ]
++    (output_dir / "acceptance_report.md").write_text("\n".join(markdown), encoding="utf-8")
++    return report
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description="Run full-proposal five-group concurrent authoring acceptance.")
++    parser.add_argument(
++        "--output-dir",
++        type=Path,
++        default=ROOT / "recovery_evidence" / "full_proposal" / "local",
++    )
++    args = parser.parse_args()
++    output_dir = args.output_dir.resolve()
++    output_dir.mkdir(parents=True, exist_ok=True)
++    report = asyncio.run(_run_acceptance(output_dir))
++    print(json.dumps(report, ensure_ascii=False, indent=2))
++    return 0 if report["status"] == "PASS" else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/test_full_proposal_concurrent.py b/tests/test_full_proposal_concurrent.py
+new file mode 100644
+index 0000000..02ddb19
+--- /dev/null
++++ b/tests/test_full_proposal_concurrent.py
+@@ -0,0 +1,328 @@
++from __future__ import annotations
++
++import asyncio
++import copy
++import json
++from collections import Counter
++from datetime import datetime
++
++import pytest
++
++from app.quality import QualityLifecycleManager
++from app.workflows import WorkflowEngine
++from tests.test_runtime import add_standard_materials, create_project, finish_workflow, runtime
++from tests.test_single_section_chain import ChainHarness, SECTION
++
++
++FULL_PROPOSAL_OPTIONS = {
++    "full_proposal_concurrent": True,
++    "integration_scope": "FULL_PROPOSAL_CONCURRENT",
++}
++FULL_PROPOSAL_TITLES = [
++    "项目摘要",
++    "立项依据",
++    "国内外研究现状",
++    "关键科学问题",
++    "研究目标",
++    "研究内容",
++    "关键技术",
++    "技术路线",
++    "实验方案",
++    "创新点",
++    "预期成果",
++    "研究基础",
++    "进度安排",
++    "参考文献",
++]
++EXPECTED_GROUPS = {
++    "GROUP_1_BACKGROUND_AND_PROBLEM",
++    "GROUP_2_OBJECTIVES_AND_TASKS",
++    "GROUP_3_METHOD_AND_VALIDATION",
++    "GROUP_4_IMPLEMENTATION_AND_ASSURANCE",
++    "GROUP_5_FIGURES_AND_REFERENCES",
++}
++
++
++def _approve_open_gate(engine: WorkflowEngine, workflow_id: str) -> None:
++    gate = next(item for item in engine.list_gates(workflow_id=workflow_id) if item["status"] == "OPEN")
++    action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
++    engine.decide_gate(
++        gate["id"],
++        action=action,
++        decided_by="full-proposal-test",
++        decided_role=gate["required_role"],
++    )
++
++
++async def _prepare(engine: WorkflowEngine, project_id: str) -> None:
++    for workflow_type in ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION"]:
++        workflow = await finish_workflow(engine, project_id, workflow_type)
++        assert workflow["status"] == "COMPLETED", workflow["state"].get("last_error")
++
++
++async def _run_parent(engine: WorkflowEngine, workflow: dict, max_steps: int = 500) -> dict:
++    current = workflow
++    for _ in range(max_steps):
++        current = await engine.advance(current["id"])
++        if current["status"] == "WAITING_GATE":
++            _approve_open_gate(engine, current["id"])
++            continue
++        if current["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
++            return current
++    return current
++
++
