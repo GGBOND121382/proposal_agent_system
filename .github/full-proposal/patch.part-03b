@@ -1,0 +1,85 @@
+         skip_gate = bool(state.pop("skip_candidate_gate_once", False))
++        suppress_gate = bool((state.get("options") or {}).get("suppress_candidate_gate"))
+         self._update(wf, current_step=wf["current_step"], state=state)
+-        if skip_gate:
++        if skip_gate or suppress_gate:
+             return None
+         refreshed = self.get(wf["id"])
+         self._create_gate(refreshed, "CANDIDATE_REVIEW", target_id=wf["id"], questions=[])
+@@ -279,6 +682,44 @@ class WorkflowAuthoringMixin:
+                 f"expected={expected}, actual={actual}"
+             )
+ 
++    def _validate_full_proposal_integration_envelope(
++        self,
++        state: dict[str, Any],
++        envelope: dict[str, Any],
++    ) -> None:
++        if not self._full_proposal_mode(state):
++            return
++        contract = state.get("full_proposal_contract") or {}
++        expected = [
++            str(item.get("section_id"))
++            for item in contract.get("sections") or []
++            if isinstance(item, dict) and item.get("section_id")
++        ]
++        payload = envelope.get("payload") or {}
++        candidates = payload.get("candidate_sections") or []
++        actual = [
++            str(item.get("section_id"))
++            for item in candidates
++            if isinstance(item, dict) and item.get("section_id")
++        ]
++        section_map = [
++            str(item.get("section_id"))
++            for item in payload.get("document_section_map") or []
++            if isinstance(item, dict) and item.get("section_id")
++        ]
++        if (
++            len(expected) < 8
++            or len(actual) != len(expected)
++            or len(set(actual)) != len(actual)
++            or set(actual) != set(expected)
++            or section_map != expected
++        ):
++            raise ValueError(
++                "完整申请书全文审查输入必须与冻结的 Section Contract 完全一致，"
++                "且 document_section_map 保持原始章节顺序；"
++                f"expected={expected}, candidates={actual}, section_map={section_map}"
++            )
++
+     @staticmethod
+     def _section_ids_from_integration_output(
+         output: dict[str, Any],
+@@ -347,6 +788,9 @@ class WorkflowAuthoringMixin:
+             state["argument_revision_findings"] = argument_findings
+             state["planning_revision_findings"] = []
+             state["section_results"] = []
++            self._invalidate_full_proposal_generation(
++                state, reason="INTEGRATION_ARGUMENT_ARCHITECTURE_REVISION",
++            )
+             state.pop("integration_repair_section_ids", None)
+             state.pop("integration_repair_findings", None)
+             target_step = next(
+@@ -366,6 +810,9 @@ class WorkflowAuthoringMixin:
+             state["integration_planning_rounds"] = rounds + 1
+             state["planning_revision_findings"] = planning_findings
+             state["section_results"] = []
++            self._invalidate_full_proposal_generation(
++                state, reason="INTEGRATION_SECTION_CONTRACT_REVISION",
++            )
+             state.pop("integration_repair_section_ids", None)
+             state.pop("integration_repair_findings", None)
+             target_step = next(
+@@ -396,7 +843,9 @@ class WorkflowAuthoringMixin:
+             if str(item.get("code") or "") in repairable_codes
+             or str(item.get("suggested_route") or "") == "WRITING_AGENT"
+         ]
+-        if writing_findings and not affected and self._three_section_mode(state):
++        if writing_findings and not affected and (
++            self._three_section_mode(state) or self._full_proposal_mode(state)
++        ):
+             # A writing defect without a section locator cannot be silently accepted.
+             # Regenerate the frozen three-section set rather than allowing manual edits.
+             affected = set(known_section_ids)
+@@ -463,6 +912,8 @@ class WorkflowAuthoringMixin:
