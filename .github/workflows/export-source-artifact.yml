@@ -1,0 +1,36 @@
+name: Export current main source
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out pinned main head
+        uses: actions/checkout@v7
+        with:
+          ref: 4564e68b8b45a16a2273550fc6306cf7029d7ed4
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exported identity
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "4564e68b8b45a16a2273550fc6306cf7029d7ed4"
+
+      - name: Upload source tree
+        uses: actions/upload-artifact@v7
+        with:
+          name: proposal-agent-main-4564-source
+          path: |
+            .
+            !.git/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
