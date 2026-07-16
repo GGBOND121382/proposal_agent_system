@@ -1,0 +1,79 @@
+         if self._three_section_mode(effective_state):
+             sections = self._resolve_three_section_contract(sections, effective_state)
++        if self._full_proposal_mode(effective_state):
++            sections = self._resolve_full_proposal_contract(sections, effective_state)
+ 
+         requested_ids = set(options.get("target_section_ids") or [])
+         requested_titles = set(options.get("target_section_titles") or [])
+diff --git a/app/workflow_repair.py b/app/workflow_repair.py
+index 9cb324d..52a4db4 100644
+--- a/app/workflow_repair.py
++++ b/app/workflow_repair.py
+@@ -82,7 +82,16 @@ class WorkflowRepairMixin:
+         if not findings:
+             return None
+         result_key = PRODUCER_RESULT_KEY.get(producer)
+-        original = self.context_builder._result(wf["project_id"], producer, result_key)
++        if hasattr(self.context_builder, "_section_prompt_result"):
++            original = self.context_builder._section_prompt_result(
++                wf["project_id"],
++                producer,
++                workflow_id=wf.get("id"),
++                section_id=str(state.get("active_section_id") or "") or None,
++                key=result_key,
++            )
++        else:
++            original = self.context_builder._result(wf["project_id"], producer, result_key)
+         if original is None:
+             return None
+ 
+@@ -147,7 +156,7 @@ class WorkflowRepairMixin:
+             return None
+         self.quality_manager.record_targeted_repair(
+             project_id=wf["project_id"],
+-            workflow_id=wf["id"],
++            workflow_id=str(state.get("quality_parent_workflow_id") or wf["id"]),
+             repair_run_id=repaired["run_id"],
+             finding_codes=[str(item.get("code")) for item in findings if item.get("code")],
+             workflow_state=state,
+diff --git a/app/workflows.py b/app/workflows.py
+index eb16d6e..c5d0b3f 100644
+--- a/app/workflows.py
++++ b/app/workflows.py
+@@ -25,9 +25,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
+ 
+ 
+     def _observe_quality_result(self, wf: dict[str, Any], state: dict[str, Any], prompt_id: str, result: dict[str, Any]) -> None:
++        quality_workflow_id = str(state.get("quality_parent_workflow_id") or wf["id"])
+         self.quality_manager.observe_prompt_result(
+             project_id=wf["project_id"],
+-            workflow_id=wf["id"],
++            workflow_id=quality_workflow_id,
+             prompt_id=prompt_id,
+             run_id=result["run_id"],
+             status=result["status"],
+@@ -75,10 +76,26 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
+             required = ["WF-4_PROPOSAL_AUTHORING"]
+         missing = []
+         for required_type in required:
+-            row = self.db.fetchone(
+-                "SELECT id FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC LIMIT 1",
+-                (project_id, required_type),
+-            )
++            if required_type == "WF-4_PROPOSAL_AUTHORING":
++                # Concurrent authoring groups reuse the frozen WF-4 state machine
++                # but are explicitly marked as child workflows.  A completed
++                # group is not a completed proposal and must never unlock WF-5.
++                rows = self.db.fetchall(
++                    "SELECT id,state_json FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC",
++                    (project_id, required_type),
++                )
++                row = next(
++                    (
++                        item for item in rows
++                        if not json.loads(item.get("state_json") or "{}").get("parent_workflow_id")
++                    ),
++                    None,
++                )
++            else:
++                row = self.db.fetchone(
