@@ -1,0 +1,156 @@
+name: G3 Formal Capability Acceptance
+
+on:
+  push:
+    branches:
+      - agent/g3-formal-capability
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/g3_acceptance.py"
+      - "app/g3_runtime.py"
+      - "app/skills/g3_crossref.py"
+      - "scripts/run_g3_formal_acceptance.py"
+      - "scripts/validate_g3_evidence.py"
+      - "tests/test_g3_formal_acceptance.py"
+      - "docs/G3_FORMAL_CAPABILITY_ACCEPTANCE.md"
+      - ".github/workflows/g3-formal-capability.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: G3 contracts and affected regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      MODEL_RUNTIME_MODE: SIMULATED
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Validate contracts and syntax
+        run: |
+          python -m compileall -q app scripts tests
+          python scripts/validate_g0.py
+          python prompt_pack/tools/validate_pack.py
+      - name: Run G3 and affected regressions
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_g3_formal_acceptance.py \
+            tests/test_research_skill_track_c.py \
+            tests/test_runtime.py \
+            tests/test_runtime_recovery.py
+
+  live:
+    name: Real model, research, proposal and delivery
+    if: github.event_name != 'pull_request'
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      CAPABILITY_ACCEPTANCE_MODE: "true"
+      MODEL_RUNTIME_MODE: LIVE
+      MODEL_RESPONSE_AUTOMATION: "false"
+      SAMPLE_SECTION_FALLBACK: "false"
+      AUTO_RESPONSE_ENABLED: "false"
+      PROPOSAL_QUALITY_GUARD_ENABLED: "true"
+      OFFLINE_LLM_ENABLED: "true"
+      OFFLINE_LLM_BASE_URL: ${{ secrets.OFFLINE_LLM_BASE_URL }}
+      OFFLINE_LLM_API_KEY: ${{ secrets.OFFLINE_LLM_API_KEY }}
+      OFFLINE_GENERAL_MODEL: ${{ secrets.OFFLINE_GENERAL_MODEL }}
+      OFFLINE_CRITIC_MODEL: ${{ secrets.OFFLINE_CRITIC_MODEL }}
+      ONLINE_LLM_ENABLED: "true"
+      ONLINE_LLM_BASE_URL: ${{ secrets.ONLINE_LLM_BASE_URL }}
+      ONLINE_LLM_API_KEY: ${{ secrets.ONLINE_LLM_API_KEY }}
+      ONLINE_PUBLIC_MODEL: ${{ secrets.ONLINE_PUBLIC_MODEL }}
+      PUBLIC_SEARCH_PROVIDER: crossref
+      PUBLIC_SEARCH_BASE_URL: https://api.crossref.org
+      PUBLIC_SEARCH_MAX_RESULTS: "40"
+      G3_OPERATOR_ATTESTATION: USER_REQUESTED
+      G3_OPERATOR_ID: ${{ github.actor }}
+      G3_MODEL_PROVENANCE_ATTESTATION: ${{ secrets.G3_MODEL_PROVENANCE_ATTESTATION }}
+      MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install document dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends chromium libreoffice-writer poppler-utils fonts-noto-cjk
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Run G3 formal capability acceptance
+        shell: bash
+        run: |
+          set -o pipefail
+          OUT="recovery_evidence/g3/${GITHUB_SHA}"
+          mkdir -p "${OUT}/test_logs"
+          python scripts/run_g3_formal_acceptance.py --output-dir "${OUT}" \
+            2>&1 | tee "${OUT}/test_logs/g3-live.log"
+      - name: Audit prompt traces
+        if: success()
+        shell: bash
+        run: |
+          OUT="recovery_evidence/g3/${GITHUB_SHA}"
+          python scripts/audit_prompt_traces.py \
+            --database "${OUT}/workflow_checkpoint.sqlite" \
+            --output-dir "${OUT}/prompt_trace_audit" \
+            2>&1 | tee "${OUT}/test_logs/trace-audit.log"
+      - name: Validate G3 evidence
+        if: success()
+        run: |
+          OUT="recovery_evidence/g3/${GITHUB_SHA}"
+          python scripts/validate_g3_evidence.py \
+            "${OUT}/G3_ACCEPTANCE.json" \
+            --evidence-root "${OUT}" \
+            --json-out "${OUT}/G3_REVERIFY.json"
+      - name: Build and verify recovery bundle
+        if: success()
+        shell: bash
+        run: |
+          OUT="recovery_evidence/g3/${GITHUB_SHA}"
+          python scripts/f_recovery_bundle.py build \
+            --database "${OUT}/workflow_checkpoint.sqlite" \
+            --test-log "${OUT}/test_logs/g3-live.log" \
+            --test-log "${OUT}/test_logs/trace-audit.log" \
+            --output "${OUT}/recovery_bundle.zip" \
+            | tee "${OUT}/test_logs/recovery-build.json"
+          python scripts/f_recovery_bundle.py verify \
+            "${OUT}/recovery_bundle.zip" \
+            --extract-dir /tmp/g3-restored \
+            --report "${OUT}/recovery-verify.json"
+      - name: Upload G3 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: g3-formal-capability-${{ github.sha }}
+          path: recovery_evidence/g3/${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
