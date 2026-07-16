@@ -1,0 +1,2 @@
++            errors.append(f"章节 {section_titles.get(section_id) or section_id} 阶段序列错误：{prompts}")
++        result[section_id] = {
