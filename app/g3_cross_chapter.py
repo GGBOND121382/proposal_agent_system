@@ -77,6 +77,59 @@ class G3CrossChapterReviewMixin:
         LIVE_ENVELOPE_REGISTRY.register(subset)
         return subset
 
+    async def _write_full_proposal_concurrently(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if not self._g3_cross_chapter_enabled(state):
+            return await super()._write_full_proposal_concurrently(wf, state)
+        state["skip_candidate_gate_once"] = True
+        result = await super()._write_full_proposal_concurrently(wf, state)
+        if result is not None:
+            return result
+        refreshed = self.get(wf["id"])
+        state = refreshed["state"]
+        self._update(refreshed, current_step=5, state=state)
+        refreshed = self.get(wf["id"])
+        state = refreshed["state"]
+        envelope = self.context_builder.build(
+            "P-INTEGRATION-CRITIC",
+            refreshed["project_id"],
+            workflow_id=refreshed["id"],
+            workflow_state=state,
+        )
+        super()._validate_full_proposal_integration_envelope(state, envelope)
+        outcome = await self._run_g3_cross_chapter_reviews(refreshed, state, envelope)
+        if outcome in {"SCHEDULED", "BLOCKED"}:
+            return self.get(wf["id"])
+        refreshed = self.get(wf["id"])
+        state = refreshed["state"]
+        self._update(refreshed, current_step=6, state=state)
+        refreshed = self.get(wf["id"])
+        self._create_gate(
+            refreshed,
+            "CANDIDATE_REVIEW",
+            target_id=wf["id"],
+            questions=[],
+        )
+        self._update(refreshed, status="WAITING_GATE", state=state)
+        return self.get(wf["id"])
+
+    def _validate_full_proposal_integration_envelope(
+        self,
+        state: dict[str, Any],
+        envelope: dict[str, Any],
+    ) -> None:
+        super()._validate_full_proposal_integration_envelope(state, envelope)
+        if not self._g3_cross_chapter_enabled(state):
+            return
+        review = state.get("g3_cross_chapter_reviews") or {}
+        if review.get("status") != "PASS":
+            raise ValueError(
+                "G3 final integration requires all persisted cross-chapter batches to pass first"
+            )
+
     async def _run_g3_cross_chapter_reviews(
         self,
         wf: dict[str, Any],
