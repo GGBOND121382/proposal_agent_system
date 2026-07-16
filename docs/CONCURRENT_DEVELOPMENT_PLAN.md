@@ -178,6 +178,7 @@ flowchart LR
 8. 全文 Integration Critic；  
    **实施记录：** 已完成完整候选集合与最终 Expression Critic 来源硬门、十二维质量与六条论证链复核、最早责任阶段路由、责任章节局部重写、上游缺陷全代重建、候选集合哈希变化检查、P0/P1 生命周期和独立全文复审，见 `docs/FULL_INTEGRATION_CRITIC_ACCEPTANCE.md`。
 9. DOCX/PDF 导出后验收；
+   **实施记录：** 已完成最终候选与全文审查快照一致性硬门、真实 DOCX/PDF 转换、结构与逐页视觉检查、正文/导出工程责任分流、受控重导出、独立复核、Finding 生命周期和重启哈希复用，见 `docs/POST_EXPORT_ACCEPTANCE.md`。
 10. 自动返修和最终复审。
 
 **通过条件：** 无 Replay/模拟响应、无人工改正文、P0/P1 全部关闭、事实和引用可追溯、图表完整、结论闭环、主文无系统说明书漂移、文档视觉可读、全流程可从检查点重现。
