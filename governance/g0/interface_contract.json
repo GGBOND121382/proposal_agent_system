@@ -121,5 +121,13 @@
     "app/api_models.py",
     "app/executor.py"
   ],
-  "approved_changes": []
+  "approved_changes": [
+    {
+      "path": "prompt_pack/schemas/prompts/integration_critic_output.schema.json",
+      "blob_sha": "83a155f1e9c0c544aae30b9d6a3c35b2304fa2fe",
+      "owner": "Track E",
+      "reason": "Extend the whole-proposal critic routing enum to the explicit upstream and downstream responsibility agents used by deterministic findings.",
+      "approval_reference": "docs/FULL_INTEGRATION_CRITIC_ACCEPTANCE.md"
+    }
+  ]
 }
