@@ -13,6 +13,77 @@ class PostExportAcceptanceError(RuntimeError):
     pass
 
 
+class PostExportQualityLifecycleManager(QualityLifecycleManager):
+    """Post-export routing without changing the shared quality baseline."""
+
+    def ingest_delivery_findings(
+        self,
+        *,
+        project_id: str,
+        workflow_id: str | None,
+        validation_run_id: str,
+        findings: Any,
+    ) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for raw in findings:
+            finding = dict(raw)
+            finding.setdefault("severity", "P1")
+            finding.setdefault("blocking", True)
+            finding.setdefault("repairable", True)
+            finding.setdefault("evidence_refs", [])
+            route = self.route_delivery_finding(finding)
+            finding.setdefault(
+                "suggested_route",
+                "WRITING_AGENT" if route.owner_kind == "AGENT" else "BLOCK",
+            )
+            section_ids = [
+                str(item) for item in finding.get("responsible_section_ids") or [] if item
+            ]
+            scopes = (
+                [f"section:{section_id}" for section_id in section_ids]
+                if route.owner_kind == "AGENT" and section_ids
+                else [self._delivery_scope(finding)]
+            )
+            for scope_key in scopes:
+                scoped = dict(finding)
+                if scope_key.startswith("section:"):
+                    scoped["responsible_section_ids"] = [scope_key.removeprefix("section:")]
+                    scoped["target_path_or_span"] = scope_key
+                records.append(
+                    self._open_or_refresh(
+                        project_id=project_id,
+                        workflow_id=workflow_id,
+                        prompt_id="DELIVERY_VALIDATOR",
+                        run_id=validation_run_id,
+                        finding=scoped,
+                        scope_key=scope_key,
+                        responsibility=route,
+                    )
+                )
+        return records
+
+    def route_delivery_finding(self, finding: dict[str, Any]):  # type: ignore[no-untyped-def]
+        category = str(finding.get("category") or "SYSTEM")
+        target_type = str(finding.get("target_type") or "").upper()
+        code = str(finding.get("code") or "").upper()
+        engineering = category != "CONTENT" and (
+            category in {"FORMAT", "SYSTEM"}
+            or any(token in target_type for token in {"DOCX", "PDF", "EXPORT", "RENDER", "LAYOUT"})
+            or any(token in code for token in {"EXPORT", "RENDER", "DOCX", "PDF", "LAYOUT", "CLIP", "OVERLAP"})
+        )
+        route = super().route_delivery_finding(finding)
+        if not engineering:
+            return route
+        return type(route)(
+            owner_kind="ENGINEERING",
+            owner="EXPORT_ENGINEERING",
+            workflow_type=None,
+            stage_prompt_ids=("EXPORT_ENGINEERING",),
+            reviewer_prompt_id="DELIVERY_VALIDATOR",
+            reason="导出、渲染、版式或文件结构缺陷属于工程责任，不允许通过改写正文掩盖。",
+        )
+
+
 class PostExportAcceptanceManager:
     """Run and persist DOCX/PDF post-export acceptance attempts.
 
@@ -28,7 +99,7 @@ class PostExportAcceptanceManager:
         self.db = db
         self.settings = settings
         self.exporter = exporter or DocxExporter(db, settings)
-        self.quality_manager = QualityLifecycleManager(db)
+        self.quality_manager = PostExportQualityLifecycleManager(db)
 
     def run(
         self,
