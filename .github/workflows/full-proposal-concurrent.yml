@@ -1,0 +1,141 @@
+name: Full Proposal Concurrent Authoring
+
+on:
+  push:
+    branches:
+      - main
+      - agent/full-proposal-concurrent-authoring
+      - agent/full-proposal-concurrent-authoring-clean
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/context.py"
+      - "app/context_base.py"
+      - "app/workflow_authoring.py"
+      - "app/workflow_authoring_base.py"
+      - "app/full_proposal_*.py"
+      - "app/workflow_repair.py"
+      - "app/workflows.py"
+      - "scripts/run_full_proposal_concurrent_acceptance.py"
+      - "tests/test_full_proposal_concurrent.py"
+      - "docs/FULL_PROPOSAL_CONCURRENT_AUTHORING_ACCEPTANCE.md"
+      - ".github/workflows/full-proposal-concurrent.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  full-proposal-concurrent:
+    name: Five-group authoring, integration and recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+      MODEL_RUNTIME_MODE: SIMULATED
+      MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install rendering dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Validate frozen contracts and syntax
+        run: |
+          python -m compileall -q app scripts tests
+          python scripts/validate_g0.py
+          python prompt_pack/tools/validate_pack.py
+
+      - name: Run full repository regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="recovery_evidence/full_proposal/${GITHUB_SHA}"
+          mkdir -p "${OUT}/test_logs"
+          python -m pytest -q --tb=short \
+            --junitxml="${OUT}/test_logs/full-junit.xml" \
+            2>&1 | tee "${OUT}/test_logs/full-pytest.log"
+
+      - name: Run fixed-material five-group acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="recovery_evidence/full_proposal/${GITHUB_SHA}"
+          python scripts/run_full_proposal_concurrent_acceptance.py \
+            --output-dir "${OUT}" \
+            2>&1 | tee "${OUT}/test_logs/acceptance.log"
+          cp "${OUT}/runtime/proposal_agents.sqlite3" "${OUT}/workflow_checkpoint.sqlite"
+
+      - name: Audit prompt traces
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="recovery_evidence/full_proposal/${GITHUB_SHA}"
+          python scripts/audit_prompt_traces.py \
+            --database "${OUT}/workflow_checkpoint.sqlite" \
+            --output-dir "${OUT}/prompt_trace_audit" \
+            2>&1 | tee "${OUT}/test_logs/trace-audit.log"
+
+      - name: Build and verify recovery bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="recovery_evidence/full_proposal/${GITHUB_SHA}"
+          python scripts/f_recovery_bundle.py build \
+            --database "${OUT}/workflow_checkpoint.sqlite" \
+            --test-log "${OUT}/test_logs/full-pytest.log" \
+            --test-log "${OUT}/test_logs/acceptance.log" \
+            --test-log "${OUT}/test_logs/trace-audit.log" \
+            --output "${OUT}/recovery_bundle.zip" \
+            | tee "${OUT}/test_logs/recovery-build.json"
+          python scripts/f_recovery_bundle.py verify \
+            "${OUT}/recovery_bundle.zip" \
+            --extract-dir /tmp/full-proposal-restored \
+            --report "${OUT}/recovery-verify.json"
+
+      - name: Enforce final acceptance result
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          out = Path("recovery_evidence/full_proposal") / os.environ["GITHUB_SHA"]
+          report = json.loads((out / "FULL_PROPOSAL_CONCURRENT_ACCEPTANCE.json").read_text())
+          verify = json.loads((out / "recovery-verify.json").read_text())
+          assert report["status"] == "PASS", report
+          assert all(report["checks"].values()), report["checks"]
+          assert verify.get("status") == "PASS", verify
+          PY
+
+      - name: Upload full-proposal evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-proposal-concurrent-${{ github.sha }}
+          path: recovery_evidence/full_proposal/${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30

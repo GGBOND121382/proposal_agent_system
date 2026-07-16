@@ -25,9 +25,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
 
 
     def _observe_quality_result(self, wf: dict[str, Any], state: dict[str, Any], prompt_id: str, result: dict[str, Any]) -> None:
+        quality_workflow_id = str(state.get("quality_parent_workflow_id") or wf["id"])
         self.quality_manager.observe_prompt_result(
             project_id=wf["project_id"],
-            workflow_id=wf["id"],
+            workflow_id=quality_workflow_id,
             prompt_id=prompt_id,
             run_id=result["run_id"],
             status=result["status"],
@@ -75,10 +76,26 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             required = ["WF-4_PROPOSAL_AUTHORING"]
         missing = []
         for required_type in required:
-            row = self.db.fetchone(
-                "SELECT id FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC LIMIT 1",
-                (project_id, required_type),
-            )
+            if required_type == "WF-4_PROPOSAL_AUTHORING":
+                # Concurrent authoring groups reuse the frozen WF-4 state machine
+                # but are explicitly marked as child workflows.  A completed
+                # group is not a completed proposal and must never unlock WF-5.
+                rows = self.db.fetchall(
+                    "SELECT id,state_json FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC",
+                    (project_id, required_type),
+                )
+                row = next(
+                    (
+                        item for item in rows
+                        if not json.loads(item.get("state_json") or "{}").get("parent_workflow_id")
+                    ),
+                    None,
+                )
+            else:
+                row = self.db.fetchone(
+                    "SELECT id FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC LIMIT 1",
+                    (project_id, required_type),
+                )
             if not row:
                 missing.append(required_type)
         if missing:
@@ -161,6 +178,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 envelope = self.context_builder.build(prompt_id, wf["project_id"], workflow_id=workflow_id, workflow_state=state)
                 if prompt_id == "P-INTEGRATION-CRITIC":
                     self._validate_three_section_integration_envelope(state, envelope)
+                    self._validate_full_proposal_integration_envelope(state, envelope)
                 result = await self.executor.execute(prompt_id, envelope, project_id=wf["project_id"], workflow_id=workflow_id, original_environment=state.get("original_environment"))
             except (PromptExecutionError, ValueError, KeyError) as exc:
                 state["last_error"] = str(exc)
@@ -201,6 +219,24 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                         for item in (state.get("three_section_contract") or {}).get("sections") or []
                         if isinstance(item, dict) and item.get("section_id")
                     ],
+                })
+                self._update(wf, state=state)
+            if prompt_id == "P-INTEGRATION-CRITIC" and self._full_proposal_mode(state):
+                state.setdefault("full_proposal_review_history", []).append({
+                    "run_id": result["run_id"],
+                    "status": result["status"],
+                    "finding_codes": [
+                        str(item.get("code") or "")
+                        for item in output.get("findings") or []
+                        if isinstance(item, dict)
+                    ],
+                    "contract_hash": (state.get("full_proposal_contract") or {}).get("contract_hash"),
+                    "section_ids": [
+                        str(item.get("section_id"))
+                        for item in (state.get("full_proposal_contract") or {}).get("sections") or []
+                        if isinstance(item, dict) and item.get("section_id")
+                    ],
+                    "child_workflow_ids": list(state.get("authoring_child_workflow_ids") or []),
                 })
                 self._update(wf, state=state)
             if result["status"] == "BLOCK":
