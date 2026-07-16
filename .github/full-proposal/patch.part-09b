@@ -1,0 +1,81 @@
++        workflow = engine.start(project_id, "WF-4_PROPOSAL_AUTHORING", FULL_PROPOSAL_OPTIONS)
++        current = workflow
++        # Advance only through the architecture and planning gates.  Stop at the
++        # persisted WRITE_SECTIONS boundary before the parent launches all groups.
++        for _ in range(30):
++            if current["current_step"] == 5 and current["status"] == "RUNNING":
++                break
++            current = await engine.advance(current["id"])
++            if current["status"] == "WAITING_GATE":
++                _approve_open_gate(engine, current["id"])
++                current = engine.get(current["id"])
++        assert current["current_step"] == 5
++        assert current["status"] == "RUNNING"
++
++        state = current["state"]
++        engine._target_sections(project_id, state.get("options") or {}, state)
++        contract = state["full_proposal_contract"]
++        group = next(
++            item for item in contract["groups"]
++            if item["group_id"] == "GROUP_1_BACKGROUND_AND_PROBLEM"
++        )
++        record = engine._create_full_proposal_child(current, state, group)
++        child = await engine._run_full_proposal_group(current, state, record, set())
++        assert child["status"] == "COMPLETED"
++        # Simulate a process stop after the child transaction is durable but before
++        # the coordinator launches or aggregates the remaining groups.
++        return engine.get(current["id"]), child
++
++    checkpoint, child = asyncio.run(asyncio.wait_for(checkpoint_one_group(), timeout=90))
++    assert checkpoint["status"] == "RUNNING"
++    before = db.fetchone(
++        "SELECT COUNT(*) AS n FROM prompt_runs WHERE workflow_id=?",
++        (child["id"],),
++    )["n"]
++
++    premature_export = engine.start(project_id, "WF-5_SECURITY_REVIEW_AND_EXPORT")
++    assert premature_export["status"] == "BLOCKED"
++    assert "WF-4_PROPOSAL_AUTHORING" in premature_export["state"]["last_error"]
++
++    restarted = WorkflowEngine(
++        db,
++        pack,
++        builder,
++        executor,
++        engine.research_service,
++        quality_manager=QualityLifecycleManager(db),
++    )
++    completed = asyncio.run(
++        asyncio.wait_for(_run_parent(restarted, restarted.get(checkpoint["id"])), timeout=120)
++    )
++    assert completed["status"] == "COMPLETED", completed["state"].get("last_error")
++    after = db.fetchone(
++        "SELECT COUNT(*) AS n FROM prompt_runs WHERE workflow_id=?",
++        (child["id"],),
++    )["n"]
++    assert after == before, "completed group was regenerated after restart"
++
++
++def test_full_document_finding_rewrites_only_responsible_section(runtime):
++    settings, _, db, _, _, executor, engine, _ = runtime
++    project_id = create_project(db, internet=False)
++    add_standard_materials(settings, db, project_id, current_sections=FULL_PROPOSAL_TITLES)
++    calls = _inject_one_full_document_conflict(executor)
++
++    async def scenario():
++        await _prepare(engine, project_id)
++        workflow = engine.start(project_id, "WF-4_PROPOSAL_AUTHORING", FULL_PROPOSAL_OPTIONS)
++        return await _run_parent(engine, workflow)
++
++    completed = asyncio.run(asyncio.wait_for(scenario(), timeout=120))
++    assert completed["status"] == "COMPLETED", completed["state"].get("last_error")
++    state = completed["state"]
++    assert [item["status"] for item in state["full_proposal_review_history"]] == ["REVISE", "PASS"]
++    child_ids = state["authoring_child_workflow_ids"]
++    counts = _prompt_counts_by_section(db, project_id, child_ids, "P-WRITE-CONTENT")
++    assert counts["技术路线"] == 2
++    assert all(counts[title] == 1 for title in FULL_PROPOSAL_TITLES if title != "技术路线")
++    history = state["cross_section_repair_history"]
++    assert history[0]["responsible_section_ids"] == [calls["target_section_id"]]
++    target = next(
++        item for item in engine.quality_manager.list_findings(project_id, workflow_id=completed["id"])
