@@ -51,13 +51,14 @@ jobs:
           python -m compileall -q app scripts tests
           python scripts/validate_g0.py
           python prompt_pack/tools/validate_pack.py
-      - name: Run G3 and affected regressions
-        run: |
-          python -m pytest -q --tb=short \
-            tests/test_g3_formal_acceptance.py \
-            tests/test_research_skill_track_c.py \
-            tests/test_runtime.py \
-            tests/test_runtime_recovery.py
+      - name: Run G3 contract tests
+        run: python -m pytest -q --tb=short tests/test_g3_formal_acceptance.py
+      - name: Run research regressions
+        run: python -m pytest -q --tb=short tests/test_research_skill_track_c.py
+      - name: Run runtime regressions
+        run: python -m pytest -q --tb=short tests/test_runtime.py
+      - name: Run recovery regressions
+        run: python -m pytest -q --tb=short tests/test_runtime_recovery.py
 
   live:
     name: Real model, research, proposal and delivery
