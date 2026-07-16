@@ -19,6 +19,7 @@ from .executor import PromptExecutionError, PromptExecutor
 from .exporter import DocxExporter, ExportDenied
 from .llm import ModelGateway
 from .pack import PromptPack
+from .post_export_acceptance import PostExportAcceptanceError, PostExportAcceptanceManager
 from .research import PublicResearchService
 from .skill_setup import build_skill_executor
 from .security import SecurityRouter
@@ -45,6 +46,7 @@ research = PublicResearchService(settings, skill_executor)
 diagram_enrichment = DiagramEnrichmentService(db, pack, skill_executor)
 workflows = WorkflowEngine(db, pack, context_builder, executor, research, diagram_enrichment)
 exporter = DocxExporter(db, settings)
+post_export_acceptance = PostExportAcceptanceManager(db, settings, exporter)
 
 app = FastAPI(title="项目申请书智能体系统", version="0.6.0")
 app.mount("/static", StaticFiles(directory=settings.root_dir / "app" / "static"), name="static")
@@ -370,6 +372,33 @@ def export_project_package(project_id: str) -> FileResponse:
         raise HTTPException(404, "Project not found") from exc
     except ExportDenied as exc:
         raise HTTPException(403, str(exc)) from exc
+
+
+@app.post("/api/projects/{project_id}/post-export-acceptance")
+def run_post_export_acceptance(project_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    values = payload or {}
+    try:
+        return post_export_acceptance.run(
+            project_id,
+            workflow_id=values.get("workflow_id"),
+            engineering_repair_id=values.get("engineering_repair_id"),
+            expected_candidate_set_hash=values.get("expected_candidate_set_hash"),
+            reuse_verified=bool(values.get("reuse_verified", True)),
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    except (ExportDenied, PostExportAcceptanceError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/api/projects/{project_id}/post-export-acceptance/latest")
+def latest_post_export_acceptance(project_id: str) -> dict[str, Any]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    result = post_export_acceptance.latest_attempt(project_id)
+    if result is None:
+        raise HTTPException(404, "No post-export acceptance attempt")
+    return result
 
 
 @app.get("/api/workflow-types")
