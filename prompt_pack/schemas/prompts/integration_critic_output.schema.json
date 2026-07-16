@@ -145,6 +145,9 @@
                   "SECURITY_REVIEW_AGENT",
                   "PLANNING_AGENT",
                   "WRITING_AGENT",
+                  "ARGUMENT_ARCHITECTURE_AGENT",
+                  "EXPRESSION_EDITOR_AGENT",
+                  "INTEGRATION_AGENT",
                   "USER",
                   "BLOCK"
                 ]

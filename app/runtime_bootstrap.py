@@ -11,10 +11,12 @@ def install_runtime_extensions() -> None:
     from .runtime_context import LiveContextBuilder
     from .runtime_executor import RuntimePromptExecutor
     from .runtime_export import RecoverableDocxExporter
+    from .full_integration_quality import FullProposalQualityGuard
     from .runtime_gateway import AuditedModelGateway
     from .runtime_workflows import RecoverableWorkflowEngine
 
     context_module.ContextBuilder = LiveContextBuilder
+    executor_module.ProposalQualityGuard = FullProposalQualityGuard
     executor_module.PromptExecutor = RuntimePromptExecutor
     llm_module.ModelGateway = AuditedModelGateway
     workflows_module.WorkflowEngine = RecoverableWorkflowEngine

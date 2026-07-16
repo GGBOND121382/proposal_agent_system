@@ -222,23 +222,12 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 })
                 self._update(wf, state=state)
             if prompt_id == "P-INTEGRATION-CRITIC" and self._full_proposal_mode(state):
-                state.setdefault("full_proposal_review_history", []).append({
-                    "run_id": result["run_id"],
-                    "status": result["status"],
-                    "finding_codes": [
-                        str(item.get("code") or "")
-                        for item in output.get("findings") or []
-                        if isinstance(item, dict)
-                    ],
-                    "contract_hash": (state.get("full_proposal_contract") or {}).get("contract_hash"),
-                    "section_ids": [
-                        str(item.get("section_id"))
-                        for item in (state.get("full_proposal_contract") or {}).get("sections") or []
-                        if isinstance(item, dict) and item.get("section_id")
-                    ],
-                    "child_workflow_ids": list(state.get("authoring_child_workflow_ids") or []),
-                })
-                self._update(wf, state=state)
+                try:
+                    self._record_full_integration_review(wf, state, result)
+                except ValueError as exc:
+                    state["last_error"] = str(exc)
+                    self._update(wf, status="BLOCKED", state=state)
+                    return self.get(workflow_id)
             if result["status"] == "BLOCK":
                 self._update(wf, status="BLOCKED", state=state)
                 return self.get(workflow_id)

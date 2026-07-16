@@ -175,7 +175,8 @@ flowchart LR
 5. 分组并行写作；
 6. 分章 Critic/Repair/Polish；
 7. 每三章执行跨章审查；
-8. 全文 Integration Critic；
+8. 全文 Integration Critic；  
+   **实施记录：** 已完成完整候选集合与最终 Expression Critic 来源硬门、十二维质量与六条论证链复核、最早责任阶段路由、责任章节局部重写、上游缺陷全代重建、候选集合哈希变化检查、P0/P1 生命周期和独立全文复审，见 `docs/FULL_INTEGRATION_CRITIC_ACCEPTANCE.md`。
 9. DOCX/PDF 导出后验收；
 10. 自动返修和最终复审。
 
