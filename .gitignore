@@ -22,3 +22,5 @@ recovery_evidence/s3/
 recovery_evidence/full_proposal/
 
 recovery_evidence/full_integration/
+
+recovery_evidence/post_export/
