@@ -1,0 +1,77 @@
++            "GROUP_1_BACKGROUND_AND_PROBLEM": {
++                "workflow_id": "wf-group-old",
++                "section_ids": ["s1"],
++                "status": "COMPLETED",
++            }
++        },
++        "authoring_child_workflow_ids": ["wf-group-old"],
++        "section_progress": {"s1": {"phase": "DONE"}},
++        "full_proposal_concurrency": {"mode": "FIVE_GROUP_PARALLEL_SECTION_SERIAL"},
++    }
++    engine._invalidate_full_proposal_generation(
++        state, reason="INTEGRATION_ARGUMENT_ARCHITECTURE_REVISION"
++    )
++    assert state["full_proposal_children"] == {}
++    assert "full_proposal_contract" not in state
++    assert "authoring_child_workflow_ids" not in state
++    assert "section_progress" not in state
++    archived = state["full_proposal_child_generations"]
++    assert archived[-1]["children"]["GROUP_1_BACKGROUND_AND_PROBLEM"]["workflow_id"] == "wf-group-old"
++    assert archived[-1]["reason"] == "INTEGRATION_ARGUMENT_ARCHITECTURE_REVISION"
++
++
++def test_full_proposal_five_groups_are_parallel_isolated_and_complete(runtime):
++    settings, _, db, _, _, _, engine, _ = runtime
++    project_id = create_project(db, internet=False)
++    add_standard_materials(settings, db, project_id, current_sections=FULL_PROPOSAL_TITLES)
++
++    async def scenario():
++        await _prepare(engine, project_id)
++        workflow = engine.start(project_id, "WF-4_PROPOSAL_AUTHORING", FULL_PROPOSAL_OPTIONS)
++        return await _run_parent(engine, workflow)
++
++    completed = asyncio.run(asyncio.wait_for(scenario(), timeout=120))
++    assert completed["status"] == "COMPLETED", completed["state"].get("last_error")
++    state = completed["state"]
++    contract = state["full_proposal_contract"]
++    assert contract["contract_type"] == "FULL_PROPOSAL_CONCURRENT"
++    assert len(contract["sections"]) == len(FULL_PROPOSAL_TITLES)
++    assert {item["group_id"] for item in contract["groups"]} == EXPECTED_GROUPS
++    assert len({item["section_id"] for item in contract["sections"]}) == len(contract["sections"])
++    assert len(state["section_results"]) == len(contract["sections"])
++
++    children = state["full_proposal_children"]
++    assert set(children) == EXPECTED_GROUPS
++    child_ids = state["authoring_child_workflow_ids"]
++    assert len(child_ids) == 5
++    assert len(set(child_ids)) == 5
++    for group_id, record in children.items():
++        child = engine.get(record["workflow_id"])
++        assert child["status"] == "COMPLETED"
++        assert child["state"]["parent_workflow_id"] == completed["id"]
++        assert child["state"]["full_proposal_group_id"] == group_id
++        assert {
++            item["section_id"] for item in child["state"]["section_results"]
++        } == set(record["section_ids"])
++
++    starts = [datetime.fromisoformat(record["started_at"]) for record in children.values()]
++    finishes = [datetime.fromisoformat(record["finished_at"]) for record in children.values()]
++    assert max(starts) < min(finishes), "five group workers did not overlap"
++    assert state["full_proposal_concurrency"]["no_shared_mutable_draft"] is True
++    assert state["full_proposal_review_history"][-1]["status"] == "PASS"
++    assert state["full_proposal_review_history"][-1]["contract_hash"] == contract["contract_hash"]
++
++    counts = _prompt_counts_by_section(db, project_id, child_ids, "P-EXPRESSION-CRITIC")
++    assert counts == Counter({title: 1 for title in FULL_PROPOSAL_TITLES})
++    assert engine.quality_manager.quality_matrix(
++        project_id, workflow_id=completed["id"]
++    )["open_blockers"] == 0
++
++
++def test_full_proposal_restart_reuses_completed_group_and_does_not_unlock_export(runtime):
++    settings, pack, db, _, builder, executor, engine, _ = runtime
++    project_id = create_project(db, internet=False)
++    add_standard_materials(settings, db, project_id, current_sections=FULL_PROPOSAL_TITLES)
++
++    async def checkpoint_one_group():
++        await _prepare(engine, project_id)
