@@ -24,3 +24,6 @@ recovery_evidence/full_proposal/
 recovery_evidence/full_integration/
 
 recovery_evidence/post_export/
+
+# G3 formal capability evidence is uploaded as a workflow artifact.
+recovery_evidence/g3/
