@@ -201,6 +201,8 @@ Blueprint → Blueprint Critic → Targeted Repair（最多一次）
 
 章节之间不得共享可变草稿对象。每章使用独立 `section_id`、版本号、修复额度和 Trace；跨章一致性由 Integration Critic 统一处理。
 
+**实施记录：** 完整申请书并发编制已实现父协调工作流与五个持久化子工作流。五组并发、组内逐章串行；Section Contract、责任组、子工作流、章节进度、修复额度和 Trace 相互隔离。全文 Finding 仅路由给责任章节，未受影响组复用，修复后必须由新的 Integration Critic 独立复审；单个子工作流完成不能提前解锁 WF-5。自动验收、恢复证据和能力边界见 `docs/FULL_PROPOSAL_CONCURRENT_AUTHORING_ACCEPTANCE.md`。
+
 ## 6. Git、分支与工作树约定
 
 ### 6.1 建议分支
