@@ -5,18 +5,21 @@ on:
     branches:
       - main
       - agent/full-proposal-concurrent-authoring
+      - agent/full-proposal-concurrent-authoring-clean
   pull_request:
     branches:
       - main
     paths:
       - "app/context.py"
+      - "app/context_base.py"
       - "app/workflow_authoring.py"
+      - "app/workflow_authoring_base.py"
+      - "app/full_proposal_*.py"
       - "app/workflow_repair.py"
       - "app/workflows.py"
       - "scripts/run_full_proposal_concurrent_acceptance.py"
       - "tests/test_full_proposal_concurrent.py"
       - "docs/FULL_PROPOSAL_CONCURRENT_AUTHORING_ACCEPTANCE.md"
-      - "docs/CONCURRENT_DEVELOPMENT_PLAN.md"
       - ".github/workflows/full-proposal-concurrent.yml"
   workflow_dispatch:
 
@@ -35,11 +38,18 @@ jobs:
     env:
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
       MODEL_RUNTIME_MODE: SIMULATED
+      MERMAID_BROWSER_EXECUTABLE: /usr/bin/chromium
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Install rendering dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            chromium libreoffice-writer poppler-utils fonts-noto-cjk
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
