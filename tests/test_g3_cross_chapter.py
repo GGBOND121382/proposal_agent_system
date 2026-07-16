@@ -8,7 +8,7 @@ from tests.test_full_proposal_concurrent import (
     _prepare,
     _run_parent,
 )
-from tests.test_runtime import add_standard_materials, create_project
+from tests.test_runtime import add_standard_materials, create_project, runtime
 
 
 def test_g3_every_three_chapters_are_reviewed_before_full_integration(runtime):
