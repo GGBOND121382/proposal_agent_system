@@ -1,5 +1,0 @@
-+        if item["finding"]["code"] == "FULL_PROPOSAL_TECHNICAL_ROUTE_CONFLICT"
-+    )
-+    assert target["lifecycle"]["state"] == "VERIFIED"
-+    assert target["lifecycle"]["repair_evidence"]
-+    assert target["lifecycle"]["review_evidence"]
