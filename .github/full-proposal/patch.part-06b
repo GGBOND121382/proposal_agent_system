@@ -1,0 +1,88 @@
++async def _finish(engine: WorkflowEngine, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
++    workflow = engine.start(project_id, workflow_type, options)
++    for _ in range(1000):
++        workflow = await engine.advance(workflow["id"])
++        if workflow["status"] == "WAITING_GATE":
++            _approve_open_gate(engine, workflow["id"])
++            continue
++        if workflow["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
++            return workflow
++    return workflow
++
++
++def _export_prompt_evidence(db: Database, project_id: str, output_dir: Path) -> int:
++    requests_dir = output_dir / "requests"
++    responses_dir = output_dir / "responses"
++    traces_dir = output_dir / "prompt_traces"
++    requests_dir.mkdir(parents=True, exist_ok=True)
++    responses_dir.mkdir(parents=True, exist_ok=True)
++    traces_dir.mkdir(parents=True, exist_ok=True)
++    rows = db.fetchall(
++        "SELECT * FROM prompt_runs WHERE project_id=? ORDER BY created_at,id", (project_id,)
++    )
++    trace_rows: list[dict[str, Any]] = []
++    for row in rows:
++        run_id = str(row["id"])
++        input_data = json.loads(row["input_json"])
++        output_data = json.loads(row["output_json"]) if row.get("output_json") else None
++        write_json(requests_dir / f"{run_id}.json", input_data)
++        if output_data is not None:
++            write_json(responses_dir / f"{run_id}.json", output_data)
++        trace_rows.append(
++            {
++                "run_id": run_id,
++                "workflow_id": row.get("workflow_id"),
++                "prompt_id": row["prompt_id"],
++                "status": row["status"],
++                "model_id": row.get("model_id"),
++                "endpoint_id": row.get("endpoint_id"),
++                "input_hash": row["input_hash"],
++                "output_hash": row.get("output_hash"),
++                "duration_ms": row["duration_ms"],
++                "created_at": row["created_at"],
++            }
++        )
++    with (traces_dir / "prompt_runs.jsonl").open("w", encoding="utf-8") as handle:
++        for item in trace_rows:
++            handle.write(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n")
++    return len(rows)
++
++
++def _material_manifest(db: Database, project_id: str) -> dict[str, Any]:
++    rows = db.fetchall(
++        "SELECT filename,role,security_level,document_hash,created_at FROM documents WHERE project_id=? ORDER BY filename",
++        (project_id,),
++    )
++    return {
++        "schema_version": "1.0",
++        "project_id": project_id,
++        "materials": rows,
++        "material_count": len(rows),
++    }
++
++
++def _section_chain_checks(db: Database, child_ids: list[str]) -> tuple[dict[str, Any], list[str]]:
++    placeholders = ",".join("?" for _ in child_ids)
++    rows = db.fetchall(
++        f"SELECT workflow_id,prompt_id,input_json,created_at,id FROM prompt_runs WHERE workflow_id IN ({placeholders}) AND status='PASS' ORDER BY created_at,id",
++        tuple(child_ids),
++    )
++    by_section: dict[str, list[str]] = {}
++    section_titles: dict[str, str] = {}
++    for row in rows:
++        payload = (json.loads(row["input_json"]).get("payload") or {})
++        section = payload.get("source_section") or {}
++        section_id = str(section.get("section_id") or "")
++        if not section_id:
++            continue
++        prompt_id = str(row["prompt_id"])
++        if prompt_id not in EXPECTED_SECTION_CHAIN and prompt_id != "P-TARGETED-REPAIR":
++            continue
++        by_section.setdefault(section_id, []).append(prompt_id)
++        section_titles[section_id] = str(section.get("title") or "")
++    errors: list[str] = []
++    result: dict[str, Any] = {}
++    for section_id, prompts in by_section.items():
++        without_repairs = [item for item in prompts if item != "P-TARGETED-REPAIR"]
++        valid = without_repairs == EXPECTED_SECTION_CHAIN
++        if not valid:
