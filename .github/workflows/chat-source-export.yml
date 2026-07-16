@@ -1,0 +1,40 @@
+name: Chat Source Export
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/chat-source-export.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Pack source
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -qr proposal_agent_system-main-source.zip . \
+            -x '.git/*' \
+            -x 'proposal_agent_system-main-source.zip'
+          sha256sum proposal_agent_system-main-source.zip > proposal_agent_system-main-source.zip.sha256
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: proposal-agent-system-main-source
+          path: |
+            proposal_agent_system-main-source.zip
+            proposal_agent_system-main-source.zip.sha256
+          if-no-files-found: error
+          retention-days: 1
