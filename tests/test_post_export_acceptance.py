@@ -99,3 +99,34 @@ def test_visible_manifest_counts_structured_blocks():
         "FORMULA",
         "PARAGRAPH",
     }
+
+
+def test_pdf_linear_text_parity_does_not_treat_table_cells_as_contiguous_prose(tmp_path: Path):
+    docx = tmp_path / "table-delivery.docx"
+    document = Document()
+    document.add_heading("研究问题", level=1)
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "研究问题"
+    table.cell(0, 1).text = "核心输出"
+    table.cell(1, 0).text = "恢复跨制品可追踪关系"
+    table.cell(1, 1).text = "异构关联图与证据路径"
+    document.save(docx)
+    pdf = tmp_path / "table-delivery.pdf"
+    _blank_pdf(pdf)
+
+    validator = PostExportDeliveryValidator(SimpleNamespace())
+    expected = validator._expected_visible_manifest([
+        {
+            "section_id": "section-objective",
+            "section_title": "研究问题",
+            "candidate_id": "candidate-table",
+            "paragraphs": [
+                "[[TABLE]]研究问题|核心输出\n恢复跨制品可追踪关系|异构关联图与证据路径"
+            ],
+        }
+    ])
+    assert all(item["kind"] == "TABLE_CELL" for item in expected["units"])
+    # Table cells are covered by structural and visual checks rather than an
+    # order-sensitive linear PDF text comparison.
+    pdf_parity_units = [item for item in expected["units"] if item.get("kind") != "TABLE_CELL"]
+    assert pdf_parity_units == []

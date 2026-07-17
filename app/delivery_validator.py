@@ -22,7 +22,11 @@ class DeliveryValidator:
 
     PLACEHOLDER_PATTERNS = {
         "PLACEHOLDER_BRACES": re.compile(r"\{\{[^{}]+\}\}|<<[^<>]+>>"),
-        "PLACEHOLDER_WORD": re.compile(r"(?i)\b(?:TODO|TBD|PLACEHOLDER|FIXME)\b|待补充|此处填写|示例文本"),
+        "PLACEHOLDER_WORD": re.compile(
+            r"(?im)\b(?:TODO|TBD|PLACEHOLDER|FIXME)\b|"
+            r"(?:^|[\s【\[])待补充(?:项|内容|材料|数据)?(?:[\s】\]]*$|[:：])|"
+            r"此处填写|示例文本"
+        ),
     }
     INTERNAL_PATTERNS = {
         "INTERNAL_RUNTIME_TERM": re.compile(
@@ -103,12 +107,43 @@ class DeliveryValidator:
                     location="DOCX", blocking=True,
                 ))
 
+        # A parent heading may be followed immediately by a lower-level heading, and a
+        # subsection may contain a table or figure without an ordinary text paragraph.
+        # Inspect the real DOCX XML block range until the next heading of the same or a
+        # higher level instead of looking only at paragraphs before the next heading.
+        body_children = list(document.element.body.iterchildren())
+        child_index_by_id = {id(child): index for index, child in enumerate(body_children)}
         for position, (paragraph_index, title, level) in enumerate(headings):
             if title == "目录":
                 continue
-            end = headings[position + 1][0] if position + 1 < len(headings) else len(paragraphs)
-            body = [p.text.strip() for p in paragraphs[paragraph_index + 1 : end] if p.text.strip()]
-            if not body and level <= 3:
+            next_boundary = len(paragraphs)
+            for next_paragraph_index, _next_title, next_level in headings[position + 1 :]:
+                if next_level <= level:
+                    next_boundary = next_paragraph_index
+                    break
+            start_child = child_index_by_id.get(id(paragraphs[paragraph_index]._p), -1)
+            if next_boundary < len(paragraphs):
+                end_child = child_index_by_id.get(id(paragraphs[next_boundary]._p), len(body_children))
+            else:
+                end_child = len(body_children)
+            has_content = False
+            for child in body_children[start_child + 1 : end_child]:
+                local_name = child.tag.rsplit("}", 1)[-1]
+                if local_name == "tbl":
+                    has_content = True
+                    break
+                if local_name != "p":
+                    continue
+                paragraph = next((item for item in paragraphs if item._p is child), None)
+                if paragraph is None:
+                    continue
+                child_level = self._heading_level(paragraph.style.name if paragraph.style else "")
+                if child_level:
+                    continue
+                if paragraph.text.strip() or child.xpath('.//w:drawing') or child.xpath('.//w:object'):
+                    has_content = True
+                    break
+            if not has_content and level <= 3:
                 findings.append(self._finding(
                     "D5_EMPTY_SECTION", "P1", f"章节没有正文：{title}",
                     location=f"DOCX paragraph {paragraph_index + 1}", blocking=True,

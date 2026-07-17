@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,7 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         *,
         expected_sections: list[str] | None = None,
         expected_candidates: list[dict[str, Any]] | None = None,
+        expected_constraints: dict[str, Any] | None = None,
         screenshots_dir: Path | None = None,
     ) -> dict[str, Any]:
         docx_path = docx_path.resolve()
@@ -37,6 +40,7 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
             pdf_path,
             expected_sections=expected_sections or [],
             expected_candidates=expected_candidates or [],
+            expected_constraints=expected_constraints or {},
         )
         visual = self.validate_visual(docx_path, pdf_path, screenshots_dir=screenshots_dir)
         findings = structure["findings"] + visual["findings"]
@@ -71,6 +75,7 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         *,
         expected_sections: list[str],
         expected_candidates: list[dict[str, Any]] | None = None,
+        expected_constraints: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         base = super().validate_structure(
             docx_path, pdf_path, expected_sections=expected_sections
@@ -117,6 +122,11 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         actual_normalized = self._normalize(actual_text)
         missing_units: list[dict[str, str]] = []
         for unit in expected["units"]:
+            # Formula directives are rendered as native OMML equations. python-docx
+            # intentionally excludes OMML tokens from paragraph.text, so formula
+            # preservation is checked structurally by formula_count below.
+            if unit.get("kind") == "FORMULA":
+                continue
             normalized = self._normalize(unit["text"])
             if len(normalized) >= 4 and normalized not in actual_normalized:
                 missing_units.append(unit)
@@ -133,6 +143,21 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
                     target_type="DOCX_RENDER",
                     responsible_section_ids=affected,
                     evidence={"missing_units": missing_units[:20]},
+                )
+            )
+
+        actual_formulas = len(document.element.xpath(".//m:oMathPara"))
+        if actual_formulas != expected["formula_count"]:
+            findings.append(
+                self._finding(
+                    "D5_FORMULA_COUNT_MISMATCH",
+                    "P0",
+                    f"公式数量与已审查指令不一致：期望 {expected['formula_count']}，实际 {actual_formulas}。",
+                    location="DOCX formulas",
+                    blocking=True,
+                    category="FORMAT",
+                    target_type="DOCX_RENDER",
+                    evidence={"expected": expected["formula_count"], "actual": actual_formulas},
                 )
             )
 
@@ -167,9 +192,18 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
 
         pdf_text = self._pdf_text(pdf_path)
         pdf_normalized = self._normalize(pdf_text)
+        # PDF text extractors linearize tables column-by-column or interleave cells,
+        # so an individual DOCX cell is not guaranteed to survive as one contiguous
+        # text unit even when the rendered table is complete. Table preservation is
+        # verified independently by DOCX table structure/count and page visual QA.
+        # Keep PDF text-layer parity for prose-like units only.
+        pdf_parity_units = [
+            unit for unit in expected["units"]
+            if unit.get("kind") not in {"TABLE_CELL", "FORMULA"}
+        ]
         pdf_missing = [
             unit
-            for unit in expected["units"]
+            for unit in pdf_parity_units
             if len(self._normalize(unit["text"])) >= 4
             and not self._fuzzy_unit_present(self._normalize(unit["text"]), pdf_normalized)
         ]
@@ -236,6 +270,74 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
                 )
             )
 
+        constraints = expected_constraints or {}
+        pages = constraints.get("main_body_pages") or {}
+        references = constraints.get("references") or {}
+        try:
+            pdf_page_count = len(PdfReader(str(pdf_path)).pages)
+        except Exception:
+            pdf_page_count = 0
+        if pages and not (int(pages["min"]) <= pdf_page_count <= int(pages["max"])):
+            findings.append(
+                self._finding(
+                    "D5_GUIDE_PAGE_COUNT_OUT_OF_RANGE",
+                    "P1",
+                    f"交付PDF页数不满足申请指南约束：要求 {pages['min']}—{pages['max']} 页，实际 {pdf_page_count} 页。",
+                    location="PDF pages",
+                    blocking=True,
+                    category="CONTENT",
+                    target_type="FULL_PROPOSAL_CANDIDATE_SET",
+                    evidence={"constraint": pages, "actual": pdf_page_count, "source_rule_ids": constraints.get("source_rule_ids", [])},
+                )
+            )
+        visible_text = self._docx_visible_text(document)
+        reference_numbers = {
+            int(value)
+            for value in re.findall(r"(?m)^\s*\[(\d{1,4})\]\s+", visible_text)
+        }
+        reference_count = len(reference_numbers)
+        if references and not (int(references["min"]) <= reference_count <= int(references["max"])):
+            findings.append(
+                self._finding(
+                    "D5_GUIDE_REFERENCE_COUNT_OUT_OF_RANGE",
+                    "P1",
+                    f"参考文献数量不满足申请指南约束：要求 {references['min']}—{references['max']} 篇，实际 {reference_count} 篇。",
+                    location="DOCX references",
+                    blocking=True,
+                    category="CONTENT",
+                    target_type="FULL_PROPOSAL_CANDIDATE_SET",
+                    evidence={"constraint": references, "actual": reference_count, "source_rule_ids": constraints.get("source_rule_ids", [])},
+                )
+            )
+        min_figures = constraints.get("minimum_figures")
+        if min_figures is not None and actual_figures < int(min_figures):
+            findings.append(
+                self._finding(
+                    "D5_GUIDE_FIGURE_MINIMUM_UNMET",
+                    "P1",
+                    f"图形数量不满足申请指南约束：至少 {min_figures} 幅，实际 {actual_figures} 幅。",
+                    location="DOCX figures",
+                    blocking=True,
+                    category="CONTENT",
+                    target_type="FULL_PROPOSAL_CANDIDATE_SET",
+                    evidence={"minimum": int(min_figures), "actual": actual_figures, "source_rule_ids": constraints.get("source_rule_ids", [])},
+                )
+            )
+        min_tables = constraints.get("minimum_tables")
+        if min_tables is not None and actual_tables < int(min_tables):
+            findings.append(
+                self._finding(
+                    "D5_GUIDE_TABLE_MINIMUM_UNMET",
+                    "P1",
+                    f"表格数量不满足申请指南约束：至少 {min_tables} 张，实际 {actual_tables} 张。",
+                    location="DOCX tables",
+                    blocking=True,
+                    category="CONTENT",
+                    target_type="FULL_PROPOSAL_CANDIDATE_SET",
+                    evidence={"minimum": int(min_tables), "actual": actual_tables, "source_rule_ids": constraints.get("source_rule_ids", [])},
+                )
+            )
+
         for finding in findings:
             self._enrich_finding(finding)
         structure = dict(base)
@@ -266,6 +368,9 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
                     "actual_figure_count": actual_figures,
                     "expected_table_count": expected["table_count"],
                     "actual_table_count": actual_tables,
+                    "hard_constraints": constraints,
+                    "reference_count": reference_count,
+                    "pdf_page_count": pdf_page_count,
                     "source_visible_sha256": sha256_text(
                         "\n".join(item["text"] for item in expected["units"])
                     ),
@@ -283,6 +388,7 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         units: list[dict[str, str]] = []
         figure_count = 0
         table_count = 0
+        formula_count = 0
         for candidate in candidates:
             section_id = str(candidate.get("section_id") or "")
             for block in candidate.get("paragraphs") or []:
@@ -320,11 +426,21 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
                 ):
                     if text.startswith(marker):
                         text = text.removeprefix(marker).strip()
-                        units.append({"section_id": section_id, "kind": kind, "text": text})
+                        if kind == "FORMULA":
+                            formula_count += 1
+                        unit = {"section_id": section_id, "kind": kind, "text": text}
+                        if kind == "HEADING" and units and units[-1] == unit:
+                            break
+                        units.append(unit)
                         break
                 else:
                     units.append({"section_id": section_id, "kind": "PARAGRAPH", "text": text})
-        return {"units": units, "figure_count": figure_count, "table_count": table_count}
+        return {
+            "units": units,
+            "figure_count": figure_count,
+            "table_count": table_count,
+            "formula_count": formula_count,
+        }
 
     @staticmethod
     def _fuzzy_unit_present(unit: str, document: str) -> bool:
@@ -350,6 +466,18 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
 
     @staticmethod
     def _pdf_text(pdf_path: Path) -> str:
+        # Poppler preserves the logical Chinese text layer produced by LibreOffice
+        # more reliably than pypdf for CID/subset fonts.  pypdf may visually split
+        # or reorder glyphs and create false content-loss findings even though the
+        # rendered PDF and Poppler text are complete.
+        pdftotext = shutil.which("pdftotext")
+        if pdftotext:
+            completed = subprocess.run(
+                [pdftotext, "-layout", str(pdf_path), "-"],
+                check=True,
+                capture_output=True,
+            )
+            return completed.stdout.decode("utf-8", errors="replace")
         reader = PdfReader(str(pdf_path))
         return "\n".join((page.extract_text() or "") for page in reader.pages)
 

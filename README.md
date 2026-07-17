@@ -297,3 +297,45 @@ tests/             # 自动测试
 5. 接入单位文件病毒扫描、DLP、密钥管理和日志平台；
 6. 对复杂 DOCX 模板实现部署单位专用的 OOXML 补丁与完整性验证；
 7. 对在线模型、搜索服务和回传材料完成正式外发/导入审批。
+
+### 生成与恢复模式
+
+智能体区分两种可审计运行模式：
+
+```bash
+# 生产续跑：仅当 Prompt 版本、输入哈希、工作流、模型路由完全一致时复用
+PROPOSAL_GENERATION_MODE=RESUME_FROM_CHECKPOINT
+
+# 跨模型冷启动验收：拒绝数据库和文件证据中的既有模型响应
+PROPOSAL_GENERATION_MODE=FRESH_GENERATION
+```
+
+`RESUME_FROM_CHECKPOINT` 是安全中断后的正常恢复能力，不是模拟或预写正文注入。复用记录必须回溯到已提交的 `prompt_runs`、原始响应证据和来源 Run。更换模型 ID、端点 ID、供应商模型名、Prompt 版本或输入内容后，复用键都会变化，必须重新调用模型。生产代码不读取松散的 `prior_section_content.json`。
+
+WF-5、最终导出和后验收必须显式绑定同一冻结 WF-4；项目中其他失败或重跑版本不能污染该候选集合。
+
+### 可替换模型与人工文件桥
+
+正式运行时通过显式网关模式选择模型传输层，不在业务工作流中绑定具体供应商：
+
+```bash
+# OpenAI-compatible API
+MODEL_GATEWAY_MODE=OPENAI_COMPATIBLE
+
+# 当前对话或其他外部执行器通过耐久文件桥处理真实 Prompt
+MODEL_GATEWAY_MODE=CHAT_BRIDGE
+CHAT_BRIDGE_DIR=./runtime/chat_bridge
+HUMAN_GATE_BRIDGE_DIR=./runtime/human_gate_bridge
+```
+
+`CHAT_BRIDGE` 会原样持久化 System Prompt、输入 Envelope、输出 Schema、模型路由和输入哈希；外部模型返回后仍由智能体执行 Schema、质量门和独立 Critic。`HUMAN_GATE_BRIDGE_DIR` 中的人工决定必须匹配 Gate ID、上下文哈希、角色和允许动作，运行器不会自动批准。
+
+通用入口：
+
+```bash
+python scripts/run_portable_workflow.py --workflow-id <workflow-id>
+```
+
+### 指南硬约束贯穿验收
+
+方案抽取识别出的正文页数、参考文献数量、最少图表数量等强制规则会进入冻结申请书合同，并由规划、全文审查及导出后验收共同执行。导出文件不满足指南硬约束时，系统产生内容级阻断并路由回写作流程，不允许仅因 DOCX/PDF 可打开而判定交付通过。

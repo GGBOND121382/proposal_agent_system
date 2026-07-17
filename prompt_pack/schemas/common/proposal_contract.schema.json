@@ -3,18 +3,138 @@
   "$id": "proposal_contract.schema.json",
   "type": "object",
   "properties": {
-    "contract_id": {"type": "string", "minLength": 1},
-    "document_type": {"type": "string", "enum": ["RESEARCH_PROPOSAL", "ENGINEERING_PROPOSAL", "TECHNICAL_REPORT", "UNKNOWN"]},
-    "funding_scheme": {"type": ["string", "null"]},
-    "primary_evaluation_logic": {"type": "string", "enum": ["SCIENTIFIC_MERIT", "TECHNICAL_INNOVATION", "ENGINEERING_FEASIBILITY", "MIXED", "UNKNOWN"]},
-    "target_evaluators": {"type": "array", "items": {"type": "string", "minLength": 1}},
-    "max_main_pages": {"type": ["integer", "null"], "minimum": 1},
-    "max_core_research_questions": {"type": "integer", "minimum": 1, "maximum": 6},
-    "mandatory_sections": {"type": "array", "items": {"type": "string", "minLength": 1}},
-    "appendix_only_topics": {"type": "array", "items": {"type": "string", "minLength": 1}},
-    "forbidden_main_body_topics": {"type": "array", "items": {"type": "string", "minLength": 1}},
-    "status": {"type": "string", "enum": ["CONFIRMED", "PARTIAL", "UNKNOWN"]}
+    "contract_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "document_type": {
+      "type": "string",
+      "enum": [
+        "RESEARCH_PROPOSAL",
+        "ENGINEERING_PROPOSAL",
+        "TECHNICAL_REPORT",
+        "UNKNOWN"
+      ]
+    },
+    "funding_scheme": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "primary_evaluation_logic": {
+      "type": "string",
+      "enum": [
+        "SCIENTIFIC_MERIT",
+        "TECHNICAL_INNOVATION",
+        "ENGINEERING_FEASIBILITY",
+        "MIXED",
+        "UNKNOWN"
+      ]
+    },
+    "target_evaluators": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "max_main_pages": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "max_core_research_questions": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 6
+    },
+    "mandatory_sections": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "appendix_only_topics": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "forbidden_main_body_topics": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "CONFIRMED",
+        "PARTIAL",
+        "UNKNOWN"
+      ]
+    },
+    "min_main_pages": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "min_reference_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "max_reference_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "min_figure_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "min_table_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "hard_constraint_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
   },
   "additionalProperties": false,
-  "required": ["contract_id", "document_type", "funding_scheme", "primary_evaluation_logic", "target_evaluators", "max_main_pages", "max_core_research_questions", "mandatory_sections", "appendix_only_topics", "forbidden_main_body_topics", "status"]
+  "required": [
+    "contract_id",
+    "document_type",
+    "funding_scheme",
+    "primary_evaluation_logic",
+    "target_evaluators",
+    "max_main_pages",
+    "max_core_research_questions",
+    "mandatory_sections",
+    "appendix_only_topics",
+    "forbidden_main_body_topics",
+    "status"
+  ]
 }

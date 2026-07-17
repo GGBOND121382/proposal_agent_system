@@ -35,13 +35,13 @@ class ExportGenerateMixin:
             note.alignment = WD_ALIGN_PARAGRAPH.CENTER
             note.paragraph_format.space_before = Pt(42)
             note_run = note.add_run(description)
-            self._set_run_font(note_run, "宋体", 10)
+            self._set_run_font(note_run, "Noto Serif CJK SC", 10)
 
         meta = document.add_paragraph()
         meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
         meta.paragraph_format.space_before = Pt(80)
         meta_run = meta.add_run(f"资料等级：{project.get('security_level', 'INTERNAL')}\n生成时间：{utc_now()[:10]}")
-        self._set_run_font(meta_run, "宋体", 11)
+        self._set_run_font(meta_run, "Noto Serif CJK SC", 11)
         document.add_page_break()
 
         if candidates:
@@ -51,7 +51,7 @@ class ExportGenerateMixin:
                 p.paragraph_format.first_line_indent = None
                 p.paragraph_format.left_indent = Cm(0.8)
                 run = p.add_run(candidate.get("section_title") or "未命名章节")
-                self._set_run_font(run, "宋体", 12)
+                self._set_run_font(run, "Noto Serif CJK SC", 12)
             for candidate in candidates:
                 document.add_heading(candidate.get("section_title") or "未命名章节", level=1)
                 list_state = {"number": 0}
@@ -76,27 +76,27 @@ class ExportGenerateMixin:
 
     def _configure_document(self, document: Document) -> None:
         section = document.sections[0]
-        section.top_margin = Cm(2.5)
-        section.bottom_margin = Cm(2.5)
-        section.left_margin = Cm(2.8)
-        section.right_margin = Cm(2.5)
+        section.top_margin = Cm(2.2)
+        section.bottom_margin = Cm(2.2)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.2)
         section.different_first_page_header_footer = True
 
         normal = document.styles["Normal"]
-        normal.font.name = "宋体"
-        normal._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
-        normal.font.size = Pt(12)
-        normal.paragraph_format.line_spacing = 1.5
-        normal.paragraph_format.first_line_indent = Pt(24)
-        normal.paragraph_format.space_after = Pt(6)
+        normal.font.name = "Noto Serif CJK SC"
+        normal._element.rPr.rFonts.set(qn("w:eastAsia"), "Noto Serif CJK SC")
+        normal.font.size = Pt(11)
+        normal.paragraph_format.line_spacing = 1.25
+        normal.paragraph_format.first_line_indent = Pt(22)
+        normal.paragraph_format.space_after = Pt(3)
 
-        for style_name, font_name, size in [("Heading 1", "黑体", 16), ("Heading 2", "黑体", 14), ("Heading 3", "楷体", 12)]:
+        for style_name, font_name, size in [("Heading 1", "Noto Sans CJK SC", 15), ("Heading 2", "Noto Sans CJK SC", 13), ("Heading 3", "Noto Serif CJK SC", 11)]:
             style = document.styles[style_name]
             style.font.name = font_name
             style._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
             style.font.size = Pt(size)
             style.font.bold = True
-            style.paragraph_format.space_before = Pt(12)
-            style.paragraph_format.space_after = Pt(6)
+            style.paragraph_format.space_before = Pt(8)
+            style.paragraph_format.space_after = Pt(4)
             style.paragraph_format.keep_with_next = True
 

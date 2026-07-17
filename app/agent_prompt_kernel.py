@@ -56,7 +56,7 @@ UNAMBIGUOUS_RELATION_SIGNATURES: dict[str, tuple[set[str], set[str]]] = {
     "MEASURED_BY": ({"OBJECTIVE", "DELIVERABLE", "EXPERIMENT"}, {"METRIC"}),
     "OCCURS_IN": ({"DEMAND", "PROBLEM", "RISK"}, {"SCENARIO"}),
     "SCHEDULED_IN": ({"WORK_PACKAGE"}, {"SCHEDULE_PHASE"}),
-    "VALIDATED_BY": ({"OBJECTIVE", "METHOD", "INNOVATION"}, {"EXPERIMENT", "METRIC"}),
+    "VALIDATED_BY": ({"OBJECTIVE", "WORK_PACKAGE", "METHOD", "INNOVATION"}, {"EXPERIMENT", "METRIC"}),
 }
 
 APPENDIX_ENGINEERING_TERMS = {
@@ -561,7 +561,24 @@ class AgentPromptKernelValidator:
         changed = [str(item) for item in result.get("changed_paths") or []]
 
         def under(path: str, roots: list[str]) -> bool:
-            return any(path == root or path.startswith(root + ".") or path.startswith(root + "[") for root in roots)
+            def normalize_selectors(value: str) -> str:
+                return re.sub(r"\[[^\]]+\]", "", value)
+
+            for root in roots:
+                if "[" in root:
+                    # Explicit selectors/indices remain strict: permission for [3]
+                    # must never silently authorize [4].
+                    if path == root or path.startswith(root + ".") or path.startswith(root + "["):
+                        return True
+                    continue
+                normalized_path = normalize_selectors(path)
+                normalized_root = normalize_selectors(root)
+                if (
+                    normalized_path == normalized_root
+                    or normalized_path.startswith(normalized_root + ".")
+                ):
+                    return True
+            return False
 
         outside = [path for path in changed if not under(path, allowed)]
         protected_hits = [path for path in changed if under(path, protected)]

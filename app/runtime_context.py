@@ -9,6 +9,7 @@ from typing import Any
 
 from .context import ContextBuilder as BaseContextBuilder
 from .runtime_policy import CapabilityPolicy, LIVE_ENVELOPE_REGISTRY
+from .task_instruction import instruction_text, intended_uses
 from .util import sha256_json, utc_now
 
 
@@ -209,10 +210,35 @@ class LiveContextBuilder(BaseContextBuilder):
         *,
         strict: bool = False,
     ) -> bool:
-        changed = super()._set_path_if_valid(prompt_id, envelope, dotted_path, value, strict=strict)
-        if changed and getattr(self, "runtime_mode", "REPLAY") == "LIVE":
+        # LIVE envelopes start as complete schema scaffolds. Validating after every
+        # individual replacement is incorrect because several required scaffold
+        # fields often have to be replaced together before the whole envelope can
+        # validate. Apply each replacement atomically, record its provenance, and
+        # perform one strict schema validation after all replacements are complete.
+        if getattr(self, "runtime_mode", "REPLAY") == "LIVE":
+            parts = dotted_path.split(".")
+            node: Any = envelope
+            for part in parts[:-1]:
+                if not isinstance(node, dict) or part not in node or not isinstance(node[part], dict):
+                    if strict:
+                        raise ValueError(
+                            f"Critical context path does not exist for {prompt_id}: {dotted_path}"
+                        )
+                    return False
+                node = node[part]
+            if not isinstance(node, dict) or parts[-1] not in node:
+                if strict:
+                    raise ValueError(
+                        f"Critical context path does not exist for {prompt_id}: {dotted_path}"
+                    )
+                return False
+            node[parts[-1]] = copy.deepcopy(value)
             self._live_touched_paths.add(dotted_path)
-        return changed
+            return True
+
+        return super()._set_path_if_valid(
+            prompt_id, envelope, dotted_path, value, strict=strict
+        )
 
     def _path_was_touched(self, dotted_path: str) -> bool:
         return any(
@@ -308,14 +334,168 @@ class LiveContextBuilder(BaseContextBuilder):
         envelope["expected_output_schema"] = self.pack.entry(prompt_id)["output_schema"]
         self._apply_common_payload(envelope, prompt_id, project, config, docs, context_hash, state, workflow_id)
 
+        # Concurrent authoring must never resolve a producer result from another
+        # section or child workflow. Rebind every section-stage dependency using
+        # the source_section already present in this exact LIVE envelope. This is
+        # intentionally done after the common builder so it also corrects any
+        # mutable-context race in the shared concurrent ContextBuilder instance.
+        section_dependency = {
+            "P-WRITE-BLUEPRINT-CRITIC": ("blueprint_candidate", "P-WRITE-BLUEPRINT", "blueprint"),
+            "P-WRITE-CONTENT": ("approved_blueprint", "P-WRITE-BLUEPRINT", "blueprint"),
+            "P-WRITE-CRITIC": ("content_candidate", "P-WRITE-CONTENT", None),
+            "P-EXPRESSION-POLISH": ("content_candidate", "P-WRITE-CONTENT", None),
+            "P-EXPRESSION-CRITIC": ("polished_candidate", "P-EXPRESSION-POLISH", None),
+        }
+        dependency = section_dependency.get(prompt_id)
+        if dependency and workflow_id:
+            target_field, producer_prompt, result_key = dependency
+            source_section = (envelope.get("payload") or {}).get("source_section") or {}
+            source_section_id = str(source_section.get("section_id") or "")
+            if source_section_id:
+                rows = self.db.fetchall(
+                    "SELECT input_json,output_json FROM prompt_runs "
+                    "WHERE project_id=? AND workflow_id=? AND prompt_id=? AND status='PASS' "
+                    "ORDER BY created_at DESC,id DESC",
+                    (project_id, workflow_id, producer_prompt),
+                )
+                scoped_result = None
+                for row in rows:
+                    try:
+                        prior_input = json.loads(row.get("input_json") or "{}")
+                        prior_output = json.loads(row.get("output_json") or "{}")
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        continue
+                    prior_section = (prior_input.get("payload") or {}).get("source_section") or {}
+                    if str(prior_section.get("section_id") or "") != source_section_id:
+                        continue
+                    candidate_result = prior_output.get("result")
+                    if isinstance(candidate_result, dict):
+                        scoped_result = (
+                            candidate_result.get(result_key)
+                            if result_key is not None
+                            else candidate_result
+                        )
+                        if scoped_result is not None:
+                            break
+                if scoped_result is not None:
+                    self._set_path_if_valid(
+                        prompt_id, envelope, f"payload.{target_field}", scoped_result, strict=True
+                    )
+
+        if prompt_id == "P-INTEGRATION-CRITIC":
+            # The parent workflow state handed to the LIVE builder can lag one
+            # persistence boundary behind the completed concurrent children.
+            # Reconstruct the final candidate set from the child workflow prompt
+            # runs, then explicitly touch the strict scaffold paths.
+            persisted_state = state
+            if workflow_id:
+                row = self.db.fetchone("SELECT state_json FROM workflows WHERE id=?", (workflow_id,))
+                if row:
+                    try:
+                        persisted_state = json.loads(row.get("state_json") or "{}")
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        persisted_state = state
+            child_ids = [str(x) for x in persisted_state.get("authoring_child_workflow_ids", []) if x]
+            if not child_ids:
+                child_ids = [
+                    str(item.get("workflow_id"))
+                    for item in (persisted_state.get("full_proposal_children") or {}).values()
+                    if isinstance(item, dict) and item.get("workflow_id")
+                ]
+            if child_ids:
+                placeholders = ",".join("?" for _ in child_ids)
+                rows = self.db.fetchall(
+                    "SELECT input_json,output_json,created_at,id FROM prompt_runs "
+                    "WHERE project_id=? AND workflow_id IN (" + placeholders + ") "
+                    "AND prompt_id='P-EXPRESSION-POLISH' AND status='PASS' "
+                    "ORDER BY created_at,id",
+                    (project_id, *child_ids),
+                )
+                latest: dict[str, dict[str, Any]] = {}
+                for row in rows:
+                    try:
+                        input_data = json.loads(row.get("input_json") or "{}")
+                        output_data = json.loads(row.get("output_json") or "{}")
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        continue
+                    section = (input_data.get("payload") or {}).get("source_section") or {}
+                    candidate = output_data.get("result") or {}
+                    section_id = str(section.get("section_id") or "")
+                    if section_id and candidate.get("candidate_id"):
+                        latest[section_id] = {"section": section, "candidate": candidate}
+                contract = persisted_state.get("full_proposal_contract") or {}
+                order = [str(item.get("section_id")) for item in contract.get("sections", []) if item.get("section_id")]
+                candidate_sections = [
+                    {"section_id": section_id, "candidate": self._integration_candidate(latest[section_id]["candidate"])}
+                    for section_id in order if section_id in latest
+                ]
+                if candidate_sections:
+                    self._set_path_if_valid(prompt_id, envelope, "payload.candidate_sections", candidate_sections, strict=True)
+                    section_map = []
+                    by_contract = {str(item.get("section_id")): item for item in contract.get("sections", []) if item.get("section_id")}
+                    for index, item in enumerate(candidate_sections, 1):
+                        section_id = item["section_id"]
+                        source = latest[section_id]["section"]
+                        contract_item = by_contract.get(section_id) or {}
+                        section_map.append({
+                            "section_id": section_id,
+                            "title": str(source.get("title") or contract_item.get("title") or section_id),
+                            "level": int(source.get("level") or 1),
+                            "candidate_id": str(item["candidate"].get("candidate_id") or ""),
+                        })
+                    self._set_path_if_valid(prompt_id, envelope, "payload.document_section_map", section_map, strict=True)
+
+            # The integration terminology list is optional and may legitimately be
+            # empty. Explicitly replace the schema scaffold so LIVE provenance
+            # validation does not treat its generated sample item as unresolved.
+            if "terminology" in (envelope.get("payload") or {}):
+                self._set_path_if_valid(
+                    prompt_id, envelope, "payload.terminology", [], strict=True
+                )
+
+            # Keep the strict map contract even when an older parent-state snapshot
+            # contributed helper metadata such as `order`. Only the four schema
+            # fields are sent to the Integration Critic.
+            current_map = (envelope.get("payload") or {}).get("document_section_map") or []
+            sanitized_map = [
+                {
+                    "section_id": str(item.get("section_id") or ""),
+                    "title": str(item.get("title") or item.get("section_id") or "章节"),
+                    "level": int(item.get("level") or 1),
+                    "candidate_id": item.get("candidate_id"),
+                }
+                for item in current_map
+                if isinstance(item, dict) and item.get("section_id")
+            ]
+            if sanitized_map:
+                self._set_path_if_valid(
+                    prompt_id, envelope, "payload.document_section_map", sanitized_map, strict=True
+                )
+
         fallback_values = {
-            "payload.task_instruction": config.get("task_instruction") or project.get("description") or project.get("name"),
+            # Structured task_instruction objects are populated by the common
+            # context builder. Only use the scalar fallback when the schema field
+            # itself is scalar.
+            "payload.task_instruction": (
+                instruction_text(
+                    config.get("task_instruction"),
+                    str(project.get("description") or project.get("name") or ""),
+                )
+                if not isinstance((envelope.get("payload") or {}).get("task_instruction"), dict)
+                else None
+            ),
             "payload.project_name": project.get("name"),
             "payload.project_description": project.get("description"),
-            "payload.intended_uses": [config.get("task_instruction") or project.get("description") or project.get("name")],
+            "payload.intended_uses": intended_uses(
+                config.get("task_instruction"),
+                str(project.get("description") or project.get("name") or ""),
+            ),
+            # A required but legitimately empty prior-label collection is real input,
+            # not an unresolved schema placeholder. Mark it as explicitly supplied.
+            "payload.existing_labels": [],
         }
         for path, value in fallback_values.items():
-            if value:
+            if value or path == "payload.existing_labels":
                 self._set_path_if_valid(prompt_id, envelope, path, value)
         if overrides:
             for path, value in overrides.items():

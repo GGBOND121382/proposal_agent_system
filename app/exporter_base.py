@@ -7,6 +7,7 @@ from typing import Any
 
 from .delivery_validator import DeliveryValidationError
 from .post_export_validator import PostExportDeliveryValidator as DeliveryValidator
+from .proposal_constraints import latest_scheme_constraints
 from .figure_protocol import FigureProtocolError
 from .pdf_exporter import PdfConversionError, PdfConverter
 from .quality import QualityGateBlocked, QualityLifecycleManager
@@ -138,6 +139,7 @@ class ExportBaseMixin:
                 pdf_path,
                 expected_sections=expected_sections,
                 expected_candidates=candidates,
+                expected_constraints=latest_scheme_constraints(self.db, project_id),
                 screenshots_dir=document_path.parent / f"{document_path.stem}-pages",
             )
         except DeliveryValidationError as exc:
@@ -249,7 +251,10 @@ class ExportBaseMixin:
         if not project:
             raise KeyError(project_id)
         try:
-            self.quality_manager.assert_no_open_blockers(project_id)
+            self.quality_manager.assert_no_open_blockers(
+                project_id,
+                workflow_id=str(getattr(self, "review_workflow_id", "") or "") or None,
+            )
         except QualityGateBlocked as exc:
             raise ExportDenied(
                 str(exc) + "。导出必须等待修复证据与独立复审完成，不能通过批准Gate或手工改库绕过。"
@@ -281,7 +286,10 @@ class ExportBaseMixin:
         project = self.db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
         if not project:
             raise KeyError(project_id)
-        blockers = self.quality_manager.open_blockers(project_id)
+        blockers = self.quality_manager.open_blockers(
+            project_id,
+            workflow_id=str(getattr(self, "review_workflow_id", "") or "") or None,
+        )
         invalid = [
             item for item in blockers
             if (item.get("responsibility") or {}).get("owner") != "EXPORT_ENGINEERING"
@@ -301,23 +309,135 @@ class ExportBaseMixin:
 
     def _approved_gate_ids(self, project_id: str) -> dict[str, str]:
         gates: dict[str, str] = {}
+        approval_workflow_id = str(getattr(self, "approval_workflow_id", "") or "")
         for gate_type in ["FINAL_CONTENT_SECURITY_APPROVAL", "FINAL_EXPORT_APPROVAL"]:
-            gate = self.db.fetchone(
-                "SELECT id,status FROM gates WHERE project_id=? AND gate_type=? ORDER BY created_at DESC LIMIT 1",
-                (project_id, gate_type),
-            )
+            if approval_workflow_id:
+                gate = self.db.fetchone(
+                    "SELECT id,status FROM gates WHERE project_id=? AND workflow_id=? AND gate_type=? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (project_id, approval_workflow_id, gate_type),
+                )
+            else:
+                gate = self.db.fetchone(
+                    "SELECT id,status FROM gates WHERE project_id=? AND gate_type=? ORDER BY created_at DESC LIMIT 1",
+                    (project_id, gate_type),
+                )
             if not gate or gate["status"] != "APPROVED":
                 raise ExportDenied(f"{gate_type} gate has not been approved")
             gates[gate_type] = gate["id"]
         return gates
 
     def _candidate_runs(self, project_id: str) -> list[dict[str, Any]]:
-        rows = self.db.fetchall(
+        # When several recoverable WF-4 attempts exist, "latest run per section" may
+        # combine candidates from different attempts. Export must instead consume the
+        # exact 14-section snapshot frozen by the latest PASS Full Integration Critic.
+        review_workflow_id = str(getattr(self, "review_workflow_id", "") or "")
+        if review_workflow_id:
+            workflow_rows = self.db.fetchall(
+                "SELECT id,state_json,created_at FROM workflows "
+                "WHERE project_id=? AND workflow_type='WF-4_PROPOSAL_AUTHORING' AND id=?",
+                (project_id, review_workflow_id),
+            )
+        else:
+            workflow_rows = self.db.fetchall(
+                "SELECT id,state_json,created_at FROM workflows "
+                "WHERE project_id=? AND workflow_type='WF-4_PROPOSAL_AUTHORING' "
+                "ORDER BY created_at DESC,id DESC",
+                (project_id,),
+            )
+        reviewed_manifest: list[dict[str, Any]] = []
+        for workflow_row in workflow_rows:
+            try:
+                workflow_state = json.loads(workflow_row.get("state_json") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if workflow_state.get("parent_workflow_id"):
+                continue
+            pass_reviews = [
+                item for item in workflow_state.get("full_proposal_review_history", [])
+                if isinstance(item, dict) and item.get("status") == "PASS"
+            ]
+            if pass_reviews:
+                reviewed_manifest = list(pass_reviews[-1].get("section_manifest") or [])
+                break
+
+        if reviewed_manifest:
+            polish_ids = [str(item.get("polish_run_id") or "") for item in reviewed_manifest]
+            critic_ids = [str(item.get("expression_critic_run_id") or "") for item in reviewed_manifest]
+            run_ids = [item for item in [*polish_ids, *critic_ids] if item]
+            placeholders = ",".join("?" for _ in run_ids)
+            exact_rows = self.db.fetchall(
+                "SELECT id,workflow_id,prompt_id,input_json,output_json,status,created_at "
+                f"FROM prompt_runs WHERE project_id=? AND id IN ({placeholders})",
+                (project_id, *run_ids),
+            ) if run_ids else []
+            by_id = {str(row.get("id")): row for row in exact_rows}
+            reviewed_candidates: list[dict[str, Any]] = []
+            marker_prefixes = (
+                "[[TABLE]]", "[[FIGURE]]", "[[MERMAID]]", "[[FORMULA]]", "[[REFERENCE]]"
+            )
+            for item in reviewed_manifest:
+                polish_id = str(item.get("polish_run_id") or "")
+                critic_id = str(item.get("expression_critic_run_id") or "")
+                polish_row = by_id.get(polish_id)
+                critic_row = by_id.get(critic_id)
+                if not polish_row or not critic_row:
+                    raise ExportDenied(
+                        "Latest PASS Full Integration Critic references missing section runs: "
+                        f"polish={polish_id}, critic={critic_id}"
+                    )
+                if polish_row.get("status") != "PASS" or critic_row.get("status") != "PASS":
+                    raise ExportDenied(
+                        "Latest PASS Full Integration Critic references a non-PASS section run"
+                    )
+                input_data = json.loads(polish_row.get("input_json") or "{}")
+                output_data = json.loads(polish_row.get("output_json") or "{}")
+                source_section = (input_data.get("payload") or {}).get("source_section") or {}
+                result = output_data.get("result") or {}
+                section_id = str(source_section.get("section_id") or "")
+                candidate_id = str(result.get("candidate_id") or "")
+                if section_id != str(item.get("section_id") or "") or candidate_id != str(item.get("candidate_id") or ""):
+                    raise ExportDenied(
+                        "Frozen integration manifest does not match its referenced polish output: "
+                        f"section={section_id}, candidate={candidate_id}"
+                    )
+                paragraphs = [
+                    paragraph.get("text", "")
+                    for paragraph in sorted(
+                        result.get("paragraphs", []), key=lambda value: value.get("sequence", 0)
+                    )
+                    if isinstance(paragraph, dict)
+                ] or [result.get("candidate_text", "")]
+                reviewed_candidates.append({
+                    "run_id": polish_id,
+                    "workflow_id": str(polish_row.get("workflow_id") or ""),
+                    "created_at": polish_row.get("created_at"),
+                    "section_id": section_id,
+                    "section_title": source_section.get("title") or source_section.get("section_key"),
+                    "source_section_hash": source_section.get("text_hash"),
+                    "contains_complex_content": any(
+                        source_section.get(key, False)
+                        for key in [
+                            "contains_table", "contains_formula", "contains_image",
+                            "contains_comment", "contains_revision",
+                        ]
+                    ) or any(str(paragraph).strip().startswith(marker_prefixes) for paragraph in paragraphs),
+                    "paragraphs": paragraphs,
+                    "candidate_id": candidate_id,
+                    "expression_critic_run_id": critic_id,
+                })
+            return reviewed_candidates
+
+        fallback_sql = (
             "SELECT id,workflow_id,prompt_id,input_json,output_json,status,created_at "
             "FROM prompt_runs WHERE project_id=? AND prompt_id IN ('P-EXPRESSION-POLISH','P-EXPRESSION-CRITIC') "
-            "ORDER BY created_at,id",
-            (project_id,),
         )
+        fallback_params: list[Any] = [project_id]
+        if review_workflow_id:
+            fallback_sql += "AND workflow_id=? "
+            fallback_params.append(review_workflow_id)
+        fallback_sql += "ORDER BY created_at,id"
+        rows = self.db.fetchall(fallback_sql, tuple(fallback_params))
         polished: dict[tuple[str, str], dict[str, Any]] = {}
         approvals: dict[tuple[str, str], dict[str, Any]] = {}
         for row in rows:

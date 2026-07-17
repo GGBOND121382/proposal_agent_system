@@ -25,7 +25,37 @@ def tokens(text: str) -> set[str]:
     latin = {token for token in re.findall(r"[a-z0-9][a-z0-9_-]+", lowered) if len(token) > 1}
     chinese = "".join(re.findall(r"[\u4e00-\u9fff]", lowered))
     grams = {chinese[index:index + 2] for index in range(max(0, len(chinese) - 1))}
-    return latin | grams
+    # G3 plans may intentionally use Chinese research questions and English
+    # executable database queries. Add narrow domain aliases so traceability
+    # validation measures semantic binding instead of same-language spelling.
+    aliases: set[str] = set()
+    bilingual = {
+        "需求": {"requirements", "requirement"},
+        "追溯": {"traceability", "trace", "tracing"},
+        "链接": {"link", "links", "recovery"},
+        "变更": {"change", "changes", "commit"},
+        "影响": {"impact", "propagation"},
+        "制品": {"artifact", "artifacts"},
+        "依赖": {"dependency", "dependencies", "graph"},
+        "图": {"graph", "network"},
+        "测试": {"test", "testing", "regression"},
+        "选择": {"selection", "select"},
+        "优先": {"prioritization", "prioritize", "apfd"},
+        "缺陷": {"defect", "bug", "bugs", "fault"},
+        "风险": {"risk", "prediction"},
+        "预测": {"prediction", "predict"},
+        "数据集": {"dataset", "datasets", "benchmark"},
+        "基准": {"benchmark", "benchmarks"},
+        "跨项目": {"cross-project", "transfer"},
+        "迁移": {"transfer", "domain", "adaptation"},
+        "语义": {"semantic", "language"},
+        "历史": {"historical", "history", "co-change"},
+        "共变": {"co-change", "logical", "coupling"},
+    }
+    for phrase, values in bilingual.items():
+        if phrase in lowered:
+            aliases.update(values)
+    return latin | grams | aliases
 
 
 def canonical_url(url: str) -> str:

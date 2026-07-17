@@ -168,7 +168,7 @@ class FullProposalRepairMixin:
         if self._three_section_mode(effective_state):
             sections = self._resolve_three_section_contract(sections, effective_state)
         if self._full_proposal_mode(effective_state):
-            sections = self._resolve_full_proposal_contract(sections, effective_state)
+            sections = self._resolve_full_proposal_contract(sections, effective_state, project_id)
 
         requested_ids = set(options.get("target_section_ids") or [])
         requested_titles = set(options.get("target_section_titles") or [])
