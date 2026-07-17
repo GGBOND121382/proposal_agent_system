@@ -30,11 +30,11 @@ jobs:
           git status --short > source_status.txt
       - name: Package source tree
         run: |
-          tar --exclude=.git --exclude=source-snapshot.tar.gz -czf source-snapshot.tar.gz .
+          tar --exclude=.git -czf /tmp/source-snapshot.tar.gz .
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
           name: proposal-agent-retest-source-${{ github.run_id }}
-          path: source-snapshot.tar.gz
+          path: /tmp/source-snapshot.tar.gz
           if-no-files-found: error
           retention-days: 3
