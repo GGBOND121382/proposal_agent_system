@@ -1,0 +1,35 @@
+name: Export Retest Source Snapshot
+
+on:
+  push:
+    branches:
+      - agent/retest-portable-generation-20260717
+    paths:
+      - ".github/workflows/export-retest-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact retest branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Record source identity
+        run: |
+          git rev-parse HEAD > source_commit.txt
+          git status --short > source_status.txt
+      - name: Package source tree
+        run: |
+          tar --exclude=.git --exclude=source-snapshot.tar.gz -czf source-snapshot.tar.gz .
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: proposal-agent-retest-source-${{ github.run_id }}
+          path: source-snapshot.tar.gz
+          if-no-files-found: error
+          retention-days: 3
