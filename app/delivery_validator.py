@@ -22,7 +22,11 @@ class DeliveryValidator:
 
     PLACEHOLDER_PATTERNS = {
         "PLACEHOLDER_BRACES": re.compile(r"\{\{[^{}]+\}\}|<<[^<>]+>>"),
-        "PLACEHOLDER_WORD": re.compile(r"(?i)\b(?:TODO|TBD|PLACEHOLDER|FIXME)\b|待补充|此处填写|示例文本"),
+        "PLACEHOLDER_WORD": re.compile(
+            r"(?im)\b(?:TODO|TBD|PLACEHOLDER|FIXME)\b|"
+            r"(?:^|[\s【\[])待补充(?:项|内容|材料|数据)?(?:[\s】\]]*$|[:：])|"
+            r"此处填写|示例文本"
+        ),
     }
     INTERNAL_PATTERNS = {
         "INTERNAL_RUNTIME_TERM": re.compile(

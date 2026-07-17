@@ -32,6 +32,9 @@ class Settings:
     mermaid_js_path: Path
     mermaid_browser_executable: str
     skill_timeout_seconds: int
+    model_gateway_mode: str
+    chat_bridge_dir: Path | None
+    human_gate_bridge_dir: Path | None
 
     @classmethod
     def load(cls) -> "Settings":
@@ -72,4 +75,7 @@ class Settings:
             mermaid_js_path=Path(os.getenv("MERMAID_JS_PATH", str(root / "third_party" / "mermaid" / "mermaid.min.js"))).resolve(),
             mermaid_browser_executable=os.getenv("MERMAID_BROWSER_EXECUTABLE", ""),
             skill_timeout_seconds=int(os.getenv("SKILL_TIMEOUT_SECONDS", "60")),
+            model_gateway_mode=os.getenv("MODEL_GATEWAY_MODE", "OPENAI_COMPATIBLE").strip().upper(),
+            chat_bridge_dir=(Path(os.environ["CHAT_BRIDGE_DIR"]).resolve() if os.getenv("CHAT_BRIDGE_DIR") else None),
+            human_gate_bridge_dir=(Path(os.environ["HUMAN_GATE_BRIDGE_DIR"]).resolve() if os.getenv("HUMAN_GATE_BRIDGE_DIR") else None),
         )

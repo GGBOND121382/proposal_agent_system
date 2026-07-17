@@ -48,11 +48,19 @@ class G3RuntimePromptExecutor(RuntimePromptExecutor):
             }
             protected = {
                 "candidate_sections",
+                "candidate_document",
                 "document_section_map",
                 "section_contracts",
+                "mandatory_sections",
+                "linked_sections",
                 "sections",
                 "tasks",
                 "paragraphs",
+                "items",
+                "relations",
+                "fact_candidates",
+                "section_profiles",
+                "research_question_ids",
             }
             array_limits = {
                 "trace_links": 1,
@@ -341,11 +349,19 @@ class G3RuntimePromptExecutor(RuntimePromptExecutor):
             key = path[-1] if path else ""
             protected = {
                 "candidate_sections",
+                "candidate_document",
                 "document_section_map",
                 "section_contracts",
+                "mandatory_sections",
+                "linked_sections",
                 "sections",
                 "tasks",
                 "paragraphs",
+                "items",
+                "relations",
+                "fact_candidates",
+                "section_profiles",
+                "research_question_ids",
             }
             minimum = int(schema.get("minItems") or 0)
             array_limits = {

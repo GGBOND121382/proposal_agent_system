@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from .proposal_constraints import latest_scheme_constraints
 from .util import sha256_json, utc_now
 
 FULL_PROPOSAL_GROUPS = (
@@ -64,6 +65,7 @@ class FullProposalContractMixin:
         self,
         sections: list[dict[str, Any]],
         state: dict[str, Any],
+        project_id: str | None = None,
     ) -> list[dict[str, Any]]:
         seen_ids: set[str] = set()
         records: list[dict[str, Any]] = []
@@ -115,8 +117,13 @@ class FullProposalContractMixin:
                 f"完整申请书并发编制至少需要 8 个唯一章节；当前仅 {len(records)} 个。"
             )
 
+        hard_constraints = latest_scheme_constraints(self.db, project_id) if project_id else {
+            "schema_version": "1.0", "source_rule_ids": [], "main_body_pages": None,
+            "references": None, "minimum_figures": None, "minimum_tables": None, "active": False,
+        }
         contract_core = {
             "contract_type": "FULL_PROPOSAL_CONCURRENT",
+            "hard_constraints": hard_constraints,
             "group_order": list(FULL_PROPOSAL_GROUP_ORDER),
             "groups": [groups[group_id] for group_id in FULL_PROPOSAL_GROUP_ORDER],
             "sections": records,

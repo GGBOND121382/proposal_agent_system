@@ -7,6 +7,8 @@ import re
 import yaml
 from typing import Any
 
+from .task_instruction import instruction_text
+from .proposal_constraints import extract_hard_constraints, merge_contract_constraints
 from .util import new_id, sha256_json, sha256_text, utc_now
 
 HASH_PLACEHOLDER = "a" * 64
@@ -195,16 +197,37 @@ class ContextBuilder:
         return digests[-30:]
 
     @staticmethod
-    def _integration_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    def _candidate_body_text(candidate: dict[str, Any]) -> str:
+        paragraphs = candidate.get("paragraphs") or []
+        values: list[str] = []
+        for paragraph in paragraphs:
+            if isinstance(paragraph, dict):
+                text = str(paragraph.get("text") or "").strip()
+            else:
+                text = str(paragraph or "").strip()
+            if text:
+                values.append(text)
+        if values:
+            return "\n\n".join(values)
+        return str(candidate.get("candidate_text") or "").strip()
+
+    @classmethod
+    def _integration_candidate(cls, candidate: dict[str, Any]) -> dict[str, Any]:
         allowed = ["candidate_id", "candidate_text", "paragraphs", "trace_links", "term_usage", "unresolved_items", "claim_advancement"]
-        return {key: candidate.get(key, [] if key in {"paragraphs", "trace_links", "term_usage", "unresolved_items"} else ({} if key == "claim_advancement" else "")) for key in allowed}
+        result = {key: candidate.get(key, [] if key in {"paragraphs", "trace_links", "term_usage", "unresolved_items"} else ({} if key == "claim_advancement" else "")) for key in allowed}
+        # Integration Critic, final security review and exporter must inspect the
+        # same prose.  Paragraph blocks are the canonical reviewed representation;
+        # candidate_text is deterministically rebuilt from them rather than trusting
+        # a stale/meta summary left by a provider response.
+        result["candidate_text"] = cls._candidate_body_text(candidate)
+        return result
 
     def _candidate_document(self, project: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:
         sections = []
         for item in candidates:
             source = item["section"]
             candidate = item["candidate"]
-            text = candidate.get("candidate_text", "")
+            text = self._candidate_body_text(candidate)
             sections.append(
                 {
                     "section_id": source["section_id"],
@@ -265,17 +288,58 @@ class ContextBuilder:
             str(x) for x in plan.get("protected_section_ids", [])
             if str(x) == str(contract.get("section_id"))
         ]
-        tasks = [
-            item for item in plan.get("tasks", [])
-            if str(item.get("objective") or "") == str(contract.get("argument_function") or "")
-        ]
+        all_tasks = [item for item in plan.get("tasks", []) if isinstance(item, dict)]
+        section_id = str(contract.get("section_id") or "")
+        section_title = str(contract.get("title") or "")
+        function = str(contract.get("argument_function") or "")
+
+        def normalized(value: object) -> str:
+            return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(value or "")).lower()
+
+        function_key = normalized(function)
+        title_key = normalized(section_title)
+        scored: list[tuple[int, int, dict[str, Any]]] = []
+        for index, item in enumerate(all_tasks):
+            score = 0
+            objective = str(item.get("objective") or "")
+            objective_key = normalized(objective)
+            if function_key and objective_key == function_key:
+                score += 100
+            elif function_key and (function_key in objective_key or objective_key in function_key):
+                score += 60
+            required = {str(x) for x in item.get("required_input_ids", []) if x}
+            score += 20 * len(relevant_ids & required)
+            searchable = normalized(
+                " ".join(
+                    [
+                        objective,
+                        *[str(x) for x in item.get("acceptance_rules", [])],
+                        *[str(x) for x in item.get("issue_ids", [])],
+                    ]
+                )
+            )
+            if section_id and normalized(section_id) in searchable:
+                score += 80
+            if title_key and title_key in searchable:
+                score += 50
+            scored.append((score, index, item))
+
+        positive = [row for row in scored if row[0] > 0]
+        tasks = [row[2] for row in sorted(positive, key=lambda row: (-row[0], row[1]))[:2]]
         if not tasks:
-            tasks = [
-                item for item in plan.get("tasks", [])
-                if relevant_ids & {str(x) for x in item.get("required_input_ids", []) if x}
-            ][:2]
-        if not tasks and plan.get("tasks"):
-            tasks = [plan["tasks"][0]]
+            # A well-formed full proposal normally has one planning task per frozen
+            # section contract.  Use the same deterministic order only when both
+            # collections have the same cardinality; never fall back to task 0 for
+            # every section, which caused cross-section task contamination.
+            contracts = [
+                item for item in (architecture or {}).get("section_contracts", [])
+                if isinstance(item, dict) and item.get("section_id")
+            ]
+            if len(contracts) == len(all_tasks) and section_id:
+                for index, item in enumerate(contracts):
+                    if str(item.get("section_id")) == section_id:
+                        tasks = [all_tasks[index]]
+                        break
         scoped["tasks"] = copy.deepcopy(tasks)
         task_ids = {str(item.get("revision_task_id")) for item in tasks if item.get("revision_task_id")}
         scoped["dependencies"] = [
@@ -303,8 +367,16 @@ class ContextBuilder:
                 expanded.update([source, target])
         items = [item for item in project_definition.get("items", []) if str(item.get("item_id")) in expanded]
         if not items:
-            items = list(project_definition.get("items", []))[:6]
-            expanded = {str(item.get("item_id")) for item in items}
+            # Missing contract evidence must be visible to the caller.  Returning
+            # the first unrelated project objects hid broken aliases and allowed a
+            # section to pass with evidence from another topic.
+            return {
+                "item_ids": [],
+                "relation_ids": [],
+                "items": [],
+                "relations": [],
+                "missing_seed_ids": sorted(seed_ids),
+            }
         scoped_relations = [
             item for item in relations
             if str(item.get("source_id")) in expanded and str(item.get("target_id")) in expanded
@@ -756,6 +828,9 @@ class ContextBuilder:
 
         project_definition = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "project_definition")
         proposal_contract = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "proposal_contract")
+        scheme = self._result(project["id"], "P-SCHEME-EXTRACT", "scheme_profile")
+        hard_constraints = extract_hard_constraints(scheme)
+        proposal_contract = merge_contract_constraints(proposal_contract, hard_constraints)
         argument_graph_seed = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed")
         argument_graph = self._result(project["id"], "P-ARGUMENT-ARCHITECTURE", "argument_architecture") or argument_graph_seed
         internal_facts = self._result(project["id"], "P-FACT-EXTRACT", "fact_candidates") or []
@@ -765,7 +840,6 @@ class ContextBuilder:
         if accepted_public_ids:
             public_claims = [claim for claim in public_claims if claim.get("claim_id") in accepted_public_ids]
         facts = [*internal_facts, *public_claims]
-        scheme = self._result(project["id"], "P-SCHEME-EXTRACT", "scheme_profile")
         template = self._result(project["id"], "P-TEMPLATE-EXTRACT", "template")
         plan = self._result(project["id"], "P-REVISION-PLAN", "revision_plan")
         narrative_architecture = (plan or {}).get("narrative_architecture") if isinstance(plan, dict) else None
@@ -1025,7 +1099,11 @@ class ContextBuilder:
             replacements.append(("payload.candidate_document", self._candidate_document(project, content_candidates)))
 
         if "task_instruction" in payload and config.get("task_instruction"):
-            instruction_text = str(config["task_instruction"])
+            instruction_value = config.get("task_instruction")
+            instruction_objective = instruction_text(
+                instruction_value,
+                str(project.get("description") or project.get("name") or ""),
+            )
             if isinstance(payload.get("task_instruction"), dict):
                 section_ids = [
                     str(section.get("section_id"))
@@ -1037,13 +1115,14 @@ class ContextBuilder:
                 replacements.append((
                     "payload.task_instruction",
                     self._structured_task_instruction(
-                        instruction_text,
+                        instruction_objective,
                         section_ids,
                         config,
+                        raw_instruction=instruction_value,
                     ),
                 ))
             else:
-                replacements.append(("payload.task_instruction", instruction_text))
+                replacements.append(("payload.task_instruction", instruction_objective))
         if "recipient_scope" in payload:
             replacements.append(("payload.recipient_scope", config.get("recipient_scope", ["内部用户"])))
         if "prior_security_findings" in payload:
@@ -1264,8 +1343,12 @@ class ContextBuilder:
         instruction_text: str,
         section_ids: list[str],
         config: dict[str, Any],
+        *,
+        raw_instruction: Any = None,
     ) -> dict[str, Any]:
         structured = config.get("task_instruction_structured")
+        if not isinstance(structured, dict) and isinstance(raw_instruction, dict):
+            structured = raw_instruction
         if isinstance(structured, dict):
             result = copy.deepcopy(structured)
             result.setdefault("schema_version", "2.0")

@@ -9,6 +9,7 @@ from typing import Any
 
 from .context import ContextBuilder as BaseContextBuilder
 from .runtime_policy import CapabilityPolicy, LIVE_ENVELOPE_REGISTRY
+from .task_instruction import instruction_text, intended_uses
 from .util import sha256_json, utc_now
 
 
@@ -476,13 +477,19 @@ class LiveContextBuilder(BaseContextBuilder):
             # context builder. Only use the scalar fallback when the schema field
             # itself is scalar.
             "payload.task_instruction": (
-                config.get("task_instruction") or project.get("description") or project.get("name")
+                instruction_text(
+                    config.get("task_instruction"),
+                    str(project.get("description") or project.get("name") or ""),
+                )
                 if not isinstance((envelope.get("payload") or {}).get("task_instruction"), dict)
                 else None
             ),
             "payload.project_name": project.get("name"),
             "payload.project_description": project.get("description"),
-            "payload.intended_uses": [config.get("task_instruction") or project.get("description") or project.get("name")],
+            "payload.intended_uses": intended_uses(
+                config.get("task_instruction"),
+                str(project.get("description") or project.get("name") or ""),
+            ),
             # A required but legitimately empty prior-label collection is real input,
             # not an unresolved schema placeholder. Mark it as explicitly supplied.
             "payload.existing_labels": [],

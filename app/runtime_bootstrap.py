@@ -12,7 +12,7 @@ def install_runtime_extensions() -> None:
     from .g3_runtime_executor import G3RuntimePromptExecutor
     from .runtime_export import RecoverableDocxExporter
     from .full_integration_quality import FullProposalQualityGuard
-    from .g3_runtime_gateway import G3AuditedModelGateway
+    from .runtime_gateway_factory import PortableModelGateway
     from .runtime_policy import CapabilityPolicy
     from .runtime_workflows import RecoverableWorkflowEngine
 
@@ -20,6 +20,6 @@ def install_runtime_extensions() -> None:
     context_module.ContextBuilder = LiveContextBuilder
     executor_module.ProposalQualityGuard = FullProposalQualityGuard
     executor_module.PromptExecutor = G3RuntimePromptExecutor
-    llm_module.ModelGateway = G3AuditedModelGateway
+    llm_module.ModelGateway = PortableModelGateway
     workflows_module.WorkflowEngine = RecoverableWorkflowEngine
     exporter_module.DocxExporter = RecoverableDocxExporter

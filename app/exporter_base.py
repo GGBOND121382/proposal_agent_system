@@ -7,6 +7,7 @@ from typing import Any
 
 from .delivery_validator import DeliveryValidationError
 from .post_export_validator import PostExportDeliveryValidator as DeliveryValidator
+from .proposal_constraints import latest_scheme_constraints
 from .figure_protocol import FigureProtocolError
 from .pdf_exporter import PdfConversionError, PdfConverter
 from .quality import QualityGateBlocked, QualityLifecycleManager
@@ -138,6 +139,7 @@ class ExportBaseMixin:
                 pdf_path,
                 expected_sections=expected_sections,
                 expected_candidates=candidates,
+                expected_constraints=latest_scheme_constraints(self.db, project_id),
                 screenshots_dir=document_path.parent / f"{document_path.stem}-pages",
             )
         except DeliveryValidationError as exc:

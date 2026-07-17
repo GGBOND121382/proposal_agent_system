@@ -29,6 +29,7 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         *,
         expected_sections: list[str] | None = None,
         expected_candidates: list[dict[str, Any]] | None = None,
+        expected_constraints: dict[str, Any] | None = None,
         screenshots_dir: Path | None = None,
     ) -> dict[str, Any]:
         docx_path = docx_path.resolve()
@@ -39,6 +40,7 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
             pdf_path,
             expected_sections=expected_sections or [],
             expected_candidates=expected_candidates or [],
+            expected_constraints=expected_constraints or {},
         )
         visual = self.validate_visual(docx_path, pdf_path, screenshots_dir=screenshots_dir)
         findings = structure["findings"] + visual["findings"]
@@ -73,6 +75,7 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         *,
         expected_sections: list[str],
         expected_candidates: list[dict[str, Any]] | None = None,
+        expected_constraints: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         base = super().validate_structure(
             docx_path, pdf_path, expected_sections=expected_sections
@@ -267,6 +270,74 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
                 )
             )
 
+        constraints = expected_constraints or {}
+        pages = constraints.get("main_body_pages") or {}
+        references = constraints.get("references") or {}
+        try:
+            pdf_page_count = len(PdfReader(str(pdf_path)).pages)
+        except Exception:
+            pdf_page_count = 0
+        if pages and not (int(pages["min"]) <= pdf_page_count <= int(pages["max"])):
+            findings.append(
+                self._finding(
+                    "D5_GUIDE_PAGE_COUNT_OUT_OF_RANGE",
+                    "P1",
+                    f"交付PDF页数不满足申请指南约束：要求 {pages['min']}—{pages['max']} 页，实际 {pdf_page_count} 页。",
+                    location="PDF pages",
+                    blocking=True,
+                    category="CONTENT",
+                    target_type="FULL_PROPOSAL_CANDIDATE_SET",
+                    evidence={"constraint": pages, "actual": pdf_page_count, "source_rule_ids": constraints.get("source_rule_ids", [])},
+                )
+            )
+        visible_text = self._docx_visible_text(document)
+        reference_numbers = {
+            int(value)
+            for value in re.findall(r"(?m)^\s*\[(\d{1,4})\]\s+", visible_text)
+        }
+        reference_count = len(reference_numbers)
+        if references and not (int(references["min"]) <= reference_count <= int(references["max"])):
+            findings.append(
+                self._finding(
+                    "D5_GUIDE_REFERENCE_COUNT_OUT_OF_RANGE",
+                    "P1",
+                    f"参考文献数量不满足申请指南约束：要求 {references['min']}—{references['max']} 篇，实际 {reference_count} 篇。",
+                    location="DOCX references",
+                    blocking=True,
+                    category="CONTENT",
+                    target_type="FULL_PROPOSAL_CANDIDATE_SET",
+                    evidence={"constraint": references, "actual": reference_count, "source_rule_ids": constraints.get("source_rule_ids", [])},
+                )
+            )
+        min_figures = constraints.get("minimum_figures")
+        if min_figures is not None and actual_figures < int(min_figures):
+            findings.append(
+                self._finding(
+                    "D5_GUIDE_FIGURE_MINIMUM_UNMET",
+                    "P1",
+                    f"图形数量不满足申请指南约束：至少 {min_figures} 幅，实际 {actual_figures} 幅。",
+                    location="DOCX figures",
+                    blocking=True,
+                    category="CONTENT",
+                    target_type="FULL_PROPOSAL_CANDIDATE_SET",
+                    evidence={"minimum": int(min_figures), "actual": actual_figures, "source_rule_ids": constraints.get("source_rule_ids", [])},
+                )
+            )
+        min_tables = constraints.get("minimum_tables")
+        if min_tables is not None and actual_tables < int(min_tables):
+            findings.append(
+                self._finding(
+                    "D5_GUIDE_TABLE_MINIMUM_UNMET",
+                    "P1",
+                    f"表格数量不满足申请指南约束：至少 {min_tables} 张，实际 {actual_tables} 张。",
+                    location="DOCX tables",
+                    blocking=True,
+                    category="CONTENT",
+                    target_type="FULL_PROPOSAL_CANDIDATE_SET",
+                    evidence={"minimum": int(min_tables), "actual": actual_tables, "source_rule_ids": constraints.get("source_rule_ids", [])},
+                )
+            )
+
         for finding in findings:
             self._enrich_finding(finding)
         structure = dict(base)
@@ -297,6 +368,9 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
                     "actual_figure_count": actual_figures,
                     "expected_table_count": expected["table_count"],
                     "actual_table_count": actual_tables,
+                    "hard_constraints": constraints,
+                    "reference_count": reference_count,
+                    "pdf_page_count": pdf_page_count,
                     "source_visible_sha256": sha256_text(
                         "\n".join(item["text"] for item in expected["units"])
                     ),
