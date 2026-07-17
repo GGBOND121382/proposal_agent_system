@@ -6,6 +6,11 @@ on:
       - agent/retest-portable-generation-20260717
     paths:
       - ".github/workflows/export-retest-source.yml"
+  pull_request:
+    branches:
+      - agent/v1-portable-generation-recovery
+    paths:
+      - ".github/workflows/export-retest-source.yml"
   workflow_dispatch:
 
 permissions:
