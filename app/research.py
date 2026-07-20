@@ -6,6 +6,7 @@ from typing import Any
 from .skills.executor import SkillExecutionError, SkillExecutor
 from .skills.research_audit import verify_research_archive
 from .skills.research_claims import validate_public_claims
+from .public_search_bridge import FilePublicSearchBridge, PublicSearchBridgeError
 from .util import sha256_json, write_json
 
 
@@ -32,18 +33,35 @@ class PublicResearchService:
         workflow_id: str | None,
         security_level: str = "PUBLIC",
     ) -> dict[str, Any]:
-        if self.settings.public_search_provider == "disabled":
+        provider = str(self.settings.public_search_provider or "disabled").lower()
+        if provider == "disabled":
             raise PublicResearchError("PUBLIC_SEARCH_PROVIDER is disabled")
+        connector_file = self.settings.public_research_connector_file
+        if provider == "bridge":
+            bridge_dir = getattr(self.settings, "public_search_bridge_dir", None)
+            if not bridge_dir:
+                raise PublicResearchError("PUBLIC_SEARCH_PROVIDER=bridge requires PUBLIC_SEARCH_BRIDGE_DIR")
+            try:
+                bridge = FilePublicSearchBridge(
+                    Path(bridge_dir),
+                    timeout_seconds=int(getattr(self.settings, "request_timeout_seconds", 240)),
+                )
+                connector_file = str(
+                    await bridge.request(plan, int(self.settings.public_search_max_results))
+                )
+            except PublicSearchBridgeError as exc:
+                raise PublicResearchError(str(exc)) from exc
+            provider = "connector"
         if self.skill_executor is None:
             raise PublicResearchError("Public research skill executor is not configured")
         try:
             result = self.skill_executor.execute(
                 "public_research.archive",
                 {
-                    "provider": self.settings.public_search_provider,
+                    "provider": provider,
                     "base_url": self.settings.public_search_base_url,
                     "record_file": self.settings.public_research_record_file,
-                    "connector_file": self.settings.public_research_connector_file,
+                    "connector_file": connector_file,
                     "max_results": self.settings.public_search_max_results,
                     # LIVE capability runs enforce the complete C1 plan contract. Replay,
                     # mock and simulated orchestration remain backward compatible.
@@ -61,6 +79,22 @@ class PublicResearchService:
         if verification.get("status") != "PASS":
             raise PublicResearchError("Public research archive failed hash verification")
         return output
+
+    def provider_ready(self) -> bool:
+        provider = str(self.settings.public_search_provider or "disabled").lower()
+        if provider == "bridge":
+            return bool(getattr(self.settings, "public_search_bridge_dir", None))
+        if provider == "connector":
+            value = str(getattr(self.settings, "public_research_connector_file", "") or "")
+            return bool(value and Path(value).exists())
+        if provider == "recorded":
+            value = str(getattr(self.settings, "public_research_record_file", "") or "")
+            return bool(value and Path(value).exists())
+        if provider == "searxng":
+            return bool(getattr(self.settings, "public_search_base_url", ""))
+        if provider == "crossref":
+            return True
+        return False
 
     def validate_synthesis(self, synthesis: dict[str, Any], research_output: dict[str, Any]) -> dict[str, Any]:
         """Bind every PUBLIC_CLAIM to an archived source before import review.

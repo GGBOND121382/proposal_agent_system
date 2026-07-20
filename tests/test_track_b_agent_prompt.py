@@ -185,6 +185,73 @@ def test_b10_appendix_is_excluded_from_main_body_repetition_statistics():
     assert pack.validate("P-INTEGRATION-CRITIC", "output", checked) == []
 
 
+def test_b10_repeated_table_syntax_does_not_dirty_redundancy_report():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-INTEGRATION-CRITIC")
+    output = pack.replay_output("P-INTEGRATION-CRITIC")
+    seed = copy.deepcopy(env["payload"]["candidate_sections"][0]["candidate"])
+    sections = []
+    section_map = []
+    contracts = []
+    for i in range(4):
+        section_id = f"main-table-{i}"
+        candidate = copy.deepcopy(seed)
+        candidate["candidate_id"] = f"candidate-main-table-{i}"
+        table = (
+            f"[[TABLE]]| 对象{i} | 方法{i} | 指标{i} | 边界{i} |\n"
+            "|---|---|---|---|\n"
+            f"| 数据{i} | 处理{i} | 结果{i} | 条件{i} |"
+        )
+        candidate["candidate_text"] = table
+        candidate["paragraphs"] = [copy.deepcopy(candidate["paragraphs"][0])]
+        candidate["paragraphs"][0]["paragraph_id"] = f"paragraph-main-table-{i}"
+        candidate["paragraphs"][0]["text"] = table
+        candidate["claim_advancement"]["new_information_keys"] = [f"information-main-table-{i}"]
+        candidate["claim_advancement"]["advanced_claim_ids"] = [f"claim-main-table-{i}"]
+        sections.append({"section_id": section_id, "candidate": candidate})
+        section_map.append({"section_id": section_id, "title": section_id, "level": 1, "candidate_id": candidate["candidate_id"]})
+        contracts.append({"section_id": section_id, "placement": "MAIN_BODY"})
+    env["payload"]["candidate_sections"] = sections
+    env["payload"]["document_section_map"] = section_map
+    env["payload"]["narrative_architecture"] = {"section_contracts": contracts}
+    checked = validator.apply("P-INTEGRATION-CRITIC", env, output)
+    report = checked["result"]["redundancy_report"]
+    assert report["semantic_template_groups"] == 0
+    assert report["template_skeleton_groups"] == 0
+    assert "QG_DOCUMENT_TEMPLATE_REPETITION" not in _codes(checked)
+    assert pack.validate("P-INTEGRATION-CRITIC", "output", checked) == []
+
+
+def test_b10_reference_entries_and_traceability_words_do_not_trigger_appendix_boundary():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-INTEGRATION-CRITIC")
+    output = pack.replay_output("P-INTEGRATION-CRITIC")
+    section = env["payload"]["candidate_sections"][0]
+    section_id = section["section_id"]
+    candidate = section["candidate"]
+    candidate["paragraphs"].append({
+        "paragraph_id": "paragraph-reference-traceability",
+        "sequence": len(candidate["paragraphs"]) + 1,
+        "paragraph_role": "EVIDENCE",
+        "text": "[[REFERENCE]][1] Doe. Requirements Traceability in Software Engineering.",
+        "blueprint_paragraph_id": candidate["paragraphs"][0]["blueprint_paragraph_id"],
+        "trace_link_ids": [],
+        "preserved_source_span": None,
+        "contains_unresolved_placeholder": False,
+        "primary_claim_id": candidate["paragraphs"][0]["primary_claim_id"],
+        "evidence_ids": candidate["paragraphs"][0]["evidence_ids"],
+        "novel_content_key": "reference-traceability",
+        "section_contract_id": candidate["paragraphs"][0]["section_contract_id"],
+    })
+    candidate["candidate_text"] += "\n\n[[REFERENCE]][1] Doe. Requirements Traceability in Software Engineering."
+    env["payload"]["narrative_architecture"] = {
+        "section_contracts": [{"section_id": section_id, "placement": "MAIN_BODY"}],
+    }
+    checked = validator.apply("P-INTEGRATION-CRITIC", env, output)
+    assert "QG_MAIN_BODY_CONTAINS_APPENDIX_TOPIC" not in _codes(checked)
+    assert pack.validate("P-INTEGRATION-CRITIC", "output", checked) == []
+
+
 def test_b10_main_body_blocks_appendix_only_engineering_topics():
     pack, validator = _runtime()
     env = pack.replay_input("P-INTEGRATION-CRITIC")

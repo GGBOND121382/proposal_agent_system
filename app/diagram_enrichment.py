@@ -106,7 +106,9 @@ class DiagramEnrichmentService:
                     f"章节《{section.get('title')}》的模型Mermaid源码未通过校验，已切换为可编辑模板：{exc}"
                 )
             paragraph["text"] = skill_result.output["figure_marker"]
-            paragraph["paragraph_role"] = "图示"
+            # The figure is a presentation block, not a new argument role.
+            # Preserve the approved blueprint role so downstream Critic and
+            # expression schemas receive the same semantic identity.
             rendered += 1
 
         # Weak-model fallback is allowed only when the approved section output
@@ -116,7 +118,8 @@ class DiagramEnrichmentService:
         if rendered == 0:
             intent_paragraph = next((
                 item for item in paragraphs
-                if str(item.get("paragraph_role") or "").upper() in {"图示", "FIGURE", "DIAGRAM"}
+                if str(item.get("text") or "").startswith("[[MERMAID]]")
+                or str(item.get("paragraph_role") or "").upper() in {"FIGURE", "DIAGRAM"}
             ), None)
             if intent_paragraph:
                 semantic_fields = [

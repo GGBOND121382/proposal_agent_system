@@ -4,7 +4,7 @@ import copy
 from typing import Any
 
 from .proposal_constraints import latest_scheme_constraints
-from .util import sha256_json, utc_now
+from .util import new_id, sha256_json, utc_now
 
 FULL_PROPOSAL_GROUPS = (
     {
@@ -159,8 +159,16 @@ class FullProposalContractMixin:
                 "invalidated_at": utc_now(),
                 "reason": reason,
                 "contract_hash": (state.get("full_proposal_contract") or {}).get("contract_hash"),
+                "generation_attempt_id": state.get("full_proposal_generation_attempt_id"),
                 "children": children,
             })
+        # A rejected argument architecture or section contract starts a genuinely
+        # new model-generation attempt.  Persist the attempt identity on the
+        # parent so every newly created child receives the same stable scope.  It
+        # survives process restarts, but differs from the archived generation and
+        # therefore cannot collide with its committed LIVE model calls.
+        state["full_proposal_generation_attempt_id"] = new_id("generation-attempt")
+        state.pop("full_proposal_repair_attempt_id", None)
         state["full_proposal_children"] = {}
         state.pop("full_proposal_contract", None)
         state.pop("full_proposal_virtual_lanes", None)

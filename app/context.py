@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
@@ -25,15 +26,19 @@ class ContextBuilder(BaseContextBuilder):
         "P-EXPRESSION-POLISH",
     }
 
-    def build(
+    @contextmanager
+    def workflow_scope(
         self,
         prompt_id: str,
-        project_id: str,
-        *,
-        workflow_id: str | None = None,
-        workflow_state: dict[str, Any] | None = None,
-        overrides: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        workflow_id: str | None,
+        workflow_state: dict[str, Any] | None,
+    ):
+        """Bind prompt/workflow/section identity for one context build.
+
+        The LIVE builder overrides :meth:`build`, so the scope must be reusable
+        rather than being hidden inside the replay-oriented implementation.
+        ContextVars keep concurrent authoring groups isolated per asyncio task.
+        """
         state = workflow_state or {}
         prompt_token = _ACTIVE_PROMPT_ID.set(prompt_id)
         workflow_token = _ACTIVE_WORKFLOW_ID.set(workflow_id)
@@ -47,6 +52,24 @@ class ContextBuilder(BaseContextBuilder):
             tuple(str(item) for item in state.get("authoring_child_workflow_ids", []) if item)
         )
         try:
+            yield
+        finally:
+            _ACTIVE_AUTHORING_CHILD_IDS.reset(child_token)
+            _ACTIVE_SOURCE_WORKFLOW_ID.reset(source_token)
+            _ACTIVE_SECTION_ID.reset(section_token)
+            _ACTIVE_WORKFLOW_ID.reset(workflow_token)
+            _ACTIVE_PROMPT_ID.reset(prompt_token)
+
+    def build(
+        self,
+        prompt_id: str,
+        project_id: str,
+        *,
+        workflow_id: str | None = None,
+        workflow_state: dict[str, Any] | None = None,
+        overrides: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self.workflow_scope(prompt_id, workflow_id, workflow_state):
             return super().build(
                 prompt_id,
                 project_id,
@@ -54,12 +77,6 @@ class ContextBuilder(BaseContextBuilder):
                 workflow_state=workflow_state,
                 overrides=overrides,
             )
-        finally:
-            _ACTIVE_AUTHORING_CHILD_IDS.reset(child_token)
-            _ACTIVE_SOURCE_WORKFLOW_ID.reset(source_token)
-            _ACTIVE_SECTION_ID.reset(section_token)
-            _ACTIVE_WORKFLOW_ID.reset(workflow_token)
-            _ACTIVE_PROMPT_ID.reset(prompt_token)
 
     def _frozen_candidates_for_workflow(
         self,

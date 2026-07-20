@@ -55,8 +55,7 @@
     "required_argument_roles": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "$ref": "argument_role.schema.json"
       },
       "minItems": 1
     },

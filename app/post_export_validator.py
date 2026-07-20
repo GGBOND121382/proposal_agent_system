@@ -15,6 +15,8 @@ from .util import sha256_json, sha256_text, utc_now, write_json
 
 
 class PostExportDeliveryValidator(RuntimeDeliveryValidator):
+    VALIDATOR_REVISION = "2.1-main-body-boundary-aware"
+
     """Delivery validation with candidate provenance and DOCX/PDF parity checks.
 
     The exporter is allowed to transform layout directives, but it may not silently
@@ -49,6 +51,7 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         blocking = [item for item in findings if item.get("blocking", True)]
         report = {
             "schema_version": "2.0",
+            "validator_revision": self.VALIDATOR_REVISION,
             "validated_at": utc_now(),
             "status": "FAIL" if blocking else "PASS",
             "docx_filename": docx_path.name,
@@ -274,20 +277,34 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         pages = constraints.get("main_body_pages") or {}
         references = constraints.get("references") or {}
         try:
-            pdf_page_count = len(PdfReader(str(pdf_path)).pages)
+            reader = PdfReader(str(pdf_path))
+            pdf_page_texts = [page.extract_text() or "" for page in reader.pages]
         except Exception:
-            pdf_page_count = 0
-        if pages and not (int(pages["min"]) <= pdf_page_count <= int(pages["max"])):
+            pdf_page_texts = []
+        page_metrics = self._main_body_page_metrics(
+            pdf_page_texts,
+            expected_titles=expected_titles,
+            references_excluded=bool(
+                constraints.get("references_excluded_from_main_body_pages", False)
+            ),
+        )
+        measured_page_count = int(page_metrics["main_body_page_count"])
+        if pages and not (int(pages["min"]) <= measured_page_count <= int(pages["max"])):
             findings.append(
                 self._finding(
                     "D5_GUIDE_PAGE_COUNT_OUT_OF_RANGE",
                     "P1",
-                    f"交付PDF页数不满足申请指南约束：要求 {pages['min']}—{pages['max']} 页，实际 {pdf_page_count} 页。",
-                    location="PDF pages",
+                    f"交付PDF正文页数不满足申请指南约束：要求 {pages['min']}—{pages['max']} 页，实际 {measured_page_count} 页。",
+                    location="PDF main-body pages",
                     blocking=True,
                     category="CONTENT",
                     target_type="FULL_PROPOSAL_CANDIDATE_SET",
-                    evidence={"constraint": pages, "actual": pdf_page_count, "source_rule_ids": constraints.get("source_rule_ids", [])},
+                    evidence={
+                        "constraint": pages,
+                        "actual": measured_page_count,
+                        "page_metrics": page_metrics,
+                        "source_rule_ids": constraints.get("source_rule_ids", []),
+                    },
                 )
             )
         visible_text = self._docx_visible_text(document)
@@ -344,8 +361,15 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
         structure.update(
             {
                 "schema_version": "2.0",
+                "validator_revision": self.VALIDATOR_REVISION,
                 "status": "FAIL" if any(item.get("blocking", True) for item in findings) else "PASS",
                 "findings": findings,
+                "guide_metrics": {
+                    "pages": page_metrics,
+                    "reference_count": reference_count,
+                    "figure_count": actual_figures,
+                    "table_count": actual_tables,
+                },
                 "candidate_parity": {
                     "candidate_set_hash": sha256_json(
                         {
@@ -370,7 +394,8 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
                     "actual_table_count": actual_tables,
                     "hard_constraints": constraints,
                     "reference_count": reference_count,
-                    "pdf_page_count": pdf_page_count,
+                    "pdf_page_count": int(page_metrics["total_pdf_page_count"]),
+                    "main_body_page_count": int(page_metrics["main_body_page_count"]),
                     "source_visible_sha256": sha256_text(
                         "\n".join(item["text"] for item in expected["units"])
                     ),
@@ -504,6 +529,77 @@ class PostExportDeliveryValidator(RuntimeDeliveryValidator):
             owner = str(item.get("owner") or "UNROUTED")
             counts[owner] = counts.get(owner, 0) + 1
         return counts
+
+    @classmethod
+    def _main_body_page_metrics(
+        cls,
+        page_texts: list[str],
+        *,
+        expected_titles: list[str],
+        references_excluded: bool,
+    ) -> dict[str, Any]:
+        total = len(page_texts)
+        if not page_texts:
+            return {
+                "total_pdf_page_count": 0,
+                "main_body_page_count": 0,
+                "main_body_start_page": None,
+                "main_body_end_page": None,
+                "reference_start_page": None,
+                "references_excluded": references_excluded,
+                "measurement_mode": "NO_PDF_TEXT",
+            }
+
+        first_title = str(expected_titles[0] if expected_titles else "").strip()
+        body_start = 0
+        if first_title:
+            for index, text in enumerate(page_texts):
+                title_count = text.count(first_title)
+                toc_hits = sum(1 for title in expected_titles if title and title in text)
+                # A pure table-of-contents page normally contains the first title
+                # only once and many other expected headings.  If the same page also
+                # starts the body, the first heading appears again after the TOC.
+                if "目录" in text and toc_hits >= min(5, max(2, len(expected_titles) // 2)) and title_count <= 1:
+                    continue
+                position = text.rfind(first_title)
+                if position < 0:
+                    continue
+                trailing = cls._normalize(text[position + len(first_title):])
+                if len(trailing) >= 40:
+                    body_start = index
+                    break
+
+        reference_start: int | None = None
+        reference_match = None
+        reference_pattern = re.compile(
+            r"(?im)^\s*(?:参考文献|references|bibliography)\s*$"
+        )
+        for index, text in enumerate(page_texts):
+            match = reference_pattern.search(text)
+            if match:
+                reference_start = index
+                reference_match = match
+                break
+
+        body_end = total - 1
+        mode = "TOTAL_PDF_PAGES"
+        if references_excluded and reference_start is not None and reference_match is not None:
+            prefix = cls._normalize(page_texts[reference_start][:reference_match.start()])
+            # Page numbers alone do not make a reference page part of the body.
+            prefix = re.sub(r"^\d{1,4}$", "", prefix)
+            body_end = reference_start if len(prefix) >= 40 else reference_start - 1
+            mode = "BODY_BOUNDARIES_FROM_HEADINGS"
+        body_end = max(body_start - 1, min(body_end, total - 1))
+        body_count = max(0, body_end - body_start + 1)
+        return {
+            "total_pdf_page_count": total,
+            "main_body_page_count": body_count if references_excluded else total,
+            "main_body_start_page": body_start + 1 if body_count else None,
+            "main_body_end_page": body_end + 1 if body_count else None,
+            "reference_start_page": reference_start + 1 if reference_start is not None else None,
+            "references_excluded": references_excluded,
+            "measurement_mode": mode,
+        }
 
     @staticmethod
     def _enrich_finding(finding: dict[str, Any]) -> None:

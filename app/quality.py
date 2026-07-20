@@ -98,6 +98,114 @@ class QualityLifecycleManager:
         if blockers:
             raise QualityGateBlocked(blockers)
 
+    def active_lineage_workflow_ids(self, project_id: str, *, review_workflow_id: str) -> list[str]:
+        """Return the exact workflow lineage that contributes to a final candidate.
+
+        Rejected fresh-generation attempts remain in the append-only quality ledger for
+        audit, but they are not part of a later frozen candidate.  Final acceptance must
+        therefore inspect the bound WF-4 parent, its exact producer children, the WF-5
+        approval workflow when supplied, and the latest completed prerequisite workflows
+        that existed before that WF-4 run.  It must not silently treat every abandoned
+        project attempt as part of the current candidate.
+        """
+        review = self.db.fetchone(
+            "SELECT * FROM workflows WHERE id=? AND project_id=?",
+            (review_workflow_id, project_id),
+        )
+        if not review:
+            raise KeyError(review_workflow_id)
+        try:
+            review_state = json.loads(review.get("state_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            review_state = {}
+
+        workflow_ids: list[str] = [review_workflow_id]
+        review_type = str(review.get("workflow_type") or "")
+        source_workflow_id = ""
+        if review_type == "WF-5_SECURITY_REVIEW_AND_EXPORT":
+            source_workflow_id = str(
+                review_state.get("source_workflow_id")
+                or (review_state.get("options") or {}).get("source_workflow_id")
+                or ""
+            )
+        elif review_type == "WF-4_PROPOSAL_AUTHORING":
+            source_workflow_id = review_workflow_id
+
+        source = None
+        source_state: dict[str, Any] = {}
+        if source_workflow_id:
+            source = self.db.fetchone(
+                "SELECT * FROM workflows WHERE id=? AND project_id=?",
+                (source_workflow_id, project_id),
+            )
+            if not source or str(source.get("workflow_type")) != "WF-4_PROPOSAL_AUTHORING":
+                raise ValueError(f"Final review is not bound to a valid WF-4 source: {source_workflow_id}")
+            workflow_ids.append(source_workflow_id)
+            try:
+                source_state = json.loads(source.get("state_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                source_state = {}
+
+            # The WF-5 manifest is the strongest binding because it lists the exact
+            # candidate producer for every frozen section.
+            for item in review_state.get("source_section_manifest") or []:
+                if isinstance(item, dict) and item.get("producer_workflow_id"):
+                    workflow_ids.append(str(item["producer_workflow_id"]))
+
+            # WF-4 acceptance/export can be invoked directly, before a WF-5 object is
+            # available, so retain the persisted child lineage as a deterministic fallback.
+            workflow_ids.extend(
+                str(item) for item in source_state.get("authoring_child_workflow_ids") or [] if item
+            )
+            concurrency = source_state.get("full_proposal_concurrency") or {}
+            workflow_ids.extend(str(item) for item in concurrency.get("child_workflow_ids") or [] if item)
+            for item in (source_state.get("full_proposal_children") or {}).values():
+                if isinstance(item, dict) and item.get("workflow_id"):
+                    workflow_ids.append(str(item["workflow_id"]))
+
+            cutoff = str(source.get("created_at") or review.get("created_at") or "")
+            for prerequisite_type in (
+                "WF-1_PROJECT_INTAKE",
+                "WF-2_TEMPLATE_EXTRACTION",
+                "WF-3_HYBRID_ONLINE_ASSIST",
+            ):
+                prerequisite = self.db.fetchone(
+                    """SELECT id FROM workflows
+                       WHERE project_id=? AND workflow_type=? AND status='COMPLETED' AND created_at<=?
+                       ORDER BY updated_at DESC, created_at DESC LIMIT 1""",
+                    (project_id, prerequisite_type, cutoff),
+                )
+                if prerequisite:
+                    workflow_ids.append(str(prerequisite["id"]))
+
+        return list(dict.fromkeys(item for item in workflow_ids if item))
+
+    def open_active_lineage_blockers(
+        self,
+        project_id: str,
+        *,
+        review_workflow_id: str,
+    ) -> list[dict[str, Any]]:
+        lineage = set(self.active_lineage_workflow_ids(
+            project_id, review_workflow_id=review_workflow_id
+        ))
+        return [
+            item for item in self.open_blockers(project_id)
+            if str(item.get("workflow_id") or "") in lineage
+        ]
+
+    def assert_no_active_lineage_blockers(
+        self,
+        project_id: str,
+        *,
+        review_workflow_id: str,
+    ) -> None:
+        blockers = self.open_active_lineage_blockers(
+            project_id, review_workflow_id=review_workflow_id
+        )
+        if blockers:
+            raise QualityGateBlocked(blockers)
+
     def quality_matrix(self, project_id: str, *, workflow_id: str | None = None) -> dict[str, Any]:
         findings = self.list_findings(project_id, workflow_id=workflow_id)
         by_state: dict[str, int] = {}
@@ -320,6 +428,10 @@ class QualityLifecycleManager:
             lifecycle["observations"] = seen
             lifecycle["state"] = "OPEN"
             updated = dict(latest)
+            # A finding that reappears in a replacement workflow belongs to that
+            # candidate's active lineage.  Keeping the original workflow id would let
+            # a current blocker hide behind an abandoned attempt during final export.
+            updated["workflow_id"] = workflow_id
             updated["finding"] = finding
             updated["responsibility"] = route.as_dict()
             updated["lifecycle"] = lifecycle
@@ -465,7 +577,11 @@ class QualityLifecycleManager:
     def _route_prompt_finding(self, prompt_id: str, finding: dict[str, Any]) -> ResponsibilityRoute:
         suggested = str(finding.get("suggested_route") or "")
         producer = CRITIC_PRODUCER.get(prompt_id)
-        reviewer = prompt_id if prompt_id in CRITIC_PRODUCER or prompt_id == "P-INTEGRATION-CRITIC" else self._critic_for_producer(prompt_id)
+        reviewer = (
+            prompt_id
+            if prompt_id.endswith("-CRITIC") or prompt_id == "P-INTEGRATION-CRITIC"
+            else self._critic_for_producer(prompt_id)
+        )
         if suggested == "ORIGINAL_PRODUCER" and producer:
             stage_prompts = (producer,)
             owner = self._owner_for_prompt(producer)

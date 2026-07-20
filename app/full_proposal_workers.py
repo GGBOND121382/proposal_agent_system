@@ -70,6 +70,12 @@ class FullProposalWorkersMixin:
 
         child_id = new_id("wf-group")
         now = utc_now()
+        generation_attempt_id = str(
+            state.get("full_proposal_generation_attempt_id") or ""
+        ).strip()
+        if not generation_attempt_id:
+            generation_attempt_id = new_id("generation-attempt")
+            state["full_proposal_generation_attempt_id"] = generation_attempt_id
         parent_options = copy.deepcopy(state.get("options") or {})
         parent_options.update({
             "full_proposal_concurrent": False,
@@ -94,6 +100,7 @@ class FullProposalWorkersMixin:
             "full_proposal_group_id": group_id,
             "full_proposal_group_title": group.get("title"),
             "full_proposal_contract_hash": (state.get("full_proposal_contract") or {}).get("contract_hash"),
+            "generation_attempt_id": generation_attempt_id,
         }
         self.db.execute(
             "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
@@ -115,6 +122,7 @@ class FullProposalWorkersMixin:
             "section_ids": list(group.get("section_ids") or []),
             "status": "RUNNING",
             "created_at": now,
+            "generation_attempt_id": generation_attempt_id,
         }
         children[group_id] = record
         self.db.audit(
@@ -138,6 +146,23 @@ class FullProposalWorkersMixin:
         responsible = sorted(group_ids & affected)
         if not responsible:
             return
+        repair_attempt_id = str(
+            parent_state.get("full_proposal_repair_attempt_id") or ""
+        ).strip()
+        if not repair_attempt_id:
+            # Backward-compatible recovery for a checkpoint created before repair
+            # attempts were explicitly scoped.  The ID is persisted on the parent
+            # immediately by the caller's normal state update.
+            repair_attempt_id = new_id("generation-repair")
+            parent_state["full_proposal_repair_attempt_id"] = repair_attempt_id
+        if (
+            child_state.get("generation_attempt_id") == repair_attempt_id
+            and sorted(child_state.get("integration_repair_section_ids") or []) == responsible
+        ):
+            # The same repair round may be resumed many times while waiting for a
+            # model or human bridge.  Do not rotate identity or erase progress.
+            return
+        child_state["generation_attempt_id"] = repair_attempt_id
         child_state["section_results"] = [
             item for item in child_state.get("section_results", [])
             if str(item.get("section_id")) not in set(responsible)
@@ -279,6 +304,7 @@ class FullProposalWorkersMixin:
         }
         state.pop("integration_repair_section_ids", None)
         state.pop("integration_repair_findings", None)
+        state.pop("full_proposal_repair_attempt_id", None)
         state.pop("last_error", None)
         wf["current_step"] += 1
         skip_gate = bool(state.pop("skip_candidate_gate_once", False))

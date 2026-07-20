@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Any
 
 from .exporter import DocxExporter, ExportDenied
-from .quality import QualityLifecycleManager
+from .quality import QualityLifecycleManager, ResponsibilityRoute
+from .post_export_validator import PostExportDeliveryValidator
+from .proposal_constraints import latest_scheme_constraints
 from .util import new_id, sha256_bytes, sha256_json, utc_now, write_json
 
 
@@ -61,6 +63,105 @@ class PostExportQualityLifecycleManager(QualityLifecycleManager):
                     )
                 )
         return records
+
+    def reclassify_legacy_page_count_false_positive(
+        self,
+        *,
+        project_id: str,
+        workflow_id: str,
+        finding_id: str,
+        previous_validator_revision: str,
+        current_validator_revision: str,
+        constraints: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Move one proven legacy page-count false positive to validator engineering.
+
+        This is intentionally narrow.  It never deletes the original observation and
+        it cannot reclassify an arbitrary content finding.  The old validator must
+        have measured total PDF pages without page-boundary evidence even though the
+        frozen guide explicitly excludes references from the main-body page count.
+        """
+        records = {
+            str(item.get("finding_id") or ""): item
+            for item in self.list_findings(project_id, workflow_id=workflow_id)
+        }
+        record = records.get(finding_id)
+        if not record:
+            raise KeyError(finding_id)
+        finding = dict(record.get("finding") or {})
+        evidence = dict(finding.get("evidence") or {})
+        responsibility = dict(record.get("responsibility") or {})
+        lifecycle = dict(record.get("lifecycle") or {})
+        location = str(finding.get("location") or finding.get("target_path_or_span") or "")
+        valid = (
+            finding.get("code") == "D5_GUIDE_PAGE_COUNT_OUT_OF_RANGE"
+            and responsibility.get("owner") == "WRITING_AGENT"
+            and responsibility.get("owner_kind") == "AGENT"
+            and "PDF" in location.upper()
+            and "page_metrics" not in evidence
+            and bool(constraints.get("references_excluded_from_main_body_pages"))
+            and bool(previous_validator_revision)
+            and previous_validator_revision != current_validator_revision
+        )
+        if not valid:
+            raise ValueError(
+                "Only an unversioned/older total-page finding with reference-page "
+                "exclusion may be reclassified as a validator false positive"
+            )
+
+        reclassifications = list(lifecycle.get("reclassification_evidence") or [])
+        event = {
+            "reason": "LEGACY_TOTAL_PAGE_COUNT_IGNORED_REFERENCE_EXCLUSION",
+            "previous_validator_revision": previous_validator_revision,
+            "current_validator_revision": current_validator_revision,
+            "old_owner": responsibility.get("owner"),
+            "new_owner": "DELIVERY_VALIDATOR_ENGINEERING",
+            "recorded_at": utc_now(),
+            "evidence_hash": sha256_json(
+                {
+                    "finding_id": finding_id,
+                    "constraint": evidence.get("constraint"),
+                    "actual": evidence.get("actual"),
+                    "references_excluded": True,
+                    "previous_validator_revision": previous_validator_revision,
+                    "current_validator_revision": current_validator_revision,
+                }
+            ),
+        }
+        if not any(
+            item.get("current_validator_revision") == current_validator_revision
+            for item in reclassifications
+        ):
+            reclassifications.append(event)
+        lifecycle["reclassification_evidence"] = reclassifications
+        lifecycle["state"] = "OPEN"
+
+        finding.update(
+            {
+                "category": "SYSTEM",
+                "owner": "DELIVERY_VALIDATOR_ENGINEERING",
+                "suggested_route": "DELIVERY_VALIDATOR_ENGINEERING",
+                "repair_instruction": (
+                    "修复正文页边界测量规则；保持冻结候选集合不变，"
+                    "由新版本 Delivery Validator 独立复验。"
+                ),
+            }
+        )
+        updated = dict(record)
+        updated["finding"] = finding
+        updated["responsibility"] = ResponsibilityRoute(
+            owner_kind="ENGINEERING",
+            owner="DELIVERY_VALIDATOR_ENGINEERING",
+            workflow_type=None,
+            stage_prompt_ids=("DELIVERY_VALIDATOR_ENGINEERING",),
+            reviewer_prompt_id="DELIVERY_VALIDATOR",
+            reason=(
+                "旧版确定性验收器将参考文献页计入正文页数；该误报属于验证器工程责任，"
+                "不得要求写作智能体删改已冻结正文。"
+            ),
+        ).as_dict()
+        updated["lifecycle"] = lifecycle
+        return self._persist(updated)
 
     def route_delivery_finding(self, finding: dict[str, Any]):  # type: ignore[no-untyped-def]
         category = str(finding.get("category") or "SYSTEM")
@@ -136,6 +237,9 @@ class PostExportAcceptanceManager:
             raise PostExportAcceptanceError("No final Expression-Critic-approved candidates are available")
         integration_review = self._integration_review_snapshot(project_id, workflow_id, snapshot)
         previous_attempt = self.latest_attempt(project_id, workflow_id)
+        current_validator_revision = self._validator_revision()
+        validator_revalidation: dict[str, Any] | None = None
+        validator_repair_id: str | None = None
         if (
             not engineering_repair_id
             and previous_attempt
@@ -143,9 +247,17 @@ class PostExportAcceptanceManager:
             and (previous_attempt.get("candidate_snapshot") or {}).get("candidate_set_hash")
             == snapshot.get("candidate_set_hash")
         ):
-            raise PostExportAcceptanceError(
-                "A post-export content finding requires a new reviewed candidate set before re-export"
+            validator_revalidation = self._prepare_validator_revalidation(
+                project_id=project_id,
+                workflow_id=workflow_id,
+                previous_attempt=previous_attempt,
+                current_validator_revision=current_validator_revision,
             )
+            if not validator_revalidation:
+                raise PostExportAcceptanceError(
+                    "A post-export content finding requires a new reviewed candidate set before re-export"
+                )
+            validator_repair_id = new_id("validator-repair")
 
         prior_blockers = self.quality_manager.open_blockers(project_id, workflow_id=workflow_id)
         if engineering_repair_id:
@@ -179,38 +291,54 @@ class PostExportAcceptanceManager:
         current_finding_ids = {str(item.get("finding_id")) for item in records}
 
         verified_engineering: list[str] = []
-        if engineering_repair_id:
-            for blocker in prior_blockers:
-                responsibility = blocker.get("responsibility") or {}
-                if (
-                    responsibility.get("owner") != "EXPORT_ENGINEERING"
-                    or responsibility.get("owner_kind") != "ENGINEERING"
-                ):
-                    continue
-                finding_id = str(blocker.get("finding_id") or "")
-                if not finding_id or finding_id in current_finding_ids:
-                    continue
-                self.quality_manager.add_repair_evidence(
-                    finding_id,
-                    project_id=project_id,
-                    prompt_id="EXPORT_ENGINEERING",
-                    run_id=engineering_repair_id,
-                )
-                self.quality_manager.verify_finding(
-                    finding_id,
-                    project_id=project_id,
-                    reviewer="DELIVERY_VALIDATOR",
-                    review_run_id=validation_run_id,
-                    review_hash=sha256_json(
-                        {
-                            "validation_run_id": validation_run_id,
-                            "docx_sha256": delivery.get("docx_sha256"),
-                            "pdf_sha256": delivery.get("pdf_sha256"),
-                            "absent_finding_id": finding_id,
-                        }
-                    ),
-                )
-                verified_engineering.append(finding_id)
+        validator_reclassified_ids = set(
+            (validator_revalidation or {}).get("reclassified_finding_ids") or []
+        )
+        for blocker in prior_blockers:
+            responsibility = blocker.get("responsibility") or {}
+            finding_id = str(blocker.get("finding_id") or "")
+            if (
+                responsibility.get("owner_kind") != "ENGINEERING"
+                or not finding_id
+                or finding_id in current_finding_ids
+            ):
+                continue
+            repair_prompt_id = ""
+            repair_run_id = ""
+            if engineering_repair_id and responsibility.get("owner") == "EXPORT_ENGINEERING":
+                repair_prompt_id = "EXPORT_ENGINEERING"
+                repair_run_id = engineering_repair_id
+            elif (
+                validator_repair_id
+                and finding_id in validator_reclassified_ids
+                and responsibility.get("owner") == "DELIVERY_VALIDATOR_ENGINEERING"
+            ):
+                repair_prompt_id = "DELIVERY_VALIDATOR_ENGINEERING"
+                repair_run_id = validator_repair_id
+            if not repair_prompt_id or not repair_run_id:
+                continue
+            self.quality_manager.add_repair_evidence(
+                finding_id,
+                project_id=project_id,
+                prompt_id=repair_prompt_id,
+                run_id=repair_run_id,
+            )
+            self.quality_manager.verify_finding(
+                finding_id,
+                project_id=project_id,
+                reviewer="DELIVERY_VALIDATOR",
+                review_run_id=validation_run_id,
+                review_hash=sha256_json(
+                    {
+                        "validation_run_id": validation_run_id,
+                        "validator_revision": current_validator_revision,
+                        "docx_sha256": delivery.get("docx_sha256"),
+                        "pdf_sha256": delivery.get("pdf_sha256"),
+                        "absent_finding_id": finding_id,
+                    }
+                ),
+            )
+            verified_engineering.append(finding_id)
 
         open_blockers = self.quality_manager.open_blockers(project_id, workflow_id=workflow_id)
         owner_counts: dict[str, int] = {}
@@ -226,13 +354,19 @@ class PostExportAcceptanceManager:
             status = "PASS"
         elif owner_counts.get("WRITING_AGENT"):
             status = "REVISE_CONTENT"
-        elif owner_counts.get("EXPORT_ENGINEERING"):
+        elif any(
+            (item.get("responsibility") or {}).get("owner_kind") == "ENGINEERING"
+            for item in open_blockers
+        ):
             status = "ENGINEERING_REPAIR_REQUIRED"
         else:
             status = "BLOCK"
 
         attempt = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
+            "validator_revision": current_validator_revision,
+            "validator_revalidation": validator_revalidation,
+            "validator_repair_id": validator_repair_id,
             "attempt_id": new_id("post-export"),
             "project_id": project_id,
             "workflow_id": workflow_id,
@@ -306,6 +440,107 @@ class PostExportAcceptanceManager:
             },
         )
         return attempt
+
+    def _validator_revision(self) -> str:
+        validator = getattr(self.exporter, "delivery_validator", None)
+        return str(
+            getattr(validator, "VALIDATOR_REVISION", None)
+            or PostExportDeliveryValidator.VALIDATOR_REVISION
+        )
+
+    @staticmethod
+    def _previous_validator_revision(previous_attempt: dict[str, Any]) -> str:
+        revision = str(previous_attempt.get("validator_revision") or "").strip()
+        if revision:
+            return revision
+        report = previous_attempt.get("delivery_report") or {}
+        path = Path(str(report.get("path") or ""))
+        if path.is_file():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            revision = str(payload.get("validator_revision") or "").strip()
+            if revision:
+                return revision
+        return "legacy-unversioned"
+
+    def _prepare_validator_revalidation(
+        self,
+        *,
+        project_id: str,
+        workflow_id: str,
+        previous_attempt: dict[str, Any],
+        current_validator_revision: str,
+    ) -> dict[str, Any] | None:
+        """Authorize a same-candidate rerun only for a proven validator-rule repair."""
+        previous_revision = self._previous_validator_revision(previous_attempt)
+        if previous_revision == current_validator_revision:
+            return None
+        constraints = latest_scheme_constraints(self.db, project_id)
+        if not constraints.get("references_excluded_from_main_body_pages"):
+            return None
+
+        previous_ids = {
+            str(item) for item in previous_attempt.get("finding_ids") or [] if item
+        }
+        if not previous_ids:
+            return None
+        open_records = {
+            str(item.get("finding_id") or ""): item
+            for item in self.quality_manager.open_blockers(
+                project_id, workflow_id=workflow_id
+            )
+        }
+        # Do not use a validator revision to bypass another still-open content or
+        # engineering finding that was not part of the old page-count decision.
+        if set(open_records) - previous_ids:
+            return None
+
+        eligible: list[str] = []
+        for finding_id in sorted(previous_ids):
+            record = open_records.get(finding_id)
+            if not record:
+                continue
+            finding = dict(record.get("finding") or {})
+            evidence = dict(finding.get("evidence") or {})
+            responsibility = dict(record.get("responsibility") or {})
+            location = str(
+                finding.get("location") or finding.get("target_path_or_span") or ""
+            )
+            if not (
+                finding.get("code") == "D5_GUIDE_PAGE_COUNT_OUT_OF_RANGE"
+                and responsibility.get("owner") == "WRITING_AGENT"
+                and responsibility.get("owner_kind") == "AGENT"
+                and "PDF" in location.upper()
+                and "page_metrics" not in evidence
+            ):
+                return None
+            eligible.append(finding_id)
+        if not eligible:
+            return None
+
+        reclassified: list[str] = []
+        for finding_id in eligible:
+            self.quality_manager.reclassify_legacy_page_count_false_positive(
+                project_id=project_id,
+                workflow_id=workflow_id,
+                finding_id=finding_id,
+                previous_validator_revision=previous_revision,
+                current_validator_revision=current_validator_revision,
+                constraints=constraints,
+            )
+            reclassified.append(finding_id)
+        return {
+            "reason": "VALIDATOR_REVISION_CHANGED",
+            "previous_validator_revision": previous_revision,
+            "current_validator_revision": current_validator_revision,
+            "candidate_set_hash": (
+                previous_attempt.get("candidate_snapshot") or {}
+            ).get("candidate_set_hash"),
+            "reclassified_finding_ids": reclassified,
+            "constraint_hash": sha256_json(constraints),
+        }
 
     def _integration_review_snapshot(
         self,
@@ -418,6 +653,8 @@ class PostExportAcceptanceManager:
         if not row:
             return None
         record = json.loads(row["content_json"])
+        if str(record.get("validator_revision") or "") != self._validator_revision():
+            return None
         current_hash = self.exporter.candidate_snapshot(project_id).get("candidate_set_hash")
         if current_hash != (record.get("candidate_snapshot") or {}).get("candidate_set_hash"):
             return None

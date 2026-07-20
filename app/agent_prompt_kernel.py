@@ -15,6 +15,7 @@ from .proposal_quality import (
     HIGH_RISK_META_TERMS,
     ProposalQualityGuard,
     _content_text,
+    _meta_term_hits,
     _normalized_sentences,
     _template_skeleton,
 )
@@ -749,12 +750,10 @@ class AgentPromptKernelValidator:
         skeleton_locations: dict[str, set[str]] = collections.defaultdict(set)
         information_locations: dict[str, set[str]] = collections.defaultdict(set)
         claim_locations: dict[str, set[str]] = collections.defaultdict(set)
-        texts: list[str] = []
+        meta_texts: list[str] = []
         for item in main_sections:
             section_id = str(item.get("section_id") or "")
             candidate = item.get("candidate") or {}
-            text = _content_text(candidate)
-            texts.append(text)
             advancement = candidate.get("claim_advancement") or {}
             for key in advancement.get("new_information_keys") or []:
                 if key:
@@ -767,6 +766,13 @@ class AgentPromptKernelValidator:
                     continue
                 paragraph_text = str(paragraph.get("text") or "").strip()
                 if not paragraph_text:
+                    continue
+                if not paragraph_text.startswith("[[REFERENCE]]"):
+                    meta_texts.append(paragraph_text)
+                if paragraph_text.startswith((
+                    "[[TABLE]]", "[[MERMAID]]", "[[FIGURE]]",
+                    "[[FORMULA]]", "[[REFERENCE]]",
+                )):
                     continue
                 paragraph_locations[paragraph_text].add(section_id)
                 for sentence in _normalized_sentences(paragraph_text):
@@ -792,8 +798,8 @@ class AgentPromptKernelValidator:
             for group in [*exact.values(), *repeated.values(), *skeletons.values()]
             for section_id in group
         })
-        main_text = "\n".join(texts)
-        meta_hits = sum(main_text.count(term) for term in HIGH_RISK_META_TERMS)
+        main_text = "\n".join(meta_texts)
+        meta_hits = _meta_term_hits(main_text)
         report = {
             "exact_duplicate_groups": len(exact),
             "semantic_template_groups": len(repeated),
@@ -842,8 +848,35 @@ class AgentPromptKernelValidator:
             section_id = str(item.get("section_id") or "")
             if placements.get(section_id, "MAIN_BODY") != "MAIN_BODY":
                 continue
-            text = _content_text(item.get("candidate") or {})
-            hits = sorted(term for term in forbidden_terms if term and term in text)
+            candidate = item.get("candidate") or {}
+            # Bibliographic entries may legitimately contain words such as
+            # ``Traceability`` or ``Prompting``. They are rendered as a
+            # separate reference artifact and must not be classified as
+            # main-body engineering instructions.  Filter both the canonical
+            # paragraph list and candidate_text because legacy/model outputs
+            # can update only one of the two representations.
+            paragraph_text = "\n".join(
+                str(paragraph.get("text") or "")
+                for paragraph in candidate.get("paragraphs") or []
+                if isinstance(paragraph, dict)
+                and not str(paragraph.get("text") or "").lstrip().startswith("[[REFERENCE]]")
+            )
+            candidate_text = "\n".join(
+                line for line in str(candidate.get("candidate_text") or "").splitlines()
+                if not line.lstrip().startswith("[[REFERENCE]]")
+            )
+            text = "\n".join(part for part in (paragraph_text, candidate_text) if part)
+
+            def contains_forbidden_term(term: str) -> bool:
+                if re.fullmatch(r"[A-Za-z][A-Za-z0-9_ -]*", term):
+                    return bool(re.search(
+                        rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])",
+                        text,
+                        flags=re.IGNORECASE,
+                    ))
+                return term in text
+
+            hits = sorted(term for term in forbidden_terms if term and contains_forbidden_term(term))
             if hits:
                 findings.append(_finding(
                     "QG_MAIN_BODY_CONTAINS_APPENDIX_TOPIC",

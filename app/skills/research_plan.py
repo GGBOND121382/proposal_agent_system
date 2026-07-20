@@ -32,6 +32,9 @@ def tokens(text: str) -> set[str]:
     bilingual = {
         "需求": {"requirements", "requirement"},
         "追溯": {"traceability", "trace", "tracing"},
+        "追踪": {"traceability", "trace", "tracing"},
+        "源代码": {"source", "code"},
+        "检索": {"retrieval", "search"},
         "链接": {"link", "links", "recovery"},
         "变更": {"change", "changes", "commit"},
         "影响": {"impact", "propagation"},

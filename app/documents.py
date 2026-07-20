@@ -46,7 +46,11 @@ def _parse_text(text: str, security_level: str) -> list[dict[str, Any]]:
     def flush() -> None:
         nonlocal index, current_lines
         body = "\n".join(current_lines).strip()
-        if body or not sections:
+        # Preserve explicit headings even when their body is intentionally empty.
+        # Proposal skeletons are allowed to contain only frozen section titles;
+        # dropping those headings silently collapses a multi-section contract into
+        # a single document and contaminates every downstream workflow.
+        if body or not sections or current_title != "全文":
             index += 1
             sections.append(_section(f"section_{index}", current_title, current_level, body, security_level))
         current_lines = []

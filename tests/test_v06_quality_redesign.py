@@ -231,6 +231,43 @@ def test_integration_rejects_cross_section_template_repetition():
     assert set(checked["result"]["redundancy_report"]["affected_section_ids"]) == {f"section-{i:03d}" for i in range(4)}
 
 
+def test_integration_ignores_repeated_table_rendering_syntax():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-INTEGRATION-CRITIC")
+    sections = []
+    section_map = []
+    for i in range(4):
+        sid = f"section-table-{i:03d}"
+        cid = f"candidate-table-{i:03d}"
+        table = (
+            f"[[TABLE]]| 本节对象{i} | 本节结论{i} | 本节指标{i} | 本节边界{i} |\n"
+            "|---|---|---|---|\n"
+            f"| 对象{i} | 结论{i} | 指标{i} | 边界{i} |"
+        )
+        sections.append({
+            "section_id": sid,
+            "candidate": {
+                "candidate_id": cid,
+                "candidate_text": table,
+                "paragraphs": [{"paragraph_id": f"paragraph-table-{i:03d}", "text": table}],
+                "trace_links": [], "term_usage": [], "unresolved_items": [],
+                "claim_advancement": {
+                    "section_contract_id": f"contract-table-{i}",
+                    "advanced_claim_ids": [f"claim-table-{i}"],
+                    "new_information_keys": [f"information-table-{i}"],
+                    "distinguished_from_section_ids": [],
+                    "section_contribution": f"表格章节{i}",
+                },
+            },
+        })
+        section_map.append({"section_id": sid, "title": f"表格章节{i}", "level": 1, "candidate_id": cid})
+    env["payload"]["candidate_sections"] = sections
+    env["payload"]["document_section_map"] = section_map
+    output = sim.invoke("P-INTEGRATION-CRITIC", env)
+    checked = guard.apply("P-INTEGRATION-CRITIC", env, output)
+    assert "QG_DOCUMENT_TEMPLATE_REPETITION" not in _codes(checked)
+
+
 def test_blueprint_rejects_reuse_of_prior_section_information_key():
     pack, sim, guard = _pack_sim_guard()
     env = pack.replay_input("P-WRITE-BLUEPRINT")
@@ -706,3 +743,143 @@ def test_diagram_fallback_requires_explicit_semantic_intent():
     ))
     assert result["result"]["paragraphs"] == output["result"]["paragraphs"]
     assert "warnings" not in result
+
+
+
+
+def test_diagram_enrichment_preserves_approved_argument_role():
+    service = DiagramEnrichmentService.__new__(DiagramEnrichmentService)
+
+    class RenderResult:
+        output = {"figure_marker": "[[FIGURE]]figure-1|技术路线图|15.0"}
+
+    async def fake_execute(payload, **kwargs):
+        assert payload["argument_purpose"] == "RESEARCH_QUESTION"
+        return RenderResult()
+
+    service._execute_mermaid = fake_execute
+    service._persist_enriched_output = lambda *args, **kwargs: None
+    output = {
+        "status": "PASS",
+        "result": {
+            "paragraphs": [{
+                "paragraph_id": "p-figure", "sequence": 1,
+                "paragraph_role": "RESEARCH_QUESTION",
+                "text": "[[MERMAID]]技术路线图|15\nflowchart LR\nA --> B",
+                "blueprint_paragraph_id": "bp-figure",
+                "trace_link_ids": ["trace-figure"],
+                "preserved_source_span": None,
+                "contains_unresolved_placeholder": False,
+                "primary_claim_id": "rq-001",
+                "evidence_ids": ["evidence-001"],
+                "novel_content_key": "rq-map-001",
+                "section_contract_id": "contract-001",
+            }],
+            "candidate_text": "[[MERMAID]]技术路线图|15\nflowchart LR\nA --> B",
+        },
+    }
+    result = asyncio.run(service.enrich(
+        project_id="project-test", workflow_id="workflow-test", run_id="run-test",
+        section={"section_id": "section-route", "title": "总体技术路线"},
+        output=copy.deepcopy(output), security_level="PUBLIC",
+    ))
+    paragraph = result["result"]["paragraphs"][0]
+    assert paragraph["paragraph_role"] == "RESEARCH_QUESTION"
+    assert paragraph["text"].startswith("[[FIGURE]]")
+
+
+def test_user_asserted_capability_with_evidence_material_allows_warned_foundation_planning():
+    _, _, guard, _, project_output, _, argument_output, env, output = _valid_project_argument_readiness()
+    project = copy.deepcopy(project_output["result"]["project_definition"])
+    for item in project["items"]:
+        if item["item_type"] == "ACHIEVEMENT":
+            item["knowledge_status"] = "UNKNOWN"
+            item["source_refs"] = []
+        elif item["item_type"] == "CAPABILITY":
+            item["knowledge_status"] = "USER_ASSERTED"
+            item["source_refs"] = [{
+                "source_id": "capability-evidence-span",
+                "source_type": "EVIDENCE_MATERIAL",
+                "quoted_text": "团队具备Python开发、Git仓库分析和自动化测试能力，但尚无直接课题成果。",
+                "source_hash": "2" * 64,
+                "authority_rank": 80,
+                "security_level": "INTERNAL",
+            }]
+    graph = copy.deepcopy(argument_output["result"]["argument_architecture"])
+    for node in graph["nodes"]:
+        if node["node_type"] == "TEAM_EVIDENCE":
+            node["status"] = "SUPPORTED"
+            node["source_refs"] = copy.deepcopy(next(
+                item for item in project["items"] if item["item_type"] == "CAPABILITY"
+            )["source_refs"])
+    env = copy.deepcopy(env)
+    env["payload"]["project_definition"] = project
+    env["payload"]["argument_graph"] = graph
+    candidate = copy.deepcopy(output)
+    candidate["result"]["ready_for_section_planning"] = True
+    candidate["result"]["writeable_section_profiles"] = sorted(ProposalQualityGuard.REQUIRED_SECTION_PROFILES)
+    for item in candidate["result"]["chapter_readiness"]:
+        if item["profile_id"] == "RESEARCH_FOUNDATION":
+            item["readiness"] = "READY_WITH_WARNINGS"
+    checked = guard.apply("P-PROJECT-READINESS-CRITIC", env, candidate)
+    assert checked["status"] == "PASS"
+    assert "QG_FOUNDATION_FALSE_READY" not in _codes(checked)
+
+
+def test_user_asserted_capability_must_keep_foundation_warning():
+    _, _, guard, _, project_output, _, argument_output, env, output = _valid_project_argument_readiness()
+    project = copy.deepcopy(project_output["result"]["project_definition"])
+    for item in project["items"]:
+        if item["item_type"] == "ACHIEVEMENT":
+            item["knowledge_status"] = "UNKNOWN"
+            item["source_refs"] = []
+        elif item["item_type"] == "CAPABILITY":
+            item["knowledge_status"] = "USER_ASSERTED"
+            item["source_refs"] = [{
+                "source_id": "capability-evidence-span",
+                "source_type": "EVIDENCE_MATERIAL",
+                "quoted_text": "团队具备Python开发和自动化测试能力，但尚无直接课题成果。",
+                "source_hash": "3" * 64,
+                "authority_rank": 80,
+                "security_level": "INTERNAL",
+            }]
+    graph = copy.deepcopy(argument_output["result"]["argument_architecture"])
+    for node in graph["nodes"]:
+        if node["node_type"] == "TEAM_EVIDENCE":
+            node["status"] = "SUPPORTED"
+            node["source_refs"] = copy.deepcopy(next(
+                item for item in project["items"] if item["item_type"] == "CAPABILITY"
+            )["source_refs"])
+    env = copy.deepcopy(env)
+    env["payload"]["project_definition"] = project
+    env["payload"]["argument_graph"] = graph
+    candidate = copy.deepcopy(output)
+    candidate["result"]["ready_for_section_planning"] = True
+    candidate["result"]["writeable_section_profiles"] = sorted(ProposalQualityGuard.REQUIRED_SECTION_PROFILES)
+    for item in candidate["result"]["chapter_readiness"]:
+        if item["profile_id"] == "RESEARCH_FOUNDATION":
+            item["readiness"] = "READY"
+    checked = guard.apply("P-PROJECT-READINESS-CRITIC", env, candidate)
+    assert checked["status"] == "REVISE"
+    assert "QG_FOUNDATION_EVIDENCE_STRENGTH_OVERSTATED" in _codes(checked)
+
+
+def test_plan_accepts_specialized_argument_roles_shared_with_blueprint_schema():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-REVISION-PLAN")
+    output = sim.invoke("P-REVISION-PLAN", env)
+    contract = output["result"]["revision_plan"]["narrative_architecture"]["section_contracts"][0]
+    contract["required_argument_roles"] = ["INPUT", "DATA_FLOW", "FEEDBACK", "MILESTONE"]
+    checked = guard.apply("P-REVISION-PLAN", env, output)
+    assert "QG_PLAN_ARGUMENT_ROLE_INVALID" not in _codes(checked)
+    assert not pack.validate("P-REVISION-PLAN", "output", output)
+
+
+def test_section_contract_schema_rejects_unknown_argument_role():
+    pack, sim, _ = _pack_sim_guard()
+    env = pack.replay_input("P-REVISION-PLAN")
+    output = sim.invoke("P-REVISION-PLAN", env)
+    contract = output["result"]["revision_plan"]["narrative_architecture"]["section_contracts"][0]
+    contract["required_argument_roles"] = ["MODEL_SPECIFIC_UNDECLARED_ROLE"]
+    errors = pack.validate("P-REVISION-PLAN", "output", output)
+    assert errors

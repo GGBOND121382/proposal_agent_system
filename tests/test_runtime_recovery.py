@@ -289,3 +289,131 @@ def test_recoverable_block_resumes_same_step(tmp_path):
     assert recovered["status"] == "RUNNING"
     assert recovered["current_step"] == 3
     assert recovered["state"]["recovered_from"] == "after_db_transaction"
+
+
+def test_blocked_model_route_recovers_only_after_current_route_revalidates():
+    class Builder:
+        def __init__(self):
+            self.calls = []
+
+        def build(self, prompt_id, project_id, *, workflow_id=None, workflow_state=None):
+            self.calls.append((prompt_id, project_id, workflow_id, dict(workflow_state or {})))
+            return {
+                "security_context": {
+                    "input_max_security_level": "PUBLIC",
+                    "online_transfer_approval_status": "APPROVED",
+                    "allowed_model_endpoint_ids": ["online-public-primary"],
+                }
+            }
+
+    class Router:
+        def __init__(self):
+            self.calls = []
+
+        def route(self, prompt_id, envelope):
+            self.calls.append((prompt_id, envelope))
+            return SimpleNamespace(endpoint_id="online-public-primary")
+
+    class DB:
+        def __init__(self):
+            self.events = []
+
+        def audit(self, event, **kwargs):
+            self.events.append((event, kwargs))
+
+    class Engine:
+        _recover_status = RecoverableWorkflowEngine._recover_status
+
+        def __init__(self):
+            self.context_builder = Builder()
+            self.executor = SimpleNamespace(router=Router())
+            self.db = DB()
+            self.current = {
+                "id": "wf-route",
+                "project_id": "project-1",
+                "workflow_type": "WF-3_HYBRID_ONLINE_ASSIST",
+                "status": "BLOCKED",
+                "current_step": 2,
+                "state": {"last_error": "No eligible model route: online-public-primary: disabled"},
+            }
+
+        def get(self, workflow_id):
+            assert workflow_id == self.current["id"]
+            return self.current
+
+        def _update(self, wf, *, status=None, state=None, **kwargs):
+            if status is not None:
+                self.current["status"] = status
+            if state is not None:
+                self.current["state"] = state
+
+    engine = Engine()
+    recovered = engine._recover_status(engine.current)
+    assert recovered["status"] == "RUNNING"
+    assert recovered["state"]["recovered_from"] == "MODEL_ROUTE_REVALIDATED"
+    assert recovered["state"]["invalid_route_error"].startswith("No eligible model route:")
+    assert "last_error" not in recovered["state"]
+    assert engine.context_builder.calls[0][:3] == (
+        "P-PUBLIC-RESEARCH-PLAN",
+        "project-1",
+        "wf-route",
+    )
+    assert engine.executor.router.calls[0][0] == "P-PUBLIC-RESEARCH-PLAN"
+    assert engine.db.events[0][0] == "WORKFLOW_MODEL_ROUTE_REVALIDATED"
+
+
+def test_wf5_project_wide_quality_block_recovers_only_after_active_lineage_revalidates():
+    class Quality:
+        def __init__(self, clean):
+            self.clean = clean
+            self.calls = []
+
+        def assert_no_active_lineage_blockers(self, project_id, *, review_workflow_id):
+            self.calls.append((project_id, review_workflow_id))
+            if not self.clean:
+                raise RuntimeError("active blocker")
+
+    class DB:
+        def __init__(self):
+            self.events = []
+
+        def audit(self, event, **kwargs):
+            self.events.append(event)
+
+    class Engine:
+        _recover_status = RecoverableWorkflowEngine._recover_status
+
+        def __init__(self, clean):
+            self.db = DB()
+            self.quality_manager = Quality(clean)
+            self.current = {
+                "id": "wf5-review",
+                "project_id": "project-1",
+                "workflow_type": "WF-5_SECURITY_REVIEW_AND_EXPORT",
+                "status": "BLOCKED",
+                "current_step": 2,
+                "state": {
+                    "last_error": "存在未完成独立复审的P0/P1质量问题：QG_OLD。必须记录修复运行并由独立Critic复审。",
+                    "quality_blocker_ids": ["qf-old"],
+                },
+            }
+
+        def get(self, workflow_id):
+            return self.current
+
+        def _update(self, wf, *, status=None, state=None, **kwargs):
+            if status is not None:
+                self.current["status"] = status
+            if state is not None:
+                self.current["state"] = state
+
+    blocked = Engine(False)
+    assert blocked._recover_status(blocked.current)["status"] == "BLOCKED"
+    recovered_engine = Engine(True)
+    recovered = recovered_engine._recover_status(recovered_engine.current)
+    assert recovered["status"] == "RUNNING"
+    assert recovered["state"]["recovered_from"] == "ACTIVE_LINEAGE_QUALITY_REVALIDATED"
+    assert "last_error" not in recovered["state"]
+    assert "quality_blocker_ids" not in recovered["state"]
+    assert recovered_engine.quality_manager.calls == [("project-1", "wf5-review")]
+    assert recovered_engine.db.events == ["WORKFLOW_ACTIVE_LINEAGE_QUALITY_REVALIDATED"]

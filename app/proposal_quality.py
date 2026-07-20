@@ -13,6 +13,27 @@ HIGH_RISK_META_TERMS = {
     "Prompt", "Trace", "Gate", "Critic", "Repair", "Schema", "Skill", "Worker",
     "提示词", "审计日志", "完整性校验", "离线安装", "Docker", "Mermaid",
 }
+ENGLISH_HIGH_RISK_META_TERMS = {
+    term for term in HIGH_RISK_META_TERMS if re.fullmatch(r"[A-Za-z]+", term)
+}
+CJK_HIGH_RISK_META_TERMS = HIGH_RISK_META_TERMS - ENGLISH_HIGH_RISK_META_TERMS
+
+
+def _meta_term_hits(text: str) -> int:
+    """Count actual agent-system terminology without matching domain words.
+
+    Substring counting treated ``Traceability`` and ``Tracing`` in legitimate
+    software-engineering reference titles as the internal runtime term
+    ``Trace``. English terms must therefore occur as standalone words; Chinese
+    phrases remain exact substring matches. Reference entries are bibliographic
+    metadata rather than proposal prose and are excluded by callers.
+    """
+    english = sum(
+        len(re.findall(rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])", text))
+        for term in ENGLISH_HIGH_RISK_META_TERMS
+    )
+    cjk = sum(text.count(term) for term in CJK_HIGH_RISK_META_TERMS)
+    return english + cjk
 GENERIC_SECTION_HEADINGS = {
     "1. 本节定位与研究目标", "2. 核心问题与约束", "3. 方法与技术方案",
     "4. 工程实施要点", "5. 指标与验收方法", "6. 预期输出及与其他任务的关系",
@@ -21,6 +42,56 @@ GENERIC_SECTION_HEADINGS = {
 FAKE_SOURCE_HASHES = {"a" * 64, "0" * 64, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
 FOUNDATION_SOURCE_TYPES = {"EVIDENCE_MATERIAL", "TECHNICAL_MATERIAL"}
 GENERIC_SOURCE_TEXTS = {"用户确认的示例内容", "示例内容", "围绕示例方向开展研究", "全文"}
+PLAN_ARGUMENT_ROLES = {
+    "CONTEXT",
+    "PROBLEM",
+    "EVIDENCE",
+    "GAP",
+    "LIMITATION_MECHANISM",
+    "CENTRAL_CLAIM",
+    "RESEARCH_QUESTION",
+    "METHOD",
+    "WARRANT",
+    "COUNTERARGUMENT",
+    "BOUNDARY",
+    "EVALUATION",
+    "CONTRIBUTION",
+    "TRANSITION",
+    "ABLATION",
+    "ACCEPTANCE",
+    "ALGORITHM",
+    "BASELINE",
+    "CLOSEST_WORK",
+    "COMPARISON",
+    "COMPARISON_RULE",
+    "COMPENSATION_PLAN",
+    "CONFIRMED_CAPABILITY",
+    "DATASET",
+    "DATA_FLOW",
+    "DEGRADATION_BASELINE",
+    "DELIVERABLE",
+    "DEPENDENCY",
+    "FEASIBILITY_WARRANT",
+    "FEEDBACK",
+    "FORMALIZATION",
+    "INPUT",
+    "LIMITATION",
+    "MECHANISM",
+    "METRIC",
+    "MILESTONE",
+    "MITIGATION",
+    "NEW_MECHANISM",
+    "OBJECTIVE",
+    "OUTPUT",
+    "RISK",
+    "RISK_CONTROL",
+    "RQ_CLOSURE",
+    "SPLIT",
+    "SYNTHESIS",
+    "TECHNICAL_DIFFICULTY",
+    "VALIDITY_THREAT",
+    "WORK_PACKAGE",
+}
 
 QUALITY_DIMENSIONS = {
     "DOCUMENT_TYPE_FIT", "CENTRAL_THESIS", "ARGUMENT_CHAIN", "EVIDENCE_SUPPORT",
@@ -174,6 +245,29 @@ def _has_qualified_foundation_source(value: dict[str, Any]) -> bool:
 
 
 def _qualified_foundation_ids(project_definition: dict[str, Any]) -> set[str]:
+    """Return foundation objects that can support an honest feasibility section.
+
+    Prior achievements require confirmed/document-extracted evidence.  A capability
+    may also be explicitly USER_ASSERTED when it is recorded in a qualified
+    EVIDENCE_MATERIAL or TECHNICAL_MATERIAL span.  This permits early-stage and
+    youth-project proposals to describe real implementation capacity without
+    fabricating papers, prototypes or pre-experiments.  The readiness audit below
+    still requires such a capability-only foundation to be marked with warnings.
+    """
+    qualified: set[str] = set()
+    for item in project_definition.get("items", []):
+        if not isinstance(item, dict) or not _has_qualified_foundation_source(item):
+            continue
+        item_type = str(item.get("item_type") or "")
+        status = str(item.get("knowledge_status") or "")
+        if item_type == "ACHIEVEMENT" and status in {"CONFIRMED", "DOCUMENT_EXTRACTED"}:
+            qualified.add(str(item.get("item_id")))
+        elif item_type == "CAPABILITY" and status in {"CONFIRMED", "DOCUMENT_EXTRACTED", "USER_ASSERTED"}:
+            qualified.add(str(item.get("item_id")))
+    return qualified
+
+
+def _confirmed_foundation_ids(project_definition: dict[str, Any]) -> set[str]:
     return {
         str(item.get("item_id"))
         for item in project_definition.get("items", [])
@@ -463,7 +557,9 @@ class ProposalQualityGuard:
             return findings
 
         writable = set(result.get("writeable_section_profiles") or [])
-        foundation_ids = _qualified_foundation_ids(payload.get("project_definition") or {})
+        project_definition = payload.get("project_definition") or {}
+        foundation_ids = _qualified_foundation_ids(project_definition)
+        confirmed_foundation_ids = _confirmed_foundation_ids(project_definition)
         graph = payload.get("argument_graph") or {}
         supported_team_nodes = [
             node for node in graph.get("nodes", [])
@@ -476,8 +572,21 @@ class ProposalQualityGuard:
                 findings.append(QualityFinding(
                     "QG_FOUNDATION_FALSE_READY", "P1", "READINESS", "READINESS_REPORT",
                     "result.writeable_section_profiles",
-                    f"研究基础缺少合格前期证据；无效TEAM_EVIDENCE节点：{invalid_team_nodes or '无合格成果对象'}，却被标为可写或允许进入章节规划。",
-                    "移除RESEARCH_FOUNDATION可写状态，将相关节点改为UNKNOWN，并向负责人请求成果、原型、数据或预实验材料。",
+                    f"研究基础缺少合格前期证据或可定位的用户确认能力；无效TEAM_EVIDENCE节点：{invalid_team_nodes or '无可用基础对象'}，却被标为可写或允许进入章节规划。",
+                    "移除RESEARCH_FOUNDATION可写状态，或补充EVIDENCE_MATERIAL/TECHNICAL_MATERIAL中的真实能力、成果、原型、数据或预实验材料。",
+                    "PROJECT_KNOWLEDGE_AGENT",
+                ))
+        elif not confirmed_foundation_ids and "RESEARCH_FOUNDATION" in writable:
+            foundation_entry = next((
+                item for item in result.get("chapter_readiness") or []
+                if isinstance(item, dict) and item.get("profile_id") == "RESEARCH_FOUNDATION"
+            ), None)
+            if not foundation_entry or foundation_entry.get("readiness") != "READY_WITH_WARNINGS":
+                findings.append(QualityFinding(
+                    "QG_FOUNDATION_EVIDENCE_STRENGTH_OVERSTATED", "P1", "READINESS", "READINESS_REPORT",
+                    "result.chapter_readiness[RESEARCH_FOUNDATION]",
+                    "研究基础仅由可定位的USER_ASSERTED能力支撑，却未标记为READY_WITH_WARNINGS，可能被后续模型误写为既有成果。",
+                    "将研究基础章节准备度设为READY_WITH_WARNINGS，并在章节合同中禁止扩写论文、专利、合作、数据或预实验成果。",
                     "PROJECT_KNOWLEDGE_AGENT",
                 ))
         if not self.REQUIRED_SECTION_PROFILES.issubset(writable) or not result.get("ready_for_section_planning", False):
@@ -658,6 +767,20 @@ class ProposalQualityGuard:
             ))
 
         contracts = [item for item in architecture.get("section_contracts") or [] if isinstance(item, dict)]
+        invalid_argument_roles = sorted({
+            str(role)
+            for contract in contracts
+            for role in contract.get("required_argument_roles") or []
+            if str(role) not in PLAN_ARGUMENT_ROLES
+        })
+        if invalid_argument_roles:
+            findings.append(QualityFinding(
+                "QG_PLAN_ARGUMENT_ROLE_INVALID", "P1", "PLAN", "REVISION_PLAN",
+                "narrative_architecture.section_contracts.required_argument_roles",
+                "章节合同包含下游蓝图Schema无法表示的论证角色：" + ", ".join(invalid_argument_roles) + "。",
+                "仅使用蓝图paragraph.argument_role允许的标准角色，或先扩展蓝图Schema并同步全部质量门。",
+                "PLANNING_AGENT",
+            ))
         contract_ids = [str(item.get("section_contract_id") or "") for item in contracts]
         section_ids = [str(item.get("section_id") or "") for item in contracts]
         if len(contract_ids) != len(set(contract_ids)) or len(section_ids) != len(set(section_ids)):
@@ -676,6 +799,33 @@ class ProposalQualityGuard:
                 "按立项依据、现状、问题、目标、内容、方法、验证、创新和基础等真实功能分配专用Profile。",
                 "PLANNING_AGENT",
             ))
+        # Reject over-broad claim ownership before any section prose is generated.
+        # The document-level integration gate performs the same audit on actual
+        # candidates, but waiting until then wastes every model call and makes a
+        # provider swap appear unreliable.  The plan is the earliest stage that
+        # has the complete section-to-claim allocation.
+        central_id = str(((payload.get("argument_graph") or {}).get("central_proposition") or {}).get("node_id") or "")
+        claim_owners: dict[str, list[str]] = collections.defaultdict(list)
+        for contract in main_contracts:
+            sid = str(contract.get("section_id") or "")
+            for claim_id in contract.get("must_advance_claim_ids") or []:
+                if claim_id:
+                    claim_owners[str(claim_id)].append(sid)
+        claim_threshold = max(4, math.ceil(len(main_contracts) * 0.25))
+        overconcentrated_claims = {
+            claim_id: sorted(set(owners))
+            for claim_id, owners in claim_owners.items()
+            if claim_id != central_id and len(set(owners)) >= claim_threshold
+        }
+        if overconcentrated_claims:
+            findings.append(QualityFinding(
+                "QG_PLAN_CLAIM_OVERCONCENTRATION", "P1", "PLAN", "REVISION_PLAN",
+                "narrative_architecture.section_contracts.must_advance_claim_ids",
+                f"{len(overconcentrated_claims)}个非中心命题在章节合同中被分配给过多主文章节。",
+                "为每个命题限定提出、展开和验证/回扣等少量主责章节；其他章节只能引用共享上下文，不能再次声明为本章推进命题。",
+                "PLANNING_AGENT",
+            ))
+
         information_owners: dict[str, list[str]] = collections.defaultdict(list)
         for contract in contracts:
             sid = str(contract.get("section_id") or "")
@@ -858,7 +1008,11 @@ class ProposalQualityGuard:
                 "删除模板化复述，每个段落只承担一个新的论证功能。",
                 "WRITING_AGENT",
             ))
-        meta_hits = sum(text.count(term) for term in HIGH_RISK_META_TERMS)
+        meta_text = "\n".join(
+            str(p.get("text") or "") for p in paragraphs
+            if not str(p.get("text") or "").lstrip().startswith("[[REFERENCE]]")
+        )
+        meta_hits = _meta_term_hits(meta_text)
         main_profile = str((payload.get("section_profile") or {}).get("profile_id") or "")
         if meta_hits >= 3 and main_profile not in {"SYSTEM_IMPLEMENTATION", "APPENDIX", "DEPLOYMENT"}:
             findings.append(QualityFinding(
@@ -1044,6 +1198,15 @@ class ProposalQualityGuard:
                 paragraph_text = str(paragraph.get("text") or "").strip()
                 if not paragraph_text:
                     continue
+                # Tables, figures, diagrams, formulas and bibliography entries
+                # contain repeated rendering syntax (for example Markdown table
+                # separators) that is not prose duplication. Their presence and
+                # cross-references are validated by dedicated delivery checks.
+                if paragraph_text.startswith((
+                    "[[TABLE]]", "[[MERMAID]]", "[[FIGURE]]",
+                    "[[FORMULA]]", "[[REFERENCE]]",
+                )):
+                    continue
                 all_paragraphs.append((section_id, paragraph_text))
                 sentences = _normalized_sentences(paragraph_text)
                 all_sentences.extend((section_id, sentence) for sentence in sentences)
@@ -1111,7 +1274,14 @@ class ProposalQualityGuard:
                 "重新分配章节合同：一个命题由有限章节分别承担提出、证明和验证，不得在多数章节重复展开。",
                 "PLANNING_AGENT",
             ))
-        meta_hits = sum(joined.count(term) for term in HIGH_RISK_META_TERMS)
+        meta_source = "\n".join(
+            str(paragraph.get("text") or "")
+            for section in sections if isinstance(section, dict)
+            for paragraph in (section.get("candidate") or {}).get("paragraphs", [])
+            if isinstance(paragraph, dict)
+            and not str(paragraph.get("text") or "").lstrip().startswith("[[REFERENCE]]")
+        )
+        meta_hits = _meta_term_hits(meta_source)
         if meta_hits >= max(10, len(sections) // 2):
             findings.append(QualityFinding(
                 "QG_DOCUMENT_DOMINATED_BY_AGENT_SYSTEM", "P1", "INTEGRATION", "CANDIDATE_DOCUMENT",

@@ -251,10 +251,13 @@ class ExportBaseMixin:
         if not project:
             raise KeyError(project_id)
         try:
-            self.quality_manager.assert_no_open_blockers(
-                project_id,
-                workflow_id=str(getattr(self, "review_workflow_id", "") or "") or None,
-            )
+            review_workflow_id = str(getattr(self, "review_workflow_id", "") or "")
+            if review_workflow_id:
+                self.quality_manager.assert_no_active_lineage_blockers(
+                    project_id, review_workflow_id=review_workflow_id
+                )
+            else:
+                self.quality_manager.assert_no_open_blockers(project_id)
         except QualityGateBlocked as exc:
             raise ExportDenied(
                 str(exc) + "。导出必须等待修复证据与独立复审完成，不能通过批准Gate或手工改库绕过。"

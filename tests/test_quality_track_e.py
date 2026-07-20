@@ -265,3 +265,136 @@ def test_quality_matrix_is_auditable_and_append_only(tmp_path: Path):
     rows = db.fetchall("SELECT version,status FROM artifacts WHERE artifact_type='QUALITY_FINDING' ORDER BY version")
     assert [row["version"] for row in rows] == [1, 2]
     assert [row["status"] for row in rows] == ["OPEN", "REPAIR_RECORDED"]
+
+
+def _insert_workflow(
+    db: Database,
+    *,
+    workflow_id: str,
+    project_id: str,
+    workflow_type: str,
+    status: str = "COMPLETED",
+    state: dict | None = None,
+    created_at: str | None = None,
+) -> None:
+    now = created_at or utc_now()
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (
+            workflow_id,
+            project_id,
+            workflow_type,
+            status,
+            0,
+            json.dumps(state or {}, ensure_ascii=False),
+            now,
+            now,
+        ),
+    )
+
+
+def test_final_acceptance_uses_exact_active_lineage_not_abandoned_attempts(tmp_path: Path):
+    db, project_id, abandoned_workflow_id = _db(tmp_path)
+    manager = QualityLifecycleManager(db)
+    manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=abandoned_workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id="abandoned-critic",
+        status="REVISE",
+        output={"findings": [_finding("QG_ABANDONED_ATTEMPT")]},
+    )
+
+    _insert_workflow(db, workflow_id="wf1-clean", project_id=project_id, workflow_type="WF-1_PROJECT_INTAKE")
+    _insert_workflow(db, workflow_id="wf2-clean", project_id=project_id, workflow_type="WF-2_TEMPLATE_EXTRACTION")
+    _insert_workflow(db, workflow_id="wf3-clean", project_id=project_id, workflow_type="WF-3_HYBRID_ONLINE_ASSIST")
+    _insert_workflow(db, workflow_id="wf4-child", project_id=project_id, workflow_type="WF-4_PROPOSAL_AUTHORING")
+    _insert_workflow(
+        db,
+        workflow_id="wf4-source",
+        project_id=project_id,
+        workflow_type="WF-4_PROPOSAL_AUTHORING",
+        state={"authoring_child_workflow_ids": ["wf4-child"]},
+    )
+    _insert_workflow(
+        db,
+        workflow_id="wf5-review",
+        project_id=project_id,
+        workflow_type="WF-5_SECURITY_REVIEW_AND_EXPORT",
+        status="RUNNING",
+        state={
+            "source_workflow_id": "wf4-source",
+            "source_section_manifest": [
+                {"section_id": "sec-1", "producer_workflow_id": "wf4-child"}
+            ],
+        },
+    )
+
+    # The append-only project audit still exposes the rejected candidate's blocker.
+    with pytest.raises(QualityGateBlocked):
+        manager.assert_no_open_blockers(project_id)
+
+    lineage = manager.active_lineage_workflow_ids(
+        project_id, review_workflow_id="wf5-review"
+    )
+    assert {
+        "wf1-clean", "wf2-clean", "wf3-clean", "wf4-source", "wf4-child", "wf5-review"
+    }.issubset(set(lineage))
+    manager.assert_no_active_lineage_blockers(
+        project_id, review_workflow_id="wf5-review"
+    )
+
+
+def test_reappearing_finding_moves_to_current_candidate_lineage(tmp_path: Path):
+    db, project_id, abandoned_workflow_id = _db(tmp_path)
+    manager = QualityLifecycleManager(db)
+    finding = _finding("QG_REAPPEARS")
+    manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=abandoned_workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id="old-critic",
+        status="REVISE",
+        output={"findings": [finding]},
+    )
+    _insert_workflow(db, workflow_id="wf4-child", project_id=project_id, workflow_type="WF-4_PROPOSAL_AUTHORING")
+    _insert_workflow(
+        db,
+        workflow_id="wf4-source",
+        project_id=project_id,
+        workflow_type="WF-4_PROPOSAL_AUTHORING",
+        state={"authoring_child_workflow_ids": ["wf4-child"]},
+    )
+
+    manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id="wf4-child",
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id="current-critic",
+        status="REVISE",
+        output={"findings": [finding]},
+    )
+    [latest] = [
+        item for item in manager.open_blockers(project_id)
+        if item["finding"]["code"] == "QG_REAPPEARS"
+    ]
+    assert latest["workflow_id"] == "wf4-child"
+    with pytest.raises(QualityGateBlocked):
+        manager.assert_no_active_lineage_blockers(
+            project_id, review_workflow_id="wf4-source"
+        )
+
+
+def test_readiness_critic_findings_require_readiness_critic_reverification(tmp_path: Path):
+    db, project_id, workflow_id = _db(tmp_path)
+    manager = QualityLifecycleManager(db)
+    [record] = manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        prompt_id="P-PROJECT-READINESS-CRITIC",
+        run_id="readiness-open",
+        status="REVISE",
+        output={"findings": [_finding("QG_READINESS", route="ARGUMENT_ARCHITECTURE_AGENT")]},
+    )
+    assert record["responsibility"]["reviewer_prompt_id"] == "P-PROJECT-READINESS-CRITIC"

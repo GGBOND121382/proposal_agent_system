@@ -43,6 +43,45 @@ class SimulatedLLM:
     def _clean_title(title: str) -> str:
         return re.sub(r"^[#\s]+", "", title or "").strip()
 
+    @staticmethod
+    def _canonical_argument_role(value: Any) -> str:
+        """Translate legacy replay labels into the frozen argument-role vocabulary.
+
+        Production gateways remain schema-strict.  This adapter is deliberately
+        limited to the deterministic simulator, whose replay fixtures predate the
+        shared role schema and may still contain Chinese display labels.
+        """
+        raw = str(value or "EVIDENCE").strip()
+        allowed = {
+            "CONTEXT", "PROBLEM", "EVIDENCE", "GAP",
+            "LIMITATION_MECHANISM", "CENTRAL_CLAIM", "RESEARCH_QUESTION",
+            "METHOD", "WARRANT", "COUNTERARGUMENT", "BOUNDARY",
+            "EVALUATION", "CONTRIBUTION", "TRANSITION", "ABLATION",
+            "ACCEPTANCE", "ALGORITHM", "BASELINE", "CLOSEST_WORK",
+            "COMPARISON", "COMPARISON_RULE", "COMPENSATION_PLAN",
+            "CONFIRMED_CAPABILITY", "DATASET", "DATA_FLOW",
+            "DEGRADATION_BASELINE", "DELIVERABLE", "DEPENDENCY",
+            "FEASIBILITY_WARRANT", "FEEDBACK", "FORMALIZATION", "INPUT",
+            "LIMITATION", "MECHANISM", "METRIC", "MILESTONE",
+            "MITIGATION", "NEW_MECHANISM", "OBJECTIVE", "OUTPUT",
+            "RISK", "RISK_CONTROL", "RQ_CLOSURE", "SPLIT",
+            "SYNTHESIS", "TECHNICAL_DIFFICULTY", "VALIDITY_THREAT",
+            "WORK_PACKAGE",
+        }
+        if raw in allowed:
+            return raw
+        aliases = {
+            "总述": "CONTEXT", "本节总述": "CONTEXT",
+            "内容总述": "CONTEXT", "路线总述": "CONTEXT",
+            "关键技术总述": "CONTEXT", "背景": "CONTEXT",
+            "问题": "PROBLEM", "证据": "EVIDENCE", "差距": "GAP",
+            "方法": "METHOD", "机制": "MECHANISM", "目标": "OBJECTIVE",
+            "评价": "EVALUATION", "贡献": "CONTRIBUTION",
+            "过渡": "TRANSITION", "边界": "BOUNDARY", "风险": "RISK",
+            "输出": "OUTPUT", "里程碑": "MILESTONE",
+        }
+        return aliases.get(raw, "EVIDENCE")
+
     @classmethod
     def _is_transport_project(cls, envelope: dict[str, Any]) -> bool:
         project_name = cls._project_name(envelope)
@@ -1058,7 +1097,7 @@ class SimulatedLLM:
         traces: list[dict[str, Any]] = []
         for i, bp in enumerate(blueprint.get("paragraphs", []), 1):
             claim_id = str(bp.get("primary_claim_id") or proposition.get("node_id") or "prop-001")
-            role = str(bp.get("argument_role") or "EVIDENCE")
+            role = self._canonical_argument_role(bp.get("argument_role"))
             evidence_ids = [str(x) for x in (bp.get("required_evidence_ids") or [])]
             claim_text = statement(claim_id)
             evidence_texts = [statement(eid) for eid in evidence_ids]
@@ -1128,7 +1167,7 @@ class SimulatedLLM:
         for rule, evidence in generic_rules:
             if rule not in present_rules:
                 rule_results.append({"rule": rule, "passed": True, "evidence": evidence})
-        base["result"].update({"verdict":"ACCEPT","checked_paragraph_ids":ids,"unsupported_trace_ids":[],"blueprint_deviation_paragraph_ids":[],"scope_violations":[],"profile_acceptance_results":rule_results,"quality_dimensions":self._quality_dimensions(True),"duplicate_signatures":[],"document_type_drift_terms":[],"paragraph_reviews":[{"paragraph_id":p["paragraph_id"],"passed":True,"argument_role":p.get("paragraph_role","EVIDENCE"),"claim_supported":True,"new_information_added":True,"issues":[]} for p in paragraphs]})
+        base["result"].update({"verdict":"ACCEPT","checked_paragraph_ids":ids,"unsupported_trace_ids":[],"blueprint_deviation_paragraph_ids":[],"scope_violations":[],"profile_acceptance_results":rule_results,"quality_dimensions":self._quality_dimensions(True),"duplicate_signatures":[],"document_type_drift_terms":[],"paragraph_reviews":[{"paragraph_id":p["paragraph_id"],"passed":True,"argument_role":self._canonical_argument_role(p.get("paragraph_role")),"claim_supported":True,"new_information_added":True,"issues":[]} for p in paragraphs]})
         base["status"]="PASS";base["findings"]=[]
         return base
 
@@ -1388,7 +1427,7 @@ class SimulatedLLM:
             "blueprint_deviation_paragraph_ids": [], "scope_violations": [],
             "profile_acceptance_results": [{"rule": f"表达质量检查：{d}", "passed": True, "evidence": "逐段对比原始候选与润色候选。"} for d in dimensions],
             "quality_dimensions": self._quality_dimensions(True), "duplicate_signatures": [], "document_type_drift_terms": [],
-            "paragraph_reviews": [{"paragraph_id": pid, "passed": True, "argument_role": str(next((p.get("paragraph_role") for p in paragraphs if p.get("paragraph_id") == pid), "EVIDENCE")), "claim_supported": True, "new_information_added": True, "issues": []} for pid in ids],
+            "paragraph_reviews": [{"paragraph_id": pid, "passed": True, "argument_role": self._canonical_argument_role(next((p.get("paragraph_role") for p in paragraphs if p.get("paragraph_id") == pid), "EVIDENCE")), "claim_supported": True, "new_information_added": True, "issues": []} for pid in ids],
             "expression_checks": [{"dimension": d, "passed": True, "paragraph_ids": ids, "evidence": "含义、来源和文种保持一致。"} for d in dimensions],
             "trace_preservation": {"input_trace_ids": input_traces, "output_trace_ids": output_traces, "missing_trace_ids": sorted(set(input_traces) - set(output_traces)), "new_unapproved_trace_ids": sorted(set(output_traces) - set(input_traces)), "preserved": set(input_traces) == set(output_traces)},
         }

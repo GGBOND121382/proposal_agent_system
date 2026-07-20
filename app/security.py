@@ -55,13 +55,20 @@ class SecurityRouter:
         candidates = list(profile.get("preferred_models", [])) + list(profile.get("fallback_models", []))
         reasons: list[str] = []
         simulation = os.getenv("MODEL_RUNTIME_MODE", "REPLAY").upper() in {"REPLAY", "MOCK", "SIMULATED"}
+        # CHAT_BRIDGE is itself the configured model transport. It must not require
+        # the underlying HTTP endpoint/model to be enabled, because no HTTP request
+        # is made; the exact request is persisted for an external model to answer.
+        # Environment, security-level, approval and allowed-endpoint checks below
+        # remain fully enforced.
+        bridge_transport = os.getenv("MODEL_GATEWAY_MODE", "OPENAI_COMPATIBLE").strip().upper() == "CHAT_BRIDGE"
+        transport_available = simulation or bridge_transport
         for model_id in candidates:
             model = self.model_by_id.get(model_id)
-            if not model or (not model.get("enabled", False) and not simulation):
+            if not model or (not model.get("enabled", False) and not transport_available):
                 reasons.append(f"{model_id}: disabled")
                 continue
             endpoint = self.endpoint_by_id.get(model["endpoint_id"])
-            if not endpoint or (not endpoint.get("enabled", False) and not simulation):
+            if not endpoint or (not endpoint.get("enabled", False) and not transport_available):
                 reasons.append(f"{model_id}: endpoint disabled")
                 continue
             if endpoint["environment"] != required:

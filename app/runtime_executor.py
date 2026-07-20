@@ -59,6 +59,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         model_id: str,
         endpoint_id: str,
         provider_model_name: str,
+        prompt_contract_hash: str,
         requested_call_key: str | None,
     ) -> str:
         if requested_call_key:
@@ -73,6 +74,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "model_id": model_id,
                 "endpoint_id": endpoint_id,
                 "provider_model_name": provider_model_name,
+                "prompt_contract_hash": prompt_contract_hash,
             }
         )[:32]
 
@@ -88,6 +90,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         model_id: str,
         endpoint_id: str,
         provider_model_name: str,
+        prompt_contract_hash: str,
     ) -> dict[str, Any] | None:
         event = self.db.fetchone(
             "SELECT metadata_json FROM audit_events WHERE event_type='MODEL_CALL_COMMITTED' AND object_id=? ORDER BY id DESC LIMIT 1",
@@ -116,6 +119,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "model_id": model_id,
             "endpoint_id": endpoint_id,
             "provider_model_name": provider_model_name,
+            "prompt_contract_hash": prompt_contract_hash,
         }
         actual = {
             "project_id": run.get("project_id"),
@@ -137,6 +141,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
             # Legacy commits predate this field; their deterministic call key
             # already included the provider model name. New commits persist it.
             "provider_model_name": metadata.get("provider_model_name") or provider_model_name,
+            "prompt_contract_hash": metadata.get("prompt_contract_hash") or "",
         }
         if actual != expected:
             raise EvidenceIntegrityError(
@@ -155,6 +160,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "model_id": model_id,
                 "endpoint_id": endpoint_id,
                 "provider_model_name": provider_model_name,
+                "prompt_contract_hash": prompt_contract_hash,
             },
         )
         return {
@@ -198,6 +204,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         resolved_call_key = call_key or new_id("call-pending")
         system_prompt = None
         output_schema: dict[str, Any] | None = None
+        prompt_contract_hash: str | None = None
         raw_response_text: str | None = None
         provider_output: dict[str, Any] | None = None
         consumed_output: dict[str, Any] | None = None
@@ -213,6 +220,11 @@ class RuntimePromptExecutor(BasePromptExecutor):
             route = self.router.route(prompt_id, model_envelope, original_environment=original_environment)
             output_schema = self.pack.inlined_schema(prompt_id, "output")
             system_prompt = self._system_prompt(prompt_id, output_schema)
+            prompt_contract_hash = sha256_json({
+                "system_prompt": system_prompt,
+                "input_schema": self.pack.inlined_schema(prompt_id, "input"),
+                "output_schema": output_schema,
+            })
             prompt_version = str(model_envelope.get("prompt_version") or self.pack.entry(prompt_id).get("version") or "")
             resolved_call_key = self._call_key(
                 prompt_id=prompt_id,
@@ -223,6 +235,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 model_id=route.model_id,
                 endpoint_id=route.endpoint_id,
                 provider_model_name=str(route.provider_model_name or ""),
+                prompt_contract_hash=prompt_contract_hash,
                 requested_call_key=call_key,
             )
             committed = self._committed_result(
@@ -235,6 +248,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 model_id=route.model_id,
                 endpoint_id=route.endpoint_id,
                 provider_model_name=str(route.provider_model_name or ""),
+                prompt_contract_hash=prompt_contract_hash,
             )
             if committed:
                 return committed
@@ -296,6 +310,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 raw_response_text=raw_response_text,
                 system_prompt=system_prompt,
                 output_schema=output_schema,
+                prompt_contract_hash=prompt_contract_hash,
                 environment=route.environment,
                 duration_ms=duration_ms,
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
@@ -324,6 +339,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     "route_model_id": route.model_id,
                     "route_endpoint_id": route.endpoint_id,
                     "provider_model_name": str(route.provider_model_name or ""),
+                    "prompt_contract_hash": prompt_contract_hash,
                     "generation_origin": getattr(result, "generation_origin", MODEL_GENERATED),
                 },
             )
@@ -368,6 +384,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 raw_response_text=raw_response_text,
                 system_prompt=system_prompt,
                 output_schema=output_schema,
+                prompt_contract_hash=prompt_contract_hash,
                 environment=route.environment if route else None,
                 duration_ms=duration_ms,
                 error=error,
@@ -404,6 +421,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "quality_context_hash": sha256_json(kwargs["quality_context_envelope"]) if kwargs.get("quality_context_envelope") is not None else None,
             "input_compaction": kwargs.get("input_compaction"),
             "output_schema": kwargs.get("output_schema"),
+            "prompt_contract_hash": kwargs.get("prompt_contract_hash"),
             "output": kwargs.get("consumed_output"),
             "provider_parsed_output": kwargs.get("provider_output"),
             "raw_response_text": kwargs.get("raw_response_text"),
@@ -469,6 +487,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                             "route_endpoint_id": kwargs.get("route_endpoint_id"),
                             "provider_model_name": kwargs.get("provider_model_name"),
                             "prompt_version": (kwargs.get("model_envelope") or {}).get("prompt_version"),
+                            "prompt_contract_hash": kwargs.get("prompt_contract_hash"),
                             "generation_mode": self.generation_mode.value,
                             "generation_origin": kwargs.get("generation_origin") or MODEL_GENERATED,
                             "source_call_key": kwargs.get("source_call_key"),

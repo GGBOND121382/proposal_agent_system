@@ -29,6 +29,18 @@ class WorkflowGateMixin:
         if not gate:
             raise KeyError(f"Gate not found: {gate_id}")
         if gate["status"] != "OPEN":
+            prior = json.loads(gate.get("decision_json") or "{}")
+            expected_status = "APPROVED" if action in {"APPROVE", "CONFIRM", "RESOLVE", "PROVIDE_INFORMATION"} else ("CANCELLED" if action == "CANCEL" else "REJECTED")
+            if (
+                gate["status"] == expected_status
+                and str(prior.get("action") or "") == action
+                and str(prior.get("decided_role") or "") == decided_role
+                and (not context_hash or context_hash == gate["context_hash"])
+            ):
+                # Durable file bridges may replay the same response after a crash
+                # between database commit and consumed-file archival.  Treat an
+                # identical decision as idempotent, but reject any conflicting one.
+                return self._gate(gate_id)
             raise ValueError("Gate is not open")
         allowed = json.loads(gate["allowed_actions_json"])
         if action not in allowed:

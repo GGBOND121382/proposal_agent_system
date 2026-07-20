@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .util import new_id
+
 
 class FullProposalRepairMixin:
     def _prepare_integration_repair(self, wf: dict[str, Any], state: dict[str, Any], output: dict[str, Any]) -> str:
@@ -114,6 +116,10 @@ class FullProposalRepairMixin:
         state["integration_repair_rounds"] = rounds + 1
         state["integration_repair_section_ids"] = sorted(affected)
         state["integration_repair_findings"] = writing_findings
+        # A cross-section rewrite is an intentional new generation, not a
+        # checkpoint replay.  One durable attempt ID is shared by all responsible
+        # children and retained across restarts until the repair round completes.
+        state["full_proposal_repair_attempt_id"] = new_id("generation-repair")
         state.setdefault("cross_section_repair_history", []).append({
             "round": rounds + 1,
             "finding_codes": [str(item.get("code") or "") for item in writing_findings],

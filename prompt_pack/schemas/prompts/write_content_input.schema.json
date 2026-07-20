@@ -211,23 +211,7 @@
                     ]
                   },
                   "argument_role": {
-                    "type": "string",
-                    "enum": [
-                      "CONTEXT",
-                      "PROBLEM",
-                      "EVIDENCE",
-                      "GAP",
-                      "LIMITATION_MECHANISM",
-                      "CENTRAL_CLAIM",
-                      "RESEARCH_QUESTION",
-                      "METHOD",
-                      "WARRANT",
-                      "COUNTERARGUMENT",
-                      "BOUNDARY",
-                      "EVALUATION",
-                      "CONTRIBUTION",
-                      "TRANSITION"
-                    ]
+                    "$ref": "../common/argument_role.schema.json"
                   },
                   "primary_claim_id": {
                     "type": "string",

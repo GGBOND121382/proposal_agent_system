@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,11 @@ from .context import ContextBuilder as BaseContextBuilder
 from .runtime_policy import CapabilityPolicy, LIVE_ENVELOPE_REGISTRY
 from .task_instruction import instruction_text, intended_uses
 from .util import sha256_json, utc_now
+
+
+_LIVE_TOUCHED_PATHS: ContextVar[set[str] | None] = ContextVar(
+    "proposal_live_touched_paths", default=None
+)
 
 
 class LiveContextBlocked(ValueError):
@@ -195,6 +201,27 @@ def _delete_path(value: Any, dotted_path: str) -> None:
 class LiveContextBuilder(BaseContextBuilder):
     """Context builder that never reads Replay inputs in LIVE mode."""
 
+    @staticmethod
+    def _stable_task_id(
+        *,
+        prompt_id: str,
+        project_id: str,
+        workflow_id: str | None,
+        active_section_id: str,
+        attempt: int,
+        generation_attempt_id: str,
+    ) -> str:
+        return "task-" + sha256_json(
+            {
+                "prompt_id": prompt_id,
+                "project_id": project_id,
+                "workflow_id": workflow_id,
+                "active_section_id": active_section_id,
+                "attempt": attempt,
+                "generation_attempt_id": generation_attempt_id,
+            }
+        )[:16]
+
     def __init__(self, db, pack):
         super().__init__(db, pack)
         self.runtime_mode = os.getenv("MODEL_RUNTIME_MODE", "REPLAY").upper()
@@ -233,7 +260,10 @@ class LiveContextBuilder(BaseContextBuilder):
                     )
                 return False
             node[parts[-1]] = copy.deepcopy(value)
-            self._live_touched_paths.add(dotted_path)
+            touched = _LIVE_TOUCHED_PATHS.get()
+            if touched is None:
+                raise RuntimeError("LIVE context replacement occurred outside a build scope")
+            touched.add(dotted_path)
             return True
 
         return super()._set_path_if_valid(
@@ -245,7 +275,7 @@ class LiveContextBuilder(BaseContextBuilder):
             touched == dotted_path
             or dotted_path.startswith(touched + ".")
             or touched.startswith(dotted_path + ".")
-            for touched in getattr(self, "_live_touched_paths", set())
+            for touched in (_LIVE_TOUCHED_PATHS.get() or set())
         )
 
     def build(
@@ -265,6 +295,28 @@ class LiveContextBuilder(BaseContextBuilder):
                 workflow_state=workflow_state,
                 overrides=overrides,
             )
+        touched_token = _LIVE_TOUCHED_PATHS.set(set())
+        try:
+            with self.workflow_scope(prompt_id, workflow_id, workflow_state):
+                return self._build_live(
+                    prompt_id,
+                    project_id,
+                    workflow_id=workflow_id,
+                    workflow_state=workflow_state,
+                    overrides=overrides,
+                )
+        finally:
+            _LIVE_TOUCHED_PATHS.reset(touched_token)
+
+    def _build_live(
+        self,
+        prompt_id: str,
+        project_id: str,
+        *,
+        workflow_id: str | None = None,
+        workflow_state: dict[str, Any] | None = None,
+        overrides: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         project = self.db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
         if not project:
             raise KeyError(f"Project not found: {project_id}")
@@ -279,7 +331,6 @@ class LiveContextBuilder(BaseContextBuilder):
             }
         )
         scaffold = build_schema_scaffold(self.pack.inlined_schema(prompt_id, "input"))
-        self._live_touched_paths: set[str] = set()
         envelope = scaffold.value
         if not isinstance(envelope, dict):
             raise ValueError(f"Input schema for {prompt_id} did not produce an object scaffold")
@@ -291,15 +342,23 @@ class LiveContextBuilder(BaseContextBuilder):
             f"section:{active_section}:{prompt_id}" if active_section else prompt_id
         )
         attempt = int(repair_attempts.get(section_attempt_key, repair_attempts.get(prompt_id, 0))) + 1
-        task["task_id"] = "task-" + sha256_json(
-            {
-                "prompt_id": prompt_id,
-                "project_id": project_id,
-                "workflow_id": workflow_id,
-                "active_section_id": active_section,
-                "attempt": attempt,
-            }
-        )[:16]
+        generation_attempt_id = str(
+            state.get("generation_attempt_id")
+            or state.get("full_proposal_repair_attempt_id")
+            or state.get("full_proposal_generation_attempt_id")
+            or ""
+        )
+        # Intentional regeneration must not share a committed call key with
+        # the rejected generation. This stable persisted scope also keeps a
+        # process restart within the same attempt idempotent.
+        task["task_id"] = self._stable_task_id(
+            prompt_id=prompt_id,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            active_section_id=active_section,
+            attempt=attempt,
+            generation_attempt_id=generation_attempt_id,
+        )
         task["current_step"] = prompt_id.removeprefix("P-").replace("-", "_")
         workflow_type = str(state.get("workflow_type") or "WF-1_PROJECT_INTAKE")
         task["workflow_type"] = (
@@ -339,19 +398,23 @@ class LiveContextBuilder(BaseContextBuilder):
         # the source_section already present in this exact LIVE envelope. This is
         # intentionally done after the common builder so it also corrects any
         # mutable-context race in the shared concurrent ContextBuilder instance.
-        section_dependency = {
-            "P-WRITE-BLUEPRINT-CRITIC": ("blueprint_candidate", "P-WRITE-BLUEPRINT", "blueprint"),
-            "P-WRITE-CONTENT": ("approved_blueprint", "P-WRITE-BLUEPRINT", "blueprint"),
-            "P-WRITE-CRITIC": ("content_candidate", "P-WRITE-CONTENT", None),
-            "P-EXPRESSION-POLISH": ("content_candidate", "P-WRITE-CONTENT", None),
-            "P-EXPRESSION-CRITIC": ("polished_candidate", "P-EXPRESSION-POLISH", None),
+        section_dependencies = {
+            "P-WRITE-BLUEPRINT-CRITIC": [("blueprint_candidate", "P-WRITE-BLUEPRINT", "blueprint")],
+            "P-WRITE-CONTENT": [("approved_blueprint", "P-WRITE-BLUEPRINT", "blueprint")],
+            "P-WRITE-CRITIC": [("content_candidate", "P-WRITE-CONTENT", None)],
+            "P-EXPRESSION-POLISH": [("content_candidate", "P-WRITE-CONTENT", None)],
+            "P-EXPRESSION-CRITIC": [
+                ("content_candidate", "P-WRITE-CONTENT", None),
+                ("polished_candidate", "P-EXPRESSION-POLISH", None),
+            ],
         }
-        dependency = section_dependency.get(prompt_id)
-        if dependency and workflow_id:
-            target_field, producer_prompt, result_key = dependency
+        dependencies = section_dependencies.get(prompt_id) or []
+        if dependencies and workflow_id:
             source_section = (envelope.get("payload") or {}).get("source_section") or {}
             source_section_id = str(source_section.get("section_id") or "")
-            if source_section_id:
+            for target_field, producer_prompt, result_key in dependencies:
+                if not source_section_id:
+                    continue
                 rows = self.db.fetchall(
                     "SELECT input_json,output_json FROM prompt_runs "
                     "WHERE project_id=? AND workflow_id=? AND prompt_id=? AND status='PASS' "

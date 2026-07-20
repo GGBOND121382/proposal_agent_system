@@ -173,9 +173,12 @@ def test_upstream_revision_invalidates_all_concurrent_child_generations(runtime)
         "section_progress": {"s1": {"phase": "DONE"}},
         "full_proposal_concurrency": {"mode": "FIVE_GROUP_PARALLEL_SECTION_SERIAL"},
     }
+    previous_attempt = state.get("full_proposal_generation_attempt_id")
     engine._invalidate_full_proposal_generation(
         state, reason="INTEGRATION_ARGUMENT_ARCHITECTURE_REVISION"
     )
+    assert state["full_proposal_generation_attempt_id"]
+    assert state["full_proposal_generation_attempt_id"] != previous_attempt
     assert state["full_proposal_children"] == {}
     assert "full_proposal_contract" not in state
     assert "authoring_child_workflow_ids" not in state

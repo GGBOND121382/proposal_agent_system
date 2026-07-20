@@ -11,7 +11,7 @@ from app.context import ContextBuilder
 from app.db import Database
 from app.diagram_enrichment import DiagramEnrichmentService
 from app.executor import PromptExecutor
-from app.human_gate_bridge import FileHumanGateBridge
+from app.human_gate_bridge import FileHumanGateBridge, workflow_gate_scope_ids
 from app.llm import ModelGateway
 from app.pack import PromptPack
 from app.research import PublicResearchService
@@ -43,12 +43,36 @@ def build_runtime() -> tuple[Settings, Database, WorkflowEngine]:
     return settings, db, engine
 
 
-def _open_gates(engine: WorkflowEngine, project_id: str) -> list[dict[str, Any]]:
-    return [
-        gate
-        for gate in engine.list_gates(project_id=project_id)
-        if gate.get("status") == "OPEN"
-    ]
+def _workflow_gate_scope_ids(engine: WorkflowEngine, workflow_id: str) -> list[str]:
+    """Return the current workflow and only its persisted authoring children.
+
+    A project can contain abandoned or intentionally paused workflows.  Looking up
+    every project-level gate lets a stale gate from an unrelated run hijack a fresh
+    portable execution.  Full-proposal authoring is the one case where the parent
+    driver must also service child-workflow gates, so those IDs are derived from the
+    parent's persisted state rather than from the whole project.
+    """
+    workflow = engine.get(workflow_id)
+    state = workflow.get("state") or {}
+    ordered = [workflow_id]
+    ordered.extend(str(item) for item in state.get("authoring_child_workflow_ids") or [] if item)
+    concurrency = state.get("full_proposal_concurrency") or {}
+    ordered.extend(str(item) for item in concurrency.get("child_workflow_ids") or [] if item)
+    for record in (state.get("full_proposal_children") or {}).values():
+        if isinstance(record, dict) and record.get("workflow_id"):
+            ordered.append(str(record["workflow_id"]))
+    return list(dict.fromkeys(ordered))
+
+
+def _open_gates(engine: WorkflowEngine, workflow_id: str) -> list[dict[str, Any]]:
+    gates: list[dict[str, Any]] = []
+    for scoped_workflow_id in _workflow_gate_scope_ids(engine, workflow_id):
+        gates.extend(
+            gate
+            for gate in engine.list_gates(workflow_id=scoped_workflow_id)
+            if gate.get("status") == "OPEN"
+        )
+    return gates
 
 
 async def drive_workflow(
@@ -70,7 +94,7 @@ async def drive_workflow(
                 )
             continue
 
-        gates = _open_gates(engine, workflow["project_id"])
+        gates = _open_gates(engine, workflow_id)
         if gates:
             # Full-proposal authoring may expose child-workflow gates.  Publish and
             # consume every open gate one at a time; never auto-approve.

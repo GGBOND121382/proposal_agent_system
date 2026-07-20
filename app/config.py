@@ -27,6 +27,7 @@ class Settings:
     public_research_record_file: str
     public_research_connector_file: str
     public_search_max_results: int
+    public_search_bridge_dir: Path | None
     research_fetch_timeout_seconds: int
     research_max_source_bytes: int
     mermaid_js_path: Path
@@ -70,6 +71,7 @@ class Settings:
             public_research_record_file=os.getenv("PUBLIC_RESEARCH_RECORD_FILE", ""),
             public_research_connector_file=os.getenv("PUBLIC_RESEARCH_CONNECTOR_FILE", ""),
             public_search_max_results=int(os.getenv("PUBLIC_SEARCH_MAX_RESULTS", "40")),
+            public_search_bridge_dir=(Path(os.environ["PUBLIC_SEARCH_BRIDGE_DIR"]).resolve() if os.getenv("PUBLIC_SEARCH_BRIDGE_DIR") else None),
             research_fetch_timeout_seconds=int(os.getenv("RESEARCH_FETCH_TIMEOUT_SECONDS", "45")),
             research_max_source_bytes=int(os.getenv("RESEARCH_MAX_SOURCE_BYTES", str(10 * 1024 * 1024))),
             mermaid_js_path=Path(os.getenv("MERMAID_JS_PATH", str(root / "third_party" / "mermaid" / "mermaid.min.js"))).resolve(),

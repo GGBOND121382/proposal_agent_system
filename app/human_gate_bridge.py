@@ -19,6 +19,43 @@ def _atomic_json(path: Path, value: Any) -> None:
     os.replace(tmp, path)
 
 
+def workflow_gate_scope_ids(engine: Any, workflow_id: str) -> set[str]:
+    """Resolve the exact workflow lineage whose gates a runner may consume."""
+    root = engine.get(str(workflow_id))
+    project_id = str(root["project_id"])
+    rows = engine.db.fetchall(
+        "SELECT id,state_json FROM workflows WHERE project_id=?",
+        (project_id,),
+    )
+    decoded: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        try:
+            state = json.loads(row.get("state_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            state = {}
+        decoded[str(row["id"])] = state if isinstance(state, dict) else {}
+
+    scope = {str(workflow_id)}
+    changed = True
+    while changed:
+        changed = False
+        for candidate_id, state in decoded.items():
+            parent_id = str(state.get("parent_workflow_id") or "")
+            explicit_children = {
+                str(item)
+                for item in state.get("authoring_child_workflow_ids") or []
+                if item
+            }
+            if parent_id in scope and candidate_id not in scope:
+                scope.add(candidate_id)
+                changed = True
+            for child_id in explicit_children:
+                if candidate_id in scope and child_id not in scope:
+                    scope.add(child_id)
+                    changed = True
+    return scope
+
+
 class FileHumanGateBridge:
     """Durable, auditable file bridge for human decisions.
 

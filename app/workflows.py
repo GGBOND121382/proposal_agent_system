@@ -362,10 +362,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 return self.get(workflow_id)
 
         try:
-            self.quality_manager.assert_no_open_blockers(
-                wf["project_id"],
-                workflow_id=None if wf["workflow_type"] == "WF-5_SECURITY_REVIEW_AND_EXPORT" else workflow_id,
-            )
+            if wf["workflow_type"] == "WF-5_SECURITY_REVIEW_AND_EXPORT":
+                self.quality_manager.assert_no_active_lineage_blockers(
+                    wf["project_id"], review_workflow_id=workflow_id
+                )
+            else:
+                self.quality_manager.assert_no_open_blockers(
+                    wf["project_id"], workflow_id=workflow_id
+                )
         except QualityGateBlocked as exc:
             state["last_error"] = str(exc) + "。必须记录修复运行并由独立Critic复审，人工确认或直接改库均不能放行。"
             state["quality_blocker_ids"] = [item.get("finding_id") for item in exc.findings]

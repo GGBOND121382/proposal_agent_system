@@ -78,6 +78,38 @@ class ContextBuilder:
             raise ValueError("Context builder produced invalid input: " + "; ".join(errors[:10]))
         return envelope
 
+    @staticmethod
+    def _safe_package_leaked_literals(
+        package_candidate: dict[str, Any],
+        project: dict[str, Any],
+        config: dict[str, Any],
+    ) -> list[str]:
+        """Detect actual outbound identity leaks without flagging policy labels.
+
+        ``removed_fields``, ``prohibited_inferences`` and ``prohibited_outputs``
+        intentionally name forbidden categories (for example ``真实个人信息``).
+        Scanning those policy fields as if they were outbound data makes every
+        correctly redacted package fail its own safety check.  Only inspect the
+        fields that carry task content to the public model/search service.  Sites
+        can additionally provide literal secrets through
+        ``prohibited_external_values`` when exact-value matching is required.
+        """
+        outbound = {
+            "package_id": package_candidate.get("package_id"),
+            "task_type": package_candidate.get("task_type"),
+            "task_description": package_candidate.get("task_description"),
+            "queries": package_candidate.get("queries") or [],
+            "allowed_context": package_candidate.get("allowed_context") or [],
+            "entity_placeholders": package_candidate.get("entity_placeholders") or [],
+        }
+        outbound_text = json.dumps(outbound, ensure_ascii=False)
+        forbidden_literals = [
+            str(project.get("id") or ""),
+            str(project.get("name") or ""),
+            *[str(item) for item in config.get("prohibited_external_values", [])],
+        ]
+        return [token for token in forbidden_literals if token and token in outbound_text]
+
     def _documents(self, project_id: str) -> list[dict[str, Any]]:
         rows = self.db.fetchall("SELECT parsed_json,document_hash,role,security_level FROM documents WHERE project_id=? ORDER BY created_at", (project_id,))
         documents: list[dict[str, Any]] = []
@@ -370,12 +402,14 @@ class ContextBuilder:
             # Missing contract evidence must be visible to the caller.  Returning
             # the first unrelated project objects hid broken aliases and allowed a
             # section to pass with evidence from another topic.
+            # Keep the model-facing object schema-valid. Missing seed diagnostics
+            # belong in the deterministic quality/audit layer, not in a strict
+            # Prompt payload whose project_subgraph schema has only four fields.
             return {
                 "item_ids": [],
                 "relation_ids": [],
                 "items": [],
                 "relations": [],
-                "missing_seed_ids": sorted(seed_ids),
             }
         scoped_relations = [
             item for item in relations
@@ -739,13 +773,7 @@ class ContextBuilder:
             ))
         if "deterministic_scan" in payload:
             package_candidate = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE") or {}
-            package_text = json.dumps(package_candidate, ensure_ascii=False)
-            forbidden_literals = [
-                str(project.get("id") or ""),
-                str(project.get("name") or ""),
-                *[str(item) for item in config.get("prohibited_external_fields", [])],
-            ]
-            leaked = [item for item in forbidden_literals if item and item in package_text]
+            leaked = self._safe_package_leaked_literals(package_candidate, project, config)
             replacements.append(("payload.deterministic_scan", {
                 "passed": not leaked,
                 "matched_rules": [
@@ -1140,13 +1168,7 @@ class ContextBuilder:
         if prompt_id == "P-SAFE-ONLINE-PACKAGE-CRITIC":
             package_for_scan = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE") or {}
             source_summary = self._project_item_summaries(project["id"], project)
-            package_text = json.dumps(package_for_scan, ensure_ascii=False)
-            forbidden_literals = [
-                str(project.get("id") or ""),
-                str(project.get("name") or ""),
-                *[str(item) for item in config.get("prohibited_external_fields", [])],
-            ]
-            leaked = [token for token in forbidden_literals if token and token in package_text]
+            leaked = self._safe_package_leaked_literals(package_for_scan, project, config)
             replacements.extend([
                 ("payload.source_summary", source_summary),
                 ("payload.deterministic_scan", {
@@ -1346,31 +1368,28 @@ class ContextBuilder:
         *,
         raw_instruction: Any = None,
     ) -> dict[str, Any]:
-        structured = config.get("task_instruction_structured")
-        if not isinstance(structured, dict) and isinstance(raw_instruction, dict):
-            structured = raw_instruction
-        if isinstance(structured, dict):
-            result = copy.deepcopy(structured)
-            result.setdefault("schema_version", "2.0")
-            result.setdefault("task_instruction_id", "instruction-" + sha256_json(result)[:16])
-            result.setdefault("task_type", "DRAFT_FROM_PROJECT_DEFINITION")
-            result.setdefault("objective", instruction_text)
-            result.setdefault("target_section_ids", section_ids)
-            for key in (
-                "specific_requirements", "must_preserve", "forbidden_changes",
-                "acceptance_preferences", "priority_order",
-            ):
-                result.setdefault(key, [])
-            result["instruction_hash"] = sha256_json({
-                key: value for key, value in result.items() if key != "instruction_hash"
-            })
-            return result
-        core = {
-            "schema_version": "2.0",
-            "task_instruction_id": "instruction-" + sha256_json(instruction_text)[:16],
-            "task_type": "DRAFT_FROM_PROJECT_DEFINITION",
-            "objective": instruction_text,
-            "target_section_ids": section_ids,
+        """Normalize arbitrary user task metadata to the frozen schema.
+
+        External callers commonly provide convenience keys such as ``constraints``
+        and ``deliverables``.  Copying that dictionary verbatim leaked unsupported
+        fields into every Prompt that references task_instruction, making the
+        runtime provider-dependent before the model was even called.  Project only
+        schema-defined fields and translate common aliases deterministically.
+        """
+        source = config.get("task_instruction_structured")
+        if not isinstance(source, dict) and isinstance(raw_instruction, dict):
+            source = raw_instruction
+        source = source if isinstance(source, dict) else {}
+
+        def strings(value: Any) -> list[str]:
+            if isinstance(value, (list, tuple)):
+                return [str(item).strip() for item in value if str(item).strip()]
+            if value is None:
+                return []
+            text = str(value).strip()
+            return [text] if text else []
+
+        defaults = {
             "specific_requirements": list(config.get("specific_requirements") or [
                 "按已确认的章节合同完成完整申请书",
                 "公开调研使用可核验来源并保留来源绑定",
@@ -1394,6 +1413,30 @@ class ContextBuilder:
                 "方法和实验可验证",
                 "表达与版式质量",
             ]),
+        }
+        requirements = strings(source.get("specific_requirements")) or strings(source.get("constraints")) or defaults["specific_requirements"]
+        deliverables = strings(source.get("deliverables"))
+        acceptance_preferences = strings(source.get("acceptance_preferences")) or deliverables or defaults["acceptance_preferences"]
+
+        task_type = str(source.get("task_type") or "DRAFT_FROM_PROJECT_DEFINITION")
+        allowed_task_types = {
+            "COPY_EDIT_ONLY", "SUBSTANTIVE_REVISION", "DRAFT_FROM_PROJECT_DEFINITION",
+            "PUBLIC_RESEARCH", "PUBLIC_TEMPLATE_ANALYSIS", "GENERIC_LANGUAGE_ASSIST",
+        }
+        if task_type not in allowed_task_types:
+            task_type = "DRAFT_FROM_PROJECT_DEFINITION"
+
+        core = {
+            "schema_version": "2.0",
+            "task_instruction_id": str(source.get("task_instruction_id") or "instruction-" + sha256_json({"objective": instruction_text, "sections": section_ids})[:16]),
+            "task_type": task_type,
+            "objective": str(source.get("objective") or instruction_text).strip() or instruction_text,
+            "target_section_ids": strings(source.get("target_section_ids")) or list(section_ids),
+            "specific_requirements": requirements,
+            "must_preserve": strings(source.get("must_preserve")) or defaults["must_preserve"],
+            "forbidden_changes": strings(source.get("forbidden_changes")) or defaults["forbidden_changes"],
+            "acceptance_preferences": acceptance_preferences,
+            "priority_order": strings(source.get("priority_order")) or defaults["priority_order"],
         }
         core["instruction_hash"] = sha256_json(core)
         return core

@@ -37,6 +37,16 @@ class PortablePack:
         return {"version": "3.0.0", "next_human_gate": None}
 
 
+
+
+class ContractAwarePortablePack(PortablePack):
+    def __init__(self, marker: str):
+        self.marker = marker
+
+    def inlined_schema(self, prompt_id, kind):
+        return {"type": "object", "x-contract-marker": self.marker, "x-kind": kind}
+
+
 class PortableRouter:
     def __init__(self, model_id: str, endpoint_id: str, provider_model_name: str):
         self.model_id = model_id
@@ -140,6 +150,38 @@ def test_model_route_is_part_of_reuse_identity(tmp_path):
     assert first_gateway.calls == 1
     assert second_gateway.calls == 1
     assert db.fetchone("SELECT COUNT(*) AS n FROM prompt_runs WHERE status='PASS'")["n"] == 2
+
+
+def test_prompt_and_schema_contract_is_part_of_reuse_identity(tmp_path):
+    db = make_db(tmp_path)
+    first_gateway = PortableGateway()
+    first = RuntimePromptExecutor(
+        db,
+        ContractAwarePortablePack("schema-v1"),
+        PortableRouter("model-a", "endpoint-a", "provider/a"),
+        first_gateway,
+        quality_guard_enabled=False,
+    )
+    first_result = execute(first)
+
+    second_gateway = PortableGateway()
+    second = RuntimePromptExecutor(
+        db,
+        ContractAwarePortablePack("schema-v2"),
+        PortableRouter("model-a", "endpoint-a", "provider/a"),
+        second_gateway,
+        quality_guard_enabled=False,
+    )
+    second_result = execute(second)
+
+    assert first_result["call_key"] != second_result["call_key"]
+    assert first_gateway.calls == 1
+    assert second_gateway.calls == 1
+    events = db.fetchall(
+        "SELECT metadata_json FROM audit_events WHERE event_type='MODEL_CALL_COMMITTED' ORDER BY id"
+    )
+    hashes = [json.loads(row["metadata_json"])["prompt_contract_hash"] for row in events]
+    assert len(set(hashes)) == 2
 
 
 def test_fresh_generation_rejects_checkpoint_contamination(monkeypatch, tmp_path):

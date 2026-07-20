@@ -168,8 +168,7 @@
                 "type": "boolean"
               },
               "argument_role": {
-                "type": "string",
-                "minLength": 1
+                "$ref": "../common/argument_role.schema.json"
               },
               "claim_supported": {
                 "type": "boolean"
