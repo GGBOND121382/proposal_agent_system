@@ -43,6 +43,12 @@ def rebuild(response):
     )
 
 
+def prepare_stage6a_snapshot(run: Path) -> None:
+    snapshot = run / "source_snapshots" / "stage6a_batch_draft.json"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text(json.dumps({"sections": []}), encoding="utf-8")
+
+
 def test_stage6b_frozen_sections_pass():
     for name in ["stage6b_sec06_writer_response.json", "stage6b_sec07_writer_response.json", "stage6b_sec08_writer_response.json"]:
         report = validate(load(name))
@@ -88,9 +94,7 @@ def test_expression_identity_blocks_metadata_change():
 
 def test_batch_validator_passes_final_candidates(tmp_path: Path):
     run = tmp_path / "run"
-    (run / "source_snapshots").mkdir(parents=True)
-    stage6a = json.loads(Path('/mnt/data/proposal_stage6a_delivery/stage6a_batch_draft.json').read_text(encoding='utf-8'))
-    (run / "source_snapshots" / "stage6a_batch_draft.json").write_text(json.dumps(stage6a, ensure_ascii=False), encoding="utf-8")
+    prepare_stage6a_snapshot(run)
     candidates = {sid: load(f"stage6b_sec{sid[-2:]}_writer_response.json")["candidate"] for sid in ["SEC-06", "SEC-07", "SEC-08"]}
     report = deterministic_validate_batch(run, candidates)
     assert report["verdict"] == "PASS", report
@@ -98,9 +102,7 @@ def test_batch_validator_passes_final_candidates(tmp_path: Path):
 
 def test_batch_validator_blocks_duplicate_paragraph(tmp_path: Path):
     run = tmp_path / "run"
-    (run / "source_snapshots").mkdir(parents=True)
-    stage6a = json.loads(Path('/mnt/data/proposal_stage6a_delivery/stage6a_batch_draft.json').read_text(encoding='utf-8'))
-    (run / "source_snapshots" / "stage6a_batch_draft.json").write_text(json.dumps(stage6a, ensure_ascii=False), encoding="utf-8")
+    prepare_stage6a_snapshot(run)
     candidates = {sid: load(f"stage6b_sec{sid[-2:]}_writer_response.json")["candidate"] for sid in ["SEC-06", "SEC-07", "SEC-08"]}
     candidates["SEC-07"]["subsections"][0]["paragraphs"][0]["text"] = candidates["SEC-06"]["subsections"][0]["paragraphs"][0]["text"]
     report = deterministic_validate_batch(run, candidates)
