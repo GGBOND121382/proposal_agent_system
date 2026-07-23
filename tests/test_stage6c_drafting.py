@@ -45,6 +45,13 @@ def rebuild(response):
     )
 
 
+def prepare_upstream_snapshots(run: Path) -> None:
+    snapshots = run / "source_snapshots"
+    snapshots.mkdir(parents=True, exist_ok=True)
+    for name in ("stage6a_batch_draft.json", "stage6b_batch_draft.json"):
+        (snapshots / name).write_text(json.dumps({"sections": []}), encoding="utf-8")
+
+
 def test_stage6c_frozen_sections_pass():
     for name in ["stage6c_sec09_writer_response.json", "stage6c_sec10_writer_response.json", "stage6c_sec11_writer_response.json"]:
         report = validate(load(name))
@@ -104,12 +111,7 @@ def test_repair_attempt_paths_are_unique(tmp_path: Path):
 
 def test_batch_validator_passes_final_candidates(tmp_path: Path):
     run = tmp_path / "run"
-    (run / "source_snapshots").mkdir(parents=True)
-    for name, src in [
-        ("stage6a_batch_draft.json", "/mnt/data/proposal_stage6a_delivery/stage6a_batch_draft.json"),
-        ("stage6b_batch_draft.json", "/mnt/data/proposal_stage6b_delivery/stage6b_batch_draft.json"),
-    ]:
-        (run / "source_snapshots" / name).write_text(Path(src).read_text(encoding="utf-8"), encoding="utf-8")
+    prepare_upstream_snapshots(run)
     candidates = {
         "SEC-09": load("stage6c_sec09_writer_response.json")["candidate"],
         "SEC-10": load("stage6c_sec10_writer_response.json")["candidate"],
