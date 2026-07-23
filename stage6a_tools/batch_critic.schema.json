@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "type":"object",
+  "required":["schema_version","prompt_id","prompt_version","actual_model_id","endpoint_id","batch_id","verdict","checked_section_ids","quality_dimensions","findings","next_stage_decision","summary"],
+  "additionalProperties":false,
+  "properties":{
+    "schema_version":{"const":"1.0"},
+    "prompt_id":{"const":"P-STAGE6A-BATCH-CRITIC"},
+    "prompt_version":{"const":"1.0.0"},
+    "actual_model_id":{"type":"string","minLength":2},
+    "endpoint_id":{"type":"string","minLength":2},
+    "batch_id":{"const":"STAGE-6A"},
+    "verdict":{"enum":["ACCEPT","REVISE"]},
+    "checked_section_ids":{"type":"array","minItems":5,"maxItems":5,"items":{"pattern":"^SEC-0[1-5]$"},"uniqueItems":true},
+    "quality_dimensions":{"type":"array","minItems":7,"items":{"type":"object","required":["dimension","result","comment"],"additionalProperties":false,"properties":{"dimension":{"enum":["CENTRAL_PROPOSITION_COHERENCE","RQ_COVERAGE","PRIOR_WORK_BOUNDARY","THEORY_TO_OBJECTIVE_CHAIN","CROSS_SECTION_NONREDUNDANCY","SOURCE_STATUS_CONSISTENCY","PAGE_BUDGET"]},"result":{"enum":["PASS","FAIL"]},"comment":{"type":"string","minLength":10}}}},
+    "findings":{"type":"array","items":{"type":"object"}},
+    "next_stage_decision":{"enum":["ALLOW_STAGE_6B","HOLD_STAGE_6B"]},
+    "summary":{"type":"string","minLength":30}
+  }
+}

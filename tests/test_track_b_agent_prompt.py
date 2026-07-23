@@ -83,6 +83,43 @@ def test_b3_fact_records_must_be_atomic_and_numeric_values_bound():
     assert {"QG_FACT_NOT_ATOMIC", "QG_FACT_NUMERIC_BINDING_MISSING"} <= _codes(checked)
 
 
+def test_b3_identifier_numbers_do_not_require_fake_numeric_bindings():
+    pack, validator = _runtime()
+    identifier_claims = [
+        "本材料仅用于阶段0运行基线验证。",
+        "阶段0工作包处理规则抽取。",
+        "工作流WF-1使用版本2.0契约。",
+        "1. 输出必须结构化。",
+        "（2）该条目用于说明结构。",
+    ]
+    for text in identifier_claims:
+        env = pack.replay_input("P-FACT-EXTRACT")
+        output = pack.replay_output("P-FACT-EXTRACT")
+        claim = output["result"]["fact_candidates"][0]
+        claim["claim_text"] = text
+        claim["numeric_values"] = []
+        checked = validator.apply("P-FACT-EXTRACT", env, output)
+        assert "QG_FACT_NUMERIC_BINDING_MISSING" not in _codes(checked), text
+
+
+def test_b3_substantive_numbers_still_require_numeric_bindings():
+    pack, validator = _runtime()
+    substantive_claims = [
+        "团队已完成2个原型。",
+        "项目拟在2027年开展验证。",
+        "模型请求与响应配对率为100%。",
+        "完整项目受理运行次数基线为0次。",
+    ]
+    for text in substantive_claims:
+        env = pack.replay_input("P-FACT-EXTRACT")
+        output = pack.replay_output("P-FACT-EXTRACT")
+        claim = output["result"]["fact_candidates"][0]
+        claim["claim_text"] = text
+        claim["numeric_values"] = []
+        checked = validator.apply("P-FACT-EXTRACT", env, output)
+        assert "QG_FACT_NUMERIC_BINDING_MISSING" in _codes(checked), text
+
+
 def test_b7_critic_findings_must_be_precise():
     pack, validator = _runtime()
     env = pack.replay_input("P-WRITE-CRITIC")

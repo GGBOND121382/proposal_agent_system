@@ -737,7 +737,25 @@ class ContextBuilder:
             replacements.append(("payload.candidate_document", self._candidate_document(project, content_candidates)))
 
         if "task_instruction" in payload and config.get("task_instruction"):
-            replacements.append(("payload.task_instruction", config["task_instruction"]))
+            raw_instruction = config.get("task_instruction")
+            if isinstance(raw_instruction, dict):
+                objective = str(raw_instruction.get("objective") or project.get("description") or project.get("name") or "完成指定任务").strip()
+            else:
+                objective = str(raw_instruction or project.get("description") or project.get("name") or "完成指定任务").strip()
+            if isinstance(payload.get("task_instruction"), dict):
+                section_ids = [
+                    str(section.get("section_id"))
+                    for document in docs
+                    if document.get("document_role") == "CURRENT_PROPOSAL"
+                    for section in document.get("sections", [])
+                    if section.get("section_id")
+                ]
+                replacements.append((
+                    "payload.task_instruction",
+                    self._structured_task_instruction(objective, section_ids, config, raw_instruction=raw_instruction),
+                ))
+            else:
+                replacements.append(("payload.task_instruction", objective))
         if "recipient_scope" in payload:
             replacements.append(("payload.recipient_scope", config.get("recipient_scope", ["内部用户"])))
         if "allowed_topics" in payload:
@@ -756,6 +774,77 @@ class ContextBuilder:
 
         for path, value in replacements:
             self._set_path_if_valid(prompt_id, envelope, path, value, strict=path in CRITICAL_CONTEXT_PATHS)
+
+    @staticmethod
+    def _structured_task_instruction(
+        instruction_text: str,
+        section_ids: list[str],
+        config: dict[str, Any],
+        *,
+        raw_instruction: Any = None,
+    ) -> dict[str, Any]:
+        source = config.get("task_instruction_structured")
+        if not isinstance(source, dict) and isinstance(raw_instruction, dict):
+            source = raw_instruction
+        source = source if isinstance(source, dict) else {}
+
+        def strings(value: Any) -> list[str]:
+            if isinstance(value, (list, tuple)):
+                return [str(item).strip() for item in value if str(item).strip()]
+            if value is None:
+                return []
+            value = str(value).strip()
+            return [value] if value else []
+
+        defaults = {
+            "specific_requirements": list(config.get("specific_requirements") or [
+                "按已确认的任务范围与对象合同完成当前阶段产物",
+                "所有实质结论使用可核验来源并保留来源绑定",
+                "创新与结论按证据强度表述",
+            ]),
+            "must_preserve": list(config.get("must_preserve") or [
+                "已确认的项目事实、约束、章节合同和人工决策",
+                "未提供或未核验的事实保持UNKNOWN",
+            ]),
+            "forbidden_changes": list(config.get("forbidden_changes") or [
+                "不得虚构论文、专利、数据、合作关系或预实验结果",
+                "不得把待验证主张写成既有结论",
+            ]),
+            "acceptance_preferences": list(config.get("acceptance_preferences") or [
+                "问题—差距—命题—方法—实验—成果形成闭环",
+                "章节之间不重复、不串稿且可追溯",
+            ]),
+            "priority_order": list(config.get("priority_order") or [
+                "事实与来源正确",
+                "研究逻辑闭环",
+                "方法和实验可验证",
+                "表达与版式质量",
+            ]),
+        }
+        requirements = strings(source.get("specific_requirements")) or strings(source.get("constraints")) or defaults["specific_requirements"]
+        deliverables = strings(source.get("deliverables"))
+        acceptance_preferences = strings(source.get("acceptance_preferences")) or deliverables or defaults["acceptance_preferences"]
+        task_type = str(source.get("task_type") or "DRAFT_FROM_PROJECT_DEFINITION")
+        allowed_task_types = {
+            "COPY_EDIT_ONLY", "SUBSTANTIVE_REVISION", "DRAFT_FROM_PROJECT_DEFINITION",
+            "PUBLIC_RESEARCH", "PUBLIC_TEMPLATE_ANALYSIS", "GENERIC_LANGUAGE_ASSIST",
+        }
+        if task_type not in allowed_task_types:
+            task_type = "DRAFT_FROM_PROJECT_DEFINITION"
+        core = {
+            "schema_version": "2.0",
+            "task_instruction_id": str(source.get("task_instruction_id") or "instruction-" + sha256_json({"objective": instruction_text, "sections": section_ids})[:16]),
+            "task_type": task_type,
+            "objective": str(source.get("objective") or instruction_text).strip() or instruction_text,
+            "target_section_ids": strings(source.get("target_section_ids")) or list(section_ids),
+            "specific_requirements": requirements,
+            "must_preserve": strings(source.get("must_preserve")) or defaults["must_preserve"],
+            "forbidden_changes": strings(source.get("forbidden_changes")) or defaults["forbidden_changes"],
+            "acceptance_preferences": acceptance_preferences,
+            "priority_order": strings(source.get("priority_order")) or defaults["priority_order"],
+        }
+        core["instruction_hash"] = sha256_json(core)
+        return core
 
     def _source_ref(self, doc: dict[str, Any], sec: dict[str, Any]) -> dict[str, Any]:
         return {

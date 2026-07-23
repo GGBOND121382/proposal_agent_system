@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import os
 import threading
 from dataclasses import dataclass
@@ -47,11 +48,31 @@ class CapabilityPolicy:
                 "and sample-section fallbacks: " + ", ".join(violations)
             )
 
+    @staticmethod
+    def _semantic_projection(value: dict[str, Any]) -> dict[str, Any]:
+        """Return the model-authored semantic payload without validator annotations.
+
+        Deterministic validators may append findings and derive an execution status,
+        but they must never rewrite the model-authored proposal content.  Provider
+        output is persisted separately, so this projection gives capability runs a
+        precise immutability check instead of rejecting every legitimate quality
+        finding.
+        """
+        projected = copy.deepcopy(value)
+        projected.pop("status", None)
+        projected.pop("findings", None)
+        result = projected.get("result")
+        if isinstance(result, dict):
+            result.pop("verdict", None)
+        return projected
+
     def assert_output_unchanged(self, original: dict[str, Any], candidate: dict[str, Any], *, stage: str) -> None:
-        if self.enabled and sha256_json(original) != sha256_json(candidate):
+        if not self.enabled:
+            return
+        if sha256_json(self._semantic_projection(original)) != sha256_json(self._semantic_projection(candidate)):
             raise CapabilityModeError(
-                f"Capability acceptance permits JSON parsing, schema validation, and hashing only; "
-                f"stage {stage} attempted to modify the model object."
+                "Capability acceptance allows deterministic status/finding annotations only; "
+                f"stage {stage} attempted to rewrite model-authored semantic content."
             )
 
 

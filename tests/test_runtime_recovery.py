@@ -140,6 +140,33 @@ def test_capability_policy_rejects_replay(monkeypatch):
         CapabilityPolicy.from_environment().assert_environment("REPLAY")
 
 
+def test_capability_policy_allows_validator_annotations(monkeypatch):
+    monkeypatch.setenv("CAPABILITY_ACCEPTANCE_MODE", "true")
+    policy = CapabilityPolicy.from_environment()
+    original = {
+        "prompt_id": "P-TEST",
+        "status": "PASS",
+        "findings": [],
+        "result": {"verdict": "ACCEPT", "content": {"claim": "unchanged"}},
+    }
+    annotated = {
+        "prompt_id": "P-TEST",
+        "status": "REVISE",
+        "findings": [{"code": "QG_TEST"}],
+        "result": {"verdict": "REVISE", "content": {"claim": "unchanged"}},
+    }
+    policy.assert_output_unchanged(original, annotated, stage="proposal_quality_guard")
+
+
+def test_capability_policy_rejects_semantic_rewrite(monkeypatch):
+    monkeypatch.setenv("CAPABILITY_ACCEPTANCE_MODE", "true")
+    policy = CapabilityPolicy.from_environment()
+    original = {"status": "PASS", "findings": [], "result": {"claim": "original"}}
+    rewritten = {"status": "REVISE", "findings": [], "result": {"claim": "changed"}}
+    with pytest.raises(CapabilityModeError, match="semantic content"):
+        policy.assert_output_unchanged(original, rewritten, stage="proposal_quality_guard")
+
+
 def test_live_context_does_not_read_replay(monkeypatch):
     monkeypatch.setenv("MODEL_RUNTIME_MODE", "LIVE")
     pack = MinimalPack()

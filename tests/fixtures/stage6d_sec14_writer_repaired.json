@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "prompt_id": "P-STAGE6D-WRITE-SECTION",
+  "prompt_version": "1.0.0",
+  "actual_model_id": "gpt-5.6-thinking",
+  "endpoint_id": "chatgpt-conversation-file-bridge",
+  "status": "PASS",
+  "section_id": "SEC-14",
+  "candidate": {
+    "candidate_id": "cand-stage6d-sec-14-001",
+    "section_name": "结论",
+    "markdown": "# 结论\n\n## 研究问题闭环\n\nRQ-1由OBJ-1、OBJ-2及统一Schema、版本依赖和增量传播回答，并以一致性试验对照反证；RQ-2由OBJ-2、OBJ-3及边际增益调度回答，若同预算下不优于固定顺序，则机制不成立。\n\nRQ-3由OBJ-3、OBJ-4及偏好版本、权限交接、人工最终确认和Trace回答；若不能在保持人工控制的同时降低负担或提高采纳表现，则该回答被反证，四项目标也不能视为闭环。\n\n## 中心命题与边界\n\nCP-1由三项待验证假设支撑：INNO-H1检验共享态势与增量失效传播，INNO-H2检验推理、求解和人工注意力调度，INNO-H3检验全过程Trace证据；三者均须通过比较和消融后才能转化为结论。\n\n成立条件包括场景可结构化、存在确定性工具、人员能够关键判断、模型遵循统一合同且保留最终确认权；条件不满足或比较规则无优势时，应降级或否定相应结论。开放事项仍含指南、模板、团队、经费、周期和证明材料，当前稿不代表最终申报条件已经齐备。\n",
+    "subsections": [
+      {
+        "subsection_id": "SEC-14-01",
+        "title": "研究问题闭环",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-14-01",
+            "role": "逐一回答RQ-1、RQ-2和RQ-3",
+            "text": "RQ-1由OBJ-1、OBJ-2及统一Schema、版本依赖和增量传播回答，并以一致性试验对照反证；RQ-2由OBJ-2、OBJ-3及边际增益调度回答，若同预算下不优于固定顺序，则机制不成立。",
+            "node_ids": [
+              "RQ-1",
+              "RQ-2",
+              "OBJ-1",
+              "OBJ-2",
+              "OBJ-3"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "conclusion_rq1_rq2_closure"
+          },
+          {
+            "paragraph_id": "P-SEC-14-02",
+            "role": "绑定目标、机制和验证证据",
+            "text": "RQ-3由OBJ-3、OBJ-4及偏好版本、权限交接、人工最终确认和Trace回答；若不能在保持人工控制的同时降低负担或提高采纳表现，则该回答被反证，四项目标也不能视为闭环。",
+            "node_ids": [
+              "RQ-3",
+              "OBJ-3",
+              "OBJ-4"
+            ],
+            "rq_ids": [
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "conclusion_rq3_objective_closure"
+          }
+        ]
+      },
+      {
+        "subsection_id": "SEC-14-02",
+        "title": "中心命题与边界",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-14-03",
+            "role": "回扣三项创新假设",
+            "text": "CP-1由三项待验证假设支撑：INNO-H1检验共享态势与增量失效传播，INNO-H2检验推理、求解和人工注意力调度，INNO-H3检验全过程Trace证据；三者均须通过比较和消融后才能转化为结论。",
+            "node_ids": [
+              "CP-1",
+              "INNO-H1",
+              "INNO-H2",
+              "INNO-H3"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "conclusion_innovation_hypotheses"
+          },
+          {
+            "paragraph_id": "P-SEC-14-04",
+            "role": "说明成立条件、反证和未决事项",
+            "text": "成立条件包括场景可结构化、存在确定性工具、人员能够关键判断、模型遵循统一合同且保留最终确认权；条件不满足或比较规则无优势时，应降级或否定相应结论。开放事项仍含指南、模板、团队、经费、周期和证明材料，当前稿不代表最终申报条件已经齐备。",
+            "node_ids": [
+              "CP-1",
+              "OBJ-1",
+              "OBJ-2",
+              "OBJ-3",
+              "OBJ-4"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "BOUNDARY_STATEMENT",
+            "novel_content_key": "conclusion_conditions_open_items"
+          }
+        ]
+      }
+    ],
+    "visual_placeholders": [],
+    "unresolved_open_item_ids": [
+      "OPEN-001",
+      "OPEN-002",
+      "OPEN-003",
+      "OPEN-004",
+      "OPEN-005",
+      "OPEN-006",
+      "OPEN-007",
+      "OPEN-008",
+      "OPEN-009",
+      "OPEN-010",
+      "OPEN-011",
+      "OPEN-012"
+    ],
+    "key_terms": [
+      {
+        "term": "论证闭环",
+        "canonical_form": "论证闭环"
+      },
+      {
+        "term": "中心命题",
+        "canonical_form": "中心命题"
+      }
+    ],
+    "section_contribution": "逐一闭合三项研究问题、目标、创新假设和中心命题，同时保留反证条件与最终开放事项。"
+  },
+  "findings": [],
+  "warnings": []
+}

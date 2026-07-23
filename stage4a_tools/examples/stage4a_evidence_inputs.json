@@ -1,0 +1,412 @@
+{
+  "schema_version": "1.0",
+  "purpose": "STAGE_4A_EVIDENCE_INPUTS",
+  "public_research_scope": "Human-AI teaming, multi-agent collaboration, finite-time decision making, learning to defer, evaluation and governance",
+  "sources": [
+    {
+      "source_id": "SRC-PUB-01",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework",
+      "authors": [
+        "Sirui Hong",
+        "Mingchen Zhuge",
+        "Jonathan Chen",
+        "Xiawu Zheng",
+        "Yuheng Cheng",
+        "Jinlin Wang",
+        "Ceyao Zhang",
+        "Zili Wang",
+        "Steven Yau",
+        "Zijuan Lin",
+        "Liyang Zhou",
+        "Chenyu Ran",
+        "Lingfeng Xiao",
+        "Chenglin Wu",
+        "Jürgen Schmidhuber"
+      ],
+      "year": 2024,
+      "venue": "ICLR 2024",
+      "doi": "",
+      "locator": "https://proceedings.iclr.cc/paper_files/paper/2024/hash/6507b115562bb0a305f1958ccc87355a-Abstract-Conference.html",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-1",
+        "RQ-2"
+      ],
+      "evidence_scope": "以标准作业流程和角色分工组织多智能体协作，说明结构化流程可减少简单串联带来的逻辑不一致。",
+      "limitations": "面向软件工程式协作，未建立动态任务—资源—约束—偏好的统一版本化决策态势，也未研究事件驱动的增量失效传播。"
+    },
+    {
+      "source_id": "SRC-PUB-02",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "CAMEL: Communicative Agents for Mind Exploration of Large Language Model Society",
+      "authors": [
+        "Guohao Li",
+        "Hasan Hammoud",
+        "Hani Itani",
+        "Dmitrii Khizbullin",
+        "Bernard Ghanem"
+      ],
+      "year": 2023,
+      "venue": "NeurIPS 2023",
+      "doi": "",
+      "locator": "https://proceedings.neurips.cc/paper/2023/hash/a3621ee907def47c1b952ade25c67698-Abstract-Conference.html",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-1",
+        "RQ-2"
+      ],
+      "evidence_scope": "通过角色扮演和起始提示保持多智能体协作与人类意图的一致，提供可扩展的通信型智能体框架。",
+      "limitations": "协作状态主要存在于对话和角色提示中，未提供结构化共享决策对象、版本依赖与局部失效更新机制。"
+    },
+    {
+      "source_id": "SRC-PUB-03",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "Interaction of Thoughts: Towards Mediating Task Assignment in Human-AI Cooperation with a Capability-Aware Shared Mental Model",
+      "authors": [
+        "Ziyao He",
+        "Yunpeng Song",
+        "Shurui Zhou",
+        "Zhongmin Cai"
+      ],
+      "year": 2023,
+      "venue": "CHI 2023",
+      "doi": "10.1145/3544548.3580983",
+      "locator": "https://dl.acm.org/doi/10.1145/3544548.3580983",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-1",
+        "RQ-3"
+      ],
+      "evidence_scope": "以能力感知的共享心智模型支持人机任务分配和协商，说明共享能力认知对协作分工有价值。",
+      "limitations": "重点是成员能力与任务分配，未覆盖复杂方案的对象版本、约束依赖、候选谱系和扰动后的增量更新。"
+    },
+    {
+      "source_id": "SRC-PUB-04",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "Improving Factuality and Reasoning in Language Models through Multiagent Debate",
+      "authors": [
+        "Yilun Du",
+        "Shuang Li",
+        "Antonio Torralba",
+        "Joshua B. Tenenbaum",
+        "Igor Mordatch"
+      ],
+      "year": 2024,
+      "venue": "ICML 2024",
+      "doi": "",
+      "locator": "https://proceedings.mlr.press/v235/du24e.html",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-2"
+      ],
+      "evidence_scope": "多模型实例通过多轮提出、辩论和收敛改善数学、策略推理与事实性，支撑候选竞争和批判机制。",
+      "limitations": "使用固定辩论轮次和统一程序，未把推理、优化求解与人工注意力作为联合预算，也未给出基于边际增益的动态停止规则。"
+    },
+    {
+      "source_id": "SRC-PUB-05",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "Should we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs",
+      "authors": [
+        "Andries Petrus Smit",
+        "Nathan Grinsztajn",
+        "Paul Duckworth",
+        "Thomas D. Barrett",
+        "Arnu Pretorius"
+      ],
+      "year": 2024,
+      "venue": "ICML 2024",
+      "doi": "",
+      "locator": "https://proceedings.mlr.press/v235/smit24a.html",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-2"
+      ],
+      "evidence_scope": "系统比较多智能体辩论策略的成本、时间与准确率权衡，并指出不同协议对超参数和一致程度敏感。",
+      "limitations": "结论表明辩论并不稳定优于自一致和集成，强调协议调度的重要性，但未提出面向有限决策窗口的跨工具与人工资源调度器。"
+    },
+    {
+      "source_id": "SRC-PUB-06",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "ReConcile: Round-Table Conference Improves Reasoning via Consensus among Diverse LLMs",
+      "authors": [
+        "Justin Chen",
+        "Swarnadeep Saha",
+        "Mohit Bansal"
+      ],
+      "year": 2024,
+      "venue": "ACL 2024",
+      "doi": "10.18653/v1/2024.acl-long.381",
+      "locator": "https://aclanthology.org/2024.acl-long.381/",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-2"
+      ],
+      "evidence_scope": "通过多模型多轮讨论、置信度加权投票和异构模型组合改善推理，提供多样性与共识机制的实证基线。",
+      "limitations": "以固定会议式流程优化答案正确性，未处理动态约束方案、求解器调用、人工分歧注入和基于剩余时间的动作选择。"
+    },
+    {
+      "source_id": "SRC-PUB-07",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "Benchmarking Real-Time Reinforcement Learning",
+      "authors": [
+        "Pierre Thodoroff",
+        "Wenyu Li",
+        "Neil D. Lawrence"
+      ],
+      "year": 2022,
+      "venue": "Proceedings of Machine Learning Research 181",
+      "doi": "",
+      "locator": "https://proceedings.mlr.press/v181/thodoroff22a/thodoroff22a.pdf",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-2"
+      ],
+      "evidence_scope": "把计算成本和环境实时演化纳入强化学习基准，强调时间敏感决策中算法性能必须与计算时延联合评价。",
+      "limitations": "面向连续控制与强化学习算法基准，不涉及多智能体讨论、优化求解、人工注意力和证据完整性的联合调度。"
+    },
+    {
+      "source_id": "SRC-PUB-08",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "Learning to Complement Humans",
+      "authors": [
+        "Bryan Wilder",
+        "Eric Horvitz",
+        "Ece Kamar"
+      ],
+      "year": 2020,
+      "venue": "IJCAI 2020",
+      "doi": "",
+      "locator": "https://www.ijcai.org/proceedings/2020/212",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-3"
+      ],
+      "evidence_scope": "端到端优化人机团队联合性能，让模型聚焦人类困难样本，并在人类和模型各有优势的场景形成互补。",
+      "limitations": "主要研究分类或判断任务的互补分配，未覆盖多阶段方案形成、动态权限交接、可追溯过程证据和扰动重规划。"
+    },
+    {
+      "source_id": "SRC-PUB-09",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "Exploiting Human-AI Dependence for Learning to Defer",
+      "authors": [
+        "Zixi Wei",
+        "Yuzhou Cao",
+        "Lei Feng"
+      ],
+      "year": 2024,
+      "venue": "ICML 2024",
+      "doi": "",
+      "locator": "https://proceedings.mlr.press/v235/wei24a.html",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-3"
+      ],
+      "evidence_scope": "在学习转交框架中显式考虑模型与专家能力依赖，给出何时转交人类的理论原则。",
+      "limitations": "决策结构仍以预测与转交为主，未建模人类偏好注入、风险裁定、方案局部修复和全过程责任链。"
+    },
+    {
+      "source_id": "SRC-PUB-10",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "Does the Whole Exceed its Parts? The Effect of AI Explanations on Complementary Team Performance",
+      "authors": [
+        "Gagan Bansal",
+        "Tongshuang Wu",
+        "Joyce Zhou",
+        "Raymond Fok",
+        "Besmira Nushi",
+        "Ece Kamar",
+        "Marco Tulio Ribeiro",
+        "Daniel S. Weld"
+      ],
+      "year": 2021,
+      "venue": "CHI 2021",
+      "doi": "",
+      "locator": "https://www.microsoft.com/en-us/research/publication/does-the-whole-exceed-its-parts-the-effect-of-ai-explanations-on-complementary-team-performance/",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-3"
+      ],
+      "evidence_scope": "直接评估解释对人机互补团队绩效的影响，为纯人工、纯AI和协同系统的对照评价提供依据。",
+      "limitations": "说明提供解释并不自动产生互补收益，但未给出围绕共享态势、权限和证据链的闭环协同机制。"
+    },
+    {
+      "source_id": "SRC-PUB-11",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "Advancing Human-AI Complementarity: The Impact of User Expertise and Algorithmic Tuning on Joint Decision Making",
+      "authors": [
+        "Kori Inkpen",
+        "Shreya Chappidi",
+        "Keri Mallari",
+        "Besmira Nushi",
+        "Divya Ramesh",
+        "Pietro Michelucci",
+        "Vani Mandava",
+        "Libuše Hannah Vepřek",
+        "Gabrielle Quinn"
+      ],
+      "year": 2023,
+      "venue": "ACM Transactions on Computer-Human Interaction 30(5)",
+      "doi": "10.1145/3534561",
+      "locator": "https://dl.acm.org/doi/10.1145/3534561",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-3"
+      ],
+      "evidence_scope": "揭示用户专业水平、相对能力认知和算法错误类型调优会显著影响联合决策表现。",
+      "limitations": "聚焦推荐采纳和单次判断，不处理有限窗口内的多智能体候选竞争、求解器与人工动作联合编排。"
+    },
+    {
+      "source_id": "SRC-PUB-12",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "When combinations of humans and AI are useful: A systematic review and meta-analysis",
+      "authors": [
+        "Michelle Vaccaro",
+        "Abdullah Almaatouq",
+        "Thomas Malone"
+      ],
+      "year": 2024,
+      "venue": "Nature Human Behaviour 8",
+      "doi": "10.1038/s41562-024-02024-1",
+      "locator": "https://www.nature.com/articles/s41562-024-02024-1.pdf",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-3"
+      ],
+      "evidence_scope": "对106项实验和370个效应量的综述显示，人机组合平均未形成强协同，决策任务尤其可能出现损失，构成本项目必须证明“优于最好单方”的负向基线。",
+      "limitations": "跨任务汇总存在异质性，不能直接给出本项目具体机制的效果，只能用于设定严格对照和反证标准。"
+    },
+    {
+      "source_id": "SRC-STD-01",
+      "source_type": "OFFICIAL_STANDARD",
+      "title": "Artificial Intelligence Risk Management Framework (AI RMF 1.0)",
+      "authors": [
+        "National Institute of Standards and Technology"
+      ],
+      "year": 2023,
+      "venue": "NIST AI 100-1",
+      "doi": "10.6028/NIST.AI.100-1",
+      "locator": "https://nvlpubs.nist.gov/nistpubs/ai/nist.ai.100-1.pdf",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-3"
+      ],
+      "evidence_scope": "明确要求区分人类在AI决策和监督中的角色与责任，并指出人机配置可覆盖自动决策、转交专家和辅助意见。",
+      "limitations": "属于通用治理框架，不提供本项目的算法、交互协议或实验阈值。"
+    },
+    {
+      "source_id": "SRC-PUB-13",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "title": "A benchmarking framework and dataset for learning to defer in human-AI decision-making",
+      "authors": [
+        "Jean V. Alves",
+        "Diogo Leitão",
+        "Sérgio Jesus",
+        "Marco O. P. Sampaio",
+        "Javier Liébana",
+        "Pedro Saleiro",
+        "Mário A. T. Figueiredo",
+        "Pedro Bizarro"
+      ],
+      "year": 2025,
+      "venue": "Scientific Data 12, 506",
+      "doi": "10.1038/s41597-025-04664-y",
+      "locator": "https://www.nature.com/articles/s41597-025-04664-y",
+      "verification_status": "VERIFIED_PUBLIC",
+      "supports_rq_ids": [
+        "RQ-3",
+        "RQ-2"
+      ],
+      "evidence_scope": "提供含专家能力差异和工作容量约束的学习转交基准，说明人类可用性和容量必须进入人机协同评价。",
+      "limitations": "以预测任务和合成专家为主，作者也明确不能替代真实人类数据；本项目仍需开展真实参与者的受控实验。"
+    },
+    {
+      "source_id": "SRC-UA-01",
+      "source_type": "USER_ASSERTED",
+      "title": "申请人分布式在线优化与隐私计算研究经历",
+      "authors": [
+        "Jiandong Liu"
+      ],
+      "year": 2026,
+      "venue": "用户此前提供的个人研究背景",
+      "doi": "",
+      "locator": "conversation:user-asserted-research-background",
+      "verification_status": "USER_ASSERTED_UNVERIFIED",
+      "supports_rq_ids": [
+        "RQ-1",
+        "RQ-2"
+      ],
+      "evidence_scope": "用户陈述其具备分布式在线优化、差分隐私、多方计算和增量计算研究经历，并提及TPDS 2024、MobiHoc 2023和MASS 2023相关论文。",
+      "limitations": "阶段4A未取得论文首页、检索证明或正式成果清单，只能作为用户陈述用于章节规划，最终提交前必须补充可定位材料。"
+    },
+    {
+      "source_id": "SRC-UA-02",
+      "source_type": "USER_ASSERTED",
+      "title": "复杂物流方案筹划项目与原型经历",
+      "authors": [
+        "Jiandong Liu"
+      ],
+      "year": 2026,
+      "venue": "用户此前提供的项目背景",
+      "doi": "",
+      "locator": "conversation:user-asserted-project-background",
+      "verification_status": "USER_ASSERTED_UNVERIFIED",
+      "supports_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "evidence_scope": "用户陈述其参与海运方案筹划项目，已有智能配积载、航线规划、计划生成和冲突消解模块及典型场景测试经历。",
+      "limitations": "未提供项目任务书、验收报告、原型截图或测试报告，不能直接表述为已验收成果。"
+    },
+    {
+      "source_id": "SRC-TRACE-01",
+      "source_type": "INTERNAL_TRACE",
+      "title": "申请书智能体阶段0至阶段4运行与测试记录",
+      "authors": [
+        "Proposal Agent System"
+      ],
+      "year": 2026,
+      "venue": "本地智能体Trace",
+      "doi": "",
+      "locator": "/mnt/data/proposal_stage4_delivery/stage4_trace_complete_20260721.zip",
+      "verification_status": "VERIFIED_INTERNAL_TRACE",
+      "supports_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "evidence_scope": "记录文件桥、结构化Schema、确定性质量门、独立Critic、人工Gate、局部修复、候选哈希和完整回归测试，证明工程上具备多智能体编排、工具集成与可追溯运行能力。",
+      "limitations": "该Trace证明的是申请书智能体工程能力，不等同于目标科研原型已完成，也不能替代跨场景人机实验。"
+    },
+    {
+      "source_id": "SRC-TRACE-02",
+      "source_type": "INTERNAL_TRACE",
+      "title": "阶段4论证架构工件与活动候选修复记录",
+      "authors": [
+        "Proposal Agent System"
+      ],
+      "year": 2026,
+      "venue": "本地论证架构Trace",
+      "doi": "",
+      "locator": "/mnt/data/proposal_stage4_delivery/stage4_argument_architecture.json",
+      "verification_status": "VERIFIED_INTERNAL_TRACE",
+      "supports_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "evidence_scope": "66个论证节点、104条关系和3条研究设计链展示了结构化状态、版本哈希、定向修复和跨节点一致性检查能力。",
+      "limitations": "属于论证与工作流层面的内部验证，不是实际决策场景的性能证据。"
+    }
+  ],
+  "official_guide_status": "NOT_PROVIDED",
+  "official_template_status": "NOT_PROVIDED",
+  "metric_policy": "Freeze definitions, baselines and statistical summaries; keep all numeric thresholds provisional until scenario baselines exist.",
+  "foundation_policy": "Use USER_ASSERTED and INTERNAL_TRACE separately; never upgrade either to documentary proof.",
+  "retrieval_record": {
+    "date": "2026-07-21",
+    "method": "public primary-source search plus existing local trace and user-provided background",
+    "selection_rule": "Peer-reviewed proceedings/journals or official standards; closest mechanism and explicit limitation retained."
+  }
+}

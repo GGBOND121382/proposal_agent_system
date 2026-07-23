@@ -132,13 +132,18 @@ class FullIntegrationQualityMixin:
                 if value
             }
 
+        question_ids = {
+            str(item.get("node_id"))
+            for item in graph.get("research_questions") or []
+            if isinstance(item, dict) and item.get("node_id")
+        }
         conclusion_sections = [
             section_id for section_id, contract in contracts.items()
             if contract.get("profile_id") == "CONCLUSION"
         ]
         for section_id in conclusion_sections:
             candidate = candidate_objects.get(section_id) or {}
-            required = ({central_id} if central_id else set()) | innovation_ids
+            required = ({central_id} if central_id else set()) | question_ids | innovation_ids
             missing = sorted(required - (advanced_ids(candidate) | evidence_ids(candidate)))
             if missing:
                 findings.append(QualityFinding(

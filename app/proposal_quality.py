@@ -956,6 +956,59 @@ class ProposalQualityGuard:
                 "claim_advancement", "章节推进摘要与段落中的命题/信息键不一致。",
                 "从段落primary_claim_id和novel_content_key确定性生成推进摘要。", "WRITING_AGENT",
             ))
+
+        # Push whole-document closure requirements down to the responsible
+        # section.  Provider-swappable generation should fail immediately after
+        # the innovation/conclusion section is produced, rather than waiting for
+        # every other chapter and the final integration call to finish.
+        node_types = {
+            str(item.get("node_id")): str(item.get("node_type") or "")
+            for item in argument_graph.get("nodes") or []
+            if isinstance(item, dict) and item.get("node_id")
+        }
+        prior_ids = {node_id for node_id, node_type in node_types.items() if node_type == "CLOSEST_PRIOR_WORK"}
+        innovation_ids = {node_id for node_id, node_type in node_types.items() if node_type == "NOVEL_MECHANISM"}
+        question_ids = {
+            str(item.get("node_id"))
+            for item in argument_graph.get("research_questions") or []
+            if isinstance(item, dict) and item.get("node_id")
+        }
+        central_id = str((argument_graph.get("central_proposition") or {}).get("node_id") or "")
+        bound_ids = set(paragraph_claims) | set(advancement_claims)
+        bound_ids.update(
+            str(value)
+            for paragraph in paragraphs
+            for value in paragraph.get("evidence_ids") or []
+            if value
+        )
+        if main_profile == "INNOVATION":
+            if not prior_ids or not innovation_ids:
+                findings.append(QualityFinding(
+                    "QG_INNOVATION_GRAPH_EVIDENCE_INCOMPLETE", "P1", "ARGUMENT", "ARGUMENT_GRAPH",
+                    "argument_graph.nodes",
+                    "论证图缺少最近工作或新增机制节点，创新章节无法建立可验证比较链。",
+                    "返回论证架构阶段补齐最近工作、局限机制、新增机制及验证关系。",
+                    "ARGUMENT_ARCHITECTURE_AGENT",
+                ))
+            elif not (bound_ids & prior_ids) or not (bound_ids & innovation_ids):
+                findings.append(QualityFinding(
+                    "QG_INNOVATION_SECTION_LACKS_BASELINE_BINDING", "P1", "CONTENT", "SECTION_CANDIDATE",
+                    "paragraphs.evidence_ids,paragraphs.primary_claim_id",
+                    "创新章节没有同时绑定最接近工作与新增机制。",
+                    "仅重写创新章节，明确最近工作、机制性局限、本项目新增机制和可比较验证。",
+                    "WRITING_AGENT",
+                ))
+        if main_profile == "CONCLUSION":
+            required_closure_ids = ({central_id} if central_id else set()) | question_ids | innovation_ids
+            missing_closure_ids = sorted(required_closure_ids - bound_ids)
+            if missing_closure_ids:
+                findings.append(QualityFinding(
+                    "QG_CONCLUSION_DOES_NOT_CLOSE_ARGUMENT", "P1", "ARGUMENT", "SECTION_CANDIDATE",
+                    "paragraphs.primary_claim_id,paragraphs.evidence_ids,claim_advancement.advanced_claim_ids",
+                    f"结论章节未逐项回答研究问题或回扣中心命题/贡献节点：{missing_closure_ids}。",
+                    "仅重写结论章节，逐项回答研究问题并回扣中心命题和经验证的贡献；不得引入新方法。",
+                    "WRITING_AGENT",
+                ))
         return findings
 
     def _audit_critic_coverage(self, candidate: dict[str, Any], output: dict[str, Any], payload: dict[str, Any] | None = None) -> list[QualityFinding]:

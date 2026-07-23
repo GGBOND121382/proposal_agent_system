@@ -1,0 +1,153 @@
+{
+  "schema_version": "1.0",
+  "prompt_id": "P-STAGE6D-WRITE-SECTION",
+  "prompt_version": "1.0.0",
+  "actual_model_id": "gpt-5.6-thinking",
+  "endpoint_id": "chatgpt-conversation-file-bridge",
+  "status": "PASS",
+  "section_id": "SEC-13",
+  "candidate": {
+    "candidate_id": "cand-stage6d-sec-13-001",
+    "section_name": "风险与组织管理",
+    "markdown": "# 风险与组织管理\n\n## 技术与数据风险\n\nRISK-1的触发信号包括对象版本冲突、规则变化后候选未失效及局部更新与全量校验不一致。系统监测版本链和依赖覆盖率，异常时保守扩大重算范围；仍不能恢复则降级为全量重算或人工同步，并保留最近确认版本用于回滚。\n\nRISK-2表现为边际增益预测持续偏离实际、动作频繁反转或低收益环节耗尽时间。系统监测预测误差、单位时间改进和超时率，保留当前最好可行方案并设置时间兜底；必要时降级到固定顺序或确定性求解。\n\n## 人机与评价风险\n\nRISK-3的触发信号是偏好冲突、人工否决缺少理由或权限交接不清。系统监测偏好版本、适用范围和撤销关系；冲突未解时停止自动推进并由授权人员人工接管。该安排引用SRC-STD-01的一般人类责任原则，不将其写成特定申报要求。\n\nRISK-4表现为收益不能跨场景复现、失败集中于特定任务或人工负担上升。评价持续监测场景分布、失败案例和人工操作量；代表性不足时不宣称风险消除，而是限制外推、补充样本并报告适用边界。\n\n> **TAB-08：风险触发信号、监测、降级、回滚与责任原则表**\n\n## 组织管理原则\n\n组织管理采用职责分离：业务角色负责问题与最终确认，方法角色维护模型和评价，工程角色维护接口与Trace，独立审查角色检查证据。输入不可用时依次停止自动动作、保留当前最好方案、切换替代工具、人工接管并回滚。\n\n上述仅是责任原则，不是正式组织架构。团队名单、实名负责人和岗位权限仍由OPEN-009记录，待实际团队确认后再映射到工作包；此前不得写入虚构姓名，也不能以流程角色替代正式责任主体。\n",
+    "subsections": [
+      {
+        "subsection_id": "SEC-13-01",
+        "title": "技术与数据风险",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-13-01",
+            "role": "覆盖状态依赖和收益估计风险",
+            "text": "RISK-1的触发信号包括对象版本冲突、规则变化后候选未失效及局部更新与全量校验不一致。系统监测版本链和依赖覆盖率，异常时保守扩大重算范围；仍不能恢复则降级为全量重算或人工同步，并保留最近确认版本用于回滚。",
+            "node_ids": [
+              "RISK-1",
+              "BOUND-1",
+              "BOUND-2"
+            ],
+            "rq_ids": [
+              "RQ-2"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "risk_state_dependency_controls"
+          },
+          {
+            "paragraph_id": "P-SEC-13-02",
+            "role": "给出监测与保守策略",
+            "text": "RISK-2表现为边际增益预测持续偏离实际、动作频繁反转或低收益环节耗尽时间。系统监测预测误差、单位时间改进和超时率，保留当前最好可行方案并设置时间兜底；必要时降级到固定顺序或确定性求解。",
+            "node_ids": [
+              "RISK-2",
+              "BOUND-2",
+              "BOUND-4"
+            ],
+            "rq_ids": [
+              "RQ-2"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "risk_gain_estimation_controls"
+          }
+        ]
+      },
+      {
+        "subsection_id": "SEC-13-02",
+        "title": "人机与评价风险",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-13-03",
+            "role": "覆盖反馈冲突和场景代表性",
+            "text": "RISK-3的触发信号是偏好冲突、人工否决缺少理由或权限交接不清。系统监测偏好版本、适用范围和撤销关系；冲突未解时停止自动推进并由授权人员人工接管。该安排引用SRC-STD-01的一般人类责任原则，不将其写成特定申报要求。",
+            "node_ids": [
+              "RISK-3",
+              "BOUND-3",
+              "BOUND-5"
+            ],
+            "rq_ids": [
+              "RQ-3"
+            ],
+            "source_ids": [
+              "SRC-STD-01"
+            ],
+            "claim_status": "PUBLIC_RESEARCH_SUMMARY",
+            "novel_content_key": "risk_human_feedback_controls"
+          },
+          {
+            "paragraph_id": "P-SEC-13-04",
+            "role": "给出人工接管和报告边界",
+            "text": "RISK-4表现为收益不能跨场景复现、失败集中于特定任务或人工负担上升。评价持续监测场景分布、失败案例和人工操作量；代表性不足时不宣称风险消除，而是限制外推、补充样本并报告适用边界。",
+            "node_ids": [
+              "RISK-4",
+              "BOUND-1",
+              "BOUND-3"
+            ],
+            "rq_ids": [
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "risk_scenario_validity_controls"
+          }
+        ]
+      },
+      {
+        "subsection_id": "SEC-13-03",
+        "title": "组织管理原则",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-13-05",
+            "role": "定义角色原则和变更记录",
+            "text": "组织管理采用职责分离：业务角色负责问题与最终确认，方法角色维护模型和评价，工程角色维护接口与Trace，独立审查角色检查证据。输入不可用时依次停止自动动作、保留当前最好方案、切换替代工具、人工接管并回滚。",
+            "node_ids": [
+              "BOUND-3",
+              "BOUND-4",
+              "BOUND-5"
+            ],
+            "rq_ids": [
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "organization_role_principles"
+          },
+          {
+            "paragraph_id": "P-SEC-13-06",
+            "role": "保留正式团队信息缺口",
+            "text": "上述仅是责任原则，不是正式组织架构。团队名单、实名负责人和岗位权限仍由OPEN-009记录，待实际团队确认后再映射到工作包；此前不得写入虚构姓名，也不能以流程角色替代正式责任主体。",
+            "node_ids": [
+              "BOUND-5"
+            ],
+            "rq_ids": [
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "BOUNDARY_STATEMENT",
+            "novel_content_key": "organization_open_team_boundary"
+          }
+        ]
+      }
+    ],
+    "visual_placeholders": [
+      {
+        "visual_id": "TAB-08",
+        "caption": "风险触发信号、监测、降级、回滚与责任原则表",
+        "placement_after_paragraph_id": "P-SEC-13-04"
+      }
+    ],
+    "unresolved_open_item_ids": [
+      "OPEN-009"
+    ],
+    "key_terms": [
+      {
+        "term": "可控降级",
+        "canonical_form": "可控降级"
+      },
+      {
+        "term": "人工接管",
+        "canonical_form": "人工接管"
+      }
+    ],
+    "section_contribution": "形成覆盖四类关键风险的触发、监测、预防、降级、回滚与组织责任原则。"
+  },
+  "findings": [],
+  "warnings": []
+}

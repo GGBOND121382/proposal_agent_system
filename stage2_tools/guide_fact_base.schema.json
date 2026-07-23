@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stage2GuideAndFactBase",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "stage", "project_title", "upstream_artifact",
+    "authority_policy", "source_registry", "rules", "facts",
+    "open_items", "conflicts", "writing_permissions", "readiness"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "stage": {"const": "STAGE_2_GUIDE_AND_FACT_BASE"},
+    "project_title": {"type": "string", "minLength": 4},
+    "upstream_artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stage", "artifact_name", "sha256", "accepted"],
+      "properties": {
+        "stage": {"const": "STAGE_1_DESIGN_INPUT"},
+        "artifact_name": {"const": "stage1_design_input.json"},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "accepted": {"const": true}
+      }
+    },
+    "authority_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["official_guide_status", "precedence", "missing_guide_policy", "fact_promotion_policy"],
+      "properties": {
+        "official_guide_status": {"const": "NOT_PROVIDED"},
+        "precedence": {
+          "type": "array", "minItems": 4, "uniqueItems": true,
+          "items": {"enum": ["OFFICIAL_GUIDE", "USER_REQUIREMENT", "CONFIRMED_DESIGN_INPUT", "WORKING_ASSUMPTION"]}
+        },
+        "missing_guide_policy": {"type": "string", "minLength": 30},
+        "fact_promotion_policy": {"type": "string", "minLength": 30}
+      }
+    },
+    "source_registry": {
+      "type": "array", "minItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source_id", "source_type", "title", "availability", "authority", "content_hash", "locator"],
+        "properties": {
+          "source_id": {"type": "string", "pattern": "^SRC-[A-Z0-9-]+$"},
+          "source_type": {"enum": ["USER_REQUEST", "CONFIRMED_ARTIFACT", "STAGE_CONTRACT", "OFFICIAL_GUIDE"]},
+          "title": {"type": "string", "minLength": 3},
+          "availability": {"enum": ["AVAILABLE", "MISSING"]},
+          "authority": {"enum": ["PRIMARY", "CONFIRMED", "PROCESS", "UNKNOWN"]},
+          "content_hash": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+          "locator": {"type": "string", "minLength": 3}
+        }
+      }
+    },
+    "rules": {
+      "type": "array", "minItems": 12,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["rule_id", "category", "modality", "statement", "status", "source_refs", "validation_method", "blocking", "applies_to_stages", "depends_on_open_item_ids"],
+        "properties": {
+          "rule_id": {"type": "string", "pattern": "^RULE-[0-9]{3}$"},
+          "category": {"enum": ["DOCUMENT", "CONTENT", "PROCESS", "TRACE", "FACT", "MODEL_INTERFACE", "HUMAN_AUTHORITY", "GUIDE_UNKNOWN"]},
+          "modality": {"enum": ["MUST", "MUST_NOT", "SHOULD", "MAY", "UNKNOWN"]},
+          "statement": {"type": "string", "minLength": 12},
+          "status": {"enum": ["CONFIRMED_REQUIREMENT", "CONFIRMED_DESIGN_CONSTRAINT", "STAGE_PROCESS_RULE", "UNRESOLVED_GUIDE_RULE"]},
+          "source_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "validation_method": {"type": "string", "minLength": 8},
+          "blocking": {"type": "boolean"},
+          "applies_to_stages": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "depends_on_open_item_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "facts": {
+      "type": "array", "minItems": 35,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["fact_id", "statement", "subject", "predicate", "object", "knowledge_status", "source_refs", "scope", "assertion_policy", "requires_qualification", "atomic", "related_design_ids"],
+        "properties": {
+          "fact_id": {"type": "string", "pattern": "^FACT-[0-9]{3}$"},
+          "statement": {"type": "string", "minLength": 8},
+          "subject": {"type": "string", "minLength": 1},
+          "predicate": {"type": "string", "minLength": 1},
+          "object": {"type": ["string", "number", "boolean"], "minLength": 1},
+          "knowledge_status": {"enum": ["USER_ASSERTED", "CONFIRMED_DESIGN", "PROVISIONAL_TARGET", "WORKING_ASSUMPTION", "UNKNOWN"]},
+          "source_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "scope": {"type": "string", "minLength": 3},
+          "assertion_policy": {"enum": ["DIRECT", "QUALIFIED", "PROHIBITED"]},
+          "requires_qualification": {"type": "boolean"},
+          "atomic": {"const": true},
+          "related_design_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "open_items": {
+      "type": "array", "minItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["item_id", "field", "status", "reason", "required_before_stage", "blocking_now", "resolution_source"],
+        "properties": {
+          "item_id": {"type": "string", "pattern": "^OPEN-[0-9]{3}$"},
+          "field": {"type": "string", "minLength": 2},
+          "status": {"const": "UNRESOLVED"},
+          "reason": {"type": "string", "minLength": 8},
+          "required_before_stage": {"type": "string", "minLength": 3},
+          "blocking_now": {"type": "boolean"},
+          "resolution_source": {"type": "string", "minLength": 3}
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["conflict_id", "description", "source_refs", "status", "resolution"],
+        "properties": {
+          "conflict_id": {"type": "string", "pattern": "^CONFLICT-[0-9]{3}$"},
+          "description": {"type": "string", "minLength": 8},
+          "source_refs": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+          "status": {"enum": ["OPEN", "RESOLVED"]},
+          "resolution": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "writing_permissions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["direct_fact_ids", "qualified_fact_ids", "prohibited_fact_ids", "provisional_target_fact_ids", "unknown_fields"],
+      "properties": {
+        "direct_fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "qualified_fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "prohibited_fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "provisional_target_fact_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "unknown_fields": {"type": "array", "minItems": 5, "items": {"type": "string"}}
+      }
+    },
+    "readiness": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ready_for_project_definition", "ready_for_argument_architecture", "ready_for_section_planning", "blocked_capabilities", "rationale"],
+      "properties": {
+        "ready_for_project_definition": {"const": true},
+        "ready_for_argument_architecture": {"type": "boolean"},
+        "ready_for_section_planning": {"const": false},
+        "blocked_capabilities": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "rationale": {"type": "string", "minLength": 30}
+      }
+    }
+  }
+}
