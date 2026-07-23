@@ -1,6 +1,8 @@
 from pathlib import Path
 import re
+import shutil
 
+import pytest
 from pypdf import PdfReader
 
 from stage8_tools.export_final import (
@@ -14,6 +16,11 @@ from stage8_tools.export_final import (
 )
 
 FIXTURE = Path(__file__).resolve().parents[1] / "stage8_tools" / "fixtures" / "stage7_integrated_proposal.md"
+CJK_FONT_PATHS = (
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"),
+)
+EXPORT_RUNTIME_AVAILABLE = bool(shutil.which("libreoffice")) and all(path.exists() for path in CJK_FONT_PATHS)
 
 
 def test_stage8_markdown_contract_counts():
@@ -25,6 +32,10 @@ def test_stage8_markdown_contract_counts():
     assert len(FIGURE_SPECS) == 4
 
 
+@pytest.mark.skipif(
+    not EXPORT_RUNTIME_AVAILABLE,
+    reason="requires LibreOffice and Noto CJK fonts; covered by the repository post-export workflow",
+)
 def test_stage8_export_preserves_page_limit_and_removes_markers(tmp_path):
     docx = tmp_path / "proposal.docx"
     pdf = tmp_path / "proposal.pdf"
