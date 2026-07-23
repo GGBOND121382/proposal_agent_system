@@ -1,0 +1,1828 @@
+{
+  "authority_policy": {
+    "fact_promotion_policy": "只有获得可定位来源并通过独立审查与人工确认的内容，才能从工作假设或未知状态提升为可直接陈述的确认事实。",
+    "missing_guide_policy": "在正式指南提供前，只固化用户明确要求与已确认设计约束，不推断模板、资格、截止日期、评审权重和附件要求。",
+    "official_guide_status": "NOT_PROVIDED",
+    "precedence": [
+      "OFFICIAL_GUIDE",
+      "USER_REQUIREMENT",
+      "CONFIRMED_DESIGN_INPUT",
+      "WORKING_ASSUMPTION"
+    ]
+  },
+  "conflicts": [],
+  "facts": [
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-001",
+      "knowledge_status": "USER_ASSERTED",
+      "object": "分阶段生成",
+      "predicate": "执行方式",
+      "related_design_ids": [],
+      "requires_qualification": false,
+      "scope": "全流程",
+      "source_refs": [
+        "SRC-USER-REQUEST-20260721"
+      ],
+      "statement": "用户要求分阶段生成申请书。",
+      "subject": "生成任务"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-002",
+      "knowledge_status": "USER_ASSERTED",
+      "object": "每阶段交付Trace和中间结果",
+      "predicate": "记录要求",
+      "related_design_ids": [],
+      "requires_qualification": false,
+      "scope": "全流程",
+      "source_refs": [
+        "SRC-USER-REQUEST-20260721"
+      ],
+      "statement": "用户要求每阶段交付Trace和中间结果。",
+      "subject": "生成任务"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-003",
+      "knowledge_status": "USER_ASSERTED",
+      "object": 20,
+      "predicate": "页数上限",
+      "related_design_ids": [],
+      "requires_qualification": false,
+      "scope": "最终文档",
+      "source_refs": [
+        "SRC-USER-REQUEST-20260721"
+      ],
+      "statement": "申请书正文不得超过20页。",
+      "subject": "申请书正文"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-004",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "人机协同决策优势冲刺关键技术研究",
+      "predicate": "名称",
+      "related_design_ids": [],
+      "requires_qualification": false,
+      "scope": "项目定义",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "课题名称为人机协同决策优势冲刺关键技术研究。",
+      "subject": "课题"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-005",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "有限决策窗口",
+      "predicate": "时间边界",
+      "related_design_ids": [],
+      "requires_qualification": false,
+      "scope": "核心概念",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "优势冲刺发生在有限决策窗口内。",
+      "subject": "人机协同决策优势冲刺"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-006",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "最终决策权",
+      "predicate": "权限",
+      "related_design_ids": [],
+      "requires_qualification": false,
+      "scope": "权限边界",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "授权人员保留最终决策权。",
+      "subject": "授权人员"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-007",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "明确授权的数据与工具",
+      "predicate": "调用边界",
+      "related_design_ids": [],
+      "requires_qualification": false,
+      "scope": "权限边界",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "智能体只能调用明确授权的数据与工具。",
+      "subject": "智能体"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-008",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "通过硬约束校验",
+      "predicate": "前置条件",
+      "related_design_ids": [],
+      "requires_qualification": false,
+      "scope": "质量门",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "方案必须先通过硬约束校验。",
+      "subject": "候选方案"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-009",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "不能直接执行",
+      "predicate": "执行属性",
+      "related_design_ids": [],
+      "requires_qualification": false,
+      "scope": "执行边界",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "语言模型输出不能直接视为可执行决策。",
+      "subject": "语言模型输出"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-010",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "如何将动态任务、资源、规则、偏好、不确定性及人机协作状态统一表达，并在多智能体并行处理中保持语义和版本一致？",
+      "predicate": "研究问题",
+      "related_design_ids": [
+        "RQ-1"
+      ],
+      "requires_qualification": false,
+      "scope": "研究问题",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "项目设置RQ-1：如何将动态任务、资源、规则、偏好、不确定性及人机协作状态统一表达，并在多智能体并行处理中保持语义和版本一致？",
+      "subject": "项目"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-011",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "如何在有限决策窗口内协调候选生成、批判、优化求解和人工干预，使有限计算与注意力获得更高的单位时间决策增益？",
+      "predicate": "研究问题",
+      "related_design_ids": [
+        "RQ-2"
+      ],
+      "requires_qualification": false,
+      "scope": "研究问题",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "项目设置RQ-2：如何在有限决策窗口内协调候选生成、批判、优化求解和人工干预，使有限计算与注意力获得更高的单位时间决策增益？",
+      "subject": "项目"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-012",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "如何界定人类与智能体的权限、交接和责任边界，并以可解释证据证明协同结果优于纯人工或纯自动流程？",
+      "predicate": "研究问题",
+      "related_design_ids": [
+        "RQ-3"
+      ],
+      "requires_qualification": false,
+      "scope": "研究问题",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "项目设置RQ-3：如何界定人类与智能体的权限、交接和责任边界，并以可解释证据证明协同结果优于纯人工或纯自动流程？",
+      "subject": "项目"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-013",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "构建统一的人机协同决策态势模型，支持任务、资源、约束、偏好、不确定性、候选方案和版本依据的联合表达与增量更新。",
+      "predicate": "研究目标",
+      "related_design_ids": [
+        "OBJ-1",
+        "RQ-1"
+      ],
+      "requires_qualification": false,
+      "scope": "研究目标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "项目设置OBJ-1：构建统一的人机协同决策态势模型，支持任务、资源、约束、偏好、不确定性、候选方案和版本依据的联合表达与增量更新。",
+      "subject": "项目"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-014",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "研究生成、校验、批判、修复和优化求解相结合的多智能体候选竞争机制，形成面向有限窗口的持续可行化与质量提升方法。",
+      "predicate": "研究目标",
+      "related_design_ids": [
+        "OBJ-2",
+        "RQ-1",
+        "RQ-2"
+      ],
+      "requires_qualification": false,
+      "scope": "研究目标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "项目设置OBJ-2：研究生成、校验、批判、修复和优化求解相结合的多智能体候选竞争机制，形成面向有限窗口的持续可行化与质量提升方法。",
+      "subject": "项目"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-015",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "研究人类偏好注入、分歧裁定、权限交接和停止判断机制，使人工注意力集中于高价值判断并保持最终控制权。",
+      "predicate": "研究目标",
+      "related_design_ids": [
+        "OBJ-3",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "requires_qualification": false,
+      "scope": "研究目标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "项目设置OBJ-3：研究人类偏好注入、分歧裁定、权限交接和停止判断机制，使人工注意力集中于高价值判断并保持最终控制权。",
+      "subject": "项目"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-016",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "形成可配置的原型系统和跨场景评价体系，验证人机协同优势冲刺在效率、质量、稳健性、负担和可追溯性方面的适用条件。",
+      "predicate": "研究目标",
+      "related_design_ids": [
+        "OBJ-4",
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "requires_qualification": false,
+      "scope": "研究目标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "项目设置OBJ-4：形成可配置的原型系统和跨场景评价体系，验证人机协同优势冲刺在效率、质量、稳健性、负担和可追溯性方面的适用条件。",
+      "subject": "项目"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-017",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "生产调度",
+      "predicate": "场景名称",
+      "related_design_ids": [
+        "SC-01"
+      ],
+      "requires_qualification": false,
+      "scope": "验证场景",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "SC-01验证场景为生产调度。",
+      "subject": "SC-01"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-018",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "物流协同",
+      "predicate": "场景名称",
+      "related_design_ids": [
+        "SC-02"
+      ],
+      "requires_qualification": false,
+      "scope": "验证场景",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "SC-02验证场景为物流协同。",
+      "subject": "SC-02"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-019",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "设备维护",
+      "predicate": "场景名称",
+      "related_design_ids": [
+        "SC-03"
+      ],
+      "requires_qualification": false,
+      "scope": "验证场景",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "SC-03验证场景为设备维护。",
+      "subject": "SC-03"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-020",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "大型活动保障",
+      "predicate": "场景名称",
+      "related_design_ids": [
+        "SC-04"
+      ],
+      "requires_qualification": false,
+      "scope": "验证场景",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "SC-04验证场景为大型活动保障。",
+      "subject": "SC-04"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-021",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "共享决策态势与增量知识建模",
+      "predicate": "工作包名称",
+      "related_design_ids": [
+        "WP-1",
+        "OBJ-1",
+        "OBJ-2",
+        "M-1",
+        "M-2"
+      ],
+      "requires_qualification": false,
+      "scope": "研究内容",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "WP-1工作包名称为共享决策态势与增量知识建模。",
+      "subject": "WP-1"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-022",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "多智能体候选生成与交叉批判",
+      "predicate": "工作包名称",
+      "related_design_ids": [
+        "WP-2",
+        "OBJ-2",
+        "M-3",
+        "M-4"
+      ],
+      "requires_qualification": false,
+      "scope": "研究内容",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "WP-2工作包名称为多智能体候选生成与交叉批判。",
+      "subject": "WP-2"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-023",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "人工偏好注入与权限交接",
+      "predicate": "工作包名称",
+      "related_design_ids": [
+        "WP-3",
+        "OBJ-3",
+        "M-5"
+      ],
+      "requires_qualification": false,
+      "scope": "研究内容",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "WP-3工作包名称为人工偏好注入与权限交接。",
+      "subject": "WP-3"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-024",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "优势冲刺资源调度与停止决策",
+      "predicate": "工作包名称",
+      "related_design_ids": [
+        "WP-4",
+        "OBJ-2",
+        "OBJ-3",
+        "M-4",
+        "M-6"
+      ],
+      "requires_qualification": false,
+      "scope": "研究内容",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "WP-4工作包名称为优势冲刺资源调度与停止决策。",
+      "subject": "WP-4"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-025",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "原型集成与跨场景验证",
+      "predicate": "工作包名称",
+      "related_design_ids": [
+        "WP-5",
+        "OBJ-4",
+        "M-7"
+      ],
+      "requires_qualification": false,
+      "scope": "研究内容",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "WP-5工作包名称为原型集成与跨场景验证。",
+      "subject": "WP-5"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-026",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "统一决策对象与关系建模",
+      "predicate": "方法名称",
+      "related_design_ids": [
+        "M-1",
+        "RQ-1"
+      ],
+      "requires_qualification": false,
+      "scope": "方法体系",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "M-1方法名称为统一决策对象与关系建模。",
+      "subject": "M-1"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-027",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "增量状态同步与影响传播",
+      "predicate": "方法名称",
+      "related_design_ids": [
+        "M-2",
+        "RQ-1",
+        "RQ-2"
+      ],
+      "requires_qualification": false,
+      "scope": "方法体系",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "M-2方法名称为增量状态同步与影响传播。",
+      "subject": "M-2"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-028",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "角色分离的多智能体编排",
+      "predicate": "方法名称",
+      "related_design_ids": [
+        "M-3",
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "requires_qualification": false,
+      "scope": "方法体系",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "M-3方法名称为角色分离的多智能体编排。",
+      "subject": "M-3"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-029",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "随时可用的混合优化与多目标评价",
+      "predicate": "方法名称",
+      "related_design_ids": [
+        "M-4",
+        "RQ-2"
+      ],
+      "requires_qualification": false,
+      "scope": "方法体系",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "M-4方法名称为随时可用的混合优化与多目标评价。",
+      "subject": "M-4"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-030",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "偏好学习与主动人机交互",
+      "predicate": "方法名称",
+      "related_design_ids": [
+        "M-5",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "requires_qualification": false,
+      "scope": "方法体系",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "M-5方法名称为偏好学习与主动人机交互。",
+      "subject": "M-5"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-031",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "优势冲刺调度与停止规则",
+      "predicate": "方法名称",
+      "related_design_ids": [
+        "M-6",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "requires_qualification": false,
+      "scope": "方法体系",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "M-6方法名称为优势冲刺调度与停止规则。",
+      "subject": "M-6"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-032",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "基于Trace的对照与消融评价",
+      "predicate": "方法名称",
+      "related_design_ids": [
+        "M-7",
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "requires_qualification": false,
+      "scope": "方法体系",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "M-7方法名称为基于Trace的对照与消融评价。",
+      "subject": "M-7"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-033",
+      "knowledge_status": "PROVISIONAL_TARGET",
+      "object": "较对应基线缩短不少于30%",
+      "predicate": "暂定目标",
+      "related_design_ids": [
+        "MET-1",
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "requires_qualification": true,
+      "scope": "评价指标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "MET-1暂定目标为较对应基线缩短不少于30%。",
+      "subject": "MET-1"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-034",
+      "knowledge_status": "PROVISIONAL_TARGET",
+      "object": "较最佳非冲刺基线提高不少于10%",
+      "predicate": "暂定目标",
+      "related_design_ids": [
+        "MET-2",
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "requires_qualification": true,
+      "scope": "评价指标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "MET-2暂定目标为较最佳非冲刺基线提高不少于10%。",
+      "subject": "MET-2"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-035",
+      "knowledge_status": "PROVISIONAL_TARGET",
+      "object": 0,
+      "predicate": "暂定目标",
+      "related_design_ids": [
+        "MET-3",
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "requires_qualification": true,
+      "scope": "评价指标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "MET-3暂定目标为0。",
+      "subject": "MET-3"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-036",
+      "knowledge_status": "PROVISIONAL_TARGET",
+      "object": "典型扰动下质量保持率不低于90%",
+      "predicate": "暂定目标",
+      "related_design_ids": [
+        "MET-4",
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "requires_qualification": true,
+      "scope": "评价指标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "MET-4暂定目标为典型扰动下质量保持率不低于90%。",
+      "subject": "MET-4"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-037",
+      "knowledge_status": "PROVISIONAL_TARGET",
+      "object": "有效操作或投入时间减少不少于25%",
+      "predicate": "暂定目标",
+      "related_design_ids": [
+        "MET-5",
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "requires_qualification": true,
+      "scope": "评价指标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "MET-5暂定目标为有效操作或投入时间减少不少于25%。",
+      "subject": "MET-5"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-038",
+      "knowledge_status": "PROVISIONAL_TARGET",
+      "object": "在受控试验中达到80%以上",
+      "predicate": "暂定目标",
+      "related_design_ids": [
+        "MET-6",
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "requires_qualification": true,
+      "scope": "评价指标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "MET-6暂定目标为在受控试验中达到80%以上。",
+      "subject": "MET-6"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-039",
+      "knowledge_status": "PROVISIONAL_TARGET",
+      "object": "关键选择追溯覆盖率100%",
+      "predicate": "暂定目标",
+      "related_design_ids": [
+        "MET-7",
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "requires_qualification": true,
+      "scope": "评价指标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "MET-7暂定目标为关键选择追溯覆盖率100%。",
+      "subject": "MET-7"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-040",
+      "knowledge_status": "PROVISIONAL_TARGET",
+      "object": "关键状态一致率100%",
+      "predicate": "暂定目标",
+      "related_design_ids": [
+        "MET-8",
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "requires_qualification": true,
+      "scope": "评价指标",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "MET-8暂定目标为关键状态一致率100%。",
+      "subject": "MET-8"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-041",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "人机协同决策态势模型与规则字典",
+      "predicate": "交付物名称",
+      "related_design_ids": [
+        "DEL-1"
+      ],
+      "requires_qualification": false,
+      "scope": "预期交付",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "DEL-1交付物名称为人机协同决策态势模型与规则字典。",
+      "subject": "DEL-1"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-042",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "多智能体候选生成、批判与修复组件",
+      "predicate": "交付物名称",
+      "related_design_ids": [
+        "DEL-2"
+      ],
+      "requires_qualification": false,
+      "scope": "预期交付",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "DEL-2交付物名称为多智能体候选生成、批判与修复组件。",
+      "subject": "DEL-2"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-043",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "人工偏好与权限交互组件",
+      "predicate": "交付物名称",
+      "related_design_ids": [
+        "DEL-3"
+      ],
+      "requires_qualification": false,
+      "scope": "预期交付",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "DEL-3交付物名称为人工偏好与权限交互组件。",
+      "subject": "DEL-3"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-044",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "优势冲刺调度与停止决策算法",
+      "predicate": "交付物名称",
+      "related_design_ids": [
+        "DEL-4"
+      ],
+      "requires_qualification": false,
+      "scope": "预期交付",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "DEL-4交付物名称为优势冲刺调度与停止决策算法。",
+      "subject": "DEL-4"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-045",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "跨场景人机协同决策原型系统",
+      "predicate": "交付物名称",
+      "related_design_ids": [
+        "DEL-5"
+      ],
+      "requires_qualification": false,
+      "scope": "预期交付",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "DEL-5交付物名称为跨场景人机协同决策原型系统。",
+      "subject": "DEL-5"
+    },
+    {
+      "assertion_policy": "DIRECT",
+      "atomic": true,
+      "fact_id": "FACT-046",
+      "knowledge_status": "CONFIRMED_DESIGN",
+      "object": "对照、消融与适用边界评测报告",
+      "predicate": "交付物名称",
+      "related_design_ids": [
+        "DEL-6"
+      ],
+      "requires_qualification": false,
+      "scope": "预期交付",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "DEL-6交付物名称为对照、消融与适用边界评测报告。",
+      "subject": "DEL-6"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-047",
+      "knowledge_status": "WORKING_ASSUMPTION",
+      "object": "目标应用场景能够提供结构化或可转换的任务、资源、规则和结果数据。",
+      "predicate": "工作假设",
+      "related_design_ids": [
+        "ASM-1"
+      ],
+      "requires_qualification": true,
+      "scope": "前提假设",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "ASM-1工作假设为目标应用场景能够提供结构化或可转换的任务、资源、规则和结果数据。。",
+      "subject": "ASM-1"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-048",
+      "knowledge_status": "WORKING_ASSUMPTION",
+      "object": "至少有一类确定性规则工具或优化求解器可用于验证硬约束和候选可行性。",
+      "predicate": "工作假设",
+      "related_design_ids": [
+        "ASM-2"
+      ],
+      "requires_qualification": true,
+      "scope": "前提假设",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "ASM-2工作假设为至少有一类确定性规则工具或优化求解器可用于验证硬约束和候选可行性。。",
+      "subject": "ASM-2"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-049",
+      "knowledge_status": "WORKING_ASSUMPTION",
+      "object": "参与试验的业务人员可以提供有限次数的偏好选择、分歧裁定和最终确认。",
+      "predicate": "工作假设",
+      "related_design_ids": [
+        "ASM-3"
+      ],
+      "requires_qualification": true,
+      "scope": "前提假设",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "ASM-3工作假设为参与试验的业务人员可以提供有限次数的偏好选择、分歧裁定和最终确认。。",
+      "subject": "ASM-3"
+    },
+    {
+      "assertion_policy": "QUALIFIED",
+      "atomic": true,
+      "fact_id": "FACT-050",
+      "knowledge_status": "WORKING_ASSUMPTION",
+      "object": "不同模型端点均能按照统一JSON合同接入，且业务工作流不依赖特定模型名称。",
+      "predicate": "工作假设",
+      "related_design_ids": [
+        "ASM-4"
+      ],
+      "requires_qualification": true,
+      "scope": "前提假设",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "ASM-4工作假设为不同模型端点均能按照统一JSON合同接入，且业务工作流不依赖特定模型名称。。",
+      "subject": "ASM-4"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-051",
+      "knowledge_status": "UNKNOWN",
+      "object": "未提供",
+      "predicate": "提供状态",
+      "related_design_ids": [
+        "OPEN-001"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-OFFICIAL-GUIDE-MISSING"
+      ],
+      "statement": "官方申报指南提供状态为未提供。",
+      "subject": "官方申报指南"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-052",
+      "knowledge_status": "UNKNOWN",
+      "object": "未知",
+      "predicate": "确定状态",
+      "related_design_ids": [
+        "OPEN-002"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-OFFICIAL-GUIDE-MISSING"
+      ],
+      "statement": "申请书模板与必填结构确定状态为未知。",
+      "subject": "申请书模板与必填结构"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-053",
+      "knowledge_status": "UNKNOWN",
+      "object": "未知",
+      "predicate": "确定状态",
+      "related_design_ids": [
+        "OPEN-003"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-OFFICIAL-GUIDE-MISSING"
+      ],
+      "statement": "申报资格与限制确定状态为未知。",
+      "subject": "申报资格与限制"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-054",
+      "knowledge_status": "UNKNOWN",
+      "object": "未知",
+      "predicate": "确定状态",
+      "related_design_ids": [
+        "OPEN-004"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-OFFICIAL-GUIDE-MISSING"
+      ],
+      "statement": "申报时间节点确定状态为未知。",
+      "subject": "申报时间节点"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-055",
+      "knowledge_status": "UNKNOWN",
+      "object": "未知",
+      "predicate": "确定状态",
+      "related_design_ids": [
+        "OPEN-005"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-OFFICIAL-GUIDE-MISSING"
+      ],
+      "statement": "评审指标与权重确定状态为未知。",
+      "subject": "评审指标与权重"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-056",
+      "knowledge_status": "UNKNOWN",
+      "object": "未知",
+      "predicate": "名称",
+      "related_design_ids": [
+        "OPEN-007"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "申报单位名称为未知。",
+      "subject": "申报单位"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-057",
+      "knowledge_status": "UNKNOWN",
+      "object": "未知",
+      "predicate": "名称",
+      "related_design_ids": [
+        "OPEN-008"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "资助机构名称为未知。",
+      "subject": "资助机构"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-058",
+      "knowledge_status": "UNKNOWN",
+      "object": "未知",
+      "predicate": "内容",
+      "related_design_ids": [
+        "OPEN-009"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "团队名单内容为未知。",
+      "subject": "团队名单"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-059",
+      "knowledge_status": "UNKNOWN",
+      "object": "未知",
+      "predicate": "数值",
+      "related_design_ids": [
+        "OPEN-010"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "经费金额数值为未知。",
+      "subject": "经费金额"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-060",
+      "knowledge_status": "UNKNOWN",
+      "object": "未知",
+      "predicate": "时长",
+      "related_design_ids": [
+        "OPEN-011"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "项目周期时长为未知。",
+      "subject": "项目周期"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-061",
+      "knowledge_status": "UNKNOWN",
+      "object": "未提供",
+      "predicate": "内容",
+      "related_design_ids": [
+        "OPEN-012"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "研究基础证据材料内容为未提供。",
+      "subject": "研究基础证据材料"
+    },
+    {
+      "assertion_policy": "PROHIBITED",
+      "atomic": true,
+      "fact_id": "FACT-062",
+      "knowledge_status": "UNKNOWN",
+      "object": "未形成",
+      "predicate": "内容",
+      "related_design_ids": [
+        "OPEN-013"
+      ],
+      "requires_qualification": false,
+      "scope": "开放事项",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "正式参考文献范围内容为未形成。",
+      "subject": "正式参考文献范围"
+    }
+  ],
+  "open_items": [
+    {
+      "blocking_now": false,
+      "field": "官方申报指南",
+      "item_id": "OPEN-001",
+      "reason": "尚未提供正式指南，无法确认官方条款。",
+      "required_before_stage": "指南与规则冻结",
+      "resolution_source": "正式申报指南",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "申请书模板与必填结构",
+      "item_id": "OPEN-002",
+      "reason": "尚未提供正式模板，当前14部分结构仅为设计预算。",
+      "required_before_stage": "章节规划冻结",
+      "resolution_source": "正式模板或填写说明",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "申报资格与限制",
+      "item_id": "OPEN-003",
+      "reason": "尚未提供申报对象、资格条件或限制条款。",
+      "required_before_stage": "正式申报可行性确认",
+      "resolution_source": "正式申报指南",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "申报时间节点",
+      "item_id": "OPEN-004",
+      "reason": "尚未提供截止日期、评审安排或执行起止要求。",
+      "required_before_stage": "研究计划冻结",
+      "resolution_source": "正式申报通知",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "评审指标与权重",
+      "item_id": "OPEN-005",
+      "reason": "尚未提供正式评审维度及权重。",
+      "required_before_stage": "论证架构最终冻结",
+      "resolution_source": "正式评审说明",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "附件与证明材料要求",
+      "item_id": "OPEN-006",
+      "reason": "尚未提供附件清单、盖章要求或证明材料格式。",
+      "required_before_stage": "最终文档导出",
+      "resolution_source": "正式申报指南或模板",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "申报单位",
+      "item_id": "OPEN-007",
+      "reason": "当前输入未提供申报单位名称。",
+      "required_before_stage": "最终文档导出",
+      "resolution_source": "项目负责人确认",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "资助机构",
+      "item_id": "OPEN-008",
+      "reason": "当前输入未提供资助机构名称。",
+      "required_before_stage": "指南与规则冻结",
+      "resolution_source": "项目负责人确认或正式通知",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "团队名单",
+      "item_id": "OPEN-009",
+      "reason": "当前输入未提供成员姓名、职称与分工。",
+      "required_before_stage": "研究基础与任务分工写作",
+      "resolution_source": "项目负责人确认",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "经费金额",
+      "item_id": "OPEN-010",
+      "reason": "当前输入未提供经费总额及科目边界。",
+      "required_before_stage": "预算内容写作",
+      "resolution_source": "项目负责人确认或正式指南",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "项目周期",
+      "item_id": "OPEN-011",
+      "reason": "当前输入未提供执行年限和起止日期。",
+      "required_before_stage": "研究计划冻结",
+      "resolution_source": "项目负责人确认或正式指南",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "研究基础证据材料",
+      "item_id": "OPEN-012",
+      "reason": "当前阶段未提供可公开引用的既有项目、论文、专利和平台条件清单。",
+      "required_before_stage": "研究基础章节写作",
+      "resolution_source": "项目负责人提供并确认",
+      "status": "UNRESOLVED"
+    },
+    {
+      "blocking_now": false,
+      "field": "正式参考文献范围",
+      "item_id": "OPEN-013",
+      "reason": "当前阶段未开展相关工作检索，尚未形成可引用文献清单。",
+      "required_before_stage": "相关工作章节写作",
+      "resolution_source": "后续公开资料调研与人工确认",
+      "status": "UNRESOLVED"
+    }
+  ],
+  "project_title": "人机协同决策优势冲刺关键技术研究",
+  "readiness": {
+    "blocked_capabilities": [
+      "冻结正式申请书模板",
+      "撰写研究基础与团队分工",
+      "冻结经费预算与项目周期",
+      "形成正式相关工作与参考文献"
+    ],
+    "rationale": "已确认设计输入、核心规则和事实权限足以支持下一阶段项目定义，但正式指南、模板、组织信息、经费周期、研究基础证据和参考文献尚未补齐，因此不能直接冻结论证架构、章节规划或正文。",
+    "ready_for_argument_architecture": false,
+    "ready_for_project_definition": true,
+    "ready_for_section_planning": false
+  },
+  "rules": [
+    {
+      "applies_to_stages": [
+        "STAGE_5_SECTION_PLANNING",
+        "STAGE_6_SECTION_WRITING",
+        "STAGE_7_FULL_INTEGRATION",
+        "STAGE_8_EXPORT"
+      ],
+      "blocking": true,
+      "category": "DOCUMENT",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-001",
+      "source_refs": [
+        "SRC-USER-REQUEST-20260721"
+      ],
+      "statement": "申请书正文页数不得超过20页。",
+      "status": "CONFIRMED_REQUIREMENT",
+      "validation_method": "导出前统计正文页数并拒绝超限"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_5_SECTION_PLANNING",
+        "STAGE_7_FULL_INTEGRATION"
+      ],
+      "blocking": false,
+      "category": "DOCUMENT",
+      "depends_on_open_item_ids": [],
+      "modality": "SHOULD",
+      "rule_id": "RULE-002",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "正文目标篇幅应控制在16至18页。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "规划时汇总章节目标页数"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_8_EXPORT"
+      ],
+      "blocking": false,
+      "category": "DOCUMENT",
+      "depends_on_open_item_ids": [],
+      "modality": "MAY",
+      "rule_id": "RULE-003",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "参考文献可在正文页数限制之外单独计算。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "导出清单区分正文与参考文献页"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_2_GUIDE_AND_FACT_BASE"
+      ],
+      "blocking": true,
+      "category": "PROCESS",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST_NOT",
+      "rule_id": "RULE-004",
+      "source_refs": [
+        "SRC-STAGE2-CONTRACT"
+      ],
+      "statement": "阶段2不得生成申请书正文。",
+      "status": "STAGE_PROCESS_RULE",
+      "validation_method": "检查输出目录不得出现正文候选"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_3_PROJECT_DEFINITION",
+        "STAGE_4_ARGUMENT_ARCHITECTURE",
+        "STAGE_5_SECTION_PLANNING",
+        "STAGE_6_SECTION_WRITING",
+        "STAGE_7_FULL_INTEGRATION"
+      ],
+      "blocking": true,
+      "category": "FACT",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-005",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT",
+        "SRC-STAGE2-CONTRACT"
+      ],
+      "statement": "后续文本只能直接陈述写作权限表中标记为DIRECT的事实。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "正文事实引用与事实ID逐条核对"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_3_PROJECT_DEFINITION",
+        "STAGE_4_ARGUMENT_ARCHITECTURE",
+        "STAGE_5_SECTION_PLANNING",
+        "STAGE_6_SECTION_WRITING",
+        "STAGE_7_FULL_INTEGRATION"
+      ],
+      "blocking": true,
+      "category": "FACT",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-006",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "PROVISIONAL_TARGET与WORKING_ASSUMPTION事实必须带暂定或假设限定语。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "检查限定事实是否带状态标识"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_3_PROJECT_DEFINITION",
+        "STAGE_4_ARGUMENT_ARCHITECTURE",
+        "STAGE_5_SECTION_PLANNING",
+        "STAGE_6_SECTION_WRITING",
+        "STAGE_7_FULL_INTEGRATION",
+        "STAGE_8_EXPORT"
+      ],
+      "blocking": true,
+      "category": "FACT",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST_NOT",
+      "rule_id": "RULE-007",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT",
+        "SRC-STAGE2-CONTRACT"
+      ],
+      "statement": "UNKNOWN事实不得作为申请书中的确定陈述。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "禁止事实ID扫描"
+    },
+    {
+      "applies_to_stages": [
+        "ALL_STAGES"
+      ],
+      "blocking": true,
+      "category": "TRACE",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-008",
+      "source_refs": [
+        "SRC-USER-REQUEST-20260721"
+      ],
+      "statement": "每个阶段必须保留模型请求、原始响应、中间结果、审查结果和人工决定。",
+      "status": "CONFIRMED_REQUIREMENT",
+      "validation_method": "阶段清单与哈希复核"
+    },
+    {
+      "applies_to_stages": [
+        "ALL_MODEL_STAGES"
+      ],
+      "blocking": true,
+      "category": "MODEL_INTERFACE",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-009",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "模型接口必须采用结构化输入输出合同并与具体模型名称解耦。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "Schema校验与替换端点冒烟测试"
+    },
+    {
+      "applies_to_stages": [
+        "ALL_MODEL_STAGES"
+      ],
+      "blocking": true,
+      "category": "MODEL_INTERFACE",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-010",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "每次模型响应必须记录实际模型标识和端点标识。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "响应封装字段校验"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_3_PROJECT_DEFINITION",
+        "STAGE_4_ARGUMENT_ARCHITECTURE",
+        "STAGE_5_SECTION_PLANNING",
+        "STAGE_7_FULL_INTEGRATION",
+        "STAGE_8_EXPORT"
+      ],
+      "blocking": true,
+      "category": "HUMAN_AUTHORITY",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-011",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "最终方案确认权和责任归属必须保留给授权人员。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "人工Gate消费记录校验"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_4_ARGUMENT_ARCHITECTURE",
+        "STAGE_6_SECTION_WRITING",
+        "STAGE_7_FULL_INTEGRATION"
+      ],
+      "blocking": true,
+      "category": "CONTENT",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-012",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "所有候选方案必须先满足硬约束，再比较软目标与偏好。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "质量门先执行硬约束检查"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_5_SECTION_PLANNING"
+      ],
+      "blocking": false,
+      "category": "GUIDE_UNKNOWN",
+      "depends_on_open_item_ids": [
+        "OPEN-001",
+        "OPEN-002"
+      ],
+      "modality": "UNKNOWN",
+      "rule_id": "RULE-013",
+      "source_refs": [
+        "SRC-OFFICIAL-GUIDE-MISSING"
+      ],
+      "statement": "正式申请书模板及必填结构尚未确定。",
+      "status": "UNRESOLVED_GUIDE_RULE",
+      "validation_method": "获取正式模板后解析并冻结章节合同"
+    },
+    {
+      "applies_to_stages": [
+        "FORMAL_SUBMISSION_CHECK"
+      ],
+      "blocking": false,
+      "category": "GUIDE_UNKNOWN",
+      "depends_on_open_item_ids": [
+        "OPEN-001",
+        "OPEN-003"
+      ],
+      "modality": "UNKNOWN",
+      "rule_id": "RULE-014",
+      "source_refs": [
+        "SRC-OFFICIAL-GUIDE-MISSING"
+      ],
+      "statement": "申报资格与限制条款尚未确定。",
+      "status": "UNRESOLVED_GUIDE_RULE",
+      "validation_method": "获取正式指南后核对资格条件"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_5_SECTION_PLANNING",
+        "STAGE_8_EXPORT"
+      ],
+      "blocking": false,
+      "category": "GUIDE_UNKNOWN",
+      "depends_on_open_item_ids": [
+        "OPEN-001",
+        "OPEN-004"
+      ],
+      "modality": "UNKNOWN",
+      "rule_id": "RULE-015",
+      "source_refs": [
+        "SRC-OFFICIAL-GUIDE-MISSING"
+      ],
+      "statement": "申报截止日期与正式时间节点尚未确定。",
+      "status": "UNRESOLVED_GUIDE_RULE",
+      "validation_method": "获取正式通知后更新里程碑约束"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_3_PROJECT_DEFINITION",
+        "STAGE_4_ARGUMENT_ARCHITECTURE",
+        "STAGE_5_SECTION_PLANNING",
+        "STAGE_6_SECTION_WRITING",
+        "STAGE_7_FULL_INTEGRATION",
+        "STAGE_8_EXPORT"
+      ],
+      "blocking": true,
+      "category": "CONTENT",
+      "depends_on_open_item_ids": [
+        "OPEN-007",
+        "OPEN-009",
+        "OPEN-010",
+        "OPEN-011"
+      ],
+      "modality": "MUST_NOT",
+      "rule_id": "RULE-016",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "不得补写申报单位、团队名单、经费金额或项目周期。",
+      "status": "CONFIRMED_REQUIREMENT",
+      "validation_method": "扫描开放字段并验证未被确定化"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_2_GUIDE_AND_FACT_BASE"
+      ],
+      "blocking": true,
+      "category": "PROCESS",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-017",
+      "source_refs": [
+        "SRC-STAGE2-CONTRACT",
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "阶段2完成后只放行项目定义，不放行完整章节规划。",
+      "status": "STAGE_PROCESS_RULE",
+      "validation_method": "检查readiness字段"
+    },
+    {
+      "applies_to_stages": [
+        "ALL_STAGES"
+      ],
+      "blocking": true,
+      "category": "FACT",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-018",
+      "source_refs": [
+        "SRC-STAGE2-CONTRACT"
+      ],
+      "statement": "来源冲突时应依次采用官方指南、用户要求、已确认设计输入和工作假设。",
+      "status": "STAGE_PROCESS_RULE",
+      "validation_method": "来源优先级数组精确校验"
+    },
+    {
+      "applies_to_stages": [
+        "ALL_STAGES"
+      ],
+      "blocking": true,
+      "category": "TRACE",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST",
+      "rule_id": "RULE-019",
+      "source_refs": [
+        "SRC-STAGE2-CONTRACT"
+      ],
+      "statement": "进入下一阶段的工件必须具有稳定哈希并冻结版本。",
+      "status": "STAGE_PROCESS_RULE",
+      "validation_method": "核对上游哈希与候选哈希"
+    },
+    {
+      "applies_to_stages": [
+        "STAGE_3_PROJECT_DEFINITION",
+        "STAGE_4_ARGUMENT_ARCHITECTURE",
+        "STAGE_5_SECTION_PLANNING",
+        "STAGE_6_SECTION_WRITING",
+        "STAGE_7_FULL_INTEGRATION"
+      ],
+      "blocking": true,
+      "category": "CONTENT",
+      "depends_on_open_item_ids": [],
+      "modality": "MUST_NOT",
+      "rule_id": "RULE-020",
+      "source_refs": [
+        "SRC-STAGE1-DESIGN-INPUT"
+      ],
+      "statement": "暂定评价指标不得写成既有实测成果。",
+      "status": "CONFIRMED_DESIGN_CONSTRAINT",
+      "validation_method": "指标状态与措辞一致性检查"
+    }
+  ],
+  "schema_version": "1.0",
+  "source_registry": [
+    {
+      "authority": "PRIMARY",
+      "availability": "AVAILABLE",
+      "content_hash": "f0a914e3947f461874ae1b2d56f088cc790f06bdc1781c2a7b7a349422917c5c",
+      "locator": "conversation:user-request",
+      "source_id": "SRC-USER-REQUEST-20260721",
+      "source_type": "USER_REQUEST",
+      "title": "用户本轮申请书生成要求"
+    },
+    {
+      "authority": "CONFIRMED",
+      "availability": "AVAILABLE",
+      "content_hash": "11928d6ccfa2b98cf345d63699f6a5d197aa280f9f3cae3937a048ec9f064d2f",
+      "locator": "source_snapshots/stage1_design_input.json",
+      "source_id": "SRC-STAGE1-DESIGN-INPUT",
+      "source_type": "CONFIRMED_ARTIFACT",
+      "title": "阶段1已确认设计输入"
+    },
+    {
+      "authority": "PROCESS",
+      "availability": "AVAILABLE",
+      "content_hash": "76c21aba8de70ec22cee7765d57d87820a2723db515b48cba0f6bf751c18437a",
+      "locator": "RUN_METADATA.json#stage_boundary",
+      "source_id": "SRC-STAGE2-CONTRACT",
+      "source_type": "STAGE_CONTRACT",
+      "title": "阶段2边界合同"
+    },
+    {
+      "authority": "UNKNOWN",
+      "availability": "MISSING",
+      "content_hash": null,
+      "locator": "not-provided",
+      "source_id": "SRC-OFFICIAL-GUIDE-MISSING",
+      "source_type": "OFFICIAL_GUIDE",
+      "title": "正式申报指南"
+    }
+  ],
+  "stage": "STAGE_2_GUIDE_AND_FACT_BASE",
+  "upstream_artifact": {
+    "accepted": true,
+    "artifact_name": "stage1_design_input.json",
+    "sha256": "11928d6ccfa2b98cf345d63699f6a5d197aa280f9f3cae3937a048ec9f064d2f",
+    "stage": "STAGE_1_DESIGN_INPUT"
+  },
+  "writing_permissions": {
+    "direct_fact_ids": [
+      "FACT-001",
+      "FACT-002",
+      "FACT-003",
+      "FACT-004",
+      "FACT-005",
+      "FACT-006",
+      "FACT-007",
+      "FACT-008",
+      "FACT-009",
+      "FACT-010",
+      "FACT-011",
+      "FACT-012",
+      "FACT-013",
+      "FACT-014",
+      "FACT-015",
+      "FACT-016",
+      "FACT-017",
+      "FACT-018",
+      "FACT-019",
+      "FACT-020",
+      "FACT-021",
+      "FACT-022",
+      "FACT-023",
+      "FACT-024",
+      "FACT-025",
+      "FACT-026",
+      "FACT-027",
+      "FACT-028",
+      "FACT-029",
+      "FACT-030",
+      "FACT-031",
+      "FACT-032",
+      "FACT-041",
+      "FACT-042",
+      "FACT-043",
+      "FACT-044",
+      "FACT-045",
+      "FACT-046"
+    ],
+    "prohibited_fact_ids": [
+      "FACT-051",
+      "FACT-052",
+      "FACT-053",
+      "FACT-054",
+      "FACT-055",
+      "FACT-056",
+      "FACT-057",
+      "FACT-058",
+      "FACT-059",
+      "FACT-060",
+      "FACT-061",
+      "FACT-062"
+    ],
+    "provisional_target_fact_ids": [
+      "FACT-033",
+      "FACT-034",
+      "FACT-035",
+      "FACT-036",
+      "FACT-037",
+      "FACT-038",
+      "FACT-039",
+      "FACT-040"
+    ],
+    "qualified_fact_ids": [
+      "FACT-033",
+      "FACT-034",
+      "FACT-035",
+      "FACT-036",
+      "FACT-037",
+      "FACT-038",
+      "FACT-039",
+      "FACT-040",
+      "FACT-047",
+      "FACT-048",
+      "FACT-049",
+      "FACT-050"
+    ],
+    "unknown_fields": [
+      "官方申报指南",
+      "申请书模板与必填结构",
+      "申报资格与限制",
+      "申报时间节点",
+      "评审指标与权重",
+      "附件与证明材料要求",
+      "申报单位",
+      "资助机构",
+      "团队名单",
+      "经费金额",
+      "项目周期",
+      "研究基础证据材料",
+      "正式参考文献范围"
+    ]
+  }
+}

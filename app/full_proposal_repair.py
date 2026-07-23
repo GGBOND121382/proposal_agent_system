@@ -22,15 +22,39 @@ class FullProposalRepairMixin:
             "QG_DOCUMENT_CLAIM_OVERCONCENTRATION",
             "PAGE_BUDGET_EXCEEDED",
         }
+        repairable_codes = {
+            "QG_DOCUMENT_TEMPLATE_REPETITION", "DOCUMENT_TEMPLATE_REPETITION",
+            "QG_DOCUMENT_DOMINATED_BY_AGENT_SYSTEM", "DOCUMENT_TYPE_DRIFT",
+        }
+
+        def effective_route(item: dict[str, Any]) -> str:
+            """Resolve exactly one repair owner for a whole-document finding.
+
+            The Critic's explicit ``suggested_route`` is part of the structured
+            repair contract and must win over broad categories such as ARGUMENT.
+            Category/code inference is only a compatibility fallback for older
+            findings that did not declare a route.  Without this precedence, a
+            local conclusion rewrite can incorrectly invalidate the complete
+            argument architecture and every generated section.
+            """
+            explicit = str(item.get("suggested_route") or "").strip()
+            if explicit:
+                return explicit
+            code = str(item.get("code") or "")
+            if code in planning_codes:
+                return "PLANNING_AGENT"
+            if str(item.get("category") or "") == "ARGUMENT":
+                return "ARGUMENT_ARCHITECTURE_AGENT"
+            if code in repairable_codes:
+                return "WRITING_AGENT"
+            return ""
+
+        routed_findings = [(item, effective_route(item)) for item in findings]
         argument_findings = [
-            item for item in findings
-            if str(item.get("suggested_route") or "") in argument_routes
-            or str(item.get("category") or "") == "ARGUMENT"
+            item for item, route in routed_findings if route in argument_routes
         ]
         planning_findings = [
-            item for item in findings
-            if str(item.get("suggested_route") or "") == "PLANNING_AGENT"
-            or str(item.get("code") or "") in planning_codes
+            item for item, route in routed_findings if route == "PLANNING_AGENT"
         ]
 
         if argument_findings:
@@ -89,14 +113,8 @@ class FullProposalRepairMixin:
                 if isinstance(item, dict) and item.get("section_id")
             }
         affected = self._section_ids_from_integration_output(output, known_section_ids)
-        repairable_codes = {
-            "QG_DOCUMENT_TEMPLATE_REPETITION", "DOCUMENT_TEMPLATE_REPETITION",
-            "QG_DOCUMENT_DOMINATED_BY_AGENT_SYSTEM", "DOCUMENT_TYPE_DRIFT",
-        }
         writing_findings = [
-            item for item in findings
-            if str(item.get("code") or "") in repairable_codes
-            or str(item.get("suggested_route") or "") == "WRITING_AGENT"
+            item for item, route in routed_findings if route == "WRITING_AGENT"
         ]
         if writing_findings and not affected and (
             self._three_section_mode(state) or self._full_proposal_mode(state)

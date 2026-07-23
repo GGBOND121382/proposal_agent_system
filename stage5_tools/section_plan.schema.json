@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_version", "stage", "project_title", "upstream_artifacts", "planning_mode",
+    "document_contract", "sections", "visual_plan", "draft_batches", "cross_section_controls",
+    "open_items_inherited", "revalidation_triggers", "readiness"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "stage": {"const": "STAGE_5_PROVISIONAL_SECTION_PLANNING"},
+    "project_title": {"type": "string", "minLength": 2},
+    "upstream_artifacts": {
+      "type": "array", "minItems": 4, "maxItems": 4,
+      "items": {
+        "type": "object", "required": ["stage", "sha256"], "additionalProperties": false,
+        "properties": {
+          "stage": {"enum": ["STAGE_1_DESIGN_INPUT", "STAGE_3_PROJECT_DEFINITION", "STAGE_4_ARGUMENT_ARCHITECTURE", "STAGE_4A_EVIDENCE_COMPLETION"]},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "planning_mode": {"const": "REVERSIBLE_CONTENT_PLAN"},
+    "document_contract": {
+      "type": "object",
+      "required": ["body_page_limit", "target_body_pages", "planned_body_pages", "max_body_pages", "references_outside_body_limit", "official_template_status", "plan_status"],
+      "additionalProperties": false,
+      "properties": {
+        "body_page_limit": {"type": "number", "const": 20},
+        "target_body_pages": {"type": "number", "minimum": 14, "maximum": 18},
+        "planned_body_pages": {"type": "number", "minimum": 14, "maximum": 18},
+        "max_body_pages": {"type": "number", "maximum": 20},
+        "references_outside_body_limit": {"type": "boolean"},
+        "official_template_status": {"const": "NOT_PROVIDED"},
+        "plan_status": {"const": "PROVISIONAL_REVALIDATION_REQUIRED"}
+      }
+    },
+    "sections": {
+      "type": "array", "minItems": 14, "maxItems": 14,
+      "items": {
+        "type": "object",
+        "required": [
+          "section_id", "order", "section_name", "target_pages", "max_pages", "expected_words",
+          "purpose", "required_rq_ids", "required_node_ids", "required_source_ids", "required_metric_ids",
+          "must_answer", "must_include", "must_not_claim", "subsections", "visual_ids", "contract_status"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "section_id": {"type": "string", "pattern": "^SEC-(0[1-9]|1[0-4])$"},
+          "order": {"type": "integer", "minimum": 1, "maximum": 14},
+          "section_name": {"type": "string", "minLength": 2},
+          "target_pages": {"type": "number", "exclusiveMinimum": 0, "maximum": 4},
+          "max_pages": {"type": "number", "exclusiveMinimum": 0, "maximum": 4},
+          "expected_words": {
+            "type": "object", "required": ["min", "max"], "additionalProperties": false,
+            "properties": {"min": {"type": "integer", "minimum": 100}, "max": {"type": "integer", "minimum": 150}}
+          },
+          "purpose": {"type": "string", "minLength": 20},
+          "required_rq_ids": {"type": "array", "items": {"enum": ["RQ-1", "RQ-2", "RQ-3"]}, "uniqueItems": true},
+          "required_node_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "required_source_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "required_metric_ids": {"type": "array", "items": {"pattern": "^MET-[1-8]$"}, "uniqueItems": true},
+          "must_answer": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 8}},
+          "must_include": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 4}},
+          "must_not_claim": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 4}},
+          "subsections": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "required": ["subsection_id", "title", "paragraph_roles"], "additionalProperties": false,
+              "properties": {
+                "subsection_id": {"type": "string", "pattern": "^SEC-(0[1-9]|1[0-4])-[0-9]{2}$"},
+                "title": {"type": "string", "minLength": 2},
+                "paragraph_roles": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 4}}
+              }
+            }
+          },
+          "visual_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "contract_status": {"const": "PROVISIONAL_REVALIDATION_REQUIRED"}
+        }
+      }
+    },
+    "visual_plan": {
+      "type": "array", "minItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["visual_id", "visual_type", "title", "section_id", "purpose", "required_node_ids", "content_spec", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "visual_id": {"type": "string", "pattern": "^(FIG|TAB)-[0-9]{2}$"},
+          "visual_type": {"enum": ["FIGURE", "TABLE"]},
+          "title": {"type": "string", "minLength": 3},
+          "section_id": {"pattern": "^SEC-(0[1-9]|1[0-4])$", "type": "string"},
+          "purpose": {"type": "string", "minLength": 12},
+          "required_node_ids": {"type": "array", "items": {"type": "string"}},
+          "content_spec": {"type": "string", "minLength": 20},
+          "status": {"const": "PLANNED"}
+        }
+      }
+    },
+    "draft_batches": {
+      "type": "array", "minItems": 4, "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["batch_id", "section_ids", "total_target_pages", "purpose", "dependencies", "completion_gate"],
+        "additionalProperties": false,
+        "properties": {
+          "batch_id": {"enum": ["STAGE-6A", "STAGE-6B", "STAGE-6C", "STAGE-6D"]},
+          "section_ids": {"type": "array", "minItems": 3, "items": {"pattern": "^SEC-(0[1-9]|1[0-4])$"}, "uniqueItems": true},
+          "total_target_pages": {"type": "number", "exclusiveMinimum": 0, "maximum": 8},
+          "purpose": {"type": "string", "minLength": 15},
+          "dependencies": {"type": "array", "items": {"type": "string"}},
+          "completion_gate": {"type": "string", "minLength": 15}
+        }
+      }
+    },
+    "cross_section_controls": {
+      "type": "object",
+      "required": ["central_proposition_sections", "rq_coverage", "innovation_baseline_binding", "conclusion_closure", "foundation_evidence_boundary", "metric_claim_boundary", "duplication_control"],
+      "additionalProperties": false,
+      "properties": {
+        "central_proposition_sections": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "rq_coverage": {
+          "type": "object", "required": ["RQ-1", "RQ-2", "RQ-3"], "additionalProperties": false,
+          "properties": {
+            "RQ-1": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+            "RQ-2": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+            "RQ-3": {"type": "array", "minItems": 3, "items": {"type": "string"}}
+          }
+        },
+        "innovation_baseline_binding": {"type": "string", "minLength": 20},
+        "conclusion_closure": {"type": "string", "minLength": 20},
+        "foundation_evidence_boundary": {"type": "string", "minLength": 20},
+        "metric_claim_boundary": {"type": "string", "minLength": 20},
+        "duplication_control": {"type": "string", "minLength": 20}
+      }
+    },
+    "open_items_inherited": {"type": "array", "items": {"pattern": "^OPEN-[0-9]{3}$"}, "uniqueItems": true},
+    "revalidation_triggers": {"type": "array", "minItems": 3, "items": {"type": "string"}, "uniqueItems": true},
+    "readiness": {
+      "type": "object",
+      "required": ["ready_for_provisional_drafting", "ready_for_final_submission", "next_stage", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "ready_for_provisional_drafting": {"type": "boolean"},
+        "ready_for_final_submission": {"type": "boolean"},
+        "next_stage": {"enum": ["STAGE_6A_PROVISIONAL_DRAFTING", "HOLD"]},
+        "rationale": {"type": "string", "minLength": 30}
+      }
+    }
+  }
+}

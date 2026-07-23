@@ -1,0 +1,215 @@
+{
+  "schema_version": "1.0",
+  "prompt_id": "P-STAGE6C-WRITE-SECTION",
+  "prompt_version": "1.0.0",
+  "actual_model_id": "gpt-5.6-thinking",
+  "endpoint_id": "chatgpt-conversation-file-bridge",
+  "status": "PASS",
+  "section_id": "SEC-10",
+  "candidate": {
+    "candidate_id": "stage6c-sec-10-candidate-001",
+    "section_name": "评价指标与验证方案",
+    "markdown": "# 评价指标与验证方案\n\n## 基线与实验组\n\n评价采用同一任务快照、模型端点、求解资源和决策窗口进行公平比较。BL-1为纯人工流程，BL-2为单一自动优化或单Agent流程，BL-3为固定角色顺序与固定轮次协同，BL-4为相同预算下表现最好的非冲刺方法。四类基线分别回答“人类单独完成”“机器单独完成”“协同但不自适应”和“现有最佳替代方案”四个问题，避免只选择较弱对照放大方法收益。\n\n实验由EXP-1至EXP-5组成：EXP-1比较无统一状态、全量同步和增量传播；EXP-2移除独立批判、确定性工具或局部修复；EXP-3比较固定轮次、风险优先、贪心改进与完整调度；EXP-4比较全程确认、仅最终审批、固定提问和主动高价值提问；EXP-5在四类通用场景中开展完整方法、基线、消融和扰动试验。每组均登记随机种子、超时、不可行和回退原因，失败案例不得从统计样本中删除。\n\n## 指标与统计协议\n\nMET-1记录任务冻结到首个硬约束可行方案的时间；MET-2报告最终综合质量及各单项和Pareto位置；MET-3由独立规则工具统计硬约束违规；MET-4衡量扰动后的质量保持、恢复时间和变更范围。MET-5统计人工投入时间、问题数和有效操作；MET-6区分直接采纳、小幅修改后采纳和退回重做；MET-7抽查输入、规则、工具、模型建议与人工决定的完整追溯链；MET-8检查并发更新后的版本、约束和候选依赖一致性。\n\n统计报告优先给出中位数、四分位距、配对差值、效应量和自助法置信区间，并按任务、场景、参与者和扰动强度分层；比例指标报告二项置信区间，审计指标同时报告审计者一致性。所有流程都报告超时率、不可行率、回滚次数和失败案例，不能只展示均值。30%、10%、25%、80%等仅为暂定目标，获得场景基线后由项目负责人按可达性和区分度重新标定，当前不作为实测结论。\n\n> **TAB-05：基线、实验组、指标和统计协议对应表**\n\n## 跨场景验证与反证\n\n跨场景任务集覆盖生产调度、物流协同、设备维护和活动保障四类通用问题。每类场景分别设置常规任务、资源缩减、临时任务插入、规则变化和工具不可用等扰动，并使用相同输入冻结方式、资源预算和终止条件。结果不仅比较最终方案，还比较首个可行解、过程稳定性、人工负担和证据闭合，使EXP-5能够判断方法收益是否只来自某一数据集或某一模型端点。\n\nRQ-1的反证标准是版本化增量状态在一致性、传播时延或重算范围上不优于全量同步；RQ-2的反证标准是完整调度在同预算下不能改善质量—时间曲线或按时完成率；RQ-3的反证标准是高价值提问与全过程Trace不能降低无效人工操作、保持最终控制或提高追溯覆盖。若人机组合不优于BL-1、BL-2或BL-4中的最好单方，应如实报告负结果，并缩小中心命题的适用范围。\n\n> **FIG-04：跨场景对照、消融、扰动与反证验证框架**\n",
+    "subsections": [
+      {
+        "subsection_id": "SEC-10-01",
+        "title": "基线与实验组",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-10-01",
+            "role": "定义纯人工、单一自动、固定协同和最佳非冲刺基线",
+            "text": "评价采用同一任务快照、模型端点、求解资源和决策窗口进行公平比较。BL-1为纯人工流程，BL-2为单一自动优化或单Agent流程，BL-3为固定角色顺序与固定轮次协同，BL-4为相同预算下表现最好的非冲刺方法。四类基线分别回答“人类单独完成”“机器单独完成”“协同但不自适应”和“现有最佳替代方案”四个问题，避免只选择较弱对照放大方法收益。",
+            "node_ids": [
+              "BL-1",
+              "BL-2",
+              "BL-3",
+              "BL-4"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [
+              "SRC-PUB-12"
+            ],
+            "claim_status": "CONFIRMED_DESIGN",
+            "novel_content_key": "sec10_four_fair_baselines"
+          },
+          {
+            "paragraph_id": "P-SEC-10-02",
+            "role": "定义对照、消融和扰动组",
+            "text": "实验由EXP-1至EXP-5组成：EXP-1比较无统一状态、全量同步和增量传播；EXP-2移除独立批判、确定性工具或局部修复；EXP-3比较固定轮次、风险优先、贪心改进与完整调度；EXP-4比较全程确认、仅最终审批、固定提问和主动高价值提问；EXP-5在四类通用场景中开展完整方法、基线、消融和扰动试验。每组均登记随机种子、超时、不可行和回退原因，失败案例不得从统计样本中删除。",
+            "node_ids": [
+              "EXP-1",
+              "EXP-2",
+              "EXP-3",
+              "EXP-4",
+              "EXP-5"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [
+              "SRC-PUB-05",
+              "SRC-PUB-07",
+              "SRC-PUB-13"
+            ],
+            "claim_status": "CONFIRMED_DESIGN",
+            "novel_content_key": "sec10_experiment_control_ablation_design"
+          }
+        ]
+      },
+      {
+        "subsection_id": "SEC-10-02",
+        "title": "指标与统计协议",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-10-03",
+            "role": "逐项定义MET-1至MET-8",
+            "text": "MET-1记录任务冻结到首个硬约束可行方案的时间；MET-2报告最终综合质量及各单项和Pareto位置；MET-3由独立规则工具统计硬约束违规；MET-4衡量扰动后的质量保持、恢复时间和变更范围。MET-5统计人工投入时间、问题数和有效操作；MET-6区分直接采纳、小幅修改后采纳和退回重做；MET-7抽查输入、规则、工具、模型建议与人工决定的完整追溯链；MET-8检查并发更新后的版本、约束和候选依赖一致性。",
+            "node_ids": [
+              "MET-1",
+              "MET-2",
+              "MET-3",
+              "MET-4",
+              "MET-5",
+              "MET-6",
+              "MET-7",
+              "MET-8"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [
+              "SRC-PUB-12",
+              "SRC-PUB-13",
+              "SRC-STD-01"
+            ],
+            "claim_status": "CONFIRMED_DESIGN",
+            "novel_content_key": "sec10_metric_definitions_all_eight"
+          },
+          {
+            "paragraph_id": "P-SEC-10-04",
+            "role": "规定置信区间、分布与失败案例报告",
+            "text": "统计报告优先给出中位数、四分位距、配对差值、效应量和自助法置信区间，并按任务、场景、参与者和扰动强度分层；比例指标报告二项置信区间，审计指标同时报告审计者一致性。所有流程都报告超时率、不可行率、回滚次数和失败案例，不能只展示均值。30%、10%、25%、80%等仅为暂定目标，获得场景基线后由项目负责人按可达性和区分度重新标定，当前不作为实测结论。",
+            "node_ids": [
+              "MET-1",
+              "MET-2",
+              "MET-3",
+              "MET-4",
+              "MET-5",
+              "MET-6",
+              "MET-7",
+              "MET-8"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [
+              "SRC-PUB-05",
+              "SRC-PUB-07",
+              "SRC-PUB-12"
+            ],
+            "claim_status": "BOUNDARY_STATEMENT",
+            "novel_content_key": "sec10_statistics_failure_threshold_calibration"
+          }
+        ]
+      },
+      {
+        "subsection_id": "SEC-10-03",
+        "title": "跨场景验证与反证",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-10-05",
+            "role": "说明四类验证场景",
+            "text": "跨场景任务集覆盖生产调度、物流协同、设备维护和活动保障四类通用问题。每类场景分别设置常规任务、资源缩减、临时任务插入、规则变化和工具不可用等扰动，并使用相同输入冻结方式、资源预算和终止条件。结果不仅比较最终方案，还比较首个可行解、过程稳定性、人工负担和证据闭合，使EXP-5能够判断方法收益是否只来自某一数据集或某一模型端点。",
+            "node_ids": [
+              "EXP-5",
+              "MET-1",
+              "MET-2",
+              "MET-4",
+              "MET-5",
+              "MET-7",
+              "MET-8"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [
+              "SRC-PUB-13",
+              "SRC-STD-01"
+            ],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "sec10_cross_scenario_perturbation_set"
+          },
+          {
+            "paragraph_id": "P-SEC-10-06",
+            "role": "绑定研究问题的反证标准",
+            "text": "RQ-1的反证标准是版本化增量状态在一致性、传播时延或重算范围上不优于全量同步；RQ-2的反证标准是完整调度在同预算下不能改善质量—时间曲线或按时完成率；RQ-3的反证标准是高价值提问与全过程Trace不能降低无效人工操作、保持最终控制或提高追溯覆盖。若人机组合不优于BL-1、BL-2或BL-4中的最好单方，应如实报告负结果，并缩小中心命题的适用范围。",
+            "node_ids": [
+              "EXP-1",
+              "EXP-3",
+              "EXP-4",
+              "EXP-5",
+              "BL-1",
+              "BL-2",
+              "BL-4"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [
+              "SRC-PUB-12",
+              "SRC-STD-01"
+            ],
+            "claim_status": "BOUNDARY_STATEMENT",
+            "novel_content_key": "sec10_rq_falsification_rules"
+          }
+        ]
+      }
+    ],
+    "visual_placeholders": [
+      {
+        "visual_id": "TAB-05",
+        "caption": "基线、实验组、指标和统计协议对应表",
+        "placement_after_paragraph_id": "P-SEC-10-04"
+      },
+      {
+        "visual_id": "FIG-04",
+        "caption": "跨场景对照、消融、扰动与反证验证框架",
+        "placement_after_paragraph_id": "P-SEC-10-06"
+      }
+    ],
+    "unresolved_open_item_ids": [
+      "OPEN-005"
+    ],
+    "key_terms": [
+      {
+        "term": "公平比较",
+        "canonical_form": "相同任务快照、资源预算和终止条件下的流程对照"
+      },
+      {
+        "term": "暂定目标",
+        "canonical_form": "需根据真实基线重新标定的设计阈值"
+      },
+      {
+        "term": "失败案例",
+        "canonical_form": "超时、不可行、回滚和负收益的完整记录"
+      }
+    ],
+    "section_contribution": "冻结四类基线、五组试验和八项指标的测量统计协议，并以跨场景扰动和反证规则约束效果声称。"
+  },
+  "findings": [],
+  "warnings": []
+}

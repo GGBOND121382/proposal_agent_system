@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "actual_model_id",
+    "endpoint_id",
+    "batch_id",
+    "verdict",
+    "checked_section_ids",
+    "quality_dimensions",
+    "findings",
+    "next_stage_decision",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "prompt_id": {
+      "const": "P-STAGE6B-BATCH-CRITIC"
+    },
+    "prompt_version": {
+      "const": "1.0.0"
+    },
+    "actual_model_id": {
+      "type": "string",
+      "minLength": 2
+    },
+    "endpoint_id": {
+      "type": "string",
+      "minLength": 2
+    },
+    "batch_id": {
+      "const": "STAGE-6B"
+    },
+    "verdict": {
+      "enum": [
+        "ACCEPT",
+        "REVISE"
+      ]
+    },
+    "checked_section_ids": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "pattern": "^SEC-0[6-8]$"
+      },
+      "uniqueItems": true
+    },
+    "quality_dimensions": {
+      "type": "array",
+      "minItems": 7,
+      "items": {
+        "type": "object",
+        "required": [
+          "dimension",
+          "result",
+          "comment"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "dimension": {
+            "enum": [
+              "RESEARCH_CONTENT_COMPLETENESS",
+              "SCIENTIFIC_PROBLEM_DISTINCTION",
+              "TECHNICAL_ROUTE_CLOSURE",
+              "RQ_METHOD_FALSIFICATION_ALIGNMENT",
+              "HUMAN_CONTROL_AND_TOOL_BOUNDARY",
+              "CROSS_SECTION_NONREDUNDANCY",
+              "PAGE_BUDGET"
+            ]
+          },
+          "result": {
+            "enum": [
+              "PASS",
+              "FAIL"
+            ]
+          },
+          "comment": {
+            "type": "string",
+            "minLength": 10
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "next_stage_decision": {
+      "enum": [
+        "ALLOW_STAGE_6C",
+        "HOLD_STAGE_6C"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 30
+    }
+  }
+}

@@ -1,0 +1,1532 @@
+{
+  "cross_section_controls": {
+    "central_proposition_sections": [
+      "SEC-01",
+      "SEC-04",
+      "SEC-05",
+      "SEC-08",
+      "SEC-09",
+      "SEC-14"
+    ],
+    "conclusion_closure": "SEC-14必须逐一回答RQ-1至RQ-3，并同时回扣CP-1、OBJ-1至OBJ-4和INNO-H1至INNO-H3；缺少任一绑定均退回结论章。",
+    "duplication_control": "背景只提出矛盾，相关工作只做比较，概念章只定义模型，研究内容展开任务，技术路线展开流程，创新章做相对差异，结论只闭环不新增论点。",
+    "foundation_evidence_boundary": "SEC-11只能依据SRC-UA与SRC-TRACE来源说明能力和工程记录，并明确未核验材料；不得升级为正式论文、验收或实测成果。",
+    "innovation_baseline_binding": "SEC-09中的每项创新假设必须同时引用对应PRIOR节点、至少两个公开来源、拟新增机制、比较维度、验证试验和反证条件。",
+    "metric_claim_boundary": "所有MET阈值均保持暂定目标，正文只能陈述测量协议、基线、统计方法和重新标定条件，不得写成已经达到。",
+    "rq_coverage": {
+      "RQ-1": [
+        "SEC-01",
+        "SEC-02",
+        "SEC-03",
+        "SEC-04",
+        "SEC-05",
+        "SEC-06",
+        "SEC-07",
+        "SEC-08",
+        "SEC-09",
+        "SEC-10",
+        "SEC-11",
+        "SEC-12",
+        "SEC-14"
+      ],
+      "RQ-2": [
+        "SEC-01",
+        "SEC-02",
+        "SEC-03",
+        "SEC-04",
+        "SEC-05",
+        "SEC-06",
+        "SEC-07",
+        "SEC-08",
+        "SEC-09",
+        "SEC-10",
+        "SEC-11",
+        "SEC-12",
+        "SEC-13",
+        "SEC-14"
+      ],
+      "RQ-3": [
+        "SEC-01",
+        "SEC-02",
+        "SEC-03",
+        "SEC-04",
+        "SEC-05",
+        "SEC-06",
+        "SEC-07",
+        "SEC-08",
+        "SEC-09",
+        "SEC-10",
+        "SEC-11",
+        "SEC-12",
+        "SEC-13",
+        "SEC-14"
+      ]
+    }
+  },
+  "document_contract": {
+    "body_page_limit": 20,
+    "max_body_pages": 20.0,
+    "official_template_status": "NOT_PROVIDED",
+    "plan_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+    "planned_body_pages": 16.9,
+    "references_outside_body_limit": true,
+    "target_body_pages": 16.9
+  },
+  "draft_batches": [
+    {
+      "batch_id": "STAGE-6A",
+      "completion_gate": "五章均通过单章确定性检查、独立内容审查和跨章概念一致性检查。",
+      "dependencies": [
+        "STAGE_5_CONFIRMED"
+      ],
+      "purpose": "先形成问题、相关工作、概念框架和研究问题索引，为技术正文提供稳定语义与引用基线。",
+      "section_ids": [
+        "SEC-01",
+        "SEC-02",
+        "SEC-03",
+        "SEC-04",
+        "SEC-05"
+      ],
+      "total_target_pages": 5.4
+    },
+    {
+      "batch_id": "STAGE-6B",
+      "completion_gate": "研究内容、关键问题和技术路线必须逐项绑定RQ、方法、图表和反证条件，且无功能清单化。",
+      "dependencies": [
+        "STAGE-6A_ACCEPTED"
+      ],
+      "purpose": "生成研究内容、关键问题和技术路线，是申请书的核心方法批次。",
+      "section_ids": [
+        "SEC-06",
+        "SEC-07",
+        "SEC-08"
+      ],
+      "total_target_pages": 6.4
+    },
+    {
+      "batch_id": "STAGE-6C",
+      "completion_gate": "创新同时绑定最近工作与新机制，指标不被写成结果，研究基础不越过证据范围。",
+      "dependencies": [
+        "STAGE-6A_ACCEPTED",
+        "STAGE-6B_ACCEPTED"
+      ],
+      "purpose": "生成创新、评价和研究基础，重点控制比较基线、指标状态和证据等级。",
+      "section_ids": [
+        "SEC-09",
+        "SEC-10",
+        "SEC-11"
+      ],
+      "total_target_pages": 3.3
+    },
+    {
+      "batch_id": "STAGE-6D",
+      "completion_gate": "结论逐一回答三项研究问题并回扣中心命题和创新假设，计划与风险不补造正式信息。",
+      "dependencies": [
+        "STAGE-6A_ACCEPTED",
+        "STAGE-6B_ACCEPTED",
+        "STAGE-6C_ACCEPTED"
+      ],
+      "purpose": "生成计划、风险和结论，并完成研究问题、创新和中心命题的全文闭环。",
+      "section_ids": [
+        "SEC-12",
+        "SEC-13",
+        "SEC-14"
+      ],
+      "total_target_pages": 1.8
+    }
+  ],
+  "open_items_inherited": [
+    "OPEN-001",
+    "OPEN-002",
+    "OPEN-003",
+    "OPEN-004",
+    "OPEN-005",
+    "OPEN-006",
+    "OPEN-007",
+    "OPEN-008",
+    "OPEN-009",
+    "OPEN-010",
+    "OPEN-011",
+    "OPEN-012"
+  ],
+  "planning_mode": "REVERSIBLE_CONTENT_PLAN",
+  "project_title": "人机协同决策优势冲刺关键技术研究",
+  "readiness": {
+    "next_stage": "STAGE_6A_PROVISIONAL_DRAFTING",
+    "rationale": "论证结构、最近工作、证据边界和页数预算已足以开展可逆正文写作；正式指南、模板、团队证明、场景基线、周期和经费到位后必须重放章节合同与格式检查，当前不得视为最终提交版本。",
+    "ready_for_final_submission": false,
+    "ready_for_provisional_drafting": true
+  },
+  "revalidation_triggers": [
+    "OFFICIAL_GUIDE_RECEIVED",
+    "OFFICIAL_TEMPLATE_RECEIVED",
+    "TEAM_EVIDENCE_RECEIVED",
+    "SCENARIO_BASELINE_RECEIVED",
+    "PROJECT_PERIOD_OR_BUDGET_RECEIVED"
+  ],
+  "schema_version": "1.0",
+  "sections": [
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 550,
+        "min": 350
+      },
+      "max_pages": 0.8,
+      "must_answer": [
+        "项目解决什么问题、为什么需要人机协同优势冲刺、怎样证明其有效。"
+      ],
+      "must_include": [
+        "中心命题的适用边界",
+        "三项研究问题及四项目标",
+        "正文结构和验证载体概览"
+      ],
+      "must_not_claim": [
+        "不得把暂定指标写成已达到结果",
+        "不得宣称已获得正式资助或已完成验收",
+        "不得给出正式指南未提供的资格与格式结论"
+      ],
+      "order": 1,
+      "purpose": "用最短篇幅交代研究对象、核心矛盾、中心命题、三项研究问题、总体方法和预期验证价值，为全文建立统一阅读入口。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "CP-1",
+        "RQ-1",
+        "RQ-2",
+        "RQ-3",
+        "OBJ-1",
+        "OBJ-2",
+        "OBJ-3",
+        "OBJ-4"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [],
+      "section_id": "SEC-01",
+      "section_name": "摘要与项目概览",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "提出问题与中心命题",
+            "概括研究问题和方法体系"
+          ],
+          "subsection_id": "SEC-01-01",
+          "title": "项目概览"
+        },
+        {
+          "paragraph_roles": [
+            "概括知识贡献",
+            "说明验证场景与证据类型"
+          ],
+          "subsection_id": "SEC-01-02",
+          "title": "预期贡献与验证"
+        }
+      ],
+      "target_pages": 0.6,
+      "visual_ids": []
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 1100,
+        "min": 800
+      },
+      "max_pages": 1.5,
+      "must_answer": [
+        "现有决策流程为何难以同时满足速度、质量、稳健性和可追溯性。",
+        "本项目的科学问题与一般智能体应用有何区别。"
+      ],
+      "must_include": [
+        "三个核心矛盾及其因果关系",
+        "四类通用验证场景",
+        "研究边界与非目标"
+      ],
+      "must_not_claim": [
+        "不得把设计假设描述成行业共识",
+        "不得泛化到任意开放世界决策",
+        "不得引用未提供的官方背景材料"
+      ],
+      "order": 2,
+      "purpose": "从动态复杂决策的状态分散、时间受限和责任边界三个矛盾出发，说明研究必要性，并将一般意义落到可检验的研究问题。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "CP-1",
+        "GAP-1",
+        "GAP-2",
+        "GAP-3",
+        "BOUND-1",
+        "BOUND-2",
+        "BOUND-3",
+        "BOUND-4",
+        "BOUND-5"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [
+        "SRC-PUB-03",
+        "SRC-PUB-07",
+        "SRC-PUB-12",
+        "SRC-STD-01"
+      ],
+      "section_id": "SEC-02",
+      "section_name": "研究背景与意义",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "描述动态决策压力",
+            "分析人工与自动化各自局限"
+          ],
+          "subsection_id": "SEC-02-01",
+          "title": "现实需求与核心矛盾"
+        },
+        {
+          "paragraph_roles": [
+            "从三个差距提出研究价值",
+            "说明跨场景可迁移价值"
+          ],
+          "subsection_id": "SEC-02-02",
+          "title": "科学与工程意义"
+        },
+        {
+          "paragraph_roles": [
+            "列出成立条件",
+            "排除非研究目标"
+          ],
+          "subsection_id": "SEC-02-03",
+          "title": "适用边界"
+        }
+      ],
+      "target_pages": 1.3,
+      "visual_ids": []
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 1350,
+        "min": 1000
+      },
+      "max_pages": 1.8,
+      "must_answer": [
+        "三个研究问题各自最接近哪些已有机制。",
+        "已有工作尚未覆盖哪些组合机制和验证边界。"
+      ],
+      "must_include": [
+        "按RQ组织的研究谱系",
+        "最近工作机制而非仅列论文",
+        "明确的比较维度和创新边界"
+      ],
+      "must_not_claim": [
+        "不得宣称绝对首创",
+        "不得把非同行评审材料当成最近工作",
+        "不得超出来源实际研究范围"
+      ],
+      "order": 3,
+      "purpose": "用可定位公开研究建立三条最近工作链，比较已有机制、适用范围和不足，为创新假设提供克制且可核验的基线。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "GAP-1",
+        "GAP-2",
+        "GAP-3",
+        "PRIOR-1",
+        "PRIOR-2",
+        "PRIOR-3"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [
+        "SRC-PUB-01",
+        "SRC-PUB-02",
+        "SRC-PUB-03",
+        "SRC-PUB-04",
+        "SRC-PUB-05",
+        "SRC-PUB-06",
+        "SRC-PUB-07",
+        "SRC-PUB-08",
+        "SRC-PUB-09",
+        "SRC-PUB-10",
+        "SRC-PUB-11",
+        "SRC-PUB-12",
+        "SRC-PUB-13",
+        "SRC-STD-01"
+      ],
+      "section_id": "SEC-03",
+      "section_name": "相关工作与现有差距",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "归纳角色化协作与共享心智模型",
+            "比较版本依赖和增量传播缺口"
+          ],
+          "subsection_id": "SEC-03-01",
+          "title": "共享状态与多智能体协作"
+        },
+        {
+          "paragraph_roles": [
+            "归纳辩论、共识和实时决策研究",
+            "比较动态预算与停止规则缺口"
+          ],
+          "subsection_id": "SEC-03-02",
+          "title": "有限时间协作与资源调度"
+        },
+        {
+          "paragraph_roles": [
+            "归纳互补、转交、解释和风险治理",
+            "比较多阶段交接与证据归因缺口"
+          ],
+          "subsection_id": "SEC-03-03",
+          "title": "人机互补与责任治理"
+        },
+        {
+          "paragraph_roles": [
+            "形成三条差距—研究问题映射",
+            "限定创新假设表述"
+          ],
+          "subsection_id": "SEC-03-04",
+          "title": "现有差距小结"
+        }
+      ],
+      "target_pages": 1.6,
+      "visual_ids": [
+        "TAB-01"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 950,
+        "min": 700
+      },
+      "max_pages": 1.3,
+      "must_answer": [
+        "优势冲刺的操作性定义是什么。",
+        "三个形式化模型怎样连接为统一理论框架。"
+      ],
+      "must_include": [
+        "对象、状态、动作、预算、权限和证据的形式化元素",
+        "继续、停止、降级和回滚的条件",
+        "中心命题的边界条件"
+      ],
+      "must_not_claim": [
+        "不得把概念图等同于已验证理论",
+        "不得省略人类最终控制权",
+        "不得引入未在上游冻结的新核心机制"
+      ],
+      "order": 4,
+      "purpose": "形式化定义优势冲刺及其共享状态、有限窗口调度、人机权限交接三个模型，解释方法机制如何共同支撑中心命题。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "CP-1",
+        "FM-1",
+        "FM-2",
+        "FM-3",
+        "M-1",
+        "M-2",
+        "M-3",
+        "M-4",
+        "M-5",
+        "M-6",
+        "M-7",
+        "MECH-1",
+        "MECH-2",
+        "MECH-3",
+        "MECH-4",
+        "MECH-5"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [],
+      "section_id": "SEC-04",
+      "section_name": "核心概念与理论框架",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "给出操作性定义",
+            "说明与一般自动化或固定轮次协同的区别"
+          ],
+          "subsection_id": "SEC-04-01",
+          "title": "概念定义与要素"
+        },
+        {
+          "paragraph_roles": [
+            "定义共享态势模型",
+            "定义有限窗口调度模型",
+            "定义权限交接与证据归因模型"
+          ],
+          "subsection_id": "SEC-04-02",
+          "title": "三个形式化模型"
+        },
+        {
+          "paragraph_roles": [
+            "解释模型间输入输出关系",
+            "说明可证伪条件"
+          ],
+          "subsection_id": "SEC-04-03",
+          "title": "统一理论框架"
+        }
+      ],
+      "target_pages": 1.1,
+      "visual_ids": [
+        "FIG-01"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 700,
+        "min": 500
+      },
+      "max_pages": 1.0,
+      "must_answer": [
+        "三项研究问题如何共同检验中心命题。",
+        "每项目标对应什么可观察证据和反证条件。"
+      ],
+      "must_include": [
+        "RQ—目标—内容—方法映射",
+        "研究问题边界",
+        "反证标准与验证证据"
+      ],
+      "must_not_claim": [
+        "不得把研究目标写成已完成成果",
+        "不得新增与中心命题无关的研究问题",
+        "不得删除反证条件"
+      ],
+      "order": 5,
+      "purpose": "将中心命题分解为三项研究问题和四项目标，明确每项问题的边界、验证证据和反证条件，作为后续章节的合同索引。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "CP-1",
+        "RQ-1",
+        "RQ-2",
+        "RQ-3",
+        "OBJ-1",
+        "OBJ-2",
+        "OBJ-3",
+        "OBJ-4"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [],
+      "section_id": "SEC-05",
+      "section_name": "研究问题与目标",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "说明中心命题与三项问题的逻辑关系"
+          ],
+          "subsection_id": "SEC-05-01",
+          "title": "中心命题分解"
+        },
+        {
+          "paragraph_roles": [
+            "逐项定义问题、目标和边界",
+            "列出验证与反证证据"
+          ],
+          "subsection_id": "SEC-05-02",
+          "title": "研究问题与目标"
+        }
+      ],
+      "target_pages": 0.8,
+      "visual_ids": [
+        "TAB-02"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 2700,
+        "min": 2100
+      },
+      "max_pages": 3.6,
+      "must_answer": [
+        "每项研究内容解决什么问题、采用什么机制、产生什么知识贡献。",
+        "五个工作包如何依赖并形成可验证原型。"
+      ],
+      "must_include": [
+        "四项研究内容的任务分解",
+        "五个工作包的依赖与交付",
+        "方法、指标和验证场景映射"
+      ],
+      "must_not_claim": [
+        "不得只写系统功能清单",
+        "不得把原型实现替代科学问题",
+        "不得补造团队分工和项目周期"
+      ],
+      "order": 6,
+      "purpose": "完整展开四项研究内容和五个工作包，说明各任务的输入、机制、输出、依赖和知识贡献，形成全文最主要的技术内容。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "OBJ-1",
+        "OBJ-2",
+        "OBJ-3",
+        "OBJ-4",
+        "RC-1",
+        "RC-2",
+        "RC-3",
+        "RC-4",
+        "WP-1",
+        "WP-2",
+        "WP-3",
+        "WP-4",
+        "WP-5",
+        "M-1",
+        "M-2",
+        "M-3",
+        "M-4",
+        "M-5",
+        "M-6",
+        "M-7"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [],
+      "section_id": "SEC-06",
+      "section_name": "研究内容与工作包",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "展开RC-1与WP-1",
+            "说明M-1和M-2的研究任务与输出"
+          ],
+          "subsection_id": "SEC-06-01",
+          "title": "共享决策态势与增量一致性"
+        },
+        {
+          "paragraph_roles": [
+            "展开RC-2与WP-2",
+            "说明M-3和M-4的协同机制"
+          ],
+          "subsection_id": "SEC-06-02",
+          "title": "候选竞争与确定性可行化"
+        },
+        {
+          "paragraph_roles": [
+            "展开RC-3与WP-3、WP-4",
+            "说明M-5和M-6的决策逻辑"
+          ],
+          "subsection_id": "SEC-06-03",
+          "title": "人工关键干预与冲刺调度"
+        },
+        {
+          "paragraph_roles": [
+            "展开RC-4与WP-5",
+            "说明M-7及统一试验协议"
+          ],
+          "subsection_id": "SEC-06-04",
+          "title": "Trace评价与跨场景验证"
+        },
+        {
+          "paragraph_roles": [
+            "汇总工作包依赖",
+            "绑定交付物和评价证据"
+          ],
+          "subsection_id": "SEC-06-05",
+          "title": "内容依赖与交付闭环"
+        }
+      ],
+      "target_pages": 3.2,
+      "visual_ids": [
+        "TAB-03"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 900,
+        "min": 650
+      },
+      "max_pages": 1.2,
+      "must_answer": [
+        "每项关键问题的难点为何不能由常规串联方法直接解决。",
+        "何种失败现象将说明方法没有突破。"
+      ],
+      "must_include": [
+        "关键问题的内在矛盾",
+        "可形式化变量与约束",
+        "失败模式和判断标准"
+      ],
+      "must_not_claim": [
+        "不得重复罗列工作包任务",
+        "不得把一般工程难点冒充科学问题",
+        "不得省略可证伪判断"
+      ],
+      "order": 7,
+      "purpose": "从表示一致性、有限窗口资源调度和人机权限证据链三个方面提炼真正需要突破的关键科学与技术问题，避免与研究内容重复。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "GAP-1",
+        "GAP-2",
+        "GAP-3",
+        "RQ-1",
+        "RQ-2",
+        "RQ-3",
+        "FM-1",
+        "FM-2",
+        "FM-3"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [],
+      "section_id": "SEC-07",
+      "section_name": "关键科学与技术问题",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "分析语义、版本和依赖传播矛盾"
+          ],
+          "subsection_id": "SEC-07-01",
+          "title": "共享状态的一致性与增量性"
+        },
+        {
+          "paragraph_roles": [
+            "分析anytime决策与停止矛盾"
+          ],
+          "subsection_id": "SEC-07-02",
+          "title": "有限窗口的质量—成本—风险调度"
+        },
+        {
+          "paragraph_roles": [
+            "分析权限、交接和归因矛盾"
+          ],
+          "subsection_id": "SEC-07-03",
+          "title": "人工控制与协同收益证据"
+        }
+      ],
+      "target_pages": 1.0,
+      "visual_ids": []
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 1900,
+        "min": 1450
+      },
+      "max_pages": 2.5,
+      "must_answer": [
+        "完整流程怎样在有限窗口内持续产生可行且可追溯的最好候选。",
+        "数据、模型、工具和人工决定怎样交接与回滚。"
+      ],
+      "must_include": [
+        "端到端技术路线",
+        "人机协同循环与停止规则",
+        "异常、降级和回滚路径",
+        "模型API可替换接口合同"
+      ],
+      "must_not_claim": [
+        "不得把语言模型输出直接作为执行决策",
+        "不得省略确定性工具和人工确认",
+        "不得绑定某个具体模型品牌作为必要条件"
+      ],
+      "order": 8,
+      "purpose": "给出从输入治理、共享态势、多智能体候选竞争、确定性校验、人工干预、资源调度到Trace评价的完整技术路线和人机循环。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "FM-1",
+        "FM-2",
+        "FM-3",
+        "RC-1",
+        "RC-2",
+        "RC-3",
+        "RC-4",
+        "M-1",
+        "M-2",
+        "M-3",
+        "M-4",
+        "M-5",
+        "M-6",
+        "M-7",
+        "MECH-1",
+        "MECH-2",
+        "MECH-3",
+        "MECH-4",
+        "MECH-5"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [],
+      "section_id": "SEC-08",
+      "section_name": "技术路线与人机协同流程",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "说明输入、状态、候选、校验、调度和输出链"
+          ],
+          "subsection_id": "SEC-08-01",
+          "title": "总体技术路线"
+        },
+        {
+          "paragraph_roles": [
+            "说明角色职责和结构化交接",
+            "说明求解器与规则工具闭环"
+          ],
+          "subsection_id": "SEC-08-02",
+          "title": "多智能体协同与工具调用"
+        },
+        {
+          "paragraph_roles": [
+            "说明高价值提问、裁定范围和撤销关系"
+          ],
+          "subsection_id": "SEC-08-03",
+          "title": "人工干预与权限交接"
+        },
+        {
+          "paragraph_roles": [
+            "说明剩余时间驱动的继续与停止",
+            "说明失败恢复和当前最好解保留"
+          ],
+          "subsection_id": "SEC-08-04",
+          "title": "停止、降级与恢复"
+        }
+      ],
+      "target_pages": 2.2,
+      "visual_ids": [
+        "FIG-02",
+        "FIG-03"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 900,
+        "min": 650
+      },
+      "max_pages": 1.2,
+      "must_answer": [
+        "每项创新相对于最接近工作增加了什么机制组合。",
+        "怎样通过实验和反证规则判断创新假设是否成立。"
+      ],
+      "must_include": [
+        "最近工作—机制边界—新增机制—比较维度—验证证据五联表",
+        "三个创新假设的适用条件",
+        "失败时的降级表述"
+      ],
+      "must_not_claim": [
+        "不得使用首次、首创、国际领先等绝对表述",
+        "不得把创新假设写成已证实创新",
+        "不得脱离最近工作单独罗列亮点"
+      ],
+      "order": 9,
+      "purpose": "以三个创新假设为核心，对照最近工作和比较维度说明拟新增机制、适用边界和待验证证据，形成可审查的相对创新论证。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "PRIOR-1",
+        "PRIOR-2",
+        "PRIOR-3",
+        "INNO-H1",
+        "INNO-H2",
+        "INNO-H3",
+        "MECH-1",
+        "MECH-2",
+        "MECH-3",
+        "MECH-4",
+        "MECH-5"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [
+        "SRC-PUB-01",
+        "SRC-PUB-02",
+        "SRC-PUB-03",
+        "SRC-PUB-04",
+        "SRC-PUB-05",
+        "SRC-PUB-06",
+        "SRC-PUB-08",
+        "SRC-PUB-09",
+        "SRC-PUB-10",
+        "SRC-PUB-11",
+        "SRC-PUB-12",
+        "SRC-PUB-13",
+        "SRC-STD-01"
+      ],
+      "section_id": "SEC-09",
+      "section_name": "创新点",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "绑定PRIOR-1和INNO-H1",
+            "说明比较维度和验证证据"
+          ],
+          "subsection_id": "SEC-09-01",
+          "title": "版本化共享态势与增量失效传播"
+        },
+        {
+          "paragraph_roles": [
+            "绑定PRIOR-2和INNO-H2",
+            "说明边际增益与停止机制"
+          ],
+          "subsection_id": "SEC-09-02",
+          "title": "有限窗口的协同资源调度"
+        },
+        {
+          "paragraph_roles": [
+            "绑定PRIOR-3和INNO-H3",
+            "说明权限证据和评价机制"
+          ],
+          "subsection_id": "SEC-09-03",
+          "title": "全过程Trace与责任收益归因"
+        }
+      ],
+      "target_pages": 1.0,
+      "visual_ids": [
+        "TAB-04"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 1050,
+        "min": 800
+      },
+      "max_pages": 1.4,
+      "must_answer": [
+        "如何以相同任务和资源预算公平比较人机协同与基线。",
+        "每项指标如何测量、统计和支持反证。"
+      ],
+      "must_include": [
+        "四类基线与五组试验",
+        "八项指标的定义和统计协议",
+        "跨场景任务集、扰动和消融设计",
+        "暂定阈值重新标定规则"
+      ],
+      "must_not_claim": [
+        "不得把30%、10%、25%、80%等目标写成实测结果",
+        "不得只报告平均值而隐藏失败和超时",
+        "不得在无基线数据时固定最终权重"
+      ],
+      "order": 10,
+      "purpose": "冻结基线、对照、消融、扰动和跨场景评价方案，定义八项指标的测量协议和统计报告方式，不提前承诺实测结果。",
+      "required_metric_ids": [
+        "MET-1",
+        "MET-2",
+        "MET-3",
+        "MET-4",
+        "MET-5",
+        "MET-6",
+        "MET-7",
+        "MET-8"
+      ],
+      "required_node_ids": [
+        "BL-1",
+        "BL-2",
+        "BL-3",
+        "BL-4",
+        "EXP-1",
+        "EXP-2",
+        "EXP-3",
+        "EXP-4",
+        "EXP-5",
+        "MET-1",
+        "MET-2",
+        "MET-3",
+        "MET-4",
+        "MET-5",
+        "MET-6",
+        "MET-7",
+        "MET-8"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [
+        "SRC-PUB-05",
+        "SRC-PUB-07",
+        "SRC-PUB-12",
+        "SRC-PUB-13",
+        "SRC-STD-01"
+      ],
+      "section_id": "SEC-10",
+      "section_name": "评价指标与验证方案",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "定义纯人工、单一自动、固定协同和最佳非冲刺基线",
+            "定义对照、消融和扰动组"
+          ],
+          "subsection_id": "SEC-10-01",
+          "title": "基线与实验组"
+        },
+        {
+          "paragraph_roles": [
+            "逐项定义MET-1至MET-8",
+            "规定置信区间、分布与失败案例报告"
+          ],
+          "subsection_id": "SEC-10-02",
+          "title": "指标与统计协议"
+        },
+        {
+          "paragraph_roles": [
+            "说明四类验证场景",
+            "绑定研究问题的反证标准"
+          ],
+          "subsection_id": "SEC-10-03",
+          "title": "跨场景验证与反证"
+        }
+      ],
+      "target_pages": 1.2,
+      "visual_ids": [
+        "TAB-05",
+        "FIG-04"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 950,
+        "min": 700
+      },
+      "max_pages": 1.3,
+      "must_answer": [
+        "现有经历和内部Trace能证明哪些能力，不能证明哪些结果。",
+        "项目启动还需要补充哪些团队、数据和实验条件。"
+      ],
+      "must_include": [
+        "用户陈述与内部Trace的分级证据",
+        "能力与研究内容的对应关系",
+        "需补证据和条件建设计划"
+      ],
+      "must_not_claim": [
+        "不得把用户陈述写成已核验论文或验收成果",
+        "不得把本次智能体Trace等同于目标方法实证结果",
+        "不得虚构团队名单、经费和设备"
+      ],
+      "order": 11,
+      "purpose": "在证据等级允许的范围内说明已有研究和工程能力、可复用资产及当前缺口，证明项目可启动而不虚构正式成果。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "FOUND-1",
+        "FOUND-2",
+        "FOUND-3",
+        "BOUND-1",
+        "BOUND-2",
+        "BOUND-3",
+        "BOUND-4",
+        "BOUND-5"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [
+        "SRC-UA-01",
+        "SRC-UA-02",
+        "SRC-TRACE-01",
+        "SRC-TRACE-02"
+      ],
+      "section_id": "SEC-11",
+      "section_name": "研究基础与条件",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "限定说明状态建模、优化和复杂方案经历"
+          ],
+          "subsection_id": "SEC-11-01",
+          "title": "相关研究与项目经历"
+        },
+        {
+          "paragraph_roles": [
+            "说明阶段Trace证明的工程能力和边界"
+          ],
+          "subsection_id": "SEC-11-02",
+          "title": "智能体与工具集成基础"
+        },
+        {
+          "paragraph_roles": [
+            "列出团队证明、场景数据和实验条件缺口"
+          ],
+          "subsection_id": "SEC-11-03",
+          "title": "条件缺口与补充计划"
+        }
+      ],
+      "target_pages": 1.1,
+      "visual_ids": [
+        "TAB-06"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 700,
+        "min": 500
+      },
+      "max_pages": 1.0,
+      "must_answer": [
+        "工作包按什么依赖顺序推进。",
+        "每个阶段用什么中间工件和证据判断完成。"
+      ],
+      "must_include": [
+        "方法研究、原型集成和验证的阶段关系",
+        "里程碑及验收证据",
+        "正式周期到位后的映射规则"
+      ],
+      "must_not_claim": [
+        "不得虚构项目起止时间或年度安排",
+        "不得把计划交付写成已交付成果",
+        "不得承诺未提供的经费配置"
+      ],
+      "order": 12,
+      "purpose": "以工作包依赖和里程碑逻辑给出不绑定具体年度的阶段计划，说明各阶段的输入、输出、验收证据和前置条件。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "OBJ-1",
+        "OBJ-2",
+        "OBJ-3",
+        "OBJ-4",
+        "WP-1",
+        "WP-2",
+        "WP-3",
+        "WP-4",
+        "WP-5"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [],
+      "section_id": "SEC-12",
+      "section_name": "研究计划与里程碑",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "按能力依赖组织工作包",
+            "定义阶段性证据和Gate"
+          ],
+          "subsection_id": "SEC-12-01",
+          "title": "阶段依赖与里程碑"
+        },
+        {
+          "paragraph_roles": [
+            "说明周期确定后的映射",
+            "说明场景和证据变化后的重排"
+          ],
+          "subsection_id": "SEC-12-02",
+          "title": "计划调整机制"
+        }
+      ],
+      "target_pages": 0.8,
+      "visual_ids": [
+        "TAB-07"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 550,
+        "min": 350
+      },
+      "max_pages": 0.8,
+      "must_answer": [
+        "关键风险如何被及时发现并限制影响。",
+        "在模型、工具或人工输入不可用时怎样保持可控降级。"
+      ],
+      "must_include": [
+        "风险触发条件与监测信号",
+        "预防、降级、回滚和人工接管措施",
+        "组织责任原则与开放事项"
+      ],
+      "must_not_claim": [
+        "不得虚构正式组织架构和实名负责人",
+        "不得承诺风险完全消除",
+        "不得把通用治理标准写成申报机构专门要求"
+      ],
+      "order": 13,
+      "purpose": "围绕依赖遗漏、收益估计、人工反馈和场景代表性四类风险给出预防、监测、降级和责任安排原则。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "RISK-1",
+        "RISK-2",
+        "RISK-3",
+        "RISK-4",
+        "BOUND-1",
+        "BOUND-2",
+        "BOUND-3",
+        "BOUND-4",
+        "BOUND-5"
+      ],
+      "required_rq_ids": [
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [
+        "SRC-STD-01"
+      ],
+      "section_id": "SEC-13",
+      "section_name": "风险与组织管理",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "覆盖状态依赖和收益估计风险",
+            "给出监测与保守策略"
+          ],
+          "subsection_id": "SEC-13-01",
+          "title": "技术与数据风险"
+        },
+        {
+          "paragraph_roles": [
+            "覆盖反馈冲突和场景代表性",
+            "给出人工接管和报告边界"
+          ],
+          "subsection_id": "SEC-13-02",
+          "title": "人机与评价风险"
+        },
+        {
+          "paragraph_roles": [
+            "定义角色原则和变更记录",
+            "保留正式团队信息缺口"
+          ],
+          "subsection_id": "SEC-13-03",
+          "title": "组织管理原则"
+        }
+      ],
+      "target_pages": 0.6,
+      "visual_ids": [
+        "TAB-08"
+      ]
+    },
+    {
+      "contract_status": "PROVISIONAL_REVALIDATION_REQUIRED",
+      "expected_words": {
+        "max": 400,
+        "min": 250
+      },
+      "max_pages": 0.6,
+      "must_answer": [
+        "RQ-1至RQ-3分别由什么机制和证据回答。",
+        "中心命题在什么条件下成立或被否定。"
+      ],
+      "must_include": [
+        "三项研究问题逐一闭环",
+        "三项创新假设与验证证据",
+        "中心命题边界和最终开放事项"
+      ],
+      "must_not_claim": [
+        "不得引入正文未论证的新结论",
+        "不得把创新假设写成已验证成果",
+        "不得宣称最终申报条件已经齐备"
+      ],
+      "order": 14,
+      "purpose": "以中心命题为主线逐一回答三项研究问题，汇总相对创新贡献、验证路径、适用边界和剩余未决事项，形成全文论证闭环。",
+      "required_metric_ids": [],
+      "required_node_ids": [
+        "CP-1",
+        "RQ-1",
+        "RQ-2",
+        "RQ-3",
+        "OBJ-1",
+        "OBJ-2",
+        "OBJ-3",
+        "OBJ-4",
+        "INNO-H1",
+        "INNO-H2",
+        "INNO-H3"
+      ],
+      "required_rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "required_source_ids": [],
+      "section_id": "SEC-14",
+      "section_name": "结论",
+      "subsections": [
+        {
+          "paragraph_roles": [
+            "逐一回答RQ-1、RQ-2和RQ-3",
+            "绑定目标、机制和验证证据"
+          ],
+          "subsection_id": "SEC-14-01",
+          "title": "研究问题闭环"
+        },
+        {
+          "paragraph_roles": [
+            "回扣三项创新假设",
+            "说明成立条件、反证和未决事项"
+          ],
+          "subsection_id": "SEC-14-02",
+          "title": "中心命题与边界"
+        }
+      ],
+      "target_pages": 0.4,
+      "visual_ids": []
+    }
+  ],
+  "stage": "STAGE_5_PROVISIONAL_SECTION_PLANNING",
+  "upstream_artifacts": [
+    {
+      "sha256": "11928d6ccfa2b98cf345d63699f6a5d197aa280f9f3cae3937a048ec9f064d2f",
+      "stage": "STAGE_1_DESIGN_INPUT"
+    },
+    {
+      "sha256": "9f2f913fd63353a2bc65b93baa23fc93459a4a3301d7ba50418aa0044f18ac90",
+      "stage": "STAGE_3_PROJECT_DEFINITION"
+    },
+    {
+      "sha256": "eeb079481199851261d137c96e0666aff95bb08222d8f318461ccf91a55b6b4f",
+      "stage": "STAGE_4_ARGUMENT_ARCHITECTURE"
+    },
+    {
+      "sha256": "92e7855073d8ee0fa4e3ddf8b348933dd19ef2c8319349705b85fc6d05fca8f7",
+      "stage": "STAGE_4A_EVIDENCE_COMPLETION"
+    }
+  ],
+  "visual_plan": [
+    {
+      "content_spec": "列为研究方向、代表来源、核心机制、适用对象、未覆盖机制、对应研究问题和比较维度，不填写绝对领先结论。",
+      "purpose": "按三个研究问题展示已有机制、适用范围、局限和本项目比较维度。",
+      "required_node_ids": [
+        "PRIOR-1",
+        "PRIOR-2",
+        "PRIOR-3",
+        "GAP-1",
+        "GAP-2",
+        "GAP-3"
+      ],
+      "section_id": "SEC-03",
+      "status": "PLANNED",
+      "title": "最近工作机制与研究边界比较表",
+      "visual_id": "TAB-01",
+      "visual_type": "TABLE"
+    },
+    {
+      "content_spec": "采用共享态势层、有限窗口调度层、人机权限证据层三层结构，并标出状态、候选、预算、人工决定和Trace的流向。",
+      "purpose": "展示三个形式化模型、五项作用机制与中心命题之间的因果关系。",
+      "required_node_ids": [
+        "CP-1",
+        "FM-1",
+        "FM-2",
+        "FM-3",
+        "MECH-1",
+        "MECH-2",
+        "MECH-3",
+        "MECH-4",
+        "MECH-5"
+      ],
+      "section_id": "SEC-04",
+      "status": "PLANNED",
+      "title": "人机协同决策优势冲刺理论框架",
+      "visual_id": "FIG-01",
+      "visual_type": "FIGURE"
+    },
+    {
+      "content_spec": "每行一个研究问题，列出差距、目标、研究内容、方法、验证证据和反证条件。",
+      "purpose": "为全文提供三项研究问题的唯一结构索引。",
+      "required_node_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3",
+        "OBJ-1",
+        "OBJ-2",
+        "OBJ-3",
+        "OBJ-4",
+        "RC-1",
+        "RC-2",
+        "RC-3",
+        "RC-4"
+      ],
+      "section_id": "SEC-05",
+      "status": "PLANNED",
+      "title": "研究问题—目标—内容—方法对应矩阵",
+      "visual_id": "TAB-02",
+      "visual_type": "TABLE"
+    },
+    {
+      "content_spec": "列为研究内容、工作包、关键任务、输入、输出、方法ID、指标ID、验证场景和前置依赖。",
+      "purpose": "说明四项研究内容和五个工作包的任务依赖及交付证据。",
+      "required_node_ids": [
+        "RC-1",
+        "RC-2",
+        "RC-3",
+        "RC-4",
+        "WP-1",
+        "WP-2",
+        "WP-3",
+        "WP-4",
+        "WP-5"
+      ],
+      "section_id": "SEC-06",
+      "status": "PLANNED",
+      "title": "研究内容与工作包交付闭环表",
+      "visual_id": "TAB-03",
+      "visual_type": "TABLE"
+    },
+    {
+      "content_spec": "按输入层、共享态势层、多智能体与工具层、人机决策层、评价层绘制，标出结构化接口和回路。",
+      "purpose": "展示从输入治理到候选确认和评价归档的端到端技术路径。",
+      "required_node_ids": [
+        "FM-1",
+        "FM-2",
+        "FM-3",
+        "RC-1",
+        "RC-2",
+        "RC-3",
+        "RC-4"
+      ],
+      "section_id": "SEC-08",
+      "status": "PLANNED",
+      "title": "总体技术路线与数据流",
+      "visual_id": "FIG-02",
+      "visual_type": "FIGURE"
+    },
+    {
+      "content_spec": "以当前最好可行候选为中心，环绕生成、批判、校验、求解、询问、修复动作，并以剩余时间和边际增益控制循环。",
+      "purpose": "解释下一动作选择、人工干预、停止、降级和回滚的循环逻辑。",
+      "required_node_ids": [
+        "M-3",
+        "M-4",
+        "M-5",
+        "M-6",
+        "MECH-2",
+        "MECH-3",
+        "MECH-4"
+      ],
+      "section_id": "SEC-08",
+      "status": "PLANNED",
+      "title": "有限决策窗口内的人机协同循环",
+      "visual_id": "FIG-03",
+      "visual_type": "FIGURE"
+    },
+    {
+      "content_spec": "列为创新假设、最近工作节点、已有机制、本项目拟新增机制、比较维度、验证试验、反证条件和降级表述。",
+      "purpose": "强制每项创新假设同时绑定最近工作、机制边界和验证证据。",
+      "required_node_ids": [
+        "PRIOR-1",
+        "PRIOR-2",
+        "PRIOR-3",
+        "INNO-H1",
+        "INNO-H2",
+        "INNO-H3"
+      ],
+      "section_id": "SEC-09",
+      "status": "PLANNED",
+      "title": "创新假设与最近工作绑定表",
+      "visual_id": "TAB-04",
+      "visual_type": "TABLE"
+    },
+    {
+      "content_spec": "列出任务冻结点、停止点、基线组、实验组、指标公式、统计摘要、超时与失败处理和阈值状态。",
+      "purpose": "统一基线、对照消融实验和八项指标的测量口径。",
+      "required_node_ids": [
+        "BL-1",
+        "BL-2",
+        "BL-3",
+        "BL-4",
+        "EXP-1",
+        "EXP-2",
+        "EXP-3",
+        "EXP-4",
+        "EXP-5",
+        "MET-1",
+        "MET-2",
+        "MET-3",
+        "MET-4",
+        "MET-5",
+        "MET-6",
+        "MET-7",
+        "MET-8"
+      ],
+      "section_id": "SEC-10",
+      "status": "PLANNED",
+      "title": "基线—实验—指标测量协议表",
+      "visual_id": "TAB-05",
+      "visual_type": "TABLE"
+    },
+    {
+      "content_spec": "四类验证场景共享实验协议，分别进入基线、完整方法和消融组，输出过程与结果指标及适用边界。",
+      "purpose": "展示统一任务集、资源预算、扰动注入、过程Trace和统计分析关系。",
+      "required_node_ids": [
+        "EXP-1",
+        "EXP-2",
+        "EXP-3",
+        "EXP-4",
+        "EXP-5",
+        "MET-1",
+        "MET-2",
+        "MET-3",
+        "MET-4",
+        "MET-5",
+        "MET-6",
+        "MET-7",
+        "MET-8"
+      ],
+      "section_id": "SEC-10",
+      "status": "PLANNED",
+      "title": "跨场景对照与消融评价架构",
+      "visual_id": "FIG-04",
+      "visual_type": "FIGURE"
+    },
+    {
+      "content_spec": "列为能力方向、来源ID、证据等级、可支撑表述、不可支撑表述、对应研究内容和需补材料。",
+      "purpose": "区分用户陈述、内部Trace和计划补证据，避免研究基础过度声称。",
+      "required_node_ids": [
+        "FOUND-1",
+        "FOUND-2",
+        "FOUND-3"
+      ],
+      "section_id": "SEC-11",
+      "status": "PLANNED",
+      "title": "研究基础证据等级与能力映射表",
+      "visual_id": "TAB-06",
+      "visual_type": "TABLE"
+    },
+    {
+      "content_spec": "列为阶段、工作包、前置条件、关键任务、中间工件、验收证据、并行关系和周期确定后的映射位置。",
+      "purpose": "在正式周期未定时，以逻辑阶段表达计划和验收证据。",
+      "required_node_ids": [
+        "WP-1",
+        "WP-2",
+        "WP-3",
+        "WP-4",
+        "WP-5"
+      ],
+      "section_id": "SEC-12",
+      "status": "PLANNED",
+      "title": "工作包依赖与里程碑表",
+      "visual_id": "TAB-07",
+      "visual_type": "TABLE"
+    },
+    {
+      "content_spec": "列为风险、触发条件、监测信号、影响范围、预防措施、降级或回滚、人工接管点和责任原则。",
+      "purpose": "把四类风险映射为可监测信号、预防措施和降级路径。",
+      "required_node_ids": [
+        "RISK-1",
+        "RISK-2",
+        "RISK-3",
+        "RISK-4"
+      ],
+      "section_id": "SEC-13",
+      "status": "PLANNED",
+      "title": "风险触发—监测—处置矩阵",
+      "visual_id": "TAB-08",
+      "visual_type": "TABLE"
+    }
+  ]
+}

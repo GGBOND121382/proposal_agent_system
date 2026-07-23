@@ -76,6 +76,66 @@ STRUCTURAL_BLOCK_RE = re.compile(
 NUMBER_RE = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?%?")
 CITATION_RE = re.compile(r"\[(?:\d+(?:\s*[-,，]\s*\d+)*)\]")
 
+# Number-like tokens used only as structural identifiers must not be treated as
+# quantitative claims.  The fact ledger requires object/unit/condition binding
+# for substantive quantities (for example, “2个原型”, “2027年” and “100%”),
+# but labels such as “阶段0”, “WF-1”, “版本2.0” or a Markdown list ordinal do
+# not carry that semantics.  Keep this distinction deterministic so replacing
+# the language-model executor cannot turn harmless identifiers into fake
+# measurements merely to satisfy the quality gate.
+_IDENTIFIER_NUMBER_PREFIX_RE = re.compile(
+    r"(?:"
+    r"阶段|章节|章|节|版本|版次|工作流|流程|步骤|批次|轮次|序号|编号|标识|"
+    r"stage|phase|chapter|section|version|ver|v|workflow|wf|step|round|batch|id|no"
+    r")\s*(?:[-_:#.]\s*)?$",
+    re.IGNORECASE,
+)
+_IDENTIFIER_NUMBER_SUFFIX_RE = re.compile(
+    r"^\s*(?:阶段|章|章节|节|版|版本|号)(?:\b|(?=[一-龥]))",
+    re.IGNORECASE,
+)
+
+
+def _substantive_numeric_tokens(text: str) -> list[str]:
+    """Return numeric tokens that represent values rather than identifiers.
+
+    The production Track-B module widens ``NUMBER_RE`` so numbers adjacent to
+    Chinese text are visible.  This helper then removes only deterministic
+    identifier forms; all other numbers remain subject to value/unit/object/
+    condition binding.
+    """
+
+    tokens: list[str] = []
+    for match in NUMBER_RE.finditer(text or ""):
+        start, end = match.span()
+        before = text[:start]
+        after = text[end:]
+        left = before[-32:]
+        right = after[:32]
+
+        # Ordered-list and parenthesized ordinal markers: ``1.`` / ``1、`` /
+        # ``(1)`` / ``（1）``.  They describe structure, not a measurement.
+        line_prefix = before[before.rfind("\n") + 1 :]
+        if not line_prefix.strip() and re.match(r"^\s*[.、)）]", right):
+            continue
+        if re.search(r"[(（]\s*$", left) and re.match(r"^\s*[)）]", right):
+            continue
+
+        # Chinese/English stage, chapter, workflow and version labels.
+        if _IDENTIFIER_NUMBER_PREFIX_RE.search(left):
+            continue
+        if _IDENTIFIER_NUMBER_SUFFIX_RE.search(right):
+            continue
+
+        # Code-like identifiers such as ``P-1``, ``node_2`` or ``WF-1-A``.
+        if re.search(r"[A-Za-z][A-Za-z0-9_-]*[-_:]$", left):
+            continue
+        if re.match(r"^[-_:][A-Za-z0-9_-]", right):
+            continue
+
+        tokens.append(match.group(0))
+    return tokens
+
 
 def _safe_evidence_ref(value: Any) -> str:
     ref = re.sub(r"[^A-Za-z0-9._:-]+", "_", str(value)).strip("._:-")
@@ -479,7 +539,7 @@ class AgentPromptKernelValidator:
                     "PROJECT_KNOWLEDGE_AGENT",
                     evidence_refs=[claim_id],
                 ))
-            numeric_tokens = NUMBER_RE.findall(text)
+            numeric_tokens = _substantive_numeric_tokens(text)
             numeric_values = claim.get("numeric_values") or []
             if numeric_tokens and not numeric_values:
                 findings.append(_finding(

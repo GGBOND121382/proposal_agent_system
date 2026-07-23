@@ -1,0 +1,1113 @@
+{
+  "central_proposition": {
+    "boundary_conditions": [
+      "目标场景能够提供结构化或可转换的任务、资源、规则和结果数据。",
+      "至少存在一种确定性规则工具或优化求解器用于校验硬约束和候选可行性。",
+      "业务人员能够在有限次数内提供偏好选择、分歧裁定和最终确认。",
+      "模型端点能够遵循统一JSON合同，且业务工作流不依赖特定模型名称。",
+      "授权人员保留最终方案确认权，语言模型输出不直接作为可执行决策。"
+    ],
+    "falsification_conditions": [
+      "在相同任务集和资源预算下，完整方法不能比固定轮次协同或最佳非冲刺基线更快形成通过全部硬约束的候选。",
+      "在通过硬约束的前提下，完整方法不能稳定提高最终综合方案质量或扰动后的质量保持能力。",
+      "引入主动提问、权限交接和人工裁定后，人工投入未下降且方案采纳表现没有改善。",
+      "共享状态与版本依赖机制不能维持关键对象一致性或无法完整追溯关键选择依据。"
+    ],
+    "knowledge_status": "CONFIRMED_DESIGN",
+    "mechanism_ids": [
+      "M-1",
+      "M-2",
+      "M-3",
+      "M-4",
+      "M-5",
+      "M-6",
+      "M-7"
+    ],
+    "outcome_metric_ids": [
+      "MET-1",
+      "MET-2",
+      "MET-3",
+      "MET-4",
+      "MET-5",
+      "MET-6",
+      "MET-7",
+      "MET-8"
+    ],
+    "proposition_id": "CP-1",
+    "source_fact_ids": [
+      "FACT-080",
+      "FACT-005",
+      "FACT-006",
+      "FACT-008",
+      "FACT-009",
+      "FACT-026",
+      "FACT-027",
+      "FACT-028",
+      "FACT-029",
+      "FACT-030",
+      "FACT-031",
+      "FACT-032"
+    ],
+    "statement": "若建立统一的任务—资源—约束—偏好—不确定性态势模型，以角色分离的生成、校验、批判和修复智能体形成候选竞争，并允许人类在关键分歧点注入偏好、裁定风险和调整优先级，再由优势冲刺调度器依据边际增益、剩余时间和证据完整性动态分配推理与求解资源，则可以在保持人工控制和可追溯性的前提下，提高有限决策窗口内获得可行方案的速度、最终方案质量及扰动条件下的稳健性。"
+  },
+  "document_contract": {
+    "body_page_limit": 20,
+    "contract_status": "PARTIAL_CONFIRMED",
+    "document_type": "科研项目申请书",
+    "language": "zh-CN",
+    "official_template_status": "UNKNOWN",
+    "references_outside_body_limit": true,
+    "target_body_pages": {
+      "max": 18,
+      "min": 16
+    }
+  },
+  "fact_usage": {
+    "direct_fact_ids": [
+      "FACT-003",
+      "FACT-004",
+      "FACT-005",
+      "FACT-006",
+      "FACT-007",
+      "FACT-008",
+      "FACT-009",
+      "FACT-010",
+      "FACT-011",
+      "FACT-012",
+      "FACT-013",
+      "FACT-014",
+      "FACT-015",
+      "FACT-016",
+      "FACT-017",
+      "FACT-018",
+      "FACT-019",
+      "FACT-020",
+      "FACT-021",
+      "FACT-022",
+      "FACT-023",
+      "FACT-024",
+      "FACT-025",
+      "FACT-026",
+      "FACT-027",
+      "FACT-028",
+      "FACT-029",
+      "FACT-030",
+      "FACT-031",
+      "FACT-032",
+      "FACT-041",
+      "FACT-042",
+      "FACT-043",
+      "FACT-044",
+      "FACT-045",
+      "FACT-046",
+      "FACT-064",
+      "FACT-065",
+      "FACT-066",
+      "FACT-067",
+      "FACT-068",
+      "FACT-069",
+      "FACT-070",
+      "FACT-071",
+      "FACT-072",
+      "FACT-073",
+      "FACT-074",
+      "FACT-075",
+      "FACT-076",
+      "FACT-077",
+      "FACT-078",
+      "FACT-079",
+      "FACT-080",
+      "FACT-081",
+      "FACT-082",
+      "FACT-083",
+      "FACT-084"
+    ],
+    "prohibited_fact_ids_checked": [
+      "FACT-051",
+      "FACT-052",
+      "FACT-053",
+      "FACT-054",
+      "FACT-055",
+      "FACT-056",
+      "FACT-057",
+      "FACT-058",
+      "FACT-059",
+      "FACT-060",
+      "FACT-061",
+      "FACT-062",
+      "FACT-063"
+    ],
+    "qualified_fact_ids": [
+      "FACT-033",
+      "FACT-034",
+      "FACT-035",
+      "FACT-036",
+      "FACT-037",
+      "FACT-038",
+      "FACT-039",
+      "FACT-040",
+      "FACT-047",
+      "FACT-048",
+      "FACT-049",
+      "FACT-050"
+    ],
+    "unknown_open_item_ids_inherited": [
+      "OPEN-001",
+      "OPEN-002",
+      "OPEN-003",
+      "OPEN-004",
+      "OPEN-005",
+      "OPEN-006",
+      "OPEN-007",
+      "OPEN-008",
+      "OPEN-009",
+      "OPEN-010",
+      "OPEN-011",
+      "OPEN-012",
+      "OPEN-013"
+    ]
+  },
+  "innovation_hypotheses": [
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "closest_prior_work_status": "NOT_RESEARCHED",
+      "comparison_dimensions": [
+        "状态语义粒度",
+        "版本一致性",
+        "影响传播范围",
+        "候选依据追溯"
+      ],
+      "innovation_id": "INNO-H1",
+      "novelty_status": "TO_BE_VALIDATED",
+      "statement": "将共享决策态势、版本依赖和事件驱动的增量失效传播组合为多智能体协同的统一状态基础，可能形成区别于仅共享对话上下文的机制。"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "closest_prior_work_status": "NOT_RESEARCHED",
+      "comparison_dimensions": [
+        "资源对象范围",
+        "资源调度信号",
+        "冲刺停止条件",
+        "单位时间决策增益"
+      ],
+      "innovation_id": "INNO-H2",
+      "novelty_status": "TO_BE_VALIDATED",
+      "statement": "将智能体推理、优化求解和人工注意力统一视为有限窗口内的可调度资源，并以边际增益、风险和证据完整性共同决定下一动作与停止时机，可能构成优势冲刺的核心方法差异。"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "closest_prior_work_status": "NOT_RESEARCHED",
+      "comparison_dimensions": [
+        "过程证据完整性",
+        "收益归因能力",
+        "人工覆盖可解释性",
+        "失败边界报告"
+      ],
+      "innovation_id": "INNO-H3",
+      "novelty_status": "TO_BE_VALIDATED",
+      "statement": "通过结构化候选、Finding、工具结果和人工决定的全过程Trace，将协同机制的过程贡献、最终结果和责任边界纳入同一评价链，可能形成可验证的人机协同收益证据。"
+    }
+  ],
+  "method_hypotheses": [
+    {
+      "expected_mechanism": "显式版本、来源和依赖关系使事件影响能够沿受影响子图传播，并在候选继续使用前标记失效对象。",
+      "hypothesis_id": "MH-1",
+      "method_ids": [
+        "M-1",
+        "M-2"
+      ],
+      "rq_ids": [
+        "RQ-1"
+      ],
+      "statement": "统一对象关系模型与增量影响传播能够减少多智能体并行运行中的状态不一致、过期依据使用和不必要的全量重算。",
+      "status": "PROPOSED_METHOD_HYPOTHESIS",
+      "test_design": "比较无统一状态、全量同步和增量传播三种设置下的一致性错误、重算范围、传播时延和追溯覆盖。"
+    },
+    {
+      "expected_mechanism": "生成与批判角色独立减少自我确认，规则工具和求解器在候选入集前排除不可行解，责任定位支持局部修复。",
+      "hypothesis_id": "MH-2",
+      "method_ids": [
+        "M-3",
+        "M-4"
+      ],
+      "rq_ids": [
+        "RQ-1",
+        "RQ-2"
+      ],
+      "statement": "角色分离的多智能体候选竞争与确定性工具校验能够在保持硬约束可行的同时提高候选多样性和局部修复效率。",
+      "status": "PROPOSED_METHOD_HYPOTHESIS",
+      "test_design": "比较单Agent、无独立Critic、无确定性工具和完整机制的候选多样性、首个可行解时间、违规数和修复成本。"
+    },
+    {
+      "expected_mechanism": "调度器把资源优先分配给预期单位时间价值较高且能关闭关键风险或证据缺口的动作，并在收益不足时停止。",
+      "hypothesis_id": "MH-3",
+      "method_ids": [
+        "M-4",
+        "M-6"
+      ],
+      "rq_ids": [
+        "RQ-2"
+      ],
+      "statement": "依据边际增益、剩余时间、风险和证据状态进行自适应动作选择，能够在相同资源预算下优于固定轮次或固定角色顺序。",
+      "status": "PROPOSED_METHOD_HYPOTHESIS",
+      "test_design": "在多个时间和算力预算下比较固定轮次、贪心质量改进、仅按风险调度和完整调度的质量时间曲线与按时完成率。"
+    },
+    {
+      "expected_mechanism": "候选差异和不确定性估计将人工注意力集中到机器难以可靠裁定且潜在收益较高的问题，回答被转化为有范围的偏好约束。",
+      "hypothesis_id": "MH-4",
+      "method_ids": [
+        "M-5",
+        "M-6",
+        "M-7"
+      ],
+      "rq_ids": [
+        "RQ-2",
+        "RQ-3"
+      ],
+      "statement": "只在高价值分歧点发起人工交互并记录权限范围，能够在保持最终人工控制的同时降低人工负担并提高方案理解与采纳表现。",
+      "status": "PROPOSED_METHOD_HYPOTHESIS",
+      "test_design": "比较全程人工确认、仅最终审批、固定频率提问和主动高价值提问在人工时间、操作数、覆盖次数、方案质量和采纳率上的差异。"
+    }
+  ],
+  "objectives": [
+    {
+      "content_ids": [
+        "RC-1"
+      ],
+      "objective_id": "OBJ-1",
+      "objective_type": "RESEARCH_OUTCOME",
+      "rq_ids": [
+        "RQ-1"
+      ],
+      "source_fact_ids": [
+        "FACT-013"
+      ],
+      "statement": "构建统一的人机协同决策态势模型，支持任务、资源、约束、偏好、不确定性、候选方案和版本依据的联合表达与增量更新。",
+      "success_evidence": [
+        "对象关系Schema及校验规则",
+        "跨Agent状态一致性与变更传播试验"
+      ]
+    },
+    {
+      "content_ids": [
+        "RC-1",
+        "RC-2",
+        "RC-3"
+      ],
+      "objective_id": "OBJ-2",
+      "objective_type": "RESEARCH_OUTCOME",
+      "rq_ids": [
+        "RQ-1",
+        "RQ-2"
+      ],
+      "source_fact_ids": [
+        "FACT-014"
+      ],
+      "statement": "研究生成、校验、批判、修复和优化求解相结合的多智能体候选竞争机制，形成面向有限窗口的持续可行化与质量提升方法。",
+      "success_evidence": [
+        "候选演化Trace",
+        "与单一生成或单一求解方法的对照结果"
+      ]
+    },
+    {
+      "content_ids": [
+        "RC-3"
+      ],
+      "objective_id": "OBJ-3",
+      "objective_type": "RESEARCH_OUTCOME",
+      "rq_ids": [
+        "RQ-2",
+        "RQ-3"
+      ],
+      "source_fact_ids": [
+        "FACT-015"
+      ],
+      "statement": "研究人类偏好注入、分歧裁定、权限交接和停止判断机制，使人工注意力集中于高价值判断并保持最终控制权。",
+      "success_evidence": [
+        "人工交互协议",
+        "干预位置与方案增益关联分析",
+        "人工覆盖和回滚记录"
+      ]
+    },
+    {
+      "content_ids": [
+        "RC-4"
+      ],
+      "objective_id": "OBJ-4",
+      "objective_type": "VALIDATION_OUTCOME",
+      "rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "source_fact_ids": [
+        "FACT-016"
+      ],
+      "statement": "形成可配置的原型系统和跨场景评价体系，验证人机协同优势冲刺在效率、质量、稳健性、负担和可追溯性方面的适用条件。",
+      "success_evidence": [
+        "四类场景原型试验",
+        "对照、消融和扰动测试报告",
+        "可复现实验数据与Trace"
+      ]
+    }
+  ],
+  "open_items_inherited": [
+    {
+      "blocking_now": false,
+      "field": "官方申报指南",
+      "item_id": "OPEN-001",
+      "required_before_stage": "指南与规则冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "申请书模板与必填结构",
+      "item_id": "OPEN-002",
+      "required_before_stage": "章节规划冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "申报资格与限制",
+      "item_id": "OPEN-003",
+      "required_before_stage": "正式申报可行性确认"
+    },
+    {
+      "blocking_now": false,
+      "field": "申报时间节点",
+      "item_id": "OPEN-004",
+      "required_before_stage": "研究计划冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "评审指标与权重",
+      "item_id": "OPEN-005",
+      "required_before_stage": "论证架构最终冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "附件与证明材料要求",
+      "item_id": "OPEN-006",
+      "required_before_stage": "最终文档导出"
+    },
+    {
+      "blocking_now": false,
+      "field": "申报单位",
+      "item_id": "OPEN-007",
+      "required_before_stage": "最终文档导出"
+    },
+    {
+      "blocking_now": false,
+      "field": "资助机构",
+      "item_id": "OPEN-008",
+      "required_before_stage": "指南与规则冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "团队名单",
+      "item_id": "OPEN-009",
+      "required_before_stage": "研究基础与任务分工写作"
+    },
+    {
+      "blocking_now": false,
+      "field": "经费金额",
+      "item_id": "OPEN-010",
+      "required_before_stage": "预算内容写作"
+    },
+    {
+      "blocking_now": false,
+      "field": "项目周期",
+      "item_id": "OPEN-011",
+      "required_before_stage": "研究计划冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "研究基础证据材料",
+      "item_id": "OPEN-012",
+      "required_before_stage": "研究基础章节写作"
+    },
+    {
+      "blocking_now": false,
+      "field": "正式参考文献范围",
+      "item_id": "OPEN-013",
+      "required_before_stage": "相关工作章节写作"
+    }
+  ],
+  "problem_definition": {
+    "core_contradiction": "有限时间内扩大候选搜索与改进深度的需求，同保持硬约束可行、人工最终控制、关键依据可追溯和按时进入执行准备之间存在持续张力。",
+    "gap_claim_status": "CONFIRMED_DESIGN_HYPOTHESIS_NOT_LITERATURE_CONCLUSION",
+    "problem_statement": "复杂决策任务常同时面临状态持续变化、约束相互耦合、目标彼此冲突和决策窗口收缩。人工研判能够处理隐性经验与责任权衡，却难以在短时间内系统搜索大量候选。单一自动方法可以快速计算，却难以持续吸收临时偏好、解释折中原因并可靠判断停止时机。",
+    "source_fact_ids": [
+      "FACT-065",
+      "FACT-066",
+      "FACT-067",
+      "FACT-068",
+      "FACT-069",
+      "FACT-070",
+      "FACT-071",
+      "FACT-072",
+      "FACT-073",
+      "FACT-074",
+      "FACT-075",
+      "FACT-076",
+      "FACT-077",
+      "FACT-078",
+      "FACT-079"
+    ]
+  },
+  "project_identity": {
+    "engineering_role": "跨场景原型系统用于实现研究机制、接入确定性工具、采集过程Trace并组织对照与消融试验，是验证载体和预期成果，不构成中心研究命题本身。",
+    "maturity_target": "形成可配置的方法体系和原型系统，并在多个通用场景完成对照试验与消融验证",
+    "research_attribute": "面向复杂决策支持的软件方法、智能体协同机制与工程验证研究",
+    "research_object": "有限决策窗口内，人类与多个智能体围绕动态共享态势开展候选生成、约束校验、反向质疑、局部修复、偏好注入和停止判断的协同决策机制。",
+    "target_users": [
+      "复杂任务的方案制定人员",
+      "业务规则和资源管理人员",
+      "现场执行与协调人员",
+      "系统评测和复盘人员"
+    ],
+    "validation_carriers": [
+      "SC-01",
+      "SC-02",
+      "SC-03",
+      "SC-04"
+    ]
+  },
+  "project_title": "人机协同决策优势冲刺关键技术研究",
+  "readiness": {
+    "blocked_capabilities": [
+      "完整章节规划冻结",
+      "申请书正文生成",
+      "正式创新性结论",
+      "研究基础章节写作",
+      "预算与进度章节写作"
+    ],
+    "frozen_elements": [
+      "科研申请书的部分文种契约和20页正文上限",
+      "项目研究对象、研究属性和验证载体边界",
+      "唯一中心命题CP-1",
+      "RQ-1至RQ-3及其可证伪边界",
+      "OBJ-1至OBJ-4和RC-1至RC-4的对应关系"
+    ],
+    "non_frozen_elements": [
+      "正式申请书模板与必填结构",
+      "最近工作、比较基线和最终创新点表述",
+      "研究基础证据、团队名单和任务分工",
+      "经费金额、项目周期和正式里程碑",
+      "暂定评价指标的最终阈值与正式评审权重"
+    ],
+    "rationale": "现有事实足以冻结项目研究对象、唯一中心命题、三项研究问题、目标和研究内容关系，并进入论证架构阶段。由于正式模板、评审权重、最近工作、研究基础、团队、经费和周期仍未解决，当前不得开展正式章节规划或正文生成。",
+    "ready_for_argument_architecture": true,
+    "ready_for_section_planning": false
+  },
+  "relationship_graph": [
+    {
+      "from_id": "GAP-1",
+      "rationale": "共享态势和版本一致性差距直接提出统一表达与增量传播问题。",
+      "relation": "MOTIVATES",
+      "relation_id": "REL-001",
+      "to_id": "RQ-1"
+    },
+    {
+      "from_id": "GAP-2",
+      "rationale": "资源和停止机制差距直接提出有限窗口内的动作调度问题。",
+      "relation": "MOTIVATES",
+      "relation_id": "REL-002",
+      "to_id": "RQ-2"
+    },
+    {
+      "from_id": "GAP-3",
+      "rationale": "权限、交接和证据差距直接提出协同边界与收益证明问题。",
+      "relation": "MOTIVATES",
+      "relation_id": "REL-003",
+      "to_id": "RQ-3"
+    },
+    {
+      "from_id": "RQ-1",
+      "rationale": "目标一形成统一态势模型以回答表示与一致性问题。",
+      "relation": "ADDRESSED_BY",
+      "relation_id": "REL-004",
+      "to_id": "OBJ-1"
+    },
+    {
+      "from_id": "RQ-1",
+      "rationale": "目标二通过结构化多智能体协同验证共享状态的实际消费。",
+      "relation": "ADDRESSED_BY",
+      "relation_id": "REL-005",
+      "to_id": "OBJ-2"
+    },
+    {
+      "from_id": "RQ-2",
+      "rationale": "目标二研究候选持续可行化与质量改进。",
+      "relation": "ADDRESSED_BY",
+      "relation_id": "REL-006",
+      "to_id": "OBJ-2"
+    },
+    {
+      "from_id": "RQ-2",
+      "rationale": "目标三研究人工注意力和停止判断。",
+      "relation": "ADDRESSED_BY",
+      "relation_id": "REL-007",
+      "to_id": "OBJ-3"
+    },
+    {
+      "from_id": "RQ-3",
+      "rationale": "目标三定义人类偏好、权限交接和最终控制。",
+      "relation": "ADDRESSED_BY",
+      "relation_id": "REL-008",
+      "to_id": "OBJ-3"
+    },
+    {
+      "from_id": "RQ-3",
+      "rationale": "目标四通过跨场景对照验证协同收益与边界。",
+      "relation": "ADDRESSED_BY",
+      "relation_id": "REL-009",
+      "to_id": "OBJ-4"
+    },
+    {
+      "from_id": "RC-1",
+      "rationale": "研究内容一实现目标一所需的统一状态和增量一致性机制。",
+      "relation": "IMPLEMENTS",
+      "relation_id": "REL-010",
+      "to_id": "OBJ-1"
+    },
+    {
+      "from_id": "RC-1",
+      "rationale": "共享状态为候选竞争和修复提供同源上下文。",
+      "relation": "IMPLEMENTS",
+      "relation_id": "REL-011",
+      "to_id": "OBJ-2"
+    },
+    {
+      "from_id": "RC-2",
+      "rationale": "研究内容二实现候选生成、校验、批判和局部修复。",
+      "relation": "IMPLEMENTS",
+      "relation_id": "REL-012",
+      "to_id": "OBJ-2"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "研究内容三为候选演化分配有限窗口资源。",
+      "relation": "IMPLEMENTS",
+      "relation_id": "REL-013",
+      "to_id": "OBJ-2"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "研究内容三实现偏好注入、权限交接和停止判断。",
+      "relation": "IMPLEMENTS",
+      "relation_id": "REL-014",
+      "to_id": "OBJ-3"
+    },
+    {
+      "from_id": "RC-4",
+      "rationale": "研究内容四实现跨场景评价、消融和边界验证。",
+      "relation": "IMPLEMENTS",
+      "relation_id": "REL-015",
+      "to_id": "OBJ-4"
+    },
+    {
+      "from_id": "RC-1",
+      "rationale": "统一对象关系建模支撑共享态势语义。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-016",
+      "to_id": "M-1"
+    },
+    {
+      "from_id": "RC-1",
+      "rationale": "增量状态同步支撑版本一致性和影响传播。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-017",
+      "to_id": "M-2"
+    },
+    {
+      "from_id": "RC-2",
+      "rationale": "角色分离编排支撑候选竞争和独立批判。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-018",
+      "to_id": "M-3"
+    },
+    {
+      "from_id": "RC-2",
+      "rationale": "混合优化和多目标评价支撑可行化与持续改进。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-019",
+      "to_id": "M-4"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "偏好学习与主动交互支撑高价值人工干预。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-020",
+      "to_id": "M-5"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "优势冲刺调度支撑动作分配和停止判断。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-021",
+      "to_id": "M-6"
+    },
+    {
+      "from_id": "RC-4",
+      "rationale": "基于Trace的对照与消融评价支撑收益归因。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-022",
+      "to_id": "M-7"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "中心命题成立需要共享态势和版本一致性机制有效。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-023",
+      "to_id": "RQ-1"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "中心命题成立需要有限窗口资源调度和停止机制有效。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-024",
+      "to_id": "RQ-2"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "中心命题成立需要人工权限边界和收益证据闭合。",
+      "relation": "SUPPORTED_BY",
+      "relation_id": "REL-025",
+      "to_id": "RQ-3"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "首个可行方案形成时间用于检验速度收益。",
+      "relation": "FALSIFIED_BY",
+      "relation_id": "REL-026",
+      "to_id": "MET-1"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "最终综合方案质量用于检验质量收益。",
+      "relation": "FALSIFIED_BY",
+      "relation_id": "REL-027",
+      "to_id": "MET-2"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "硬约束违规数用于检验可执行性底线。",
+      "relation": "FALSIFIED_BY",
+      "relation_id": "REL-028",
+      "to_id": "MET-3"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "扰动后质量保持率用于检验稳健性。",
+      "relation": "FALSIFIED_BY",
+      "relation_id": "REL-029",
+      "to_id": "MET-4"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "人工交互负担用于检验注意力节约。",
+      "relation": "FALSIFIED_BY",
+      "relation_id": "REL-030",
+      "to_id": "MET-5"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "方案采纳率用于检验人工接受表现。",
+      "relation": "FALSIFIED_BY",
+      "relation_id": "REL-031",
+      "to_id": "MET-6"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "关键结论可追溯率用于检验证据闭合。",
+      "relation": "FALSIFIED_BY",
+      "relation_id": "REL-032",
+      "to_id": "MET-7"
+    },
+    {
+      "from_id": "CP-1",
+      "rationale": "共享状态一致率用于检验协同状态基础。",
+      "relation": "FALSIFIED_BY",
+      "relation_id": "REL-033",
+      "to_id": "MET-8"
+    },
+    {
+      "from_id": "RC-4",
+      "rationale": "生产调度验证强约束和滚动变化下的方法表现。",
+      "relation": "VALIDATED_BY",
+      "relation_id": "REL-034",
+      "to_id": "SC-01"
+    },
+    {
+      "from_id": "RC-4",
+      "rationale": "物流协同验证跨节点耦合和扰动重规划。",
+      "relation": "VALIDATED_BY",
+      "relation_id": "REL-035",
+      "to_id": "SC-02"
+    },
+    {
+      "from_id": "RC-4",
+      "rationale": "设备维护验证不确定信息和专家判断协同。",
+      "relation": "VALIDATED_BY",
+      "relation_id": "REL-036",
+      "to_id": "SC-03"
+    },
+    {
+      "from_id": "RC-4",
+      "rationale": "大型活动保障验证多参与方和高频调整。",
+      "relation": "VALIDATED_BY",
+      "relation_id": "REL-037",
+      "to_id": "SC-04"
+    }
+  ],
+  "research_contents": [
+    {
+      "content_id": "RC-1",
+      "expected_knowledge_contribution": "形成面向人机多主体共同消费的决策状态语义与增量一致性机制，说明何种依赖粒度能够兼顾一致性、重算范围和追溯成本。",
+      "method_ids": [
+        "M-1",
+        "M-2"
+      ],
+      "name": "共享决策态势与增量一致性机制",
+      "objective_ids": [
+        "OBJ-1",
+        "OBJ-2"
+      ],
+      "research_focus": "研究任务、资源、约束、偏好、不确定性、事件、候选和依据的统一对象关系模型，建立版本、来源与依赖索引，并研究状态变化对受影响子图、失效假设和候选结论的增量传播。",
+      "rq_ids": [
+        "RQ-1",
+        "RQ-2"
+      ],
+      "source_fact_ids": [
+        "FACT-021",
+        "FACT-026",
+        "FACT-027"
+      ],
+      "validation_carrier_ids": [
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "work_package_ids": [
+        "WP-1"
+      ]
+    },
+    {
+      "content_id": "RC-2",
+      "expected_knowledge_contribution": "形成语言模型生成与确定性工具协同的候选竞争机制，揭示角色独立性、校验时机和局部修复范围对可行化速度与最终质量的影响。",
+      "method_ids": [
+        "M-3",
+        "M-4"
+      ],
+      "name": "多智能体候选竞争与确定性可行化机制",
+      "objective_ids": [
+        "OBJ-2"
+      ],
+      "research_focus": "研究生成、约束校验、方案批判、局部修复和优化求解的角色分离协议，建立结构化候选集、Finding和责任模块之间的交接关系，使多样搜索与硬约束可行性在同一候选演化链中闭合。",
+      "rq_ids": [
+        "RQ-1",
+        "RQ-2"
+      ],
+      "source_fact_ids": [
+        "FACT-022",
+        "FACT-028",
+        "FACT-029"
+      ],
+      "validation_carrier_ids": [
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "work_package_ids": [
+        "WP-2"
+      ]
+    },
+    {
+      "content_id": "RC-3",
+      "expected_knowledge_contribution": "建立人工注意力与机器计算作为共同稀缺资源的协同调度模型，说明何时提问、由谁处理何种分歧以及何时停止能够提升单位时间决策价值。",
+      "method_ids": [
+        "M-5",
+        "M-6"
+      ],
+      "name": "人工关键干预与优势冲刺调度机制",
+      "objective_ids": [
+        "OBJ-2",
+        "OBJ-3"
+      ],
+      "research_focus": "研究基于候选差异、不确定性和潜在收益的主动提问与偏好注入方法，并以剩余时间、动作成本、方案风险、证据完整性和边际增益联合调度智能体、求解器与人工注意力，形成继续、停止、降级和回滚规则。",
+      "rq_ids": [
+        "RQ-2",
+        "RQ-3"
+      ],
+      "source_fact_ids": [
+        "FACT-023",
+        "FACT-024",
+        "FACT-030",
+        "FACT-031"
+      ],
+      "validation_carrier_ids": [
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "work_package_ids": [
+        "WP-3",
+        "WP-4"
+      ]
+    },
+    {
+      "content_id": "RC-4",
+      "expected_knowledge_contribution": "形成同时评价过程与结果的证据框架，区分共享状态、角色批判、人工干预和自适应调度各自贡献，并给出方法失效条件与可迁移边界。",
+      "method_ids": [
+        "M-7"
+      ],
+      "name": "基于Trace的跨场景收益归因与适用边界验证",
+      "objective_ids": [
+        "OBJ-4"
+      ],
+      "research_focus": "构建统一任务集、资源预算、扰动注入和评价脚本，对纯人工、纯自动、固定轮次协同与优势冲刺协同开展对照和消融试验，记录每轮输入、候选、工具结果、人工决定、耗时和失败模式。",
+      "rq_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "source_fact_ids": [
+        "FACT-025",
+        "FACT-032",
+        "FACT-017",
+        "FACT-018",
+        "FACT-019",
+        "FACT-020"
+      ],
+      "validation_carrier_ids": [
+        "SC-01",
+        "SC-02",
+        "SC-03",
+        "SC-04"
+      ],
+      "work_package_ids": [
+        "WP-5"
+      ]
+    }
+  ],
+  "research_gaps": [
+    {
+      "affected_rq_ids": [
+        "RQ-1"
+      ],
+      "claim_status": "DESIGN_HYPOTHESIS_TO_BE_CHECKED_BY_PUBLIC_RESEARCH",
+      "evidence_needed": [
+        "相关工作检索对统一决策表示和多智能体共享状态方法进行比较",
+        "跨Agent一致性、失效传播范围和重算成本试验"
+      ],
+      "gap_id": "GAP-1",
+      "root_causes": [
+        "业务语义分散在自然语言、表格和求解模型中",
+        "并行智能体可能读取不同版本的状态和约束",
+        "状态变化对既有候选与依据的影响范围难以快速定位"
+      ],
+      "source_fact_ids": [
+        "FACT-075",
+        "FACT-076",
+        "FACT-077"
+      ],
+      "statement": "项目设计认为，动态任务、资源、规则、偏好和候选依据尚缺少可供人类与多个智能体共同使用的统一表达、版本控制和增量失效传播机制。"
+    },
+    {
+      "affected_rq_ids": [
+        "RQ-2"
+      ],
+      "claim_status": "DESIGN_HYPOTHESIS_TO_BE_CHECKED_BY_PUBLIC_RESEARCH",
+      "evidence_needed": [
+        "相关工作检索比较固定编排、anytime优化和自适应资源调度",
+        "同等资源预算下的调度策略与停止规则消融试验"
+      ],
+      "gap_id": "GAP-2",
+      "root_causes": [
+        "不同动作的计算成本和改进潜力随迭代变化",
+        "固定轮次或固定角色顺序无法适应窗口快速收缩",
+        "过早停止与过度搜索均可能降低最终可执行价值"
+      ],
+      "source_fact_ids": [
+        "FACT-074",
+        "FACT-078"
+      ],
+      "statement": "项目设计认为，候选生成、批判、优化求解和人工注意力尚缺少面向剩余时间、预期边际增益、方案风险和证据状态的统一资源调度与停止机制。"
+    },
+    {
+      "affected_rq_ids": [
+        "RQ-3"
+      ],
+      "claim_status": "DESIGN_HYPOTHESIS_TO_BE_CHECKED_BY_PUBLIC_RESEARCH",
+      "evidence_needed": [
+        "相关工作检索比较人机混合决策、偏好学习和可解释交接机制",
+        "纯人工、纯自动、固定协同与完整方法的对照和消融证据"
+      ],
+      "gap_id": "GAP-3",
+      "root_causes": [
+        "人工参与常集中在输入确认和结果审批两端",
+        "人类偏好与覆盖决定难以绑定适用范围和候选版本",
+        "仅比较最终结果难以说明收益来自何种协同机制"
+      ],
+      "source_fact_ids": [
+        "FACT-006",
+        "FACT-009",
+        "FACT-075",
+        "FACT-079"
+      ],
+      "statement": "项目设计认为，人类经验、权限边界和责任判断尚未与智能体候选演化形成统一的高价值交互、证据留痕和协同收益验证框架。"
+    }
+  ],
+  "research_questions": [
+    {
+      "boundary": "研究对象限于授权数据和工具能够覆盖的结构化或可转换决策场景，不解决任意开放世界知识的一致性。",
+      "falsification_criteria": [
+        "跨Agent运行时关键对象版本、约束或候选依赖不能保持一致，且增量传播不能优于全量重算或人工同步。"
+      ],
+      "gap_ids": [
+        "GAP-1"
+      ],
+      "method_ids": [
+        "M-1",
+        "M-2",
+        "M-3"
+      ],
+      "objective_ids": [
+        "OBJ-1",
+        "OBJ-2"
+      ],
+      "question": "如何将动态任务、资源、规则、偏好、不确定性及人机协作状态统一表达，并在多智能体并行处理中保持语义和版本一致？",
+      "question_type": "REPRESENTATION_AND_CONSISTENCY",
+      "rq_id": "RQ-1",
+      "source_fact_ids": [
+        "FACT-010",
+        "FACT-013",
+        "FACT-014",
+        "FACT-026",
+        "FACT-027",
+        "FACT-028"
+      ],
+      "verification_evidence": [
+        "统一对象与关系Schema",
+        "状态版本一致性试验",
+        "规则与候选的来源追踪记录"
+      ]
+    },
+    {
+      "boundary": "不承诺任意组合优化问题的全局最优，只研究窗口内当前最好可行方案的持续改进和按时停止。",
+      "falsification_criteria": [
+        "在统一任务集、相同模型与求解资源预算下，自适应调度和停止规则不能优于固定轮次或固定顺序协同。"
+      ],
+      "gap_ids": [
+        "GAP-2"
+      ],
+      "method_ids": [
+        "M-2",
+        "M-3",
+        "M-4",
+        "M-5",
+        "M-6"
+      ],
+      "objective_ids": [
+        "OBJ-2",
+        "OBJ-3"
+      ],
+      "question": "如何在有限决策窗口内协调候选生成、批判、优化求解和人工干预，使有限计算与注意力获得更高的单位时间决策增益？",
+      "question_type": "RESOURCE_ALLOCATION_AND_STOPPING",
+      "rq_id": "RQ-2",
+      "source_fact_ids": [
+        "FACT-011",
+        "FACT-014",
+        "FACT-015",
+        "FACT-027",
+        "FACT-028",
+        "FACT-029",
+        "FACT-030",
+        "FACT-031"
+      ],
+      "verification_evidence": [
+        "优势冲刺调度策略",
+        "边际增益与停止规则试验",
+        "不同资源预算下的消融对照"
+      ]
+    },
+    {
+      "boundary": "人类始终承担最终确认责任，研究不以自动化替代授权决策者，也不把模型建议直接转化为执行动作。",
+      "falsification_criteria": [
+        "完整协同流程不能在保持最终人工控制和关键结论可追溯的同时降低人工负担或提高方案采纳表现。"
+      ],
+      "gap_ids": [
+        "GAP-3"
+      ],
+      "method_ids": [
+        "M-3",
+        "M-5",
+        "M-6",
+        "M-7"
+      ],
+      "objective_ids": [
+        "OBJ-3",
+        "OBJ-4"
+      ],
+      "question": "如何界定人类与智能体的权限、交接和责任边界，并以可解释证据证明协同结果优于纯人工或纯自动流程？",
+      "question_type": "HUMAN_AUTHORITY_AND_EVIDENCE",
+      "rq_id": "RQ-3",
+      "source_fact_ids": [
+        "FACT-012",
+        "FACT-015",
+        "FACT-016",
+        "FACT-006",
+        "FACT-009",
+        "FACT-028",
+        "FACT-030",
+        "FACT-031",
+        "FACT-032"
+      ],
+      "verification_evidence": [
+        "角色权限与交接协议",
+        "纯人工、纯自动和人机协同对照试验",
+        "人工覆盖与复盘记录"
+      ]
+    }
+  ],
+  "schema_version": "1.0",
+  "scope": {
+    "in_scope": [
+      "动态任务、资源、规则、偏好、不确定性和候选依据的统一建模",
+      "多智能体生成、校验、批判、修复和优化求解的结构化协同",
+      "有限窗口内机器计算与人工注意力的自适应调度和停止判断",
+      "生产调度、物流协同、设备维护和大型活动保障中的对照与消融验证",
+      "最终人工控制、权限交接、版本回滚和关键依据追溯"
+    ],
+    "out_of_scope": [
+      "完全自动化替代授权决策者或自动执行未经确认的方案",
+      "对任意开放世界问题承诺全局最优或普遍优于所有基线",
+      "在当前阶段确认团队名单、经费金额、项目周期或正式申报资格",
+      "在未完成公开资料调研前宣称创新性或给出最近工作结论",
+      "把暂定评价目标写成已经取得的实测成果"
+    ]
+  },
+  "stage": "STAGE_3_PROJECT_DEFINITION",
+  "upstream_artifacts": [
+    {
+      "accepted": true,
+      "artifact_name": "stage1_design_input.json",
+      "sha256": "11928d6ccfa2b98cf345d63699f6a5d197aa280f9f3cae3937a048ec9f064d2f",
+      "stage": "STAGE_1_DESIGN_INPUT"
+    },
+    {
+      "accepted": true,
+      "artifact_name": "stage2_guide_fact_base_repaired.json",
+      "sha256": "bd9657f65445b33817cd9867362269cfe9206822b4ca32029b6bbad11b4ee3a7",
+      "stage": "STAGE_2_GUIDE_AND_FACT_BASE"
+    }
+  ]
+}
