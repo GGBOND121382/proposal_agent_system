@@ -316,3 +316,29 @@ def test_recoverable_block_resumes_same_step(tmp_path):
     assert recovered["status"] == "RUNNING"
     assert recovered["current_step"] == 3
     assert recovered["state"]["recovered_from"] == "after_db_transaction"
+
+
+def test_duplicate_in_process_advance_returns_without_reexecution(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-1_PROJECT_INTAKE",
+        "options": {},
+        "step_results": {},
+        "repair_attempts": {},
+        "repair_overrides": {},
+        "public_search_results": None,
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        ("wf-1", "project-1", "WF-1_PROJECT_INTAKE", "RUNNING", 3, json.dumps(state), now, now),
+    )
+    engine = RecoverableWorkflowEngine(
+        db, SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), SimpleNamespace()
+    )
+    engine._active_workflow_ids.add("wf-1")
+
+    result = asyncio.run(engine.advance("wf-1"))
+
+    assert result["status"] == "RUNNING"
+    assert result["current_step"] == 3

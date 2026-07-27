@@ -12,7 +12,7 @@ models:
   defaults:
     temperature: 0.1
     top_p: 0.9
-    max_output_tokens: 10000
+    max_output_tokens: 32000
 - model_id: offline-critic-primary
   endpoint_id: offline-primary
   provider_model_name: ${OFFLINE_CRITIC_MODEL}
@@ -25,7 +25,7 @@ models:
   defaults:
     temperature: 0.0
     top_p: 1.0
-    max_output_tokens: 7000
+    max_output_tokens: 16000
 - model_id: online-public-primary
   endpoint_id: online-public-primary
   provider_model_name: ${ONLINE_PUBLIC_MODEL}

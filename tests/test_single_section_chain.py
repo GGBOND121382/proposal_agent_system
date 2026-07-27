@@ -62,7 +62,7 @@ class ScriptedExecutor:
         self.calls: list[dict[str, Any]] = []
         self.counts = defaultdict(int)
 
-    async def execute(self, prompt_id: str, envelope: dict[str, Any], **_: Any) -> dict[str, Any]:
+    async def execute(self, prompt_id: str, envelope: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         self.counts[prompt_id] += 1
         index = self.counts[prompt_id]
         queue = self.statuses.get(prompt_id) or ["PASS"]
@@ -98,7 +98,7 @@ class ScriptedExecutor:
                 "resolved_finding_codes": ["TEST_REPAIR"],
                 "unresolved_finding_codes": [],
             }
-        elif status == "REVISE":
+        if status in {"REVISE", "BLOCK"} and not output["findings"]:
             output["findings"] = [
                 {
                     "code": "TEST_REPAIR",
@@ -119,6 +119,7 @@ class ScriptedExecutor:
             "status": status,
             "route": {"environment": "OFFLINE_LOCAL"},
             "output": output,
+            "requested_call_key": kwargs.get("call_key"),
         }
         self.calls.append(copy.deepcopy(result))
         return result
@@ -254,6 +255,100 @@ def test_second_revise_after_targeted_repair_blocks_without_second_repair():
     ]
     assert sequence.count("P-TARGETED-REPAIR") == 1
     assert "禁止二次自动修复" in harness.wf["state"]["last_error"]
+
+
+def test_acceptance_run_regenerates_new_candidate_after_repair_recheck():
+    harness = ChainHarness(
+        [SECTION],
+        {"P-WRITE-BLUEPRINT-CRITIC": ["REVISE", "REVISE", "PASS"]},
+    )
+    harness.wf["state"]["options"]["acceptance_run"] = True
+
+    result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    assert result["status"] == "WAITING_GATE"
+    sequence = [item["prompt_id"] for item in harness.executor.calls]
+    assert sequence[:7] == [
+        "P-WRITE-BLUEPRINT",
+        "P-WRITE-BLUEPRINT-CRITIC",
+        "P-TARGETED-REPAIR",
+        "P-WRITE-BLUEPRINT-CRITIC",
+        "P-WRITE-BLUEPRINT",
+        "P-WRITE-BLUEPRINT-CRITIC",
+        "P-WRITE-CONTENT",
+    ]
+    assert harness.executor.counts["P-WRITE-BLUEPRINT"] == 2
+    assert harness.wf["state"]["acceptance_regeneration_rounds"][
+        "section:section-1:P-WRITE-BLUEPRINT-CRITIC"
+    ] == 1
+    assert "section:section-1:P-WRITE-BLUEPRINT" not in harness.wf["state"]["repair_overrides"]
+    assert "integration_repair_section_ids" not in harness.wf["state"]
+
+
+def test_acceptance_run_regenerates_producer_rejected_by_quality_guard():
+    harness = ChainHarness(
+        [SECTION],
+        {"P-WRITE-BLUEPRINT": ["REVISE", "PASS"]},
+    )
+    harness.wf["state"]["options"]["acceptance_run"] = True
+
+    result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    assert result["status"] == "WAITING_GATE"
+    sequence = [item["prompt_id"] for item in harness.executor.calls]
+    assert sequence[:3] == [
+        "P-WRITE-BLUEPRINT",
+        "P-WRITE-BLUEPRINT",
+        "P-WRITE-BLUEPRINT-CRITIC",
+    ]
+    assert harness.wf["state"]["acceptance_regeneration_rounds"][
+        "section:section-1:P-WRITE-BLUEPRINT"
+    ] == 1
+    assert "integration_repair_section_ids" not in harness.wf["state"]
+
+
+def test_each_acceptance_producer_regeneration_gets_a_distinct_call_key():
+    harness = ChainHarness(
+        [SECTION],
+        {"P-WRITE-BLUEPRINT": ["REVISE", "REVISE", "PASS"]},
+    )
+    harness.wf["state"]["options"]["acceptance_run"] = True
+
+    result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    assert result["status"] == "WAITING_GATE"
+    blueprint_calls = [
+        item for item in harness.executor.calls
+        if item["prompt_id"] == "P-WRITE-BLUEPRINT"
+    ]
+    assert len(blueprint_calls) == 3
+    assert blueprint_calls[0]["requested_call_key"] is None
+    assert blueprint_calls[1]["requested_call_key"]
+    assert blueprint_calls[2]["requested_call_key"]
+    assert blueprint_calls[1]["requested_call_key"] != blueprint_calls[2]["requested_call_key"]
+
+
+def test_test_acceptance_can_regenerate_fully_repairable_critic_block():
+    harness = ChainHarness(
+        [SECTION],
+        {"P-WRITE-BLUEPRINT-CRITIC": ["BLOCK", "PASS"]},
+    )
+    harness.wf["state"]["options"].update({
+        "acceptance_run": True,
+        "allow_repairable_block_regeneration": True,
+    })
+
+    result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    assert result["status"] == "WAITING_GATE"
+    sequence = [item["prompt_id"] for item in harness.executor.calls]
+    assert sequence[:4] == [
+        "P-WRITE-BLUEPRINT",
+        "P-WRITE-BLUEPRINT-CRITIC",
+        "P-WRITE-BLUEPRINT",
+        "P-WRITE-BLUEPRINT-CRITIC",
+    ]
+    assert "P-TARGETED-REPAIR" not in sequence
 
 
 def test_expression_critic_revise_blocks_and_never_rewrites_polish():

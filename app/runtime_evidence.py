@@ -57,8 +57,10 @@ def _extract_json_object(text: str) -> dict[str, Any]:
         if start < 0 or end <= start:
             raise EvidenceIntegrityError("Raw response does not contain a JSON object")
         try:
-            value = json.loads(stripped[start : end + 1])
-        except json.JSONDecodeError as exc:
+            from .llm import _extract_json
+
+            value = _extract_json(stripped[start : end + 1])
+        except (ValueError, RuntimeError) as exc:
             raise EvidenceIntegrityError("Raw response JSON is invalid") from exc
     if not isinstance(value, dict):
         raise EvidenceIntegrityError("Raw response JSON must be an object")

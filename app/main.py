@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -234,9 +234,12 @@ def list_gates(project_id: str | None = None, workflow_id: str | None = None) ->
 
 
 @app.post("/api/gates/{gate_id}/decide")
-def decide_gate(gate_id: str, req: GateDecisionRequest) -> dict[str, Any]:
+def decide_gate(gate_id: str, req: GateDecisionRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
     try:
-        return workflows.decide_gate(gate_id, action=req.action, decided_by=req.decided_by, decided_role=req.decided_role, comment=req.comment, answers=req.answers, context_hash=req.context_hash)
+        gate = workflows.decide_gate(gate_id, action=req.action, decided_by=req.decided_by, decided_role=req.decided_role, comment=req.comment, answers=req.answers, context_hash=req.context_hash)
+        if req.auto_advance and gate["status"] == "APPROVED":
+            background_tasks.add_task(workflows.advance, gate["workflow_id"])
+        return gate
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
     except PermissionError as exc:

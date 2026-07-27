@@ -12,6 +12,10 @@ from .workflows import WorkflowEngine as BaseWorkflowEngine
 class RecoverableWorkflowEngine(BaseWorkflowEngine):
     """Workflow facade that resumes stale RUNNING/WAITING_GATE/recoverable BLOCKED states."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._active_workflow_ids: set[str] = set()
+
     def start(self, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
         options = options or {}
         idempotency_key = str(options.get("idempotency_key") or "").strip()
@@ -47,6 +51,15 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
         return wf
 
     async def advance(self, workflow_id: str) -> dict[str, Any]:
+        if workflow_id in self._active_workflow_ids:
+            return self.get(workflow_id)
+        self._active_workflow_ids.add(workflow_id)
+        try:
+            return await self._advance_once(workflow_id)
+        finally:
+            self._active_workflow_ids.discard(workflow_id)
+
+    async def _advance_once(self, workflow_id: str) -> dict[str, Any]:
         wf = self._recover_status(self.get(workflow_id))
         if wf["status"] in {"COMPLETED", "CANCELLED"}:
             return wf
@@ -80,4 +93,19 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
             state["runtime_failure_point"] = getattr(exc, "point", "WORKFLOW_ADVANCE")
             state["runtime_blocked_at"] = utc_now()
             self._update(current, status="BLOCKED", state=state)
+            return self.get(workflow_id)
+        except Exception as exc:
+            current = self.get(workflow_id)
+            state = current["state"]
+            state["last_error"] = f"UNEXPECTED_RUNTIME_ERROR: {type(exc).__name__}: {exc}"
+            state["runtime_recoverable"] = True
+            state["runtime_failure_point"] = "WORKFLOW_ADVANCE"
+            state["runtime_blocked_at"] = utc_now()
+            self._update(current, status="BLOCKED", state=state)
+            self.db.audit(
+                "WORKFLOW_RUNTIME_EXCEPTION",
+                project_id=current["project_id"],
+                object_id=workflow_id,
+                metadata={"exception_type": type(exc).__name__, "message": str(exc)},
+            )
             return self.get(workflow_id)

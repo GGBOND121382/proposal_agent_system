@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from typing import Any
 
 from .util import new_id, sha256_json, sha256_text
@@ -276,8 +277,34 @@ class ContextBuilder:
         exact = [item for item in facts if str(item.get("claim_id")) in relevant_ids]
         internal = [item for item in facts if item.get("claim_type") != "PUBLIC_CLAIM" and item not in exact]
         public = [item for item in facts if item.get("claim_type") == "PUBLIC_CLAIM" and item not in exact]
+        profile_keywords = {
+            "BACKGROUND_AND_SIGNIFICANCE": ("问题", "差距", "局限", "基线", "边界"),
+            "LITERATURE_REVIEW": ("现状", "文献", "基线", "比较"),
+            "RESEARCH_CONTENT": ("问题", "目标", "任务", "命题"),
+            "TECHNICAL_ROUTE": ("方法", "技术路线", "实验", "指标", "基线", "约束"),
+            "INNOVATION": ("创新", "基线", "比较", "最近工作"),
+            "EVALUATION": ("实验", "指标", "均值", "方差", "置信区间", "效应量"),
+            "FOUNDATION": ("团队", "成果", "能力", "基础"),
+        }.get(profile_id, ())
+        contract_text = json.dumps(contract or {}, ensure_ascii=False)
+        baseline_tokens = {
+            f"B{match}"
+            for identifier in relevant_ids
+            for match in re.findall(r"(?:GAP|RQ|IH)[-_]?0*(\d+)", identifier, flags=re.I)
+        }
+
+        def relevance(item: dict[str, Any]) -> tuple[int, str]:
+            text = json.dumps(item, ensure_ascii=False)
+            score = sum(4 for identifier in relevant_ids if identifier and identifier in text)
+            score += sum(6 for token in baseline_tokens if token in text)
+            score += sum(1 for keyword in profile_keywords if keyword in text)
+            if any(keyword in contract_text and keyword in text for keyword in profile_keywords):
+                score += 2
+            return score, str(item.get("claim_id") or "")
+
+        relevant_internal = sorted(internal, key=relevance, reverse=True)
         public_profiles = {"BACKGROUND_AND_SIGNIFICANCE", "LITERATURE_REVIEW", "INNOVATION", "REFERENCES", "EVALUATION"}
-        selected = [*exact, *internal[:6]]
+        selected = [*exact, *relevant_internal[:12]]
         # Preserve at least one accepted public claim in every writing context so
         # non-literature sections can still trace cross-section public evidence.
         # Evidence-heavy profiles receive a wider public slice, while other
@@ -341,13 +368,45 @@ class ContextBuilder:
 
     @staticmethod
     def _repair_override(state: dict[str, Any], producer_prompt: str) -> Any:
+        def unwrap(value: Any) -> Any:
+            if (
+                isinstance(value, dict)
+                and isinstance(value.get("content"), dict)
+                and any(key in value for key in ("object_id", "object_type", "object_hash"))
+            ):
+                value = copy.deepcopy(value["content"])
+            if isinstance(value, dict) and value.get("blueprint_id"):
+                unresolved = {
+                    str(item)
+                    for item in value.get("unresolved_slot_ids") or []
+                    if item
+                }
+                for paragraph in value.get("paragraphs") or []:
+                    if not isinstance(paragraph, dict):
+                        continue
+                    paragraph["project_item_slots"] = [
+                        item
+                        for item in paragraph.get("project_item_slots") or []
+                        if str(item) not in unresolved
+                    ]
+                    required_evidence = [
+                        item
+                        for item in paragraph.get("required_evidence_ids") or []
+                        if str(item) not in unresolved
+                    ]
+                    for fact_id in paragraph.get("fact_slots") or []:
+                        if fact_id and fact_id not in required_evidence:
+                            required_evidence.append(fact_id)
+                    paragraph["required_evidence_ids"] = required_evidence
+            return value
+
         overrides = state.get("repair_overrides") or {}
         section_id = str(state.get("active_section_id") or "").strip()
         if section_id:
             scoped = f"section:{section_id}:{producer_prompt}"
             if scoped in overrides:
-                return overrides[scoped]
-        return overrides.get(producer_prompt)
+                return unwrap(overrides[scoped])
+        return unwrap(overrides.get(producer_prompt))
 
     def _replace_seed_values(self, value: Any, project_id: str, context_hash: str) -> Any:
         if isinstance(value, dict):
@@ -405,6 +464,27 @@ class ContextBuilder:
     def _object_ref(self, object_id: str, object_type: str, security_level: str, context_hash: str, display_name: str) -> dict[str, Any]:
         return {"object_id": object_id, "object_type": object_type, "version": 1, "object_hash": context_hash, "security_level": security_level, "display_name": display_name}
 
+    @staticmethod
+    def _planning_template_context(template: dict[str, Any]) -> dict[str, Any]:
+        components = [
+            component
+            for component in template.get("components") or []
+            if isinstance(component, dict) and component.get("component_id")
+        ]
+        rules = [
+            str(rule).strip()
+            for rule in template.get("format_rules") or []
+            if str(rule).strip()
+        ]
+        global_argument = str(template.get("global_argument") or "").strip()
+        if global_argument:
+            rules.append(f"全局论证主线：{global_argument}")
+        return {
+            "template_id": str(template.get("template_id") or "template-current"),
+            "component_ids": [str(component["component_id"]) for component in components],
+            "rules": rules,
+        }
+
     def _first_section(self, docs: list[dict[str, Any]], roles: set[str] | None = None) -> dict[str, Any] | None:
         for doc in docs:
             if roles and doc.get("document_role") not in roles:
@@ -422,9 +502,37 @@ class ContextBuilder:
         if "security_constraints" in payload:
             self._set_path_if_valid(prompt_id, envelope, "payload.security_constraints", envelope["security_context"])
 
-        guide_docs = [d for d in docs if d.get("document_role") == "APPLICATION_GUIDE"] or docs
+        guide_docs = [d for d in docs if d.get("document_role") == "APPLICATION_GUIDE"]
+        if not guide_docs and prompt_id in {"P-SCHEME-EXTRACT", "P-SCHEME-CRITIC"}:
+            guide_keywords = (
+                "指南", "通知", "申报", "申请", "要求", "项目属性",
+                "篇幅", "边界", "执行约束",
+            )
+            guide_docs = []
+            for document in docs:
+                selected = [
+                    section
+                    for section in document.get("sections", [])
+                    if any(keyword in str(section.get("title") or "") for keyword in guide_keywords)
+                ]
+                if not selected:
+                    selected = list(document.get("sections", []))[:12]
+                if not selected:
+                    continue
+                compact_document = copy.deepcopy(document)
+                compact_document["sections"] = selected
+                guide_docs.append(compact_document)
+        guide_docs = guide_docs or docs
         source_docs = [d for d in docs if d.get("document_role") != "REFERENCE_PROPOSAL"] or docs
         reference_doc = next((d for d in docs if d.get("document_role") == "REFERENCE_PROPOSAL"), None)
+        if reference_doc is None and prompt_id in {"P-TEMPLATE-EXTRACT", "P-TEMPLATE-CRITIC"}:
+            # A current proposal can supply a provisional structural template when
+            # no dedicated reference proposal was uploaded.  It must not be
+            # presented as an official application template.
+            reference_doc = next(
+                (d for d in docs if d.get("document_role") == "CURRENT_PROPOSAL"),
+                None,
+            )
         active_section_id = state.get("active_section_id")
         current_section = None
         if active_section_id:
@@ -434,7 +542,28 @@ class ContextBuilder:
             )
         current_section = current_section or self._first_section(docs, {"CURRENT_PROPOSAL"}) or self._first_section(docs)
 
+        requested_target_ids = [
+            str(section_id)
+            for section_id in (state.get("options") or {}).get("target_section_ids") or []
+            if section_id
+        ]
+        requested_target_sections = [
+            section
+            for section_id in requested_target_ids
+            for document in docs
+            for section in document.get("sections", [])
+            if str(section.get("section_id") or "") == section_id
+        ]
+        if prompt_id == "P-REVISION-PLAN" and requested_target_sections:
+            current_section = requested_target_sections[0]
+
         replacements: list[tuple[str, Any]] = []
+        if prompt_id == "P-REVISION-PLAN" and requested_target_sections:
+            replacements.extend([
+                ("scope.target_object_ids", requested_target_ids),
+                ("scope.read_only_object_ids", []),
+                ("scope.protected_object_ids", []),
+            ])
         if "guide_documents" in payload and guide_docs:
             replacements.append(("payload.guide_documents", guide_docs))
         if "source_documents" in payload and source_docs:
@@ -453,7 +582,9 @@ class ContextBuilder:
             )
             replacements.append(("payload.readiness_stage", readiness_stage))
         if "linked_sections" in payload and docs:
-            if prompt_id in {"P-ARGUMENT-ARCHITECTURE", "P-ARGUMENT-ARCHITECTURE-CRITIC", "P-REVISION-PLAN", "P-REVISION-PLAN-CRITIC", "P-WRITE-BLUEPRINT", "P-WRITE-BLUEPRINT-CRITIC", "P-WRITE-CONTENT", "P-WRITE-CRITIC", "P-EXPRESSION-POLISH", "P-EXPRESSION-CRITIC", "P-INTEGRATION-CRITIC"}:
+            if prompt_id == "P-REVISION-PLAN" and requested_target_sections:
+                linked = requested_target_sections[1:]
+            elif prompt_id in {"P-ARGUMENT-ARCHITECTURE", "P-ARGUMENT-ARCHITECTURE-CRITIC", "P-REVISION-PLAN", "P-REVISION-PLAN-CRITIC", "P-WRITE-BLUEPRINT", "P-WRITE-BLUEPRINT-CRITIC", "P-WRITE-CONTENT", "P-WRITE-CRITIC", "P-EXPRESSION-POLISH", "P-EXPRESSION-CRITIC", "P-INTEGRATION-CRITIC"}:
                 linked = [
                     section for document in docs if document.get("document_role") == "CURRENT_PROPOSAL"
                     for section in document.get("sections", []) if section.get("title") != "全文"
@@ -468,6 +599,35 @@ class ContextBuilder:
         if "object_context" in payload and docs:
             first = docs[0]
             replacements.append(("payload.object_context", self._object_ref(first["document_id"], "SOURCE_DOCUMENT", first["security_level"], first["document_hash"], first["title"])))
+        if "original_object" in payload and docs:
+            first = docs[0]
+            replacements.append((
+                "payload.original_object",
+                {
+                    "object_type": "SOURCE_DOCUMENT",
+                    "object_id": first["document_id"],
+                    "object_hash": first["document_hash"],
+                    "content": first,
+                },
+            ))
+        if "existing_labels" in payload:
+            replacements.append((
+                "payload.existing_labels",
+                [
+                    {
+                        "object_id": doc["document_id"],
+                        "security_level": doc["security_level"],
+                        "basis": "上传材料登记时指定的安全等级",
+                    }
+                    for doc in docs
+                ],
+            ))
+        if "deterministic_findings" in payload and prompt_id.endswith("-CRITIC"):
+            producer_output = self._latest_output(project["id"], prompt_id.removesuffix("-CRITIC"))
+            replacements.append((
+                "payload.deterministic_findings",
+                list((producer_output or {}).get("findings") or []),
+            ))
         if "content_segments" in payload and docs:
             segments = []
             for doc in docs:
@@ -484,15 +644,65 @@ class ContextBuilder:
             spans = []
             for doc in docs:
                 for sec in doc.get("sections", [])[:100]:
+                    if not str(sec.get("text") or "").strip():
+                        continue
                     spans.append({"span_id": sec["section_id"], "text": sec["text"], "source_ref": self._source_ref(doc, sec)})
             if spans:
                 replacements.append(("payload.source_spans", spans))
+        if "authority_rules" in payload:
+            replacements.append(("payload.authority_rules", {
+                "version": "2.0",
+                "ordered_source_types": [
+                    "USER_CONFIRMATION", "APPLICATION_GUIDE", "TASK_BOOK",
+                    "CONTRACT", "CURRENT_PROPOSAL", "EVIDENCE_MATERIAL",
+                    "TECHNICAL_MATERIAL", "HISTORICAL_DOCUMENT",
+                    "REFERENCE_PROPOSAL", "PUBLIC_SOURCE", "MODEL_INFERENCE",
+                ],
+            }))
         if "section_tree" in payload and reference_doc:
-            tree = [{"section_id": s["section_id"], "title": s["title"], "level": s["level"], "sequence": i + 1} for i, s in enumerate(reference_doc.get("sections", []))]
+            tree = []
+            ancestors: list[dict[str, Any]] = []
+            for section in reference_doc.get("sections", []):
+                level = int(section.get("level", 0))
+                while ancestors and int(ancestors[-1].get("level", 0)) >= level:
+                    ancestors.pop()
+                tree.append({
+                    "section_id": section["section_id"],
+                    "title": str(section.get("title") or "未命名章节"),
+                    "level": level,
+                    "parent_section_id": ancestors[-1]["section_id"] if ancestors else None,
+                })
+                ancestors.append(section)
             replacements.append(("payload.section_tree", tree))
+        if "style_summary" in payload:
+            replacements.append((
+                "payload.style_summary",
+                {
+                    "paragraph_styles": [],
+                    "heading_styles": [],
+                    "table_styles": [],
+                },
+            ))
         if "document_structure" in payload and guide_docs:
-            structure = [{"document_id": d["document_id"], "section_ids": [s["section_id"] for s in d.get("sections", [])]} for d in guide_docs]
+            structure = [
+                {
+                    "section_id": section["section_id"],
+                    "title": section["title"],
+                    "level": section["level"],
+                    "text_hash": section["text_hash"],
+                }
+                for document in guide_docs
+                for section in document.get("sections", [])
+            ]
             replacements.append(("payload.document_structure", structure))
+        if "extraction_scope" in payload:
+            replacements.append(("payload.extraction_scope", ["全部已上传材料及其章节"]))
+
+        if "relation_matrix" in payload:
+            replacements.append(("payload.relation_matrix", {
+                "version": self.pack.relation_matrix["version"],
+                "allowed_relations": copy.deepcopy(self.pack.relation_matrix["allowed_relations"]),
+            }))
 
         # Producer -> consumer mappings.
         result_map = {
@@ -579,16 +789,56 @@ class ContextBuilder:
         if prompt_id in section_prompt_ids:
             profile_id = str((payload.get("section_profile") or {}).get("profile_id") or (section_contract or {}).get("profile_id") or "")
             scoped_facts = self._scoped_facts(facts, section_contract, profile_id)
+            scoped_subgraph = (
+                self._scoped_project_subgraph(project_definition, section_contract)
+                if section_contract
+                else None
+            )
             # Facts can be scoped even before the planning workflow has produced a
             # Section Contract.  This keeps accepted public evidence available to
             # ad-hoc previews while still bounding the context for weak models.
             for field in ("confirmed_facts", "fact_context", "existing_facts"):
                 if field in payload:
                     replacements.append((f"payload.{field}", scoped_facts))
+            scoped_items = [
+                item
+                for item in (scoped_subgraph or {}).get("items") or []
+                if isinstance(item, dict) and item.get("item_id")
+            ]
+
+            def project_item_refs(item_types: set[str]) -> list[dict[str, Any]]:
+                return [
+                    {
+                        "object_id": str(item["item_id"]),
+                        "object_type": str(item.get("item_type") or "PROJECT_ITEM"),
+                        "version": 1,
+                        "object_hash": item.get("item_hash"),
+                        "security_level": str(item.get("security_level") or project["security_level"]),
+                        "display_name": str(item.get("content") or item["item_id"])[:200],
+                    }
+                    for item in scoped_items
+                    if str(item.get("item_type") or "") in item_types
+                ]
+
+            if "technical_inputs" in payload:
+                replacements.append((
+                    "payload.technical_inputs",
+                    project_item_refs({
+                        "EXISTING_APPROACH",
+                        "WORK_PACKAGE",
+                        "METHOD",
+                        "EXPERIMENT",
+                        "CAPABILITY",
+                    }),
+                ))
+            if "metric_inputs" in payload:
+                replacements.append((
+                    "payload.metric_inputs",
+                    project_item_refs({"METRIC", "EXPERIMENT"}),
+                ))
             if section_contract:
                 scoped_architecture = self._scoped_architecture(narrative_architecture, section_contract)
                 scoped_plan = self._scoped_plan(plan, scoped_architecture, section_contract)
-                scoped_subgraph = self._scoped_project_subgraph(project_definition, section_contract)
                 if "narrative_architecture" in payload and scoped_architecture:
                     replacements.append(("payload.narrative_architecture", scoped_architecture))
                 if "confirmed_plan" in payload and scoped_plan:
@@ -599,12 +849,45 @@ class ContextBuilder:
         if "project_subgraph" in payload and project_definition and prompt_id not in section_prompt_ids:
             replacements.append(("payload.project_subgraph", {"item_ids": [x["item_id"] for x in project_definition.get("items", [])], "relation_ids": [x["relation_id"] for x in project_definition.get("relations", [])], "items": project_definition.get("items", []), "relations": project_definition.get("relations", [])}))
         for field in ["confirmed_facts", "fact_context", "existing_facts"]:
-            if field in payload and facts and prompt_id not in section_prompt_ids:
+            if field in payload and prompt_id not in section_prompt_ids:
                 replacements.append((f"payload.{field}", facts))
+        if "locked_facts" in payload:
+            replacements.append(("payload.locked_facts", []))
+        if "open_conflicts" in payload:
+            replacements.append(("payload.open_conflicts", []))
         if "fact_package" in payload and facts:
-            replacements.append(("payload.fact_package", {"schema_version": "2.0", "project_id": project["id"], "version": 1, "claims": facts, "conflicts": [], "package_hash": context_hash, "security_level": project["security_level"]}))
+            fact_package = {
+                "schema_version": "2.0",
+                "project_id": project["id"],
+                "version": 1,
+                "claims": facts,
+                "conflicts": [],
+                "security_level": project["security_level"],
+            }
+            fact_package["package_hash"] = sha256_json(fact_package)
+            replacements.append(("payload.fact_package", fact_package))
         if "template_context" in payload and template:
-            replacements.append(("payload.template_context", template))
+            template_context = (
+                self._planning_template_context(template)
+                if prompt_id in {
+                    "P-REVISION-PLAN",
+                    "P-WRITE-BLUEPRINT",
+                    "P-WRITE-CONTENT",
+                }
+                else template
+            )
+            replacements.append(("payload.template_context", template_context))
+        if "writing_mode" in payload:
+            writing_mode = str(
+                ((state.get("options") or {}).get("writing_mode") or "SUBSTANTIVE_REVISION")
+            )
+            if writing_mode not in {
+                "COPY_EDIT_ONLY",
+                "SUBSTANTIVE_REVISION",
+                "DRAFT_FROM_PROJECT_DEFINITION",
+            }:
+                writing_mode = "SUBSTANTIVE_REVISION"
+            replacements.append(("payload.writing_mode", writing_mode))
         if "confirmed_plan" in payload and plan and prompt_id not in section_prompt_ids:
             replacements.append(("payload.confirmed_plan", plan))
         if "approved_blueprint" in payload and blueprint:
@@ -687,8 +970,12 @@ class ContextBuilder:
                 findings = list((state or {}).get("planning_revision_findings", []) or [])
             else:
                 active_section_id = str((current_section or {}).get("section_id") or "")
-                repair_ids = {str(x) for x in (state or {}).get("integration_repair_section_ids", []) if x}
-                findings = list((state or {}).get("integration_repair_findings", []) or []) if active_section_id in repair_ids else []
+                section_findings = (state or {}).get("section_revision_findings") or {}
+                if active_section_id in section_findings:
+                    findings = list(section_findings.get(active_section_id) or [])
+                else:
+                    repair_ids = {str(x) for x in (state or {}).get("integration_repair_section_ids", []) if x}
+                    findings = list((state or {}).get("integration_repair_findings", []) or []) if active_section_id in repair_ids else []
             replacements.append(("payload.revision_findings", findings))
         if "read_only_context" in payload and content_candidates:
             # Only semantic digests of previous chapters are sent to a section
@@ -704,6 +991,66 @@ class ContextBuilder:
                 {"section_id": item["section"]["section_id"], "candidate": self._integration_candidate(item["candidate"])}
                 for item in content_candidates
             ]))
+        if "terminology" in payload:
+            terminology_by_canonical: dict[str, dict[str, Any]] = {}
+            for item in content_candidates:
+                for usage in (item.get("candidate") or {}).get("term_usage") or []:
+                    if not isinstance(usage, dict):
+                        continue
+                    term = str(usage.get("term") or "").strip()
+                    canonical = str(usage.get("canonical_term") or term).strip()
+                    if not canonical:
+                        continue
+                    entry = terminology_by_canonical.setdefault(
+                        canonical,
+                        {
+                            "canonical_term": canonical,
+                            "aliases": [],
+                            "definition": (
+                                "Canonical usage collected from approved candidate "
+                                "section terminology metadata."
+                            ),
+                        },
+                    )
+                    if term and term != canonical and term not in entry["aliases"]:
+                        entry["aliases"].append(term)
+            # An empty terminology table is valid and materially different from
+            # an untouched schema scaffold. Always populate this required field
+            # so LIVE context validation never treats it as unresolved.
+            replacements.append(
+                ("payload.terminology", list(terminology_by_canonical.values()))
+            )
+        if "prior_security_findings" in payload:
+            # The final confidentiality review requires this collection even
+            # when no earlier security review opened a finding.  In LIVE mode
+            # an untouched empty schema array is deliberately treated as a
+            # scaffold marker, so explicitly populate the real (empty) state.
+            prior_security_findings: list[dict[str, Any]] = []
+            rows = self.db.fetchall(
+                """SELECT output_json FROM prompt_runs
+                   WHERE project_id=?
+                     AND prompt_id IN (
+                       'P-SECURITY-CLASSIFY-CRITIC',
+                       'P-SAFE-ONLINE-PACKAGE-CRITIC',
+                       'P-ONLINE-RESULT-IMPORT-CRITIC'
+                     )
+                   ORDER BY created_at,id""",
+                (project["id"],),
+            )
+            seen_security_findings: set[str] = set()
+            for row in rows:
+                output = json.loads(row.get("output_json") or "{}")
+                for finding in output.get("findings") or []:
+                    if not isinstance(finding, dict) or finding.get("category") != "SECURITY":
+                        continue
+                    identity = sha256_json(finding)
+                    if identity in seen_security_findings:
+                        continue
+                    seen_security_findings.add(identity)
+                    prior_security_findings.append(copy.deepcopy(finding))
+            replacements.append(
+                ("payload.prior_security_findings", prior_security_findings)
+            )
         if "document_section_map" in payload:
             proposal_sections = [
                 section
@@ -736,14 +1083,28 @@ class ContextBuilder:
         if "candidate_document" in payload and content_candidates:
             replacements.append(("payload.candidate_document", self._candidate_document(project, content_candidates)))
 
-        if "task_instruction" in payload and config.get("task_instruction"):
-            raw_instruction = config.get("task_instruction")
+        if "task_instruction" in payload:
+            raw_instruction = (
+                config.get("task_instruction")
+                or project.get("description")
+                or project.get("name")
+            )
             if isinstance(raw_instruction, dict):
-                objective = str(raw_instruction.get("objective") or project.get("description") or project.get("name") or "完成指定任务").strip()
+                objective = str(
+                    raw_instruction.get("objective")
+                    or project.get("description")
+                    or project.get("name")
+                    or ""
+                ).strip()
             else:
-                objective = str(raw_instruction or project.get("description") or project.get("name") or "完成指定任务").strip()
-            if isinstance(payload.get("task_instruction"), dict):
-                section_ids = [
+                objective = str(
+                    raw_instruction
+                    or project.get("description")
+                    or project.get("name")
+                    or ""
+                ).strip()
+            if objective and isinstance(payload.get("task_instruction"), dict):
+                section_ids = requested_target_ids or [
                     str(section.get("section_id"))
                     for document in docs
                     if document.get("document_role") == "CURRENT_PROPOSAL"
@@ -754,7 +1115,7 @@ class ContextBuilder:
                     "payload.task_instruction",
                     self._structured_task_instruction(objective, section_ids, config, raw_instruction=raw_instruction),
                 ))
-            else:
+            elif objective:
                 replacements.append(("payload.task_instruction", objective))
         if "recipient_scope" in payload:
             replacements.append(("payload.recipient_scope", config.get("recipient_scope", ["内部用户"])))

@@ -38,3 +38,4 @@ class GateDecisionRequest(BaseModel):
     comment: str | None = None
     answers: list[dict[str, Any]] = Field(default_factory=list)
     context_hash: str | None = None
+    auto_advance: bool = True

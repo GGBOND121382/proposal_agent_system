@@ -43,6 +43,30 @@ def test_b1_scheme_extrapolation_cannot_be_mandatory():
     assert "QG_SCHEME_EXTRAPOLATION_AS_MANDATORY" in _codes(checked)
 
 
+def test_need_user_input_is_not_converted_to_block_by_model_p0_finding():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-SCHEME-EXTRACT")
+    output = pack.replay_output("P-SCHEME-EXTRACT")
+    output["status"] = "NEED_USER_INPUT"
+    output["findings"] = [{
+        "code": "SCHEME_MISSING_MANDATORY_RULE",
+        "severity": "P0",
+        "category": "SCHEME",
+        "target_type": "DOCUMENT",
+        "target_path_or_span": "guide_documents",
+        "description": "Formal guide is missing.",
+        "evidence_refs": [],
+        "repairable": True,
+        "repair_instruction": "Ask the user for the guide.",
+        "suggested_route": "USER",
+        "blocking": True,
+    }]
+
+    checked = validator.apply("P-SCHEME-EXTRACT", env, output)
+
+    assert checked["status"] == "NEED_USER_INPUT"
+
+
 def test_b2_project_relation_direction_is_checked():
     pack, validator = _runtime()
     env = pack.replay_input("P-PROJECT-DEFINITION-EXTRACT")
@@ -149,6 +173,64 @@ def test_b7_targeted_repair_cannot_modify_protected_or_unlisted_paths():
     checked = validator.apply("P-TARGETED-REPAIR", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" in _codes(checked)
+
+
+def test_b7_targeted_repair_canonicalizes_para_id_paths_without_splitting_brackets():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-TARGETED-REPAIR")
+    output = pack.replay_output("P-TARGETED-REPAIR")
+    env["payload"]["allowed_paths"] = [
+        "content.blueprint_candidate.paragraphs[para-tr-007, para-tr-008].novel_content_key",
+    ]
+    env["payload"]["original_object"]["content"] = {
+        "paragraphs": [
+            {"paragraph_id": "para-tr-007"},
+            {"paragraph_id": "para-tr-008"},
+        ],
+    }
+    output["result"]["changed_paths"] = [
+        "content.blueprint_candidate.paragraphs[para-tr-007].novel_content_key",
+        "content.blueprint_candidate.paragraphs[para-tr-008].novel_content_key",
+    ]
+
+    checked = validator.apply("P-TARGETED-REPAIR", env, output)
+
+    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in _codes(checked)
+
+
+def test_b7_targeted_repair_maps_semantic_paragraph_scope_to_numeric_index():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-TARGETED-REPAIR")
+    output = pack.replay_output("P-TARGETED-REPAIR")
+    env["payload"]["allowed_paths"] = ["content.para-tr-001"]
+    env["payload"]["original_object"]["content"] = {
+        "paragraphs": [{"paragraph_id": "para-tr-001"}],
+    }
+    output["result"]["changed_paths"] = [
+        "content.paragraphs[0].primary_claim_id",
+    ]
+
+    checked = validator.apply("P-TARGETED-REPAIR", env, output)
+
+    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in _codes(checked)
+
+
+def test_b7_targeted_repair_expands_numeric_paragraph_ranges():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-TARGETED-REPAIR")
+    output = pack.replay_output("P-TARGETED-REPAIR")
+    env["payload"]["allowed_paths"] = [
+        "content.paragraphs[0-2].novel_content_key",
+    ]
+    output["result"]["changed_paths"] = [
+        "content.paragraphs[0].novel_content_key",
+        "content.paragraphs[1].novel_content_key",
+        "content.paragraphs[2].novel_content_key",
+    ]
+
+    checked = validator.apply("P-TARGETED-REPAIR", env, output)
+
+    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in _codes(checked)
 
 
 def test_b8_expression_polish_preserves_structural_blocks():

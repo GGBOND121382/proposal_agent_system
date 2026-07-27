@@ -132,6 +132,8 @@ def _substantive_numeric_tokens(text: str) -> list[str]:
             continue
         if re.match(r"^[-_:][A-Za-z0-9_-]", right):
             continue
+        if re.search(r"[A-Za-z][A-Za-z0-9_-]*-\d+(?:/\d+)*/$", left):
+            continue
 
         tokens.append(match.group(0))
     return tokens
@@ -585,11 +587,10 @@ class AgentPromptKernelValidator:
         payload: dict[str, Any],
     ) -> list[TrackBFinding]:
         audit: list[TrackBFinding] = []
-        candidate_text = ""
-        for field in ("content_candidate", "polished_candidate", "blueprint_candidate", "architecture_candidate"):
-            value = payload.get(field)
-            if isinstance(value, dict):
-                candidate_text += "\n" + json.dumps(value, ensure_ascii=False)
+        # Critic findings may cite any object supplied in the input payload (for
+        # example a current-section ID or proposal-contract ID), not only the
+        # candidate object under review.
+        candidate_text = json.dumps(payload, ensure_ascii=False)
         for index, finding in enumerate(findings):
             if not isinstance(finding, dict) or finding.get("severity") not in {"P0", "P1"}:
                 continue
@@ -599,7 +600,19 @@ class AgentPromptKernelValidator:
             instruction = str(finding.get("repair_instruction") or "").strip()
             description = str(finding.get("description") or "").strip()
             vague = bool(re.fullmatch(r"(内容)?(不够|需要|建议)?(深入|完善|优化|补充)[。！!]?", description))
-            evidence_in_text = any(ref in candidate_text for ref in refs) if candidate_text and refs else False
+            evidence_in_text = False
+            if candidate_text and refs:
+                for ref in refs:
+                    if ref in candidate_text:
+                        evidence_in_text = True
+                        break
+                    reference_tokens = re.findall(
+                        r"[A-Za-z][A-Za-z0-9]*[-_:][A-Za-z0-9_:-]+",
+                        ref,
+                    )
+                    if any(token in candidate_text for token in reference_tokens):
+                        evidence_in_text = True
+                        break
             if not path or not refs or len(instruction) < 8 or vague or (candidate_text and refs and not evidence_in_text):
                 audit.append(_finding(
                     "QG_CRITIC_FINDING_NOT_PRECISE",
@@ -616,9 +629,103 @@ class AgentPromptKernelValidator:
     @staticmethod
     def _audit_repair_scope(payload: dict[str, Any], result: dict[str, Any]) -> list[TrackBFinding]:
         findings: list[TrackBFinding] = []
-        allowed = [str(item) for item in payload.get("allowed_paths") or []]
-        protected = [str(item) for item in payload.get("protected_paths") or []]
-        changed = [str(item) for item in result.get("changed_paths") or []]
+        def canonical_paths(values: list[Any]) -> list[str]:
+            canonical: list[str] = []
+            for value in values:
+                text = str(value).strip().replace("/", ".")
+                text = re.sub(
+                    r"^content\.(?:blueprint_candidate|candidate)\.",
+                    "content.",
+                    text,
+                )
+                bracket_match = re.match(
+                    r"^content\.paragraphs\[([^\]]+)\](.*)$",
+                    text,
+                )
+                if bracket_match:
+                    semantic_ids: list[str] = []
+                    for item in bracket_match.group(1).split(","):
+                        identity = re.sub(r"^paragraph_id=", "", item.strip())
+                        range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", identity)
+                        if not range_match:
+                            if identity:
+                                semantic_ids.append(identity)
+                            continue
+                        start, end = map(int, range_match.groups())
+                        step = 1 if end >= start else -1
+                        semantic_ids.extend(
+                            str(index)
+                            for index in range(start, end + step, step)
+                        )
+                    parts = [
+                        f"content.{semantic_id}{bracket_match.group(2)}"
+                        for semantic_id in semantic_ids
+                    ]
+                else:
+                    parts = text.split(",")
+                for index, part in enumerate(parts):
+                    path = part.strip().replace("/", ".")
+                    if not path:
+                        continue
+                    if index > 0 and not path.startswith("content."):
+                        path = "content." + path
+                    path = re.sub(
+                        r"^content\.paragraphs\[paragraph_id=([^\]]+)\]",
+                        r"content.\1",
+                        path,
+                    )
+                    path = re.sub(r"\[(\d+)\]", r".\1", path)
+                    canonical.append(path)
+            return canonical
+
+        allowed = canonical_paths(list(payload.get("allowed_paths") or []))
+        protected = canonical_paths(list(payload.get("protected_paths") or []))
+        changed = canonical_paths(list(result.get("changed_paths") or []))
+        for finding in payload.get("findings_to_repair") or []:
+            if not isinstance(finding, dict):
+                continue
+            instruction = str(finding.get("repair_instruction") or "")
+            for paragraph_id in re.findall(
+                r"(?<![A-Za-z0-9-])((?:P|para)-[A-Za-z0-9-]+)(?![A-Za-z0-9-])",
+                instruction,
+                flags=re.I,
+            ):
+                allowed.append(f"content.{paragraph_id}")
+        original_content = (payload.get("original_object") or {}).get("content") or {}
+        paragraph_indexes = {
+            str(paragraph.get("paragraph_id")): index
+            for index, paragraph in enumerate(original_content.get("paragraphs") or [])
+            if isinstance(paragraph, dict) and paragraph.get("paragraph_id")
+        }
+        requested_codes = {
+            str(item.get("code") or "")
+            for item in payload.get("findings_to_repair") or []
+            if isinstance(item, dict)
+        }
+        if "WORD_BUDGET_EXCEED" in requested_codes:
+            allowed.extend(
+                f"content.{paragraph_id}.word_budget"
+                for paragraph_id in paragraph_indexes
+            )
+        if any("CONTENT_KEY" in code for code in requested_codes):
+            allowed.extend(
+                f"content.{paragraph_id}.novel_content_key"
+                for paragraph_id in paragraph_indexes
+            )
+        for paragraph_id, index in paragraph_indexes.items():
+            semantic_root = f"content.{paragraph_id}"
+            if any(
+                path == semantic_root
+                or path.startswith(semantic_root + ".")
+                or path.startswith(semantic_root + "[")
+                for path in allowed
+            ):
+                # Numeric bracket paths canonicalize to ``content.<index>`` in
+                # canonical_paths(), while semantic paragraph-ID roots remain
+                # ``content.<paragraph_id>``. Bridge both representations so a
+                # critic-authorized paragraph ID also permits the model's
+                # equivalent zero-based changed path.
+                allowed.append(f"content.{index}")
 
         def under(path: str, roots: list[str]) -> bool:
             return any(path == root or path.startswith(root + ".") or path.startswith(root + "[") for root in roots)
@@ -907,7 +1014,15 @@ class AgentPromptKernelValidator:
         original_verdict: Any,
     ) -> None:
         findings = [item for item in output.get("findings") or [] if isinstance(item, dict)]
-        if any(item.get("severity") == "P0" and item.get("blocking", True) for item in findings):
+        deterministic_blocking = any(
+            str(item.get("code") or "").startswith("QG_")
+            and item.get("severity") in {"P0", "P1"}
+            and item.get("blocking", True)
+            for item in findings
+        )
+        if original_status == "NEED_USER_INPUT" and not deterministic_blocking:
+            status = "NEED_USER_INPUT"
+        elif any(item.get("severity") == "P0" and item.get("blocking", True) for item in findings):
             status = "BLOCK"
         elif any(item.get("severity") == "P1" and item.get("blocking", True) for item in findings):
             status = "REVISE"

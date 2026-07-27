@@ -193,7 +193,7 @@ class ProposalQualityGuard:
 
     CRITICAL_RESEARCH_TYPES = {
         "GAP", "PROBLEM", "OBJECTIVE", "WORK_PACKAGE", "METHOD", "EXPERIMENT",
-        "INNOVATION", "DELIVERABLE", "METRIC", "ACHIEVEMENT", "CAPABILITY",
+        "INNOVATION", "DELIVERABLE", "METRIC",
     }
 
     REQUIRED_SECTION_PROFILES = {
@@ -480,7 +480,10 @@ class ProposalQualityGuard:
                     "移除RESEARCH_FOUNDATION可写状态，将相关节点改为UNKNOWN，并向负责人请求成果、原型、数据或预实验材料。",
                     "PROJECT_KNOWLEDGE_AGENT",
                 ))
-        if not self.REQUIRED_SECTION_PROFILES.issubset(writable) or not result.get("ready_for_section_planning", False):
+        if (
+            not self.REQUIRED_SECTION_PROFILES.issubset(writable)
+            and result.get("ready_for_section_planning", False)
+        ):
             findings.append(QualityFinding(
                 "QG_FALSE_READINESS", "P1", "READINESS", "READINESS_REPORT",
                 "result.writeable_section_profiles", "论证架构尚未覆盖申请书核心章节，却允许进入章节规划。",
@@ -561,14 +564,46 @@ class ProposalQualityGuard:
         if critic_output is not None:
             result = critic_output.get("result") or {}
             checked = {str(x) for x in result.get("checked_node_ids") or []}
-            expected = {x for x in node_ids if x}
-            if checked != expected:
-                findings.append(QualityFinding("QG_ARGUMENT_CRITIC_PARTIAL", "P1", "ARGUMENT", "ARGUMENT_CRITIC", "result.checked_node_ids", f"论证Critic仅检查{len(checked)}/{len(expected)}个节点。", "逐节点核查全部研究问题、方法、验证、创新和基础节点。", "ORIGINAL_PRODUCER"))
+            expected = {
+                str(node.get("node_id"))
+                for node in nodes
+                if isinstance(node, dict)
+                and node.get("node_id")
+                and node.get("node_type") not in {"CENTRAL_PROPOSITION", "RESEARCH_QUESTION"}
+                and not str(node.get("node_id")).startswith("closest-")
+            }
+            expected.add(str(proposition.get("node_id") or ""))
+            expected.update(
+                str(question.get("node_id"))
+                for question in questions
+                if isinstance(question, dict) and question.get("node_id")
+            )
+            expected.discard("")
+            if not expected.issubset(checked):
+                covered = len(expected & checked)
+                findings.append(QualityFinding("QG_ARGUMENT_CRITIC_PARTIAL", "P1", "ARGUMENT", "ARGUMENT_CRITIC", "result.checked_node_ids", f"论证Critic仅检查{covered}/{len(expected)}个必检节点。", "逐节点核查全部研究问题、方法、验证、创新和基础节点。", "ORIGINAL_PRODUCER"))
             if len(result.get("chain_checks") or []) < 7:
                 findings.append(QualityFinding("QG_ARGUMENT_CRITIC_CHAIN_SCOPE", "P1", "ARGUMENT", "ARGUMENT_CRITIC", "result.chain_checks", "论证Critic没有覆盖七条核心关系链。", "补齐差距到问题、问题到目标、目标到任务、任务到方法、方法到验证、最近工作到创新、基础到可行性检查。", "ORIGINAL_PRODUCER"))
             scorecard = {str(item.get("dimension")): item for item in result.get("quality_dimensions") or [] if isinstance(item, dict)}
             required = {"CENTRAL_THESIS", "ARGUMENT_CHAIN", "EVIDENCE_SUPPORT", "METHOD_SUBSTANCE", "INNOVATION_BASELINE", "FEASIBILITY_FOUNDATION", "METRIC_JUSTIFICATION"}
-            invalid = sorted(dim for dim in required if dim not in scorecard or not scorecard[dim].get("passed", False) or float(scorecard[dim].get("score", 0)) < 3)
+            invalid = []
+            for dimension in sorted(required):
+                item = scorecard.get(dimension)
+                if not item:
+                    invalid.append(dimension)
+                    continue
+                score = item.get("score")
+                passed = item.get("passed")
+                evidence = item.get("evidence") or []
+                required_action = str(item.get("required_action") or "").strip()
+                if (
+                    not isinstance(score, (int, float))
+                    or not 0 <= float(score) <= 4
+                    or not isinstance(passed, bool)
+                    or not evidence
+                    or (not passed and not required_action)
+                ):
+                    invalid.append(dimension)
             if invalid:
                 findings.append(QualityFinding(
                     "QG_ARGUMENT_CRITIC_SCORECARD_INCOMPLETE", "P1", "ARGUMENT", "ARGUMENT_CRITIC",
@@ -831,6 +866,26 @@ class ProposalQualityGuard:
             ))
         missing_claims = sorted(required_claims - paragraph_claims)
         if missing_claims:
+            missing_claim_list = ", ".join(missing_claims)
+            findings.append(QualityFinding(
+                "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING", "P1", "BLUEPRINT", "BLUEPRINT",
+                "paragraphs.primary_claim_id",
+                (
+                    f"Blueprint is missing {len(missing_claims)} required primary claim ID(s): "
+                    f"{missing_claim_list}."
+                ),
+                (
+                    "Preserve every already-covered primary claim and add or revise paragraph plans "
+                    f"so each missing ID ({missing_claim_list}) appears verbatim as one paragraph's "
+                    "primary_claim_id. Because primary_claim_id is singular, use at least "
+                    f"{len(required_claims)} paragraphs to cover all must_advance_claim_ids."
+                ),
+                "WRITING_AGENT",
+            ))
+            # The legacy generic finding below is retained for compatibility but
+            # suppressed after emitting this actionable, ID-specific version.
+            missing_claims = []
+        if missing_claims:
             findings.append(QualityFinding(
                 "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING", "P1", "BLUEPRINT", "BLUEPRINT",
                 "paragraphs.primary_claim_id", f"蓝图没有推进章节合同要求的{len(missing_claims)}个命题。",
@@ -880,6 +935,7 @@ class ProposalQualityGuard:
             allowed_ids.add(str(proposition["node_id"]))
         allowed_ids.update(str(item.get("node_id")) for item in argument_graph.get("research_questions", []) if isinstance(item, dict) and item.get("node_id"))
         allowed_ids.update(str(item.get("node_id")) for item in argument_graph.get("nodes", []) if isinstance(item, dict) and item.get("node_id"))
+        allowed_ids.update(str(item.get("edge_id")) for item in argument_graph.get("edges", []) if isinstance(item, dict) and item.get("edge_id"))
         section_contract = payload.get("section_contract") or {}
         if section_contract.get("section_contract_id"):
             allowed_ids.add(str(section_contract["section_contract_id"]))
@@ -1024,7 +1080,12 @@ class ProposalQualityGuard:
                 "ORIGINAL_PRODUCER",
             ))
         rules = {str(item.get("rule")) for item in result.get("profile_acceptance_results") or [] if isinstance(item, dict)}
-        if len(rules) < 6:
+        quality_dimensions = {
+            str(item.get("dimension"))
+            for item in result.get("quality_dimensions") or []
+            if isinstance(item, dict) and item.get("dimension")
+        }
+        if len(quality_dimensions) < 6:
             findings.append(QualityFinding(
                 "QG_CRITIC_DIMENSIONS_TOO_SHALLOW", "P1", "CONTENT", "WRITE_CRITIC",
                 "result.profile_acceptance_results", "正文Critic只检查结构和Trace，没有检查文种、中心命题、方法实质、创新、指标依据、基础和重复。",

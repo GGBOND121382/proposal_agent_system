@@ -74,8 +74,45 @@ class FullProposalSectionsMixin:
                     self._update(wf, state=state)
                     continue
 
+                if (
+                    result["status"] == "REVISE"
+                    and self._schedule_acceptance_producer_regeneration(
+                        state,
+                        progress,
+                        prompt_id,
+                        result["output"],
+                    )
+                ):
+                    self._update(wf, status="RUNNING", state=state)
+                    continue
+
+                if (
+                    prompt_id in self.SECTION_REPAIR_CRITICS
+                    and result["status"] == "BLOCK"
+                    and self._acceptance_regenerable_review_status(
+                        state,
+                        str(result["status"]),
+                    )
+                    and self._schedule_acceptance_regeneration(
+                        state,
+                        progress,
+                        prompt_id,
+                        result["output"],
+                    )
+                ):
+                    self._update(wf, status="RUNNING", state=state)
+                    continue
+
                 if result["status"] == "REVISE" and prompt_id in self.SECTION_REPAIR_CRITICS:
                     if not self._can_auto_repair(prompt_id, state):
+                        if self._schedule_acceptance_regeneration(
+                            state,
+                            progress,
+                            prompt_id,
+                            result["output"],
+                        ):
+                            self._update(wf, status="RUNNING", state=state)
+                            continue
                         return self._block_section_chain(
                             wf, state, section, f"{prompt_id} 在一次定向修复后仍需修改；章节修复额度已耗尽。",
                         )
@@ -93,6 +130,20 @@ class FullProposalSectionsMixin:
                     except (PromptExecutionError, ValueError, KeyError) as exc:
                         return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}")
                     if reviewed["status"] != "PASS":
+                        if (
+                            self._acceptance_regenerable_review_status(
+                                state,
+                                str(reviewed["status"]),
+                            )
+                            and self._schedule_acceptance_regeneration(
+                                state,
+                                progress,
+                                prompt_id,
+                                reviewed["output"],
+                            )
+                        ):
+                            self._update(wf, status="RUNNING", state=state)
+                            continue
                         return self._block_section_chain(
                             wf, state, section,
                             f"{prompt_id} 定向修复后的独立复审返回 {reviewed['status']}；禁止二次自动修复或人工改正文放行。",
@@ -113,6 +164,7 @@ class FullProposalSectionsMixin:
                 "runs": list(progress["runs"]),
             }
             state["section_results"].append(section_record)
+            state.setdefault("section_revision_findings", {}).pop(section_id, None)
             completed.add(section_id)
             self._update(wf, state=state)
 

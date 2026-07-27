@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .env
+minimax_auth.json
 data/*.sqlite3
 data/*.sqlite3-*
 data/uploads/*
@@ -11,6 +12,8 @@ data/exports/*
 !data/exports/.gitkeep
 data/diagram_artifacts/
 data/research_archive/
+data/model_calls/
+recovery_evidence/*.log
 recovery_evidence/g0/
 recovery_evidence/d/
 recovery_evidence/f/

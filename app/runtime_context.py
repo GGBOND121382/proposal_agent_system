@@ -209,6 +209,29 @@ class LiveContextBuilder(BaseContextBuilder):
         *,
         strict: bool = False,
     ) -> bool:
+        if (
+            getattr(self, "runtime_mode", "REPLAY") == "LIVE"
+            and getattr(self, "_assembling_live_context", False)
+        ):
+            parts = dotted_path.split(".")
+            node: Any = envelope
+            for part in parts[:-1]:
+                if not isinstance(node, dict) or part not in node or not isinstance(node[part], dict):
+                    if strict:
+                        raise ValueError(
+                            f"Critical context path does not exist for {prompt_id}: {dotted_path}"
+                        )
+                    return False
+                node = node[part]
+            if not isinstance(node, dict):
+                if strict:
+                    raise ValueError(
+                        f"Critical context path does not exist for {prompt_id}: {dotted_path}"
+                    )
+                return False
+            node[parts[-1]] = copy.deepcopy(value)
+            self._live_touched_paths.add(dotted_path)
+            return True
         changed = super()._set_path_if_valid(prompt_id, envelope, dotted_path, value, strict=strict)
         if changed and getattr(self, "runtime_mode", "REPLAY") == "LIVE":
             self._live_touched_paths.add(dotted_path)
@@ -306,7 +329,20 @@ class LiveContextBuilder(BaseContextBuilder):
             }
         )
         envelope["expected_output_schema"] = self.pack.entry(prompt_id)["output_schema"]
-        self._apply_common_payload(envelope, prompt_id, project, config, docs, context_hash, state, workflow_id)
+        self._assembling_live_context = True
+        try:
+            self._apply_common_payload(
+                envelope,
+                prompt_id,
+                project,
+                config,
+                docs,
+                context_hash,
+                state,
+                workflow_id,
+            )
+        finally:
+            self._assembling_live_context = False
 
         fallback_values = {
             "payload.task_instruction": config.get("task_instruction") or project.get("description") or project.get("name"),

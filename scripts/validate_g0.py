@@ -69,6 +69,10 @@ def canonical_sha256(value: Any) -> str:
 
 def file_git_blob_sha(path: Path) -> str:
     data = path.read_bytes()
+    # Git's text filter stores JSON with LF in the blob even when a Windows
+    # checkout materializes CRLF. Validate the Git blob identity, not the
+    # platform-specific working-tree newline representation.
+    data = data.replace(b"\r\n", b"\n")
     header = f"blob {len(data)}\0".encode("ascii")
     return hashlib.sha1(header + data).hexdigest()
 

@@ -60,6 +60,75 @@ def test_valid_synthetic_argument_pipeline_passes_quality_guard():
     assert guard.apply("P-PROJECT-READINESS-CRITIC", r_env, copy.deepcopy(r_out))["status"] == "PASS"
 
 
+def test_argument_critic_allows_checked_node_superset():
+    guard = ProposalQualityGuard()
+    node_types = [
+        "RESEARCH_GAP",
+        "CLOSEST_PRIOR_WORK",
+        "OBJECTIVE",
+        "WORK_PACKAGE",
+        "FORMAL_MODEL",
+        "EXPERIMENT_DESIGN",
+        "NOVEL_MECHANISM",
+        "TEAM_EVIDENCE",
+    ]
+    nodes = [
+        {"node_id": f"node-{index}", "node_type": node_type, "status": "UNKNOWN"}
+        for index, node_type in enumerate(node_types)
+    ]
+    architecture = {
+        "argument_architecture": {
+            "central_proposition": {
+                "node_id": "central-proposition",
+                "statement": "A testable proposition",
+                "falsifiable_or_comparable": True,
+            },
+            "research_questions": [{"node_id": "question-1"}],
+            "nodes": nodes,
+        },
+        "research_design_matrix": [{
+            "research_question_id": "question-1",
+            "gap_ids": ["node-0"],
+            "objective_ids": ["node-2"],
+            "work_package_ids": ["node-3"],
+            "method_ids": ["node-4"],
+            "evaluation_ids": ["node-5"],
+            "innovation_ids": ["node-6"],
+            "closest_prior_work_ids": ["node-1"],
+        }],
+        "evidence_gap_report": [],
+        "readiness": {"ready": False},
+    }
+    expected_ids = {
+        "central-proposition",
+        "question-1",
+        *(node["node_id"] for node in nodes),
+    }
+    required_dimensions = [
+        "CENTRAL_THESIS",
+        "ARGUMENT_CHAIN",
+        "EVIDENCE_SUPPORT",
+        "METHOD_SUBSTANCE",
+        "INNOVATION_BASELINE",
+        "FEASIBILITY_FOUNDATION",
+        "METRIC_JUSTIFICATION",
+    ]
+    critic_output = {
+        "result": {
+            "checked_node_ids": sorted(expected_ids | {"upstream-extra"}),
+            "chain_checks": [{} for _ in range(7)],
+            "quality_dimensions": [
+                {"dimension": dimension, "passed": True, "score": 3}
+                for dimension in required_dimensions
+            ],
+        }
+    }
+
+    findings = guard._audit_argument_architecture(architecture, critic_output)
+
+    assert "QG_ARGUMENT_CRITIC_PARTIAL" not in {finding.code for finding in findings}
+
+
 def test_shallow_project_definition_is_rejected():
     _, _, guard, env, output, *_ = _valid_project_argument_readiness()
     candidate = copy.deepcopy(output)
@@ -111,6 +180,17 @@ def test_false_section_planning_readiness_without_foundation_is_rejected():
     checked = guard.apply("P-PROJECT-READINESS-CRITIC", env, candidate)
     assert checked["status"] == "REVISE"
     assert "QG_FOUNDATION_FALSE_READY" in _codes(checked)
+
+
+def test_conservative_not_ready_report_is_not_false_readiness():
+    _, _, guard, _, _, _, _, env, output = _valid_project_argument_readiness()
+    candidate = copy.deepcopy(output)
+    candidate["result"]["ready_for_section_planning"] = False
+    candidate["result"]["writeable_section_profiles"] = ["BACKGROUND_AND_SIGNIFICANCE"]
+
+    checked = guard.apply("P-PROJECT-READINESS-CRITIC", env, candidate)
+
+    assert "QG_FALSE_READINESS" not in _codes(checked)
 
 
 def test_format_only_template_is_rejected():

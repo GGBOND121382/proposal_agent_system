@@ -150,7 +150,9 @@ def test_three_section_cross_chapter_repair_review_and_restart(runtime):
 
     checkpoint = asyncio.run(run_until_interruption())
     assert interrupted["done"] is True
-    assert checkpoint["status"] == "RUNNING"
+    assert checkpoint["status"] == "BLOCKED"
+    assert checkpoint["state"]["runtime_recoverable"] is True
+    assert checkpoint["state"]["runtime_failure_point"] == "WORKFLOW_ADVANCE"
     assert checkpoint["state"]["integration_repair_rounds"] == 1
     assert checkpoint["state"]["integration_repair_section_ids"] == [calls["target_section_id"]]
 

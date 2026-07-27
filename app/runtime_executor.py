@@ -7,7 +7,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .executor import PromptExecutionError, PromptExecutor as BasePromptExecutor
+from .executor import (
+    OUTPUT_NORMALIZER_VERSION,
+    PromptExecutionError,
+    PromptExecutor as BasePromptExecutor,
+)
 from .llm import LLMError
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
 from .runtime_evidence import EvidenceIntegrityError, InjectedFailure, ModelCallEvidenceStore
@@ -54,11 +58,26 @@ class RuntimePromptExecutor(BasePromptExecutor):
         if requested_call_key:
             return requested_call_key
         if workflow_id:
+            try:
+                entry = self.pack.entry(prompt_id)
+                profile_name = entry.get("model_profile")
+                profiles = self.pack.profiles.get("profiles") or self.pack.profiles
+                execution_spec = {
+                    "prompt_text": self.pack.prompt_text(prompt_id),
+                    "prompt_entry": entry,
+                    "model_profile": profiles.get(profile_name),
+                    "output_schema": self.pack.inlined_schema(prompt_id, "output"),
+                    "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
+                }
+            except (AttributeError, KeyError, TypeError):
+                execution_spec = {"prompt_id": prompt_id}
+            execution_spec_hash = sha256_json(execution_spec)
             return "call-" + sha256_json(
                 {
                     "workflow_id": workflow_id,
                     "prompt_id": prompt_id,
                     "input_hash": input_hash,
+                    "execution_spec_hash": execution_spec_hash,
                 }
             )[:32]
         return new_id("call")
@@ -154,7 +173,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 result = await self.gateway.invoke(route, prompt_id, system_prompt, model_envelope, output_schema)
             raw_response_text = result.raw_text
             provider_output = copy.deepcopy(result.output)
-            consumed_output = copy.deepcopy(provider_output)
+            consumed_output = self._normalize_output(prompt_id, provider_output, model_envelope)
 
             if prompt_id == "P-SAFE-ONLINE-PACKAGE":
                 sanitized, redactions = sanitize_safe_online_package(copy.deepcopy(consumed_output), project_config)

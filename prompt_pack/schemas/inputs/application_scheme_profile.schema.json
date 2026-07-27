@@ -33,9 +33,16 @@
       "minLength": 1
     },
     "application_year": {
-      "type": "integer",
-      "minimum": 2000,
-      "maximum": 2100
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 2000,
+          "maximum": 2100
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "guide_direction_name": {
       "type": "string",
@@ -53,9 +60,16 @@
       ]
     },
     "duration_months": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 240
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "rules": {
       "type": "array",

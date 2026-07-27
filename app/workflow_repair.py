@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .executor import PromptExecutionError
@@ -122,9 +123,120 @@ class WorkflowRepairMixin:
             "display_name": f"{producer}原始输出",
         }
         allowed_paths = []
+        original_paragraph_ids = [
+            str(item.get("paragraph_id"))
+            for item in original.get("paragraphs") or []
+            if isinstance(item, dict) and item.get("paragraph_id")
+        ]
+        def split_target_paths(value: str) -> list[str]:
+            parts: list[str] = []
+            current: list[str] = []
+            bracket_depth = 0
+            for char in value:
+                if char == "[":
+                    bracket_depth += 1
+                elif char == "]" and bracket_depth:
+                    bracket_depth -= 1
+                if char in {",", ";"} and bracket_depth == 0:
+                    part = "".join(current).strip()
+                    if part:
+                        parts.append(part)
+                    current = []
+                else:
+                    current.append(char)
+            part = "".join(current).strip()
+            if part:
+                parts.append(part)
+            return parts
+
+        def expand_numeric_bracket_ranges(value: str) -> list[str]:
+            match = re.search(r"paragraphs\[([^\]]+)\]", value)
+            if not match:
+                return [value]
+            identities: list[str] = []
+            for token in match.group(1).split(","):
+                token = token.strip()
+                range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", token)
+                if not range_match:
+                    identities.append(token)
+                    continue
+                start, end = map(int, range_match.groups())
+                step = 1 if end >= start else -1
+                identities.extend(str(index) for index in range(start, end + step, step))
+            return [
+                value[: match.start(1)] + identity + value[match.end(1) :]
+                for identity in identities
+                if identity
+            ]
+
         for finding in findings:
             target = str(finding.get("target_path_or_span") or "result")
-            allowed_paths.append(target if target.startswith("content") else f"content.{target}")
+            target_parts = [
+                expanded
+                for part in split_target_paths(target)
+                for expanded in expand_numeric_bracket_ranges(part)
+            ]
+            bracket_ids = [
+                item.strip()
+                for part in target_parts
+                for match in re.finditer(r"paragraphs\[([^\]]+)\]", part)
+                for item in match.group(1).split(",")
+                if item.strip() and not item.strip().isdigit()
+            ]
+            for part in target_parts:
+                path = part.strip().replace("/", ".")
+                if not path:
+                    continue
+                allowed_paths.append(
+                    path if path.startswith("content.") else f"content.{path}"
+                )
+            if producer in {"P-WRITE-CONTENT", "P-WRITE-BLUEPRINT"}:
+                paragraph_ids = [
+                    *bracket_ids,
+                    *re.findall(
+                        r"(?<![A-Za-z0-9-])((?:P|para)-[A-Za-z0-9-]+)(?![A-Za-z0-9-])",
+                        target + " " + str(finding.get("repair_instruction") or ""),
+                        flags=re.I,
+                    ),
+                ]
+                for paragraph_id in dict.fromkeys(paragraph_ids):
+                    allowed_paths.append(f"content.{paragraph_id}")
+            finding_code = str(finding.get("code") or "")
+            finding_text = " ".join(
+                str(finding.get(field) or "")
+                for field in ("description", "repair_instruction", "target_path_or_span")
+            )
+            if producer == "P-WRITE-BLUEPRINT" and finding_code == "WORD_BUDGET_EXCEED":
+                allowed_paths.extend(
+                    f"content.{paragraph_id}.word_budget"
+                    for paragraph_id in original_paragraph_ids
+                )
+            if producer == "P-WRITE-BLUEPRINT" and "CONTENT_KEY" in finding_code:
+                allowed_paths.extend(
+                    f"content.{paragraph_id}.novel_content_key"
+                    for paragraph_id in original_paragraph_ids
+                )
+            if producer == "P-WRITE-CONTENT" and any(
+                marker in finding_text
+                for marker in ("PAGE_BUDGET", "篇幅", "字数", "word budget")
+            ):
+                allowed_paths.extend(
+                    f"content.paragraphs[{index}].text"
+                    for index, _paragraph_id in enumerate(original_paragraph_ids)
+                )
+            if producer == "P-WRITE-CONTENT" and "novel_content_key" in finding_text:
+                allowed_paths.extend(
+                    f"content.paragraphs[{index}].novel_content_key"
+                    for index, _paragraph_id in enumerate(original_paragraph_ids)
+                )
+        if producer == "P-WRITE-CONTENT" and allowed_paths:
+            allowed_paths.extend(
+                [
+                    "content.candidate_text",
+                    "content.claim_advancement",
+                ]
+            )
+        allowed_paths = list(dict.fromkeys(allowed_paths))
 
         overrides = {
             "payload.original_object": original_object,

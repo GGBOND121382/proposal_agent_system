@@ -36,6 +36,37 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             workflow_state=state,
         )
 
+    @staticmethod
+    def _unaccepted_completion_blockers(
+        blockers: list[dict[str, Any]],
+        state: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Keep accepted intake gaps open without blocking completion of the stage.
+
+        A gate decision does not verify or close a quality finding. It can accept
+        a NEED_USER_INPUT/REVISE result as the documented output of an intake
+        stage. The finding stays open for downstream repair and final export.
+        Deterministic QG findings are never eligible for this stage acceptance.
+        """
+        accepted_run_ids = {
+            str(item.get("run_id"))
+            for item in (state.get("accepted_step_results") or {}).values()
+            if isinstance(item, dict) and item.get("run_id")
+        }
+        remaining: list[dict[str, Any]] = []
+        accepted: list[dict[str, Any]] = []
+        for record in blockers:
+            finding = record.get("finding") or {}
+            code = str(finding.get("code") or "")
+            opened_run_id = str(
+                (record.get("lifecycle") or {}).get("opened_by", {}).get("run_id") or ""
+            )
+            if opened_run_id in accepted_run_ids and not code.startswith("QG_"):
+                accepted.append(record)
+            else:
+                remaining.append(record)
+        return remaining, accepted
+
     def start(self, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
         if workflow_type not in WORKFLOWS:
             raise KeyError(f"Unknown workflow: {workflow_type}")
@@ -132,8 +163,63 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
 
     async def advance(self, workflow_id: str) -> dict[str, Any]:
         wf = self.get(workflow_id)
-        if wf["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+        if wf["status"] in {"COMPLETED", "CANCELLED"}:
             return wf
+        if wf["status"] == "BLOCKED":
+            state = wf["state"]
+            step_key = str(wf["current_step"])
+            steps = WORKFLOWS[wf["workflow_type"]]
+            retries = state.setdefault("technical_retry_attempts", {})
+            retry_limit = 6 if state.get("options", {}).get("acceptance_run") else 2
+            current_prompt_id = (
+                str(steps[wf["current_step"]].get("prompt_id") or "")
+                if wf["current_step"] < len(steps)
+                else ""
+            )
+            current_scope = f"stage:{current_prompt_id}" if current_prompt_id else ""
+            has_current_deterministic_blocker = any(
+                str((record.get("finding") or {}).get("code") or "").startswith("QG_")
+                and str(record.get("scope_key") or "") == current_scope
+                for record in self.quality_manager.open_blockers(
+                    wf["project_id"],
+                    workflow_id=workflow_id,
+                )
+            )
+            deterministic_recheck = (
+                wf["current_step"] < len(steps)
+                and step_key in state.get("step_results", {})
+                and (
+                    "确定性质量校验" in str(state.get("last_error") or "")
+                    or has_current_deterministic_blocker
+                )
+                and int(retries.get(step_key, 0)) < retry_limit
+            )
+            technical_retryable = (
+                wf["current_step"] < len(steps)
+                and (
+                    step_key not in state.get("step_results", {})
+                    or deterministic_recheck
+                )
+                and int(retries.get(step_key, 0)) < retry_limit
+            )
+            completion_recheck = (
+                wf["current_step"] >= len(steps)
+                and bool(state.get("quality_blocker_ids"))
+            )
+            if not technical_retryable and not completion_recheck:
+                return wf
+            if technical_retryable:
+                retries[step_key] = int(retries.get(step_key, 0)) + 1
+                if deterministic_recheck:
+                    previous = state.get("step_results", {}).pop(step_key)
+                    state.setdefault("superseded_step_results", {}).setdefault(
+                        step_key,
+                        [],
+                    ).append(previous)
+            state["recovered_from"] = state.get("last_error") or "TECHNICAL_STEP_FAILURE"
+            state.pop("last_error", None)
+            self._update(wf, status="RUNNING", state=state)
+            wf = self.get(workflow_id)
         if self._open_gate(workflow_id):
             self._update(wf, status="WAITING_GATE")
             return self.get(workflow_id)
@@ -265,16 +351,34 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 self._update(wf, status="WAITING_GATE", state=state)
                 return self.get(workflow_id)
 
-        try:
-            self.quality_manager.assert_no_open_blockers(
+        quality_scope = None if wf["workflow_type"] == "WF-5_SECURITY_REVIEW_AND_EXPORT" else workflow_id
+        blockers = (
+            self.quality_manager.open_delivery_blockers(wf["project_id"])
+            if wf["workflow_type"] == "WF-5_SECURITY_REVIEW_AND_EXPORT"
+            else self.quality_manager.open_blockers(
                 wf["project_id"],
-                workflow_id=None if wf["workflow_type"] == "WF-5_SECURITY_REVIEW_AND_EXPORT" else workflow_id,
+                workflow_id=quality_scope,
             )
+        )
+        accepted_blockers: list[dict[str, Any]] = []
+        if wf["workflow_type"] != "WF-5_SECURITY_REVIEW_AND_EXPORT":
+            blockers, accepted_blockers = self._unaccepted_completion_blockers(blockers, state)
+        try:
+            if blockers:
+                raise QualityGateBlocked(blockers)
         except QualityGateBlocked as exc:
             state["last_error"] = str(exc) + "。必须记录修复运行并由独立Critic复审，人工确认或直接改库均不能放行。"
             state["quality_blocker_ids"] = [item.get("finding_id") for item in exc.findings]
             self._update(wf, status="BLOCKED", state=state)
             return self.get(workflow_id)
+        if accepted_blockers:
+            state["accepted_open_quality_finding_ids"] = [
+                item.get("finding_id") for item in accepted_blockers
+            ]
+            if wf["workflow_type"] == "WF-1_PROJECT_INTAKE":
+                state["completion_scope"] = "CONTENT_VALIDATION_ONLY"
+        state.pop("last_error", None)
+        state.pop("quality_blocker_ids", None)
         self._update(wf, status="COMPLETED", state=state)
         self.db.audit("WORKFLOW_COMPLETED", project_id=wf["project_id"], object_id=workflow_id, metadata={"workflow_type": wf["workflow_type"]})
         return self.get(workflow_id)

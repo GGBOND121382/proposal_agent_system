@@ -4,14 +4,14 @@ profiles:
     preferred_models:
     - offline-general-primary
     temperature: 0.0
-    max_output_tokens: 10000
+    max_output_tokens: 32000
     response_format: JSON_SCHEMA
     fallback_models: []
   critic:
     preferred_models:
     - offline-critic-primary
     temperature: 0.0
-    max_output_tokens: 7000
+    max_output_tokens: 16000
     response_format: JSON_SCHEMA
     fallback_models:
     - offline-general-primary
@@ -19,14 +19,14 @@ profiles:
     preferred_models:
     - offline-general-primary
     temperature: 0.1
-    max_output_tokens: 10000
+    max_output_tokens: 24000
     response_format: JSON_SCHEMA
     fallback_models: []
   formal_writing:
     preferred_models:
     - offline-general-primary
     temperature: 0.2
-    max_output_tokens: 12000
+    max_output_tokens: 24000
     response_format: JSON_SCHEMA
     fallback_models: []
   public_research:
@@ -40,7 +40,7 @@ profiles:
     preferred_models:
     - offline-critic-primary
     temperature: 0.0
-    max_output_tokens: 7000
+    max_output_tokens: 16000
     response_format: JSON_SCHEMA
     fallback_models:
     - offline-general-primary

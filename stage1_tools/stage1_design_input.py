@@ -347,7 +347,7 @@ def build_manifest(run_dir: Path) -> None:
     excluded = {"TRACE_MANIFEST.json", "TRACE_ARCHIVE.json"}
     for p in sorted(run_dir.rglob("*")):
         if p.is_file() and p.name not in excluded:
-            files.append({"path": str(p.relative_to(run_dir)), "size_bytes": p.stat().st_size, "sha256": sha256_file(p)})
+            files.append({"path": p.relative_to(run_dir).as_posix(), "size_bytes": p.stat().st_size, "sha256": sha256_file(p)})
     atomic_json(run_dir / "TRACE_MANIFEST.json", {"schema_version": "1.0", "root": str(run_dir), "file_count": len(files), "files": files, "archive_policy": "TRACE_ARCHIVE.json is external to the archive hash manifest to avoid a self-reference cycle.", "generated_at": utc_now()})
 
 

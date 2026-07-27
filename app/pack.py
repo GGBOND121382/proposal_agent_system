@@ -22,6 +22,7 @@ class PromptPack:
         self.profiles = expand_env(yaml.safe_load((root / "config/prompt_model_profiles.yaml").read_text(encoding="utf-8")))
         self.routing = expand_env(yaml.safe_load((root / "policies/model_routing.yaml").read_text(encoding="utf-8")))
         self.section_profiles = yaml.safe_load((root / "knowledge/section_profiles.yaml").read_text(encoding="utf-8"))
+        self.relation_matrix = yaml.safe_load((root / "knowledge/relation_matrix.yaml").read_text(encoding="utf-8"))
         self.shared_prompt = self._load_shared_prompt()
         self._schema_registry = self._build_schema_registry()
 

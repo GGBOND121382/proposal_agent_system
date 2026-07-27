@@ -42,7 +42,28 @@ class WorkflowGateMixin:
         decision = {"action": action, "comment": comment, "answers": answers or [], "decided_by": decided_by, "decided_role": decided_role, "decided_at": utc_now(), "context_hash": gate["context_hash"]}
         self.db.execute("UPDATE gates SET status=?,decision_json=?,updated_at=? WHERE id=?", (status, json.dumps(decision, ensure_ascii=False), utc_now(), gate_id))
         wf = self.get(gate["workflow_id"])
-        self._update(wf, status="RUNNING" if approved else "BLOCKED")
+        next_step = wf["current_step"]
+        state = wf["state"]
+        if approved:
+            current_result = state.get("step_results", {}).get(str(wf["current_step"])) or {}
+            if (
+                gate.get("target_id") == current_result.get("run_id")
+                and current_result.get("status") in {"REVISE", "NEED_USER_INPUT"}
+            ):
+                state.setdefault("accepted_step_results", {})[str(wf["current_step"])] = {
+                    "run_id": current_result["run_id"],
+                    "status": current_result["status"],
+                    "gate_id": gate_id,
+                    "action": action,
+                    "answers": answers or [],
+                }
+                next_step += 1
+        self._update(
+            wf,
+            status="RUNNING" if approved else "BLOCKED",
+            current_step=next_step,
+            state=state,
+        )
         self.db.audit("GATE_DECIDED", project_id=gate["project_id"], object_id=gate_id, metadata={"gate_type": gate["gate_type"], "status": status, "decided_role": decided_role})
         return self._gate(gate_id)
 

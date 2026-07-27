@@ -213,6 +213,16 @@ def test_e6_p1_requires_repair_and_independent_critic_review(tmp_path: Path):
     assert verified["lifecycle"]["review_evidence"][0]["run_id"] == "critic-review"
 
 
+def test_critic_scope_uses_canonical_producer_prompt():
+    manager = QualityLifecycleManager(SimpleNamespace())
+
+    assert manager._scope_key("P-FACT-EXTRACT", {}) == "stage:P-FACT-EXTRACT"
+    assert manager._scope_key("P-FACT-CRITIC", {}) == "stage:P-FACT-EXTRACT"
+    assert manager._scope_key("P-PROJECT-DEFINITION-CRITIC", {}) == (
+        "stage:P-PROJECT-DEFINITION-EXTRACT"
+    )
+
+
 def test_e6_export_gate_cannot_override_open_quality_blocker(tmp_path: Path):
     db, project_id, workflow_id = _db(tmp_path)
     manager = QualityLifecycleManager(db)
@@ -239,6 +249,89 @@ def test_e6_export_gate_cannot_override_open_quality_blocker(tmp_path: Path):
     exporter = DocxExporter(db, SimpleNamespace())
     with pytest.raises(ExportDenied, match="独立复审"):
         exporter._authorized_project(project_id)
+
+
+def test_delivery_blockers_ignore_superseded_workflow_lineage(tmp_path: Path):
+    db, project_id, workflow_id = _db(tmp_path)
+    manager = QualityLifecycleManager(db)
+    manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id="critic-old",
+        status="REVISE",
+        output={"findings": [_finding("OLD_WORKFLOW_BLOCKER")]},
+    )
+    db.execute(
+        """INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (
+            "wf-new",
+            project_id,
+            "WF-4_PROPOSAL_AUTHORING",
+            "COMPLETED",
+            7,
+            "{}",
+            "2099-01-01T00:00:00+00:00",
+            "2099-01-01T00:00:00+00:00",
+        ),
+    )
+
+    assert manager.open_blockers(project_id)
+    assert manager.open_delivery_blockers(project_id) == []
+
+
+def test_acceptance_delivery_keeps_qg_blockers_but_allows_confirmed_test_gaps(tmp_path: Path):
+    db, project_id, workflow_id = _db(tmp_path)
+    manager = QualityLifecycleManager(db)
+    accepted_run_id = "critic-accepted-test-gap"
+    manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id=accepted_run_id,
+        status="NEED_USER_INPUT",
+        output={
+            "findings": [
+                _finding("TEST_INPUT_GAP"),
+                _finding("QG_DETERMINISTIC_BLOCKER"),
+            ]
+        },
+    )
+    db.execute(
+        "UPDATE workflows SET status='COMPLETED',state_json=?,updated_at=? WHERE id=?",
+        (
+            json.dumps(
+                {
+                    "accepted_step_results": {
+                        "0": {"run_id": accepted_run_id, "status": "NEED_USER_INPUT"}
+                    }
+                }
+            ),
+            "2099-01-01T00:00:00+00:00",
+            workflow_id,
+        ),
+    )
+    db.execute(
+        """INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (
+            "wf-acceptance-export",
+            project_id,
+            "WF-5_SECURITY_REVIEW_AND_EXPORT",
+            "BLOCKED",
+            2,
+            json.dumps({"options": {"acceptance_run": True}}),
+            "2099-01-02T00:00:00+00:00",
+            "2099-01-02T00:00:00+00:00",
+        ),
+    )
+
+    blockers = manager.open_delivery_blockers(project_id)
+
+    assert [item["finding"]["code"] for item in blockers] == [
+        "QG_DETERMINISTIC_BLOCKER"
+    ]
 
 
 def test_quality_matrix_is_auditable_and_append_only(tmp_path: Path):

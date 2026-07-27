@@ -40,11 +40,10 @@ def atomic_json(path: Path, value: Any) -> None:
 
 
 def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    data = path.read_bytes()
+    if path.suffix.lower() in {".json", ".md", ".txt", ".yaml", ".yml"}:
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
 
 
 def schema(name: str) -> dict[str, Any]:

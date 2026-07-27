@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .executor import PromptExecutionError
+from .util import sha256_json
 
 THREE_SECTION_PROFILE_ORDER = (
     "BACKGROUND_AND_SIGNIFICANCE",
@@ -21,6 +22,15 @@ class WorkflowAuthoringMixin:
         "EXPRESSION_CRITIC": ("P-EXPRESSION-CRITIC", "DONE"),
     }
     SECTION_REPAIR_CRITICS = {"P-WRITE-BLUEPRINT-CRITIC", "P-WRITE-CRITIC"}
+    SECTION_CRITIC_PRODUCERS = {
+        "P-WRITE-BLUEPRINT-CRITIC": ("P-WRITE-BLUEPRINT", "BLUEPRINT"),
+        "P-WRITE-CRITIC": ("P-WRITE-CONTENT", "CONTENT"),
+    }
+    SECTION_PRODUCER_PHASES = {
+        "P-WRITE-BLUEPRINT": "BLUEPRINT",
+        "P-WRITE-CONTENT": "CONTENT",
+        "P-EXPRESSION-POLISH": "POLISH",
+    }
 
     @staticmethod
     def _append_section_run(progress: dict[str, Any], result: dict[str, Any], *, prompt_id: str | None = None, role: str | None = None) -> None:
@@ -67,12 +77,32 @@ class WorkflowAuthoringMixin:
             workflow_id=wf["id"],
             workflow_state=state,
         )
+        candidate_round_key = (
+            f"section:{state.get('active_section_id') or ''}:{prompt_id}"
+        )
+        candidate_round = int(
+            (state.get("acceptance_candidate_rounds") or {}).get(
+                candidate_round_key,
+                0,
+            )
+        )
+        requested_call_key = None
+        if candidate_round:
+            requested_call_key = "call-acceptance-" + sha256_json(
+                {
+                    "workflow_id": wf["id"],
+                    "section_id": state.get("active_section_id"),
+                    "prompt_id": prompt_id,
+                    "candidate_round": candidate_round,
+                }
+            )[:24]
         result = await self.executor.execute(
             prompt_id,
             envelope,
             project_id=wf["project_id"],
             workflow_id=wf["id"],
             original_environment=state.get("original_environment"),
+            call_key=requested_call_key,
         )
         if prompt_id == "P-WRITE-CONTENT" and self.diagram_enrichment is not None and result["status"] == "PASS":
             result["output"] = await self.diagram_enrichment.enrich(
@@ -88,9 +118,134 @@ class WorkflowAuthoringMixin:
             )
         self._append_section_run(progress, result, prompt_id=prompt_id, role=role)
         state["original_environment"] = result["route"]["environment"]
+        # A freshly generated producer object is a new repair subject. Repair
+        # budgets and overrides belong to the previous candidate.
+        if result["status"] == "PASS":
+            critic_prompt = next(
+                (
+                    critic
+                    for critic, (producer, _phase) in self.SECTION_CRITIC_PRODUCERS.items()
+                    if producer == prompt_id
+                ),
+                None,
+            )
+            if critic_prompt:
+                state.setdefault("repair_attempts", {}).pop(
+                    self._repair_state_key(critic_prompt, state),
+                    None,
+                )
+                state.setdefault("repair_overrides", {}).pop(
+                    self._repair_override_key(prompt_id, state),
+                    None,
+                )
         self._observe_quality_result(wf, state, prompt_id, result)
         self._update(wf, state=state)
         return envelope, result
+
+    def _schedule_acceptance_regeneration(
+        self,
+        state: dict[str, Any],
+        progress: dict[str, Any],
+        critic_prompt: str,
+        critic_output: dict[str, Any],
+    ) -> bool:
+        """Schedule a bounded new producer candidate for an acceptance run."""
+        options = state.get("options") or {}
+        if not bool(options.get("acceptance_run")):
+            return False
+        producer_phase = self.SECTION_CRITIC_PRODUCERS.get(critic_prompt)
+        if not producer_phase:
+            return False
+        findings = [
+            item
+            for item in critic_output.get("findings", [])
+            if isinstance(item, dict)
+        ]
+        if not findings or any(not item.get("repairable", False) for item in findings):
+            return False
+
+        section_id = str(state.get("active_section_id") or "")
+        round_key = f"section:{section_id}:{critic_prompt}"
+        rounds = state.setdefault("acceptance_regeneration_rounds", {})
+        limit = max(0, min(int(options.get("acceptance_regeneration_limit", 2)), 3))
+        if int(rounds.get(round_key, 0)) >= limit:
+            return False
+        rounds[round_key] = int(rounds.get(round_key, 0)) + 1
+
+        producer_prompt, producer_phase_name = producer_phase
+        producer_round_key = f"section:{section_id}:{producer_prompt}"
+        candidate_rounds = state.setdefault("acceptance_candidate_rounds", {})
+        candidate_rounds[producer_round_key] = (
+            int(candidate_rounds.get(producer_round_key, 0)) + 1
+        )
+        state.setdefault("section_revision_findings", {})[section_id] = findings
+        state.setdefault("repair_attempts", {}).pop(
+            self._repair_state_key(critic_prompt, state),
+            None,
+        )
+        state.setdefault("repair_overrides", {}).pop(
+            self._repair_override_key(producer_prompt, state),
+            None,
+        )
+        progress["phase"] = producer_phase_name
+        progress["status"] = "RUNNING"
+        progress.pop("last_error", None)
+        state.pop("last_error", None)
+        return True
+
+    @staticmethod
+    def _acceptance_regenerable_review_status(
+        state: dict[str, Any],
+        status: str,
+    ) -> bool:
+        if status == "REVISE":
+            return True
+        options = state.get("options") or {}
+        return bool(
+            status == "BLOCK"
+            and options.get("acceptance_run")
+            and options.get("allow_repairable_block_regeneration")
+        )
+
+    def _schedule_acceptance_producer_regeneration(
+        self,
+        state: dict[str, Any],
+        progress: dict[str, Any],
+        producer_prompt: str,
+        producer_output: dict[str, Any],
+    ) -> bool:
+        """Regenerate a producer object rejected by deterministic quality checks."""
+        options = state.get("options") or {}
+        producer_phase = self.SECTION_PRODUCER_PHASES.get(producer_prompt)
+        if not bool(options.get("acceptance_run")) or not producer_phase:
+            return False
+        findings = [
+            item
+            for item in producer_output.get("findings", [])
+            if isinstance(item, dict)
+        ]
+        if not findings or any(not item.get("repairable", False) for item in findings):
+            return False
+
+        section_id = str(state.get("active_section_id") or "")
+        round_key = f"section:{section_id}:{producer_prompt}"
+        rounds = state.setdefault("acceptance_regeneration_rounds", {})
+        limit = max(0, min(int(options.get("acceptance_regeneration_limit", 2)), 3))
+        if int(rounds.get(round_key, 0)) >= limit:
+            return False
+        rounds[round_key] = int(rounds.get(round_key, 0)) + 1
+        candidate_rounds = state.setdefault("acceptance_candidate_rounds", {})
+        candidate_rounds[round_key] = int(candidate_rounds.get(round_key, 0)) + 1
+        state.setdefault("section_revision_findings", {})[section_id] = findings
+        state.setdefault("repair_overrides", {}).pop(
+            self._repair_override_key(producer_prompt, state),
+            None,
+        )
+        progress["phase"] = producer_phase
+        progress["status"] = "RUNNING"
+        progress.pop("last_error", None)
+        state.pop("last_error", None)
+        return True
 
     async def _write_sections(self, wf: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
         """Run an isolated, recoverable producer/critic/repair chain for each section.
@@ -155,8 +310,45 @@ class WorkflowAuthoringMixin:
                     self._update(wf, state=state)
                     continue
 
+                if (
+                    result["status"] == "REVISE"
+                    and self._schedule_acceptance_producer_regeneration(
+                        state,
+                        progress,
+                        prompt_id,
+                        result["output"],
+                    )
+                ):
+                    self._update(wf, status="RUNNING", state=state)
+                    continue
+
+                if (
+                    prompt_id in self.SECTION_REPAIR_CRITICS
+                    and result["status"] == "BLOCK"
+                    and self._acceptance_regenerable_review_status(
+                        state,
+                        str(result["status"]),
+                    )
+                    and self._schedule_acceptance_regeneration(
+                        state,
+                        progress,
+                        prompt_id,
+                        result["output"],
+                    )
+                ):
+                    self._update(wf, status="RUNNING", state=state)
+                    continue
+
                 if result["status"] == "REVISE" and prompt_id in self.SECTION_REPAIR_CRITICS:
                     if not self._can_auto_repair(prompt_id, state):
+                        if self._schedule_acceptance_regeneration(
+                            state,
+                            progress,
+                            prompt_id,
+                            result["output"],
+                        ):
+                            self._update(wf, status="RUNNING", state=state)
+                            continue
                         return self._block_section_chain(
                             wf, state, section, f"{prompt_id} 在一次定向修复后仍需修改；章节修复额度已耗尽。",
                         )
@@ -174,6 +366,20 @@ class WorkflowAuthoringMixin:
                     except (PromptExecutionError, ValueError, KeyError) as exc:
                         return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}")
                     if reviewed["status"] != "PASS":
+                        if (
+                            self._acceptance_regenerable_review_status(
+                                state,
+                                str(reviewed["status"]),
+                            )
+                            and self._schedule_acceptance_regeneration(
+                                state,
+                                progress,
+                                prompt_id,
+                                reviewed["output"],
+                            )
+                        ):
+                            self._update(wf, status="RUNNING", state=state)
+                            continue
                         return self._block_section_chain(
                             wf, state, section,
                             f"{prompt_id} 定向修复后的独立复审返回 {reviewed['status']}；禁止二次自动修复或人工改正文放行。",
@@ -194,6 +400,7 @@ class WorkflowAuthoringMixin:
                 "runs": list(progress["runs"]),
             }
             state["section_results"].append(section_record)
+            state.setdefault("section_revision_findings", {}).pop(section_id, None)
             completed.add(section_id)
             self._update(wf, state=state)
 

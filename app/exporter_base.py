@@ -249,7 +249,7 @@ class ExportBaseMixin:
         if not project:
             raise KeyError(project_id)
         try:
-            self.quality_manager.assert_no_open_blockers(project_id)
+            self.quality_manager.assert_no_delivery_blockers(project_id)
         except QualityGateBlocked as exc:
             raise ExportDenied(
                 str(exc) + "。导出必须等待修复证据与独立复审完成，不能通过批准Gate或手工改库绕过。"
