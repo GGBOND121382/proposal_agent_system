@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.util import sha256_json, utc_now
+from app.status_ontology import normalize_stage2_candidate, normalize_stage3_candidate
 from stage2_tools.stage2_guide_fact_base import deterministic_validate as validate_stage2
 
 STAGE = "STAGE_3_PROJECT_DEFINITION"
@@ -90,6 +91,7 @@ def state(run_dir: Path, status: str, phase: str, **kwargs: Any) -> None:
 
 
 def upstream_coverage(stage2: dict[str, Any]) -> dict[str, Any]:
+    stage2, _ = normalize_stage2_candidate(stage2)
     direct = set(stage2.get("writing_permissions", {}).get("direct_fact_ids", []))
     found: dict[str, list[str]] = {k: [] for k in REQUIRED_UPSTREAM_BINDINGS}
     for fact in stage2.get("facts", []):
@@ -114,10 +116,10 @@ def make_upstream_repair_request(stage1: dict[str, Any], stage2: dict[str, Any],
         "schema_version": "1.0",
         "call_key": UPSTREAM_REPAIR_CALL_KEY,
         "prompt_id": "P-STAGE3-UPSTREAM-FACT-REPAIR",
-        "prompt_version": "1.0.0",
+        "prompt_version": "1.1.0",
         "executor_role": "Stage2 Fact Base Repair Agent",
         "model_contract": {"model_independent": True, "response_format": "JSON", "actual_model_id_required": True, "endpoint_id_required": True},
-        "system_prompt": "你是阶段2事实底座定向修复Agent。不得重写已经确认的研究设计，也不得生成申请书正文。你只能在现有阶段2候选基础上补充阶段3项目定义必需、且能从阶段1冻结工件逐字或忠实归纳得到的原子事实。新增事实必须标记为CONFIRMED_DESIGN与DIRECT，绑定真实阶段1字段，并更新writing_permissions。未知信息、暂定指标和工作假设的状态不得改变。输出必须是完整阶段2候选JSON。",
+        "system_prompt": "你是阶段2事实底座定向修复Agent。不得重写已经确认的研究设计，也不得生成申请书正文。你只能在现有阶段2候选基础上补充阶段3项目定义必需、且能从阶段1冻结工件逐字或忠实归纳得到的原子事实。新增设计事实必须使用knowledge_status=CONFIRMED、fact_role=DESIGN、temporal_status=PLANNED与assertion_policy=DIRECT，绑定真实阶段1字段，并更新writing_permissions。暂定目标使用fact_role=TARGET，工作假设使用fact_role=ASSUMPTION；不得创造新的knowledge_status。输出必须是完整阶段2候选JSON。",
         "task_prompt": "补齐核心概念工作定义、问题陈述、当前差距定义、中心命题、研究属性、成熟度目标、正文目标页数和参考文献页数规则的可直接引用事实。当前差距只能表述为项目设计所界定的差距，不得升级为经过文献检索证明的结论。保留全部原有事实、规则、开放事项、来源和权限分区。",
         "input_envelope": {"stage1_design_input": stage1, "current_stage2_candidate": stage2, "coverage_report": coverage},
         "output_schema": read_json(ROOT / "stage2_tools" / "guide_fact_base.schema.json"),
@@ -126,14 +128,15 @@ def make_upstream_repair_request(stage1: dict[str, Any], stage2: dict[str, Any],
 
 
 def make_generator_request(stage1: dict[str, Any], stage2: dict[str, Any], stage1_hash: str, stage2_hash: str) -> dict[str, Any]:
+    stage2, _ = normalize_stage2_candidate(stage2)
     return {
         "schema_version": "1.0",
         "call_key": GENERATOR_CALL_KEY,
         "prompt_id": "P-STAGE3-PROJECT-DEFINITION",
-        "prompt_version": "1.0.0",
+        "prompt_version": "1.1.0",
         "executor_role": "Project Definition Agent",
         "model_contract": {"model_independent": True, "response_format": "JSON", "actual_model_id_required": True, "endpoint_id_required": True},
-        "system_prompt": "你是科研项目定义Agent。当前阶段只冻结项目定义、中心命题、研究问题、目标与研究内容关系，不生成申请书正文、论证架构或章节计划。严格按阶段2写作权限使用事实：DIRECT可直接陈述，QUALIFIED必须带暂定或假设限定，PROHIBITED不得补写。必须把系统和原型定位为验证载体，而不是把工程建设目标冒充研究命题。最接近已有工作尚未调研，因此创新只能写成待验证假设。输出必须是单个JSON对象并严格满足Schema。",
+        "system_prompt": "你是科研项目定义Agent。当前阶段只冻结项目定义、中心命题、研究问题、目标与研究内容关系，不生成申请书正文、论证架构或章节计划。严格按阶段2写作权限使用事实：DIRECT可直接陈述，QUALIFIED必须带暂定或假设限定，PROHIBITED不得补写。所有knowledge_status只能使用统一八值词表；中心命题是已确认的项目设计假设，应使用knowledge_status=CONFIRMED、claim_role=DESIGN_HYPOTHESIS、temporal_status=PLANNED，不能写成已验证结果。必须把系统和原型定位为验证载体。输出必须是单个JSON对象并严格满足Schema。",
         "task_prompt": "基于已冻结的阶段1设计输入和经修复的阶段2事实底座，形成项目定义。保留3个研究问题，给出唯一中心命题、3类研究差距、4项研究目标、4项研究内容、可证伪条件、范围边界和关系图。项目定义可进入下一阶段论证架构，但正式模板、最近工作、研究基础证据、团队、经费和周期仍未冻结，因此不得放行章节规划或正文生成。",
         "input_envelope": {
             "stage1_design_input": stage1,
@@ -147,6 +150,8 @@ def make_generator_request(stage1: dict[str, Any], stage2: dict[str, Any], stage
 
 
 def deterministic_validate(candidate: dict[str, Any], stage1: dict[str, Any], stage2: dict[str, Any], stage1_hash: str, stage2_hash: str) -> dict[str, Any]:
+    stage2, _ = normalize_stage2_candidate(stage2)
+    candidate, status_normalization = normalize_stage3_candidate(candidate, stage2)
     findings: list[dict[str, Any]] = []
     def add(code: str, severity: str, message: str) -> None:
         findings.append({"code": code, "severity": severity, "message": message})
@@ -287,24 +292,29 @@ def init_cmd(args: argparse.Namespace) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     for name in ["requests", "responses", "schemas", "intermediate", "quality", "human_gate", "outputs", "source_snapshots", "repairs"]:
         (run_dir / name).mkdir(parents=True, exist_ok=True)
-    stage1 = read_json(stage1_path); stage2 = read_json(stage2_path)
-    if stage1.get("stage") != "STAGE_1_DESIGN_INPUT" or stage2.get("stage") != "STAGE_2_GUIDE_AND_FACT_BASE":
+    stage1 = read_json(stage1_path); stage2_received = read_json(stage2_path)
+    if stage1.get("stage") != "STAGE_1_DESIGN_INPUT" or stage2_received.get("stage") != "STAGE_2_GUIDE_AND_FACT_BASE":
         raise SystemExit("invalid upstream stage")
+    stage2, upstream_status_normalization = normalize_stage2_candidate(stage2_received)
     s1 = run_dir / "source_snapshots" / "stage1_design_input.json"
+    s2_received = run_dir / "source_snapshots" / "stage2_guide_fact_base_received.json"
     s2 = run_dir / "source_snapshots" / "stage2_guide_fact_base_original.json"
     s1.write_text(stage1_path.read_text(encoding="utf-8"), encoding="utf-8")
-    s2.write_text(stage2_path.read_text(encoding="utf-8"), encoding="utf-8")
+    s2_received.write_text(stage2_path.read_text(encoding="utf-8"), encoding="utf-8")
+    atomic_json(s2, stage2)
+    atomic_json(run_dir / "quality" / "upstream_status_normalization.json", upstream_status_normalization)
     for name in ["project_definition.schema.json", "project_definition_critic.schema.json"]:
         (run_dir / "schemas" / name).write_text((ROOT / "stage3_tools" / name).read_text(encoding="utf-8"), encoding="utf-8")
     metadata = {
         "schema_version": "1.0", "stage": STAGE, "project_title": stage1["project_title"], "created_at": utc_now(),
         "run_dir": str(run_dir), "stage_boundary": "PROJECT_DEFINITION_ONLY", "model_bridge": "CHAT_FILE_BRIDGE",
-        "stage1_sha256": sha256_file(s1), "stage2_original_sha256": sha256_file(s2),
+        "stage1_sha256": sha256_file(s1), "stage2_received_sha256": sha256_file(s2_received),
+        "stage2_original_sha256": sha256_file(s2),
     }
     atomic_json(run_dir / "RUN_METADATA.json", metadata)
     coverage = upstream_coverage(stage2)
     atomic_json(run_dir / "quality" / "upstream_project_definition_coverage.json", coverage)
-    append_event(run_dir, "RUN_INITIALIZED", stage1_sha256=metadata["stage1_sha256"], stage2_sha256=metadata["stage2_original_sha256"])
+    append_event(run_dir, "RUN_INITIALIZED", stage1_sha256=metadata["stage1_sha256"], stage2_sha256=metadata["stage2_original_sha256"], upstream_status_normalizations=upstream_status_normalization["normalized_count"])
     if coverage["verdict"] != "PASS":
         req = make_upstream_repair_request(stage1, stage2, coverage)
         atomic_json(run_dir / "requests" / "001_upstream_fact_repair.json", req)
@@ -323,13 +333,16 @@ def ingest_upstream_repair_cmd(args: argparse.Namespace) -> None:
         raise SystemExit("upstream repair response mismatch")
     if not env.get("model_id") or not env.get("endpoint_id"):
         raise SystemExit("missing actual model or endpoint")
-    candidate = env.get("output")
+    raw_candidate = env.get("output")
+    candidate, normalization_report = normalize_stage2_candidate(raw_candidate)
     meta = read_json(run_dir / "RUN_METADATA.json")
     report = validate_stage2(candidate, meta["stage1_sha256"])
     coverage = upstream_coverage(candidate)
     combined = {"stage2_deterministic_report": report, "project_definition_coverage": coverage, "verdict": "PASS" if report["verdict"] == "PASS" and coverage["verdict"] == "PASS" else "FAIL"}
     atomic_json(run_dir / "responses" / "001_upstream_fact_repair.json", env)
+    atomic_json(run_dir / "repairs" / "stage2_guide_fact_base_repaired_candidate_raw.json", raw_candidate)
     atomic_json(run_dir / "repairs" / "stage2_guide_fact_base_repaired_candidate.json", candidate)
+    atomic_json(run_dir / "quality" / "upstream_status_normalization.json", normalization_report)
     atomic_json(run_dir / "quality" / "upstream_repair_deterministic_report.json", combined)
     append_event(run_dir, "MODEL_RESPONSE_INGESTED", call_key=UPSTREAM_REPAIR_CALL_KEY, model_id=env["model_id"], endpoint_id=env["endpoint_id"], verdict=combined["verdict"], candidate_hash=sha256_json(candidate))
     if combined["verdict"] != "PASS":
@@ -337,7 +350,7 @@ def ingest_upstream_repair_cmd(args: argparse.Namespace) -> None:
         raise SystemExit(2)
     critic_req = {
         "schema_version": "1.0", "call_key": UPSTREAM_REPAIR_CRITIC_CALL_KEY,
-        "prompt_id": "P-STAGE3-UPSTREAM-FACT-REPAIR-CRITIC", "prompt_version": "1.0.0",
+        "prompt_id": "P-STAGE3-UPSTREAM-FACT-REPAIR-CRITIC", "prompt_version": "1.1.0",
         "executor_role": "Independent Stage2 Fact Repair Critic",
         "model_contract": {"independent_from_generator": True, "response_format": "JSON", "actual_model_id_required": True, "endpoint_id_required": True},
         "system_prompt": "你是独立事实底座修复Critic。检查新增事实是否都能从阶段1冻结设计输入直接定位，是否保持原子性和状态边界，是否没有改变原有未知信息、暂定指标、规则或开放事项。若修复仅补足项目定义所需事实且无越权，返回ACCEPT。",
@@ -423,7 +436,7 @@ def _generator_response_path(run_dir: Path) -> Path:
 
 def _create_project_definition_critic_request(run_dir: Path, candidate: dict[str, Any], report: dict[str, Any], stage2: dict[str, Any]) -> None:
     critic_req = {
-        "schema_version": "1.0", "call_key": CRITIC_CALL_KEY, "prompt_id": "P-STAGE3-PROJECT-DEFINITION-CRITIC", "prompt_version": "1.0.0",
+        "schema_version": "1.0", "call_key": CRITIC_CALL_KEY, "prompt_id": "P-STAGE3-PROJECT-DEFINITION-CRITIC", "prompt_version": "1.1.0",
         "executor_role": "Independent Project Definition Critic",
         "model_contract": {"independent_from_generator": True, "response_format": "JSON", "actual_model_id_required": True, "endpoint_id_required": True},
         "system_prompt": "你是独立项目定义Critic，不撰写申请书正文。逐项检查文种契约、唯一中心命题、差距与问题、目标与研究内容、方法与评价、工程载体边界、事实权限、开放事项和下一阶段边界。当前未做公开资料调研，因此不得把创新假设判定为已证实创新。没有阻断或重大问题时返回ACCEPT。",
@@ -441,7 +454,7 @@ def _schedule_project_definition_repair(run_dir: Path) -> None:
     report = read_json(run_dir / "quality" / "deterministic_project_definition_report.json")
     request = {
         "schema_version": "1.0", "call_key": GENERATOR_REPAIR_CALL_KEY,
-        "prompt_id": "P-STAGE3-PROJECT-DEFINITION-REPAIR", "prompt_version": "1.0.0",
+        "prompt_id": "P-STAGE3-PROJECT-DEFINITION-REPAIR", "prompt_version": "1.1.0",
         "executor_role": "Project Definition Repair Agent",
         "model_contract": {"model_independent": True, "response_format": "JSON", "actual_model_id_required": True, "endpoint_id_required": True, "max_repair_rounds": 1},
         "system_prompt": "你是项目定义定向修复Agent。只能修复确定性报告指出的字段，不得改变已经通过校验的研究问题、目标、事实权限、中心命题、开放事项或阶段边界。返回完整项目定义JSON，不得输出解释文字。",
@@ -473,10 +486,13 @@ def ingest_generator_cmd(args: argparse.Namespace) -> None:
     stage2_path = _current_stage2_snapshot(run_dir); stage2 = read_json(stage2_path)
     meta = read_json(run_dir / "RUN_METADATA.json")
     s2h = meta.get("stage2_repaired_sha256") or meta["stage2_original_sha256"]
-    candidate = env.get("output")
+    raw_candidate = env.get("output")
+    candidate, normalization_report = normalize_stage3_candidate(raw_candidate, normalize_stage2_candidate(stage2)[0])
     report = deterministic_validate(candidate, stage1, stage2, meta["stage1_sha256"], s2h)
     atomic_json(run_dir / "responses" / "003_project_definition_generator.json", env)
+    atomic_json(run_dir / "intermediate" / "project_definition_candidate_raw.json", raw_candidate)
     atomic_json(run_dir / "intermediate" / "project_definition_candidate.json", candidate)
+    atomic_json(run_dir / "quality" / "project_definition_status_normalization.json", normalization_report)
     atomic_json(run_dir / "quality" / "deterministic_project_definition_report.json", report)
     append_event(run_dir, "MODEL_RESPONSE_INGESTED", call_key=GENERATOR_CALL_KEY, model_id=env["model_id"], endpoint_id=env["endpoint_id"], verdict=report["verdict"], candidate_hash=report["candidate_hash"])
     if report["verdict"] != "PASS":
@@ -495,10 +511,13 @@ def ingest_generator_repair_cmd(args: argparse.Namespace) -> None:
     stage2 = read_json(_current_stage2_snapshot(run_dir))
     meta = read_json(run_dir / "RUN_METADATA.json")
     s2h = meta.get("stage2_repaired_sha256") or meta["stage2_original_sha256"]
-    candidate = env.get("output")
+    raw_candidate = env.get("output")
+    candidate, normalization_report = normalize_stage3_candidate(raw_candidate, normalize_stage2_candidate(stage2)[0])
     report = deterministic_validate(candidate, stage1, stage2, meta["stage1_sha256"], s2h)
     atomic_json(run_dir / "responses" / "005_project_definition_repair.json", env)
+    atomic_json(run_dir / "intermediate" / "project_definition_candidate_repaired_raw.json", raw_candidate)
     atomic_json(run_dir / "intermediate" / "project_definition_candidate_repaired.json", candidate)
+    atomic_json(run_dir / "quality" / "project_definition_repair_status_normalization.json", normalization_report)
     atomic_json(run_dir / "quality" / "deterministic_project_definition_repair_report.json", report)
     append_event(run_dir, "MODEL_RESPONSE_INGESTED", call_key=GENERATOR_REPAIR_CALL_KEY, model_id=env["model_id"], endpoint_id=env["endpoint_id"], verdict=report["verdict"], candidate_hash=report["candidate_hash"], repair_round=1)
     if report["verdict"] != "PASS":

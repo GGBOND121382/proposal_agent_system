@@ -208,7 +208,9 @@
         "boundary_conditions",
         "falsification_conditions",
         "source_fact_ids",
-        "knowledge_status"
+        "knowledge_status",
+        "claim_role",
+        "temporal_status"
       ],
       "properties": {
         "proposition_id": {
@@ -261,7 +263,13 @@
           }
         },
         "knowledge_status": {
-          "const": "CONFIRMED_DESIGN"
+          "const": "CONFIRMED"
+        },
+        "claim_role": {
+          "const": "DESIGN_HYPOTHESIS"
+        },
+        "temporal_status": {
+          "const": "PLANNED"
         }
       }
     },

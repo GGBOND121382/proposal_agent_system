@@ -22,13 +22,16 @@
 
 正式申报指南未提供时，必须记录为 `NOT_PROVIDED`，模板、资格、时间节点、评审权重和附件要求保持未决。
 
-## 事实状态
+## 统一事实状态（Schema 1.1）
 
-- `USER_ASSERTED`：用户明确提出，可直接陈述；
-- `CONFIRMED_DESIGN`：已确认设计工件中的内容，可直接陈述；
-- `PROVISIONAL_TARGET`：暂定指标，只能带限定语使用；
-- `WORKING_ASSUMPTION`：工作假设，只能带限定语使用；
-- `UNKNOWN`：未知信息，禁止作为确定事实写入。
+阶段2将四个语义维度分开：
+
+- `knowledge_status`：只表示证据来源与确定程度，使用统一八值词表：`CONFIRMED`、`USER_ASSERTED`、`DOCUMENT_EXTRACTED`、`ESTIMATED`、`UNKNOWN`、`NOT_APPLICABLE`、`CONFLICTED`、`SUPERSEDED`；
+- `fact_role`：`FACT`、`DESIGN`、`TARGET`、`ASSUMPTION`、`UNKNOWN`；
+- `temporal_status`：`PAST`、`CURRENT`、`PLANNED`、`EXPECTED`、`TIME_INDEPENDENT`、`UNKNOWN`；
+- `assertion_policy`：`DIRECT`、`QUALIFIED`、`PROHIBITED`。
+
+旧值 `CONFIRMED_DESIGN`、`PROVISIONAL_TARGET`、`WORKING_ASSUMPTION` 和模型可能生成的 `PROJECT_DESIGN` 不再是合法 `knowledge_status`。运行时会依据来源执行确定性兼容迁移，并保存原始候选和迁移报告。详见 `docs/STATUS_ONTOLOGY.md`。
 
 ## 新增确定性约束
 

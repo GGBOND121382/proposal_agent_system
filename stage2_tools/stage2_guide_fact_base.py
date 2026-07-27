@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.util import sha256_json, utc_now
+from app.status_ontology import CANONICAL_KNOWLEDGE_STATUSES, normalize_stage2_candidate
 
 MODEL_ID = "gpt-5.6-thinking"
 ENDPOINT_ID = "chatgpt-conversation-file-bridge"
@@ -79,13 +80,13 @@ def state(run_dir: Path, status: str, phase: str, **kwargs: Any) -> None:
 
 def generator_request(design_input: dict[str, Any], design_path: Path) -> dict[str, Any]:
     source_hash = sha256_file(design_path)
-    system_prompt = """你是科研申请书的规则与事实底座Agent。本阶段不写申请书正文，也不开展公开资料调研。你需要把已确认的设计输入拆解为可审计的规则表、原子事实账本、来源注册表、信息缺口清单和写作权限表。\n\n必须遵守：\n1. 官方申报指南没有提供，必须明确标记为NOT_PROVIDED；不得把通用写作习惯伪装成官方要求。\n2. 每条规则和事实都必须绑定来源ID；事实必须原子化，区分USER_ASSERTED、CONFIRMED_DESIGN、PROVISIONAL_TARGET、WORKING_ASSUMPTION和UNKNOWN；包含转折、并列因果或分号的来源描述必须拆成多条事实。\n3. 暂定指标只能以带限定语的方式使用；未知信息禁止写入正文。\n4. 不得补写申报单位、资助机构、团队名单、经费金额、项目周期及任何未提供的申报资格、模板格式、评审权重或截止日期。\n5. 建立规则、事实、来源和开放事项之间的显式ID关系，使后续更换模型端点后仍能确定性校验。\n6. 输出必须是单个JSON对象并严格满足Schema。"""
+    system_prompt = """你是科研申请书的规则与事实底座Agent。本阶段不写申请书正文，也不开展公开资料调研。你需要把已确认的设计输入拆解为可审计的规则表、原子事实账本、来源注册表、信息缺口清单和写作权限表。\n\n必须遵守：\n1. 官方申报指南没有提供，必须明确标记为NOT_PROVIDED；不得把通用写作习惯伪装成官方要求。\n2. 每条规则和事实都必须绑定来源ID并原子化。knowledge_status只能使用CONFIRMED、USER_ASSERTED、DOCUMENT_EXTRACTED、ESTIMATED、UNKNOWN、NOT_APPLICABLE、CONFLICTED、SUPERSEDED。项目设计、暂定目标和工作假设不得创造新的knowledge_status，必须分别使用fact_role=DESIGN/TARGET/ASSUMPTION，并配合temporal_status=PLANNED/EXPECTED/UNKNOWN。包含转折、并列因果或分号的来源描述必须拆成多条事实。\n3. TARGET和ASSUMPTION只能以QUALIFIED方式使用；UNKNOWN必须PROHIBITED。knowledge_status只说明证据来源与确定程度，不表示目标已经实现。\n4. 不得补写申报单位、资助机构、团队名单、经费金额、项目周期及任何未提供的申报资格、模板格式、评审权重或截止日期。\n5. 建立规则、事实、来源和开放事项之间的显式ID关系，使后续更换模型端点后仍能确定性校验。\n6. 输出必须是单个JSON对象并严格满足Schema。"""
     task_prompt = """根据已确认的阶段1设计输入，生成阶段2规则与事实底座。\n\n最低要求：\n- 至少12条规则，覆盖篇幅、阶段边界、事实使用、模型接口、人工权限、记录留存和官方指南缺失处理；\n- 至少35条原子事实，覆盖课题名称、核心概念工作定义、问题陈述、当前差距、唯一中心命题、研究属性、成熟度目标、正文页数契约、研究问题、目标、场景、工作包、方法、指标、交付物和假设；\n- 明确哪些事实可直接陈述、哪些必须加限定语、哪些禁止使用；\n- 至少8项开放事项，其中包含官方指南、模板结构、申报资格、时间节点、申报单位、团队、经费和项目周期；\n- 当前只允许进入项目定义，不能据此冻结完整章节规划或正文。"""
     return {
         "schema_version": "1.0",
         "call_key": GENERATOR_CALL_KEY,
         "prompt_id": "P-STAGE2-GUIDE-FACT-BASE",
-        "prompt_version": "1.0.0",
+        "prompt_version": "1.1.0",
         "executor_role": "Guide and Fact Base Agent",
         "model_contract": {
             "model_independent": True, "response_format": "JSON",
@@ -108,6 +109,7 @@ def generator_request(design_input: dict[str, Any], design_path: Path) -> dict[s
 
 
 def deterministic_validate(candidate: dict[str, Any], expected_upstream_hash: str | None = None) -> dict[str, Any]:
+    candidate, status_normalization = normalize_stage2_candidate(candidate)
     findings: list[dict[str, Any]] = []
 
     def add(code: str, severity: str, message: str) -> None:
@@ -163,13 +165,19 @@ def deterministic_validate(candidate: dict[str, Any], expected_upstream_hash: st
         missing_sources = set(fact["source_refs"]) - source_set
         if missing_sources:
             add("FACT_UNKNOWN_SOURCE", "BLOCKING", f"{fact['fact_id']}引用未知来源{sorted(missing_sources)}。")
-        if fact["knowledge_status"] == "UNKNOWN" and fact["assertion_policy"] != "PROHIBITED":
+        if fact["knowledge_status"] not in CANONICAL_KNOWLEDGE_STATUSES:
+            add("KNOWLEDGE_STATUS_NON_CANONICAL", "BLOCKING", f"{fact['fact_id']}使用了非统一knowledge_status。")
+        if fact["fact_role"] == "UNKNOWN" and fact["assertion_policy"] != "PROHIBITED":
             add("UNKNOWN_FACT_NOT_PROHIBITED", "BLOCKING", f"{fact['fact_id']}为未知事实但未禁止使用。")
-        if fact["knowledge_status"] in {"PROVISIONAL_TARGET", "WORKING_ASSUMPTION"}:
+        if fact["fact_role"] in {"TARGET", "ASSUMPTION"}:
             if fact["assertion_policy"] != "QUALIFIED" or not fact["requires_qualification"]:
-                add("QUALIFICATION_POLICY_INVALID", "BLOCKING", f"{fact['fact_id']}必须带限定语使用。")
-        if fact["knowledge_status"] in {"USER_ASSERTED", "CONFIRMED_DESIGN"} and fact["assertion_policy"] == "PROHIBITED":
-            add("CONFIRMED_FACT_PROHIBITED", "MAJOR", f"{fact['fact_id']}为确认事实但被禁止使用。")
+                add("QUALIFICATION_POLICY_INVALID", "BLOCKING", f"{fact['fact_id']}是{fact['fact_role']}，必须带限定语使用。")
+        if fact["fact_role"] == "TARGET" and fact["temporal_status"] != "EXPECTED":
+            add("TARGET_TEMPORAL_STATUS_INVALID", "BLOCKING", f"{fact['fact_id']}的TARGET语义必须使用EXPECTED。")
+        if fact["fact_role"] == "DESIGN" and fact["temporal_status"] != "PLANNED":
+            add("DESIGN_TEMPORAL_STATUS_INVALID", "BLOCKING", f"{fact['fact_id']}的DESIGN语义必须使用PLANNED。")
+        if fact["knowledge_status"] in {"CONFIRMED", "USER_ASSERTED", "DOCUMENT_EXTRACTED"} and fact["assertion_policy"] == "PROHIBITED" and fact["fact_role"] != "UNKNOWN":
+            add("SUPPORTED_FACT_PROHIBITED", "MAJOR", f"{fact['fact_id']}有可追溯来源但被禁止使用。")
         if any(mark in fact["statement"] for mark in ["；", ";"]):
             add("FACT_NOT_ATOMIC", "BLOCKING", f"{fact['fact_id']}包含分号，可能是复合事实。")
 
@@ -187,7 +195,7 @@ def deterministic_validate(candidate: dict[str, Any], expected_upstream_hash: st
         }[fact["assertion_policy"]]
         if fact["fact_id"] not in expected_bucket:
             add("WRITING_PERMISSION_MISMATCH", "BLOCKING", f"{fact['fact_id']}的权限字段与汇总表不一致。")
-    expected_provisional = {x["fact_id"] for x in candidate["facts"] if x["knowledge_status"] == "PROVISIONAL_TARGET"}
+    expected_provisional = {x["fact_id"] for x in candidate["facts"] if x["fact_role"] == "TARGET"}
     if provisional != expected_provisional:
         add("PROVISIONAL_TARGET_INDEX_MISMATCH", "BLOCKING", "暂定指标索引与事实账本不一致。")
 
@@ -265,6 +273,7 @@ def deterministic_validate(candidate: dict[str, Any], expected_upstream_hash: st
             "open_items": len(open_set), "conflicts": len(candidate["conflicts"]),
             "direct_facts": len(direct), "qualified_facts": len(qualified),
             "prohibited_facts": len(prohibited), "provisional_targets": len(provisional),
+            "status_normalizations": status_normalization["normalized_count"],
         },
         "checked_dimensions": [
             "JSON_SCHEMA", "UPSTREAM_HASH", "SOURCE_AUTHORITY", "SOURCE_REFERENCE_INTEGRITY",
@@ -272,6 +281,7 @@ def deterministic_validate(candidate: dict[str, Any], expected_upstream_hash: st
             "PROVISIONAL_TARGET_INDEX", "OPEN_ITEM_COVERAGE", "DESIGN_OBJECT_COVERAGE",
             "PROJECT_DEFINITION_FACT_COVERAGE", "READINESS_BOUNDARY", "CONFLICT_REGISTER",
         ],
+        "status_normalization": status_normalization,
         "findings": findings,
     }
 
@@ -312,22 +322,25 @@ def ingest_generator_cmd(args: argparse.Namespace) -> None:
         raise SystemExit("generator response envelope does not match request")
     if not envelope.get("model_id") or not envelope.get("endpoint_id"):
         raise SystemExit("generator response missing actual model or endpoint id")
-    candidate = envelope.get("output")
+    raw_candidate = envelope.get("output")
+    candidate, normalization_report = normalize_stage2_candidate(raw_candidate)
     expected_hash = read_json(run_dir / "RUN_METADATA.json")["upstream_sha256"]
     report = deterministic_validate(candidate, expected_hash)
     atomic_json(run_dir / "responses" / "001_guide_fact_generator.json", envelope)
+    atomic_json(run_dir / "intermediate" / "guide_fact_candidate_raw.json", raw_candidate)
     atomic_json(run_dir / "intermediate" / "guide_fact_candidate.json", candidate)
+    atomic_json(run_dir / "quality" / "knowledge_status_normalization.json", normalization_report)
     atomic_json(run_dir / "quality" / "deterministic_guide_fact_report.json", report)
-    append_event(run_dir, "MODEL_RESPONSE_INGESTED", call_key=GENERATOR_CALL_KEY, model_id=envelope["model_id"], endpoint_id=envelope["endpoint_id"], candidate_hash=report["candidate_hash"], verdict=report["verdict"])
+    append_event(run_dir, "MODEL_RESPONSE_INGESTED", call_key=GENERATOR_CALL_KEY, model_id=envelope["model_id"], endpoint_id=envelope["endpoint_id"], candidate_hash=report["candidate_hash"], verdict=report["verdict"], status_normalizations=normalization_report["normalized_count"], unresolved_statuses=normalization_report["unresolved_count"])
     if report["verdict"] != "PASS":
         state(run_dir, "BLOCKED", "GUIDE_FACT_DETERMINISTIC_REVIEW", report_path="quality/deterministic_guide_fact_report.json")
         raise SystemExit(2)
     critic_req = {
         "schema_version": "1.0", "call_key": CRITIC_CALL_KEY,
-        "prompt_id": "P-STAGE2-GUIDE-FACT-CRITIC", "prompt_version": "1.0.0",
+        "prompt_id": "P-STAGE2-GUIDE-FACT-CRITIC", "prompt_version": "1.1.0",
         "executor_role": "Independent Guide and Fact Base Critic",
         "model_contract": {"independent_from_generator": True, "response_format": "JSON", "actual_model_id_required": True, "endpoint_id_required": True},
-        "system_prompt": "你是独立的规则与事实底座Critic。本阶段不写正文。审查候选是否严格区分官方规则、用户要求、确认设计、暂定指标、工作假设和未知信息；检查每条规则与事实的来源绑定、原子性、写作权限、开放事项、冲突登记和阶段放行边界。官方指南未提供时，不得要求候选补造官方条款。若没有阻断或重大问题，返回ACCEPT。输出必须满足Schema。",
+        "system_prompt": "你是独立的规则与事实底座Critic。本阶段不写正文。审查候选是否使用统一状态本体：knowledge_status只能表示证据来源与确定程度，项目设计、暂定目标、工作假设分别由fact_role与temporal_status表达；检查每条规则与事实的来源绑定、原子性、写作权限、开放事项、冲突登记和阶段放行边界。官方指南未提供时，不得要求候选补造官方条款。若没有阻断或重大问题，返回ACCEPT。输出必须满足Schema。",
         "task_prompt": "独立审查阶段2候选。确定性报告已通过，但你要判断其是否足以安全支持下一阶段项目定义，并明确不应据此冻结预算、团队分工、正式时间表或最终模板。approved_candidate_hash必须等于候选规范JSON的SHA-256。",
         "input_envelope": {"candidate": candidate, "deterministic_report": report},
         "output_schema": schema("guide_fact_critic.schema.json"), "requested_at": utc_now(),
@@ -413,7 +426,7 @@ def write_outputs(candidate: dict[str, Any], output_dir: Path) -> None:
     write_csv(output_dir / "stage2_fact_ledger.csv", [
         {**x, "source_refs": "|".join(x["source_refs"]), "related_design_ids": "|".join(x["related_design_ids"])}
         for x in candidate["facts"]
-    ], ["fact_id", "statement", "subject", "predicate", "object", "knowledge_status", "source_refs", "scope", "assertion_policy", "requires_qualification", "atomic", "related_design_ids"])
+    ], ["fact_id", "statement", "subject", "predicate", "object", "knowledge_status", "fact_role", "temporal_status", "source_refs", "scope", "assertion_policy", "requires_qualification", "atomic", "related_design_ids"])
     write_csv(output_dir / "stage2_open_items.csv", candidate["open_items"], ["item_id", "field", "status", "reason", "required_before_stage", "blocking_now", "resolution_source"])
     source_rows = []
     for src in candidate["source_registry"]:

@@ -32,6 +32,7 @@ class PromptPack:
             "prompts/shared/business_rules.md",
             "prompts/shared/security_rules.md",
             "prompts/shared/source_authority.md",
+            "prompts/shared/knowledge_status_rules.md",
             "prompts/shared/skill_rules.md",
             "prompts/shared/output_protocol.md",
         ]:

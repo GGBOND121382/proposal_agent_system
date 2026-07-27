@@ -10,6 +10,7 @@ from .llm import LLMError, ModelGateway
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
 from .proposal_quality import ProposalQualityGuard
 from .security import RoutingDenied, SecurityRouter
+from .status_ontology import normalize_knowledge_status
 from .util import new_id, sha256_json, utc_now
 
 
@@ -30,7 +31,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-07-26.31"
+OUTPUT_NORMALIZER_VERSION = "2026-07-27.32"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -52,6 +53,70 @@ class PromptExecutor:
         self.quality_guard = quality_guard or ProposalQualityGuard()
         self.quality_guard_enabled = quality_guard_enabled
 
+
+    @staticmethod
+    def _normalize_knowledge_status_tree(output: dict[str, Any]) -> dict[str, Any]:
+        """Normalize known model/legacy aliases for every knowledge_status field.
+
+        Only known aliases are converted. Arbitrary unknown values remain in
+        place so strict JSON Schema validation still fails rather than silently
+        inventing meaning. The original provider response is retained in trace.
+        """
+        normalized = copy.deepcopy(output)
+        changes: list[str] = []
+
+        def visit(node: Any, path: str) -> None:
+            if isinstance(node, list):
+                for index, item in enumerate(node):
+                    visit(item, f"{path}/{index}")
+                return
+            if not isinstance(node, dict):
+                return
+
+            if "knowledge_status" in node:
+                raw = node.get("knowledge_status")
+                decision = normalize_knowledge_status(
+                    raw,
+                    source_refs=node.get("source_refs"),
+                )
+                if decision.normalized:
+                    node["knowledge_status"] = decision.canonical_status
+                    raw_upper = str(raw or "").strip().upper()
+                    # Preserve the semantic dimension that older vocabularies
+                    # incorrectly packed into knowledge_status.
+                    if raw_upper in {"PROJECT_DESIGN", "CONFIRMED_DESIGN", "PLANNED"}:
+                        if "claim_type" in node:
+                            node["claim_type"] = "PLAN"
+                        if "temporal_status" in node:
+                            node["temporal_status"] = "PLANNED"
+                    elif raw_upper == "PROVISIONAL_TARGET":
+                        if "claim_type" in node:
+                            node["claim_type"] = "EXPECTED_RESULT"
+                        if "temporal_status" in node:
+                            node["temporal_status"] = "EXPECTED"
+                    elif raw_upper == "WORKING_ASSUMPTION":
+                        if "claim_type" in node:
+                            node["claim_type"] = "MODEL_INFERENCE"
+                        if "temporal_status" in node:
+                            node["temporal_status"] = "UNKNOWN"
+                    changes.append(
+                        f"{path or '/'}: {decision.original_status}->{decision.canonical_status} ({decision.reason})"
+                    )
+
+            for key, value in list(node.items()):
+                visit(value, f"{path}/{key}")
+
+        visit(normalized, "")
+        if changes:
+            normalized.setdefault("warnings", []).append(
+                "SYSTEM_STATUS_NORMALIZATION: " + "; ".join(changes[:20])
+            )
+            if len(changes) > 20:
+                normalized["warnings"].append(
+                    f"SYSTEM_STATUS_NORMALIZATION: {len(changes) - 20} additional conversion(s) recorded in trace"
+                )
+        return normalized
+
     @staticmethod
     def _normalize_project_definition_output(output: dict[str, Any]) -> dict[str, Any]:
         """Normalize deterministic fields that must not be trusted to the model.
@@ -61,7 +126,7 @@ class PromptExecutor:
         enum aliases deterministic before validation.  The unmodified provider
         response remains available in ``raw_response_text`` for audit.
         """
-        normalized = copy.deepcopy(output)
+        normalized = PromptExecutor._normalize_knowledge_status_tree(output)
         result = normalized.get("result") or {}
         project_definition = result.get("project_definition") or {}
         changes: list[str] = []
@@ -651,7 +716,7 @@ class PromptExecutor:
 
     @staticmethod
     def _normalize_fact_output(output: dict[str, Any]) -> dict[str, Any]:
-        normalized = copy.deepcopy(output)
+        normalized = PromptExecutor._normalize_knowledge_status_tree(output)
         result = normalized.get("result") or {}
         facts = result.get("fact_candidates") or []
         identifier_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -704,7 +769,7 @@ class PromptExecutor:
         output: dict[str, Any],
         envelope: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        output = copy.deepcopy(output)
+        output = self._normalize_knowledge_status_tree(output)
         schema_reader = getattr(self.pack, "schema", None)
         output_schema = (
             schema_reader(prompt_id, "output")
