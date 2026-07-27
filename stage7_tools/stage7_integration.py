@@ -6,6 +6,7 @@ from jsonschema import Draft202012Validator
 ROOT=Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
 from app.util import sha256_json, utc_now
+from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
 STAGE="STAGE_7_FULL_INTEGRATION"; MODEL_ID="gpt-5.6-thinking"; ENDPOINT_ID="chatgpt-conversation-file-bridge"
 SECTION_IDS=[f"SEC-{i:02d}" for i in range(1,15)]
 ID_RE=re.compile(r"(?:CP|RQ|OBJ|WP|RC|M|FM|GAP|PRIOR|INNO-H|MECH|BL|EXP|MET|BOUND|FOUND|RISK|OPEN)-\d+")
@@ -14,7 +15,7 @@ ENGINEERING_TERMS=("Prompt","Gate","Schema","API","JSON","Trace","哈希","回�
 
 def read_json(p:Path)->Any:return json.loads(p.read_text(encoding='utf-8'))
 def atomic_json(p:Path,v:Any)->None:
- p.parent.mkdir(parents=True,exist_ok=True); t=p.with_name(p.name+f'.tmp-{os.getpid()}'); t.write_text(json.dumps(v,ensure_ascii=False,indent=2,sort_keys=True)+'\n',encoding='utf-8'); os.replace(t,p)
+ v=prepare_staged_artifact(p,v); p.parent.mkdir(parents=True,exist_ok=True); t=p.with_name(p.name+f'.tmp-{os.getpid()}'); t.write_text(json.dumps(v,ensure_ascii=False,indent=2,sort_keys=True)+'\n',encoding='utf-8'); os.replace(t,p)
 def atomic_text(p:Path,s:str)->None:
  p.parent.mkdir(parents=True,exist_ok=True); t=p.with_name(p.name+f'.tmp-{os.getpid()}'); t.write_text(s,encoding='utf-8'); os.replace(t,p)
 def sha256_text(s:str)->str:return hashlib.sha256(s.encode()).hexdigest()
@@ -24,8 +25,10 @@ def sha256_file(p:Path)->str:
   for c in iter(lambda:f.read(1048576),b''):h.update(c)
  return h.hexdigest()
 def load_schema(n:str)->dict:return read_json(ROOT/'stage7_tools'/n)
-def validate_schema(v:Any,n:str)->list[str]:
- return [f"{'/'.join(map(str,e.path)) or '$'}: {e.message}" for e in sorted(Draft202012Validator(load_schema(n)).iter_errors(v),key=lambda e:list(e.path))]
+def validate_schema(v: Any, n: str) -> list[str]:
+ schema_value = load_schema(n)
+ normalize_in_place(v, schema_value, contract_id=f"staged:{STAGE}:{n}")
+ return [f"{'/'.join(map(str,e.path)) or '$'}: {e.message}" for e in sorted(Draft202012Validator(schema_value).iter_errors(v),key=lambda e:list(e.path))]
 def paragraphs(c:dict)->list[dict]:return [p for s in c.get('subsections',[]) for p in s.get('paragraphs',[])]
 def canonical_markdown(c:dict)->str:
  out=[f"# {c['section_name']}",""]
@@ -133,6 +136,7 @@ def init_cmd(a):
  sections=all_sections(rd);req=critic_request(rd,1,sections);write_request(rd,1,'full_integration_critic_round1',req);set_state(rd,'WAITING_MODEL','INTEGRATION_CRITIC_ROUND_1',candidate_set_hash=req['input_envelope']['deterministic_report']['candidate_set_hash']);print(rd/'requests'/'001_full_integration_critic_round1.json')
 def ingest_critic_cmd(a):
  rd=Path(a.run_dir).resolve();resp=read_json(Path(a.response_file).resolve());errs=validate_schema(resp,'integration_critic.schema.json')
+ set_contract_trace_context(rd, "ingest_critic_cmd")
  if errs:raise SystemExit('; '.join(errs))
  if set(resp['checked_section_ids'])!=set(SECTION_IDS):raise SystemExit('critic did not check all sections')
  critic_round=1+len(list((rd/'responses').glob('*full_integration_critic_round*.json')))
@@ -149,6 +153,7 @@ def ingest_critic_cmd(a):
  gate={'schema_version':'1.0','gate_id':'stage7-full-integration-confirmation-001','question':'是否确认14章全文集成稿作为最终文档导出的冻结上游工件？','allowed_actions':['CONFIRM','REJECT'],'candidate_set_hash':report['candidate_set_hash'],'requested_at':utc_now()};atomic_json(rd/'human_gate'/'stage7_gate_request.json',gate);append_event(rd,'HUMAN_GATE_REQUESTED',gate_id=gate['gate_id']);set_state(rd,'WAITING_GATE','FULL_INTEGRATION_CONFIRMATION',candidate_set_hash=report['candidate_set_hash'])
 def ingest_repair_cmd(a):
  rd=Path(a.run_dir).resolve();resp=read_json(Path(a.response_file).resolve());errs=validate_schema(resp,'document_repair.schema.json')
+ set_contract_trace_context(rd, "ingest_repair_cmd")
  if errs:raise SystemExit('; '.join(errs))
  repair_round=int(resp['repair_round']);base=all_sections(rd,repaired=repair_round>1)
  index={(sid,p['paragraph_id']):(c,p) for sid,c in base.items() for p in paragraphs(c)};repaired=copy.deepcopy(base);touched=set()

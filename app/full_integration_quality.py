@@ -159,7 +159,11 @@ class FullIntegrationQualityMixin:
             if contract.get("profile_id") == "INNOVATION"
         ]
         for section_id in innovation_sections:
-            used = evidence_ids(candidate_objects.get(section_id) or {}) | advanced_ids(candidate_objects.get(section_id) or {})
+            candidate = candidate_objects.get(section_id) or {}
+            contract = contracts.get(section_id) or {}
+            evidence_bound = evidence_ids(candidate)
+            claim_bound = advanced_ids(candidate)
+            required_prior_ids = set(contract.get("must_use_evidence_ids") or []) & prior_ids
             if not prior_ids or not innovation_ids:
                 findings.append(QualityFinding(
                     "QG_INNOVATION_GRAPH_EVIDENCE_INCOMPLETE", "P1", "ARGUMENT", "ARGUMENT_GRAPH",
@@ -169,7 +173,12 @@ class FullIntegrationQualityMixin:
                     "ARGUMENT_ARCHITECTURE_AGENT",
                 ))
                 break
-            if not (used & prior_ids) or not (used & innovation_ids):
+            # A closest-prior-work baseline must be traceably cited as evidence;
+            # merely listing it as an "advanced claim" cannot establish a
+            # comparison baseline. The new mechanism may be either cited or
+            # explicitly advanced by the innovation section.
+            baseline_bound = (required_prior_ids <= evidence_bound) if required_prior_ids else bool(evidence_bound & prior_ids)
+            if not baseline_bound or not ((evidence_bound | claim_bound) & innovation_ids):
                 findings.append(QualityFinding(
                     "QG_INNOVATION_SECTION_LACKS_BASELINE_BINDING", "P1", "CONTENT", "SECTION_CANDIDATE",
                     f"candidate_sections.{section_id}.paragraphs.evidence_ids",
@@ -183,6 +192,8 @@ class FullIntegrationQualityMixin:
             if contract.get("profile_id") == "RESEARCH_FOUNDATION"
         ]
         for section_id in foundation_sections:
+            contract = contracts.get(section_id) or {}
+            required_foundation_ids = set(contract.get("must_use_evidence_ids") or []) & foundation_ids
             if not foundation_ids:
                 findings.append(QualityFinding(
                     "QG_FOUNDATION_GRAPH_EVIDENCE_MISSING", "P1", "ARGUMENT", "ARGUMENT_GRAPH",
@@ -192,7 +203,9 @@ class FullIntegrationQualityMixin:
                     "PROJECT_KNOWLEDGE_AGENT",
                 ))
                 break
-            if not (evidence_ids(candidate_objects.get(section_id) or {}) & foundation_ids):
+            bound_foundation = evidence_ids(candidate_objects.get(section_id) or {})
+            foundation_ok = (required_foundation_ids <= bound_foundation) if required_foundation_ids else bool(bound_foundation & foundation_ids)
+            if not foundation_ok:
                 findings.append(QualityFinding(
                     "QG_FOUNDATION_SECTION_NOT_BOUND_TO_EVIDENCE", "P1", "CONTENT", "SECTION_CANDIDATE",
                     f"candidate_sections.{section_id}.paragraphs.evidence_ids",
@@ -206,7 +219,11 @@ class FullIntegrationQualityMixin:
             if contract.get("profile_id") == "OUTPUTS_AND_METRICS"
         ]
         for section_id in metric_sections:
-            if metric_ids and not (evidence_ids(candidate_objects.get(section_id) or {}) & metric_ids):
+            contract = contracts.get(section_id) or {}
+            required_metric_ids = set(contract.get("must_use_evidence_ids") or []) & metric_ids
+            bound_metric = evidence_ids(candidate_objects.get(section_id) or {})
+            metric_ok = (required_metric_ids <= bound_metric) if required_metric_ids else bool(bound_metric & metric_ids)
+            if metric_ids and not metric_ok:
                 findings.append(QualityFinding(
                     "QG_METRIC_SECTION_LACKS_BASELINE_EVIDENCE", "P1", "CONTENT", "SECTION_CANDIDATE",
                     f"candidate_sections.{section_id}.paragraphs.evidence_ids",

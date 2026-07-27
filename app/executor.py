@@ -7,10 +7,20 @@ import time
 from typing import Any
 
 from .llm import LLMError, ModelGateway
+from .contract_registry import (
+    augment_prompt_with_enum_contract,
+    normalize_against_schema,
+    report_warning,
+)
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
 from .proposal_quality import ProposalQualityGuard
 from .security import RoutingDenied, SecurityRouter
-from .status_ontology import normalize_knowledge_status
+from .status_ontology import (
+    implied_temporal_status_from_claim_alias,
+    normalize_claim_type,
+    normalize_knowledge_status,
+    normalize_temporal_status,
+)
 from .util import new_id, sha256_json, utc_now
 
 
@@ -31,7 +41,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-07-27.32"
+OUTPUT_NORMALIZER_VERSION = "2026-07-27.v3-unified-contract"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -55,12 +65,14 @@ class PromptExecutor:
 
 
     @staticmethod
-    def _normalize_knowledge_status_tree(output: dict[str, Any]) -> dict[str, Any]:
-        """Normalize known model/legacy aliases for every knowledge_status field.
+    def _normalize_semantic_enum_tree(output: dict[str, Any]) -> dict[str, Any]:
+        """Normalize registered enum aliases independently by semantic field.
 
-        Only known aliases are converted. Arbitrary unknown values remain in
-        place so strict JSON Schema validation still fails rather than silently
-        inventing meaning. The original provider response is retained in trace.
+        Model drift can place the same semantic label in ``knowledge_status``,
+        ``claim_type`` or ``temporal_status``.  Each dimension is therefore
+        normalized independently before strict schema validation. Unknown
+        values remain untouched so genuinely novel drift still blocks. The raw
+        provider response is retained separately in trace.
         """
         normalized = copy.deepcopy(output)
         changes: list[str] = []
@@ -73,16 +85,16 @@ class PromptExecutor:
             if not isinstance(node, dict):
                 return
 
+            raw_knowledge = node.get("knowledge_status")
             if "knowledge_status" in node:
-                raw = node.get("knowledge_status")
                 decision = normalize_knowledge_status(
-                    raw,
+                    raw_knowledge,
                     source_refs=node.get("source_refs"),
                 )
                 if decision.normalized:
                     node["knowledge_status"] = decision.canonical_status
-                    raw_upper = str(raw or "").strip().upper()
-                    # Preserve the semantic dimension that older vocabularies
+                    raw_upper = str(raw_knowledge or "").strip().upper()
+                    # Preserve semantic dimensions that legacy vocabularies
                     # incorrectly packed into knowledge_status.
                     if raw_upper in {"PROJECT_DESIGN", "CONFIRMED_DESIGN", "PLANNED"}:
                         if "claim_type" in node:
@@ -100,7 +112,37 @@ class PromptExecutor:
                         if "temporal_status" in node:
                             node["temporal_status"] = "UNKNOWN"
                     changes.append(
-                        f"{path or '/'}: {decision.original_status}->{decision.canonical_status} ({decision.reason})"
+                        f"{path or '/'} /knowledge_status: "
+                        f"{decision.original_status}->{decision.canonical_status} ({decision.reason})"
+                    )
+
+            # Normalize claim_type even when knowledge_status is already legal.
+            # This closes the independent enum-position drift exposed by
+            # P-FACT-EXTRACT returning claim_type=PROJECT_DESIGN.
+            raw_claim_type = node.get("claim_type")
+            if "claim_type" in node:
+                claim_decision = normalize_claim_type(raw_claim_type)
+                if claim_decision.normalized:
+                    node["claim_type"] = claim_decision.canonical_value
+                    implied_temporal = implied_temporal_status_from_claim_alias(raw_claim_type)
+                    if implied_temporal is not None and "temporal_status" in node:
+                        node["temporal_status"] = implied_temporal
+                    changes.append(
+                        f"{path or '/'} /claim_type: "
+                        f"{claim_decision.original_value}->{claim_decision.canonical_value} "
+                        f"({claim_decision.reason})"
+                    )
+
+            # Also protect the time dimension from the same misplaced aliases.
+            raw_temporal = node.get("temporal_status")
+            if "temporal_status" in node:
+                temporal_decision = normalize_temporal_status(raw_temporal)
+                if temporal_decision.normalized:
+                    node["temporal_status"] = temporal_decision.canonical_value
+                    changes.append(
+                        f"{path or '/'} /temporal_status: "
+                        f"{temporal_decision.original_value}->{temporal_decision.canonical_value} "
+                        f"({temporal_decision.reason})"
                     )
 
             for key, value in list(node.items()):
@@ -109,13 +151,19 @@ class PromptExecutor:
         visit(normalized, "")
         if changes:
             normalized.setdefault("warnings", []).append(
-                "SYSTEM_STATUS_NORMALIZATION: " + "; ".join(changes[:20])
+                "SYSTEM_SEMANTIC_ENUM_NORMALIZATION: " + "; ".join(changes[:20])
             )
             if len(changes) > 20:
                 normalized["warnings"].append(
-                    f"SYSTEM_STATUS_NORMALIZATION: {len(changes) - 20} additional conversion(s) recorded in trace"
+                    "SYSTEM_SEMANTIC_ENUM_NORMALIZATION: "
+                    f"{len(changes) - 20} additional conversion(s) recorded in trace"
                 )
         return normalized
+
+    @staticmethod
+    def _normalize_knowledge_status_tree(output: dict[str, Any]) -> dict[str, Any]:
+        """Backward-compatible entry point for callers of the old helper."""
+        return PromptExecutor._normalize_semantic_enum_tree(output)
 
     @staticmethod
     def _normalize_project_definition_output(output: dict[str, Any]) -> dict[str, Any]:
@@ -126,7 +174,7 @@ class PromptExecutor:
         enum aliases deterministic before validation.  The unmodified provider
         response remains available in ``raw_response_text`` for audit.
         """
-        normalized = PromptExecutor._normalize_knowledge_status_tree(output)
+        normalized = PromptExecutor._normalize_semantic_enum_tree(output)
         result = normalized.get("result") or {}
         project_definition = result.get("project_definition") or {}
         changes: list[str] = []
@@ -716,7 +764,7 @@ class PromptExecutor:
 
     @staticmethod
     def _normalize_fact_output(output: dict[str, Any]) -> dict[str, Any]:
-        normalized = PromptExecutor._normalize_knowledge_status_tree(output)
+        normalized = PromptExecutor._normalize_semantic_enum_tree(output)
         result = normalized.get("result") or {}
         facts = result.get("fact_candidates") or []
         identifier_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -769,13 +817,22 @@ class PromptExecutor:
         output: dict[str, Any],
         envelope: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        output = self._normalize_knowledge_status_tree(output)
-        schema_reader = getattr(self.pack, "schema", None)
+        schema_reader = getattr(self.pack, "inlined_schema", None)
+        if not callable(schema_reader):
+            schema_reader = getattr(self.pack, "schema", None)
         output_schema = (
             schema_reader(prompt_id, "output")
             if callable(schema_reader)
             else {}
         )
+        output, contract_report = normalize_against_schema(
+            output,
+            output_schema,
+            contract_id=f"prompt-pack:{prompt_id}:output",
+        )
+        contract_warning = report_warning(contract_report)
+        if contract_warning:
+            output.setdefault("warnings", []).append(contract_warning)
         protocol_fields_normalized = 0
         for field in ("schema_version", "prompt_id", "prompt_version"):
             expected = ((output_schema.get("properties") or {}).get(field) or {}).get("const")
@@ -1197,6 +1254,7 @@ class PromptExecutor:
                 if section_id
             ]
             removed_out_of_scope_contracts = 0
+            rebound_section_contracts = 0
             if target_section_ids:
                 target_set = set(target_section_ids)
                 scoped_contracts = [
@@ -1205,14 +1263,49 @@ class PromptExecutor:
                     if isinstance(contract, dict)
                     and str(contract.get("section_id") or "") in target_set
                 ]
-                removed_out_of_scope_contracts = len(contracts) - len(scoped_contracts)
-                contracts = scoped_contracts
-                architecture["section_contracts"] = contracts
-                revision_plan["target_section_ids"] = target_section_ids
+                if len(scoped_contracts) == len(target_section_ids):
+                    removed_out_of_scope_contracts = len(contracts) - len(scoped_contracts)
+                    contracts = scoped_contracts
+                    architecture["section_contracts"] = contracts
+                    revision_plan["target_section_ids"] = target_section_ids
+                elif contracts and len(contracts) == len(target_section_ids):
+                    # Replay providers and weaker models sometimes emit stable
+                    # synthetic section IDs even though the authoritative scope
+                    # supplies persisted document section IDs.  When cardinality
+                    # is identical, rebind by order instead of filtering every
+                    # contract away.  Cross-contract references are rewritten
+                    # through the same one-to-one map.
+                    id_map = {
+                        str(contract.get("section_id") or f"model-section-{index}"): target_section_ids[index]
+                        for index, contract in enumerate(contracts)
+                        if isinstance(contract, dict)
+                    }
+                    for index, contract in enumerate(contracts):
+                        if not isinstance(contract, dict):
+                            continue
+                        old_id = str(contract.get("section_id") or f"model-section-{index}")
+                        new_id = target_section_ids[index]
+                        contract["section_id"] = new_id
+                        old_contract_id = str(contract.get("section_contract_id") or "")
+                        if not old_contract_id or old_id in old_contract_id:
+                            contract["section_contract_id"] = f"contract-{new_id}"
+                        for field in ("prerequisite_section_ids", "must_not_repeat_section_ids"):
+                            contract[field] = [id_map.get(str(item), str(item)) for item in contract.get(field) or []]
+                        rebound_section_contracts += int(old_id != new_id)
+                    architecture["section_contracts"] = contracts
+                    revision_plan["target_section_ids"] = target_section_ids
+                # If cardinality differs, retain the model output for the normal
+                # quality gate.  Never replace a non-empty contract set with []
+                # merely because object identifiers use a different namespace.
             if removed_out_of_scope_contracts:
                 output.setdefault("warnings", []).append(
                     "SYSTEM_NORMALIZATION: "
                     f"removed {removed_out_of_scope_contracts} section contract(s) outside the authoritative task scope"
+                )
+            if rebound_section_contracts:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_NORMALIZATION: "
+                    f"rebound {rebound_section_contracts} synthetic section contract ID(s) to authoritative scope IDs"
                 )
             expanded_information_keys = 0
             for index, contract in enumerate(contracts):
@@ -2901,10 +2994,18 @@ class PromptExecutor:
         }
 
     def _system_prompt(self, prompt_id: str, output_schema: dict[str, Any]) -> str:
-        return (
+        base_prompt = (
             self.pack.shared_prompt
             + "\n\n"
             + self.pack.prompt_text(prompt_id)
+        )
+        base_prompt = augment_prompt_with_enum_contract(
+            base_prompt,
+            output_schema,
+            contract_id=f"prompt-pack:{prompt_id}:output",
+        )
+        return (
+            base_prompt
             + "\n\n# 运行时强制输出Schema\n"
             + json.dumps(output_schema, ensure_ascii=False)
         )

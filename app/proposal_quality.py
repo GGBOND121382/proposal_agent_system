@@ -1030,13 +1030,14 @@ class ProposalQualityGuard:
             if isinstance(item, dict) and item.get("node_id")
         }
         central_id = str((argument_graph.get("central_proposition") or {}).get("node_id") or "")
-        bound_ids = set(paragraph_claims) | set(advancement_claims)
-        bound_ids.update(
+        claim_bound_ids = set(paragraph_claims) | set(advancement_claims)
+        evidence_bound_ids = {
             str(value)
             for paragraph in paragraphs
             for value in paragraph.get("evidence_ids") or []
             if value
-        )
+        }
+        bound_ids = claim_bound_ids | evidence_bound_ids
         if main_profile == "INNOVATION":
             if not prior_ids or not innovation_ids:
                 findings.append(QualityFinding(
@@ -1046,7 +1047,7 @@ class ProposalQualityGuard:
                     "返回论证架构阶段补齐最近工作、局限机制、新增机制及验证关系。",
                     "ARGUMENT_ARCHITECTURE_AGENT",
                 ))
-            elif not (bound_ids & prior_ids) or not (bound_ids & innovation_ids):
+            elif not (evidence_bound_ids & prior_ids) or not (bound_ids & innovation_ids):
                 findings.append(QualityFinding(
                     "QG_INNOVATION_SECTION_LACKS_BASELINE_BINDING", "P1", "CONTENT", "SECTION_CANDIDATE",
                     "paragraphs.evidence_ids,paragraphs.primary_claim_id",

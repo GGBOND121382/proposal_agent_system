@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.util import sha256_json, utc_now
+from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
 
 STAGE = "STAGE_5_PROVISIONAL_SECTION_PLANNING"
 GENERATOR_CALL_KEY = "stage5-section-plan-generator-001"
@@ -31,6 +32,7 @@ def read_json(path: Path) -> Any:
 
 
 def atomic_json(path: Path, value: Any) -> None:
+    value = prepare_staged_artifact(path, value)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
     tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -49,6 +51,7 @@ def load_schema(name: str) -> dict[str, Any]:
 
 
 def validate_schema(value: Any, schema_value: dict[str, Any]) -> list[str]:
+    normalize_in_place(value, schema_value, contract_id=f"staged:{STAGE}:{schema_value.get('title') or 'anonymous-schema'}")
     errors: list[str] = []
     for err in sorted(Draft202012Validator(schema_value).iter_errors(value), key=lambda x: list(x.path)):
         loc = "/".join(str(x) for x in err.path) or "$"
@@ -412,6 +415,7 @@ def issue_critic(run_dir: Path, candidate: dict[str, Any], report: dict[str, Any
 
 def ingest_generator_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
+    set_contract_trace_context(run_dir, "ingest_generator_cmd")
     env = read_json(Path(args.response_file).resolve())
     validate_envelope(env, GENERATOR_CALL_KEY, "P-STAGE5-PROVISIONAL-SECTION-PLANNING")
     candidate = env.get("output")
@@ -435,6 +439,7 @@ def ingest_generator_cmd(args: argparse.Namespace) -> None:
 
 def ingest_repair_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
+    set_contract_trace_context(run_dir, "ingest_repair_cmd")
     if (run_dir / "responses" / "002_section_plan_repair.json").exists():
         raise SystemExit("repair attempt already consumed")
     env = read_json(Path(args.response_file).resolve())
@@ -481,6 +486,7 @@ def revalidate_original_cmd(args: argparse.Namespace) -> None:
 
 def ingest_critic_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
+    set_contract_trace_context(run_dir, "ingest_critic_cmd")
     env = read_json(Path(args.response_file).resolve())
     validate_envelope(env, CRITIC_CALL_KEY, "P-STAGE5-PROVISIONAL-SECTION-PLANNING-CRITIC")
     output = env.get("output")

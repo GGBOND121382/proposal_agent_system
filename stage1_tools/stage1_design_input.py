@@ -18,12 +18,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.util import canonical_json, sha256_json, utc_now
+from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
 
 MODEL_ID = "gpt-5.6-thinking"
 ENDPOINT_ID = "chatgpt-conversation-file-bridge"
 GENERATOR_CALL_KEY = "stage1-design-input-generator-001"
 CRITIC_CALL_KEY = "stage1-design-input-critic-001"
 GATE_ID = "stage1-design-input-confirmation-001"
+STAGE = "STAGE_1_DESIGN_INPUT"
 
 
 def read_json(path: Path) -> Any:
@@ -31,6 +33,7 @@ def read_json(path: Path) -> Any:
 
 
 def atomic_json(path: Path, value: Any) -> None:
+    value = prepare_staged_artifact(path, value)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
     tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -50,6 +53,7 @@ def schema(name: str) -> dict[str, Any]:
 
 
 def validate_schema(value: Any, schema_value: dict[str, Any]) -> list[str]:
+    normalize_in_place(value, schema_value, contract_id=f"staged:{STAGE}:{schema_value.get('title') or 'anonymous-schema'}")
     errors = []
     for e in sorted(Draft202012Validator(schema_value).iter_errors(value), key=lambda x: list(x.path)):
         path = "/".join(str(p) for p in e.path) or "$"
@@ -245,6 +249,7 @@ def init_cmd(args: argparse.Namespace) -> None:
 
 def ingest_generator_cmd(args: argparse.Namespace) -> None:
     run_dir, response_path = Path(args.run_dir).resolve(), Path(args.response_file).resolve()
+    set_contract_trace_context(run_dir, "ingest_generator_cmd")
     envelope = read_json(response_path)
     required = {"call_key", "prompt_id", "model_id", "endpoint_id", "raw_text", "output", "response_author", "responded_at"}
     missing = sorted(required - set(envelope))
@@ -277,6 +282,7 @@ def ingest_generator_cmd(args: argparse.Namespace) -> None:
 
 def ingest_critic_cmd(args: argparse.Namespace) -> None:
     run_dir, response_path = Path(args.run_dir).resolve(), Path(args.response_file).resolve()
+    set_contract_trace_context(run_dir, "ingest_critic_cmd")
     envelope = read_json(response_path)
     if envelope.get("call_key") != CRITIC_CALL_KEY or envelope.get("prompt_id") != "P-STAGE1-DESIGN-INPUT-CRITIC":
         raise SystemExit("critic response envelope does not match request")

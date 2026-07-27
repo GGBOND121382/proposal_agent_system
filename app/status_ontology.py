@@ -15,6 +15,15 @@ CANONICAL_KNOWLEDGE_STATUSES: tuple[str, ...] = (
     "SUPERSEDED",
 )
 
+CANONICAL_CLAIM_TYPES: tuple[str, ...] = (
+    "FACT",
+    "PLAN",
+    "EXPECTED_RESULT",
+    "REQUIREMENT",
+    "PUBLIC_CLAIM",
+    "MODEL_INFERENCE",
+)
+
 CANONICAL_TEMPORAL_STATUSES: tuple[str, ...] = (
     "PAST",
     "CURRENT",
@@ -27,6 +36,27 @@ CANONICAL_TEMPORAL_STATUSES: tuple[str, ...] = (
 # These values appeared in older staged artifacts or are common model-created
 # paraphrases. They are accepted only by the deterministic compatibility layer;
 # schemas and prompts expose canonical values only.
+LEGACY_CLAIM_TYPE_ALIASES: frozenset[str] = frozenset(
+    {
+        "PROJECT_DESIGN",
+        "CONFIRMED_DESIGN",
+        "PROJECT_PLAN",
+        "PLANNED",
+        "PROVISIONAL_TARGET",
+        "WORKING_ASSUMPTION",
+    }
+)
+
+LEGACY_TEMPORAL_ALIASES: frozenset[str] = frozenset(
+    {
+        "PROJECT_DESIGN",
+        "CONFIRMED_DESIGN",
+        "PROJECT_PLAN",
+        "PROVISIONAL_TARGET",
+        "WORKING_ASSUMPTION",
+    }
+)
+
 LEGACY_KNOWLEDGE_ALIASES: frozenset[str] = frozenset(
     {
         "PROJECT_DESIGN",
@@ -50,6 +80,14 @@ STAGE2_FACT_ROLES: tuple[str, ...] = (
 class KnowledgeStatusDecision:
     original_status: str
     canonical_status: str
+    reason: str
+    normalized: bool
+
+
+@dataclass(frozen=True)
+class SemanticEnumDecision:
+    original_value: str
+    canonical_value: str
     reason: str
     normalized: bool
 
@@ -171,6 +209,70 @@ def normalize_knowledge_status(
     return KnowledgeStatusDecision(original, canonical, reason, True)
 
 
+def normalize_claim_type(raw_value: Any) -> SemanticEnumDecision:
+    """Normalize known aliases that drift into the ``claim_type`` field.
+
+    The mapping is semantic, not evidentiary: provenance remains in
+    ``knowledge_status``. Unknown values are left untouched so strict schema
+    validation still catches genuinely novel drift.
+    """
+
+    original = str(raw_value or "").strip().upper()
+    if original in CANONICAL_CLAIM_TYPES:
+        return SemanticEnumDecision(original, original, "already canonical", False)
+    if original not in LEGACY_CLAIM_TYPE_ALIASES:
+        return SemanticEnumDecision(
+            original, original, "unrecognized claim_type; strict validation required", False
+        )
+
+    if original in {"PROJECT_DESIGN", "CONFIRMED_DESIGN", "PROJECT_PLAN", "PLANNED"}:
+        canonical = "PLAN"
+        reason = "project-design semantics belong to claim_type=PLAN"
+    elif original == "PROVISIONAL_TARGET":
+        canonical = "EXPECTED_RESULT"
+        reason = "provisional-target semantics belong to claim_type=EXPECTED_RESULT"
+    else:  # WORKING_ASSUMPTION
+        canonical = "MODEL_INFERENCE"
+        reason = "working-assumption semantics belong to claim_type=MODEL_INFERENCE"
+    return SemanticEnumDecision(original, canonical, reason, True)
+
+
+def normalize_temporal_status(raw_value: Any) -> SemanticEnumDecision:
+    """Normalize known semantic aliases misplaced in ``temporal_status``."""
+
+    original = str(raw_value or "").strip().upper()
+    if original in CANONICAL_TEMPORAL_STATUSES:
+        return SemanticEnumDecision(original, original, "already canonical", False)
+    if original not in LEGACY_TEMPORAL_ALIASES:
+        return SemanticEnumDecision(
+            original, original, "unrecognized temporal_status; strict validation required", False
+        )
+
+    if original in {"PROJECT_DESIGN", "CONFIRMED_DESIGN", "PROJECT_PLAN"}:
+        canonical = "PLANNED"
+        reason = "project-design time semantics belong to temporal_status=PLANNED"
+    elif original == "PROVISIONAL_TARGET":
+        canonical = "EXPECTED"
+        reason = "provisional-target time semantics belong to temporal_status=EXPECTED"
+    else:  # WORKING_ASSUMPTION
+        canonical = "UNKNOWN"
+        reason = "a working assumption has no established occurrence time"
+    return SemanticEnumDecision(original, canonical, reason, True)
+
+
+def implied_temporal_status_from_claim_alias(raw_value: Any) -> str | None:
+    """Return the canonical time dimension implied by a known claim alias."""
+
+    original = str(raw_value or "").strip().upper()
+    if original in {"PROJECT_DESIGN", "CONFIRMED_DESIGN", "PROJECT_PLAN", "PLANNED"}:
+        return "PLANNED"
+    if original == "PROVISIONAL_TARGET":
+        return "EXPECTED"
+    if original == "WORKING_ASSUMPTION":
+        return "UNKNOWN"
+    return None
+
+
 def legacy_fact_role(raw_status: Any) -> str:
     status = str(raw_status or "").strip().upper()
     if status in {"PROJECT_DESIGN", "CONFIRMED_DESIGN", "PLANNED"}:
@@ -217,7 +319,19 @@ def normalize_stage2_candidate(candidate: Mapping[str, Any]) -> tuple[dict[str, 
         if not isinstance(fact, dict):
             continue
         raw_status = fact.get("knowledge_status")
-        role = str(fact.get("fact_role") or legacy_fact_role(raw_status)).upper()
+        raw_role = str(fact.get("fact_role") or "").strip().upper()
+        role_aliases = {
+            "PROJECT_DESIGN": "DESIGN",
+            "CONFIRMED_DESIGN": "DESIGN",
+            "PROJECT_PLAN": "DESIGN",
+            "PLAN": "DESIGN",
+            "PLANNED": "DESIGN",
+            "PROVISIONAL_TARGET": "TARGET",
+            "EXPECTED_RESULT": "TARGET",
+            "WORKING_ASSUMPTION": "ASSUMPTION",
+            "MODEL_INFERENCE": "ASSUMPTION",
+        }
+        role = role_aliases.get(raw_role, raw_role or legacy_fact_role(raw_status))
         if role not in STAGE2_FACT_ROLES:
             unresolved.append({
                 "path": f"facts/{index}/fact_role",
@@ -226,8 +340,37 @@ def normalize_stage2_candidate(candidate: Mapping[str, Any]) -> tuple[dict[str, 
             })
         else:
             fact["fact_role"] = role
+            if raw_role and raw_role != role:
+                changes.append({
+                    "path": f"facts/{index}/fact_role",
+                    "fact_id": fact.get("fact_id"),
+                    "from": raw_role,
+                    "to": role,
+                    "reason": "legacy/model semantic role mapped to canonical Stage-2 fact_role",
+                })
 
-        temporal = str(fact.get("temporal_status") or default_temporal_status(role)).upper()
+        raw_temporal = fact.get("temporal_status") or default_temporal_status(role)
+        temporal_decision = normalize_temporal_status(raw_temporal)
+        temporal = temporal_decision.canonical_value
+        if temporal_decision.normalized:
+            changes.append({
+                "path": f"facts/{index}/temporal_status",
+                "fact_id": fact.get("fact_id"),
+                "from": temporal_decision.original_value,
+                "to": temporal,
+                "reason": temporal_decision.reason,
+            })
+        # Stage-2 role semantics deterministically define the time dimension.
+        required_temporal = {"DESIGN": "PLANNED", "TARGET": "EXPECTED", "ASSUMPTION": "UNKNOWN"}.get(role)
+        if required_temporal and temporal != required_temporal:
+            changes.append({
+                "path": f"facts/{index}/temporal_status",
+                "fact_id": fact.get("fact_id"),
+                "from": temporal,
+                "to": required_temporal,
+                "reason": f"fact_role={role} requires temporal_status={required_temporal}",
+            })
+            temporal = required_temporal
         if temporal in CANONICAL_TEMPORAL_STATUSES:
             fact["temporal_status"] = temporal
         else:
@@ -348,8 +491,43 @@ def normalize_stage3_candidate(
                 "to": target,
                 "reason": "Stage-2 project-owner gate confirmed this proposition as the selected design",
             })
-        cp.setdefault("claim_role", "DESIGN_HYPOTHESIS")
-        cp.setdefault("temporal_status", "PLANNED")
+        raw_role = str(cp.get("claim_role") or "").strip().upper()
+        if not raw_role:
+            cp["claim_role"] = "DESIGN_HYPOTHESIS"
+            changes.append({
+                "path": "central_proposition/claim_role",
+                "from": None,
+                "to": "DESIGN_HYPOTHESIS",
+                "reason": "missing deterministic Stage-3 proposition role restored",
+            })
+        elif raw_role in {"PROJECT_DESIGN", "CONFIRMED_DESIGN", "PROJECT_PLAN", "PLAN", "DESIGN", "PLANNED"}:
+            cp["claim_role"] = "DESIGN_HYPOTHESIS"
+            changes.append({
+                "path": "central_proposition/claim_role",
+                "from": raw_role,
+                "to": "DESIGN_HYPOTHESIS",
+                "reason": "project-design alias mapped to the Stage-3 design hypothesis role",
+            })
+
+        raw_temporal = str(cp.get("temporal_status") or "").strip().upper()
+        if not raw_temporal:
+            cp["temporal_status"] = "PLANNED"
+            changes.append({
+                "path": "central_proposition/temporal_status",
+                "from": None,
+                "to": "PLANNED",
+                "reason": "missing deterministic Stage-3 proposition time restored",
+            })
+        else:
+            temporal_decision = normalize_temporal_status(raw_temporal)
+            if temporal_decision.normalized and temporal_decision.canonical_value == "PLANNED":
+                cp["temporal_status"] = "PLANNED"
+                changes.append({
+                    "path": "central_proposition/temporal_status",
+                    "from": raw_temporal,
+                    "to": "PLANNED",
+                    "reason": temporal_decision.reason,
+                })
 
     return normalized, {
         "schema_version": "1.0",

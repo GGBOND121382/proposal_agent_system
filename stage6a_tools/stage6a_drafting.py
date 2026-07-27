@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.util import sha256_json, utc_now
+from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
 
 STAGE = "STAGE_6A_PROVISIONAL_DRAFTING"
 BATCH_ID = "STAGE-6A"
@@ -32,6 +33,7 @@ def read_json(path: Path) -> Any:
 
 
 def atomic_json(path: Path, value: Any) -> None:
+    value = prepare_staged_artifact(path, value)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
     tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -58,6 +60,7 @@ def load_schema(name: str) -> dict[str, Any]:
 
 
 def validate_schema(value: Any, schema: dict[str, Any]) -> list[str]:
+    normalize_in_place(value, schema, contract_id=f"staged:{STAGE}:{schema.get('title') or 'anonymous-schema'}")
     errors: list[str] = []
     for err in sorted(Draft202012Validator(schema).iter_errors(value), key=lambda x: list(x.path)):
         loc = "/".join(str(x) for x in err.path) or "$"
@@ -445,6 +448,7 @@ def init_cmd(args: argparse.Namespace) -> None:
 
 def ingest_writer_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve(); sid = args.section_id
+    set_contract_trace_context(run_dir, "ingest_writer_cmd")
     response = read_json(Path(args.response_file).resolve())
     errors = validate_schema(response, load_schema("section_draft.schema.json"))
     if errors:
@@ -475,6 +479,7 @@ def ingest_writer_cmd(args: argparse.Namespace) -> None:
 
 def ingest_writer_repair_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve(); sid = args.section_id
+    set_contract_trace_context(run_dir, "ingest_writer_repair_cmd")
     response = read_json(Path(args.response_file).resolve())
     errors = validate_schema(response, load_schema("section_draft.schema.json"))
     if errors:
@@ -513,6 +518,7 @@ def ingest_writer_repair_cmd(args: argparse.Namespace) -> None:
 
 def ingest_critic_cmd(args: argparse.Namespace) -> None:
     run_dir=Path(args.run_dir).resolve(); sid=args.section_id; response=read_json(Path(args.response_file).resolve())
+    set_contract_trace_context(run_dir, "ingest_critic_cmd")
     errors=validate_schema(response,load_schema("section_critic.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
     candidate=read_json(run_dir/"intermediate"/sid/"original_candidate.json")
@@ -527,6 +533,7 @@ def ingest_critic_cmd(args: argparse.Namespace) -> None:
 
 def ingest_polish_cmd(args: argparse.Namespace) -> None:
     run_dir=Path(args.run_dir).resolve(); sid=args.section_id; response=read_json(Path(args.response_file).resolve())
+    set_contract_trace_context(run_dir, "ingest_polish_cmd")
     errors=validate_schema(response,load_schema("expression_polish.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
     original=read_json(run_dir/"intermediate"/sid/"original_candidate.json"); polished=response["candidate"]
@@ -545,6 +552,7 @@ def ingest_polish_cmd(args: argparse.Namespace) -> None:
 
 def ingest_expression_critic_cmd(args: argparse.Namespace) -> None:
     run_dir=Path(args.run_dir).resolve(); sid=args.section_id; response=read_json(Path(args.response_file).resolve())
+    set_contract_trace_context(run_dir, "ingest_expression_critic_cmd")
     errors=validate_schema(response,load_schema("expression_critic.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
     polished=read_json(run_dir/"intermediate"/sid/"polished_candidate.json"); expected={p["paragraph_id"] for p in paragraphs(polished)}
@@ -565,6 +573,7 @@ def ingest_expression_critic_cmd(args: argparse.Namespace) -> None:
 
 def ingest_batch_critic_cmd(args: argparse.Namespace) -> None:
     run_dir=Path(args.run_dir).resolve(); response=read_json(Path(args.response_file).resolve())
+    set_contract_trace_context(run_dir, "ingest_batch_critic_cmd")
     errors=validate_schema(response,load_schema("batch_critic.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
     if set(response["checked_section_ids"])!=set(SECTION_IDS) or response["verdict"]!="ACCEPT" or response["next_stage_decision"]!="ALLOW_STAGE_6B" or any(d["result"]!="PASS" for d in response["quality_dimensions"]):

@@ -54,8 +54,9 @@ jobs:
 
       - name: Run baseline verification
         run: |
-          python -m compileall app
+          python -m compileall app scripts stage1_tools stage2_tools stage3_tools stage4_tools stage4a_tools stage5_tools stage6a_tools stage6b_tools stage6c_tools stage6d_tools stage7_tools
           python prompt_pack/tools/validate_pack.py
+          python scripts/validate_contract_registry.py
           python -m pytest -q
 
       - name: Build and verify recovery bundle
