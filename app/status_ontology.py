@@ -296,13 +296,27 @@ def default_temporal_status(fact_role: str) -> str:
     }.get(fact_role, "UNKNOWN")
 
 
-def normalize_stage2_candidate(candidate: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def normalize_stage2_candidate(candidate: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     """Migrate a Stage-2 candidate to the canonical status contract.
 
     The input is copied. The report is suitable for trace persistence.
     """
 
     import copy
+
+    if not isinstance(candidate, Mapping):
+        return {}, {
+            "schema_version": "1.0",
+            "canonical_knowledge_statuses": list(CANONICAL_KNOWLEDGE_STATUSES),
+            "normalized_count": 0,
+            "changes": [],
+            "unresolved_count": 1,
+            "unresolved": [{
+                "path": "$",
+                "value_type": type(candidate).__name__,
+                "reason": "Stage-2 candidate must be a JSON object",
+            }],
+        }
 
     normalized: dict[str, Any] = copy.deepcopy(dict(candidate))
     normalized["schema_version"] = "1.1"
@@ -465,11 +479,24 @@ def normalize_stage2_candidate(candidate: Mapping[str, Any]) -> tuple[dict[str, 
 
 
 def normalize_stage3_candidate(
-    candidate: Mapping[str, Any],
+    candidate: Any,
     stage2: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Normalize Stage-3 project-definition knowledge status fields."""
     import copy
+
+    if not isinstance(candidate, Mapping):
+        return {}, {
+            "schema_version": "1.0",
+            "normalized_count": 0,
+            "changes": [],
+            "unresolved_count": 1,
+            "unresolved": [{
+                "path": "$",
+                "value_type": type(candidate).__name__,
+                "reason": "Stage-3 candidate must be a JSON object",
+            }],
+        }
 
     normalized: dict[str, Any] = copy.deepcopy(dict(candidate))
     changes: list[dict[str, Any]] = []
@@ -533,4 +560,6 @@ def normalize_stage3_candidate(
         "schema_version": "1.0",
         "normalized_count": len(changes),
         "changes": changes,
+        "unresolved_count": 0,
+        "unresolved": [],
     }

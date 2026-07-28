@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.util import sha256_json, utc_now
-from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
+from app.staged_contracts import normalize_in_place, prepare_staged_artifact, require_model_response_envelope, set_contract_trace_context
 
 STAGE = "STAGE_4_ARGUMENT_ARCHITECTURE"
 GENERATOR_CALL_KEY = "stage4-argument-architecture-generator-001"
@@ -391,7 +391,7 @@ def schedule_repair_cmd(args: argparse.Namespace) -> None:
 def ingest_repair_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
     set_contract_trace_context(run_dir, "ingest_repair_cmd")
-    env = read_json(Path(args.response_file).resolve())
+    env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage4_argument_architecture")
     if env.get("call_key") != REPAIR_CALL_KEY or env.get("prompt_id") != "P-STAGE4-ARGUMENT-ARCHITECTURE-REPAIR":
         raise SystemExit("repair response mismatch")
     if not env.get("model_id") or not env.get("endpoint_id"):
@@ -415,7 +415,7 @@ def ingest_repair_cmd(args: argparse.Namespace) -> None:
 def ingest_generator_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
     set_contract_trace_context(run_dir, "ingest_generator_cmd")
-    env = read_json(Path(args.response_file).resolve())
+    env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage4_argument_architecture")
     if env.get("call_key") != GENERATOR_CALL_KEY or env.get("prompt_id") != "P-STAGE4-ARGUMENT-ARCHITECTURE":
         raise SystemExit("generator response mismatch")
     if not env.get("model_id") or not env.get("endpoint_id"):
@@ -439,7 +439,7 @@ def ingest_generator_cmd(args: argparse.Namespace) -> None:
 def ingest_critic_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
     set_contract_trace_context(run_dir, "ingest_critic_cmd")
-    env = read_json(Path(args.response_file).resolve())
+    env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage4_argument_architecture")
     if env.get("call_key") != CRITIC_CALL_KEY or env.get("prompt_id") != "P-STAGE4-ARGUMENT-ARCHITECTURE-CRITIC":
         raise SystemExit("critic response mismatch")
     if not env.get("model_id") or not env.get("endpoint_id"):

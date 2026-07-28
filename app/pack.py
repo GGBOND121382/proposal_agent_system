@@ -25,6 +25,7 @@ class PromptPack:
         self.relation_matrix = yaml.safe_load((root / "knowledge/relation_matrix.yaml").read_text(encoding="utf-8"))
         self.shared_prompt = self._load_shared_prompt()
         self._schema_registry = self._build_schema_registry()
+        self._structure_validator_cache: dict[tuple[str, str], Draft202012Validator] = {}
 
     def _load_shared_prompt(self) -> str:
         parts = []
@@ -76,6 +77,105 @@ class PromptPack:
     def validate(self, prompt_id: str, kind: str, value: Any) -> list[str]:
         errors = sorted(self.validator(prompt_id, kind).iter_errors(value), key=lambda e: list(e.absolute_path))
         result = []
+        for err in errors:
+            path = "/" + "/".join(str(x) for x in err.absolute_path)
+            result.append(f"{path or '/'}: {err.message}")
+        return result
+
+    @staticmethod
+    def _structure_only_schema(node: Any, *, root: bool = False) -> Any:
+        """Return a schema that checks container/scalar shape only.
+
+        Model responses are normalized before the final strict JSON Schema
+        validation.  The normalizers intentionally repair enum aliases and a
+        small number of deterministic protocol fields, but they must never run
+        on a value whose container type is already incompatible with the
+        declared schema.  This projection preserves only type-bearing schema
+        keywords and converts ``oneOf`` to ``anyOf`` so structurally compatible
+        branches do not fail merely because semantic constraints were removed.
+
+        Missing required fields, enum drift, bounds, formats and additional
+        properties remain the responsibility of the normal strict validator.
+        """
+        if isinstance(node, bool):
+            return node
+        if isinstance(node, list):
+            return [PromptPack._structure_only_schema(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+
+        projected: dict[str, Any] = {}
+        if "type" in node:
+            declared_type = copy.deepcopy(node["type"])
+            # Nested nulls are commonly used by model providers for omitted
+            # optional values and are safely handled by the deterministic
+            # normalizers through ``or {}`` / ``or []``.  The preflight is
+            # intended to catch non-null container mismatches, not to replace
+            # the final strict schema validation.
+            if not root:
+                if isinstance(declared_type, str) and declared_type != "null":
+                    declared_type = [declared_type, "null"]
+                elif isinstance(declared_type, list) and "null" not in declared_type:
+                    declared_type = [*declared_type, "null"]
+            projected["type"] = declared_type
+        if isinstance(node.get("properties"), dict):
+            projected["properties"] = {
+                key: PromptPack._structure_only_schema(value)
+                for key, value in node["properties"].items()
+            }
+        if isinstance(node.get("patternProperties"), dict):
+            projected["patternProperties"] = {
+                key: PromptPack._structure_only_schema(value)
+                for key, value in node["patternProperties"].items()
+            }
+        if isinstance(node.get("items"), (dict, bool)):
+            projected["items"] = PromptPack._structure_only_schema(node["items"])
+        if isinstance(node.get("prefixItems"), list):
+            projected["prefixItems"] = [
+                PromptPack._structure_only_schema(item)
+                for item in node["prefixItems"]
+            ]
+        if isinstance(node.get("contains"), (dict, bool)):
+            projected["contains"] = PromptPack._structure_only_schema(node["contains"])
+        if isinstance(node.get("additionalProperties"), (dict, bool)):
+            # Keep only schema-valued additional properties.  A plain false is
+            # a semantic strictness rule rather than a container-shape rule.
+            if isinstance(node["additionalProperties"], dict):
+                projected["additionalProperties"] = PromptPack._structure_only_schema(
+                    node["additionalProperties"]
+                )
+        if isinstance(node.get("allOf"), list):
+            projected["allOf"] = [
+                PromptPack._structure_only_schema(item)
+                for item in node["allOf"]
+            ]
+        branches: list[Any] = []
+        for keyword in ("anyOf", "oneOf"):
+            if isinstance(node.get(keyword), list):
+                branches.extend(
+                    PromptPack._structure_only_schema(item)
+                    for item in node[keyword]
+                )
+        if branches:
+            projected["anyOf"] = branches
+        return projected
+
+    def structure_schema(self, prompt_id: str, kind: str) -> dict[str, Any]:
+        """Return an inlined schema projection used before normalization."""
+        return self._structure_only_schema(self.inlined_schema(prompt_id, kind), root=True)
+
+    def validate_structure(self, prompt_id: str, kind: str, value: Any) -> list[str]:
+        """Validate declared value/container types without semantic checks."""
+        cache_key = (prompt_id, kind)
+        validator = self._structure_validator_cache.get(cache_key)
+        if validator is None:
+            validator = Draft202012Validator(
+                self.structure_schema(prompt_id, kind),
+                format_checker=Draft202012Validator.FORMAT_CHECKER,
+            )
+            self._structure_validator_cache[cache_key] = validator
+        errors = sorted(validator.iter_errors(value), key=lambda e: list(e.absolute_path))
+        result: list[str] = []
         for err in errors:
             path = "/" + "/".join(str(x) for x in err.absolute_path)
             result.append(f"{path or '/'}: {err.message}")

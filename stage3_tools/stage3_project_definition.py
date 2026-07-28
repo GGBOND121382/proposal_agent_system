@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 
 from app.util import sha256_json, utc_now
 from app.status_ontology import normalize_stage2_candidate, normalize_stage3_candidate
-from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
+from app.staged_contracts import normalize_in_place, prepare_staged_artifact, require_model_response_envelope, set_contract_trace_context
 from stage2_tools.stage2_guide_fact_base import deterministic_validate as validate_stage2
 
 STAGE = "STAGE_3_PROJECT_DEFINITION"
@@ -332,7 +332,7 @@ def init_cmd(args: argparse.Namespace) -> None:
 def ingest_upstream_repair_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
     set_contract_trace_context(run_dir, "ingest_upstream_repair_cmd")
-    env = read_json(Path(args.response_file).resolve())
+    env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage3_project_definition")
     if env.get("call_key") != UPSTREAM_REPAIR_CALL_KEY or env.get("prompt_id") != "P-STAGE3-UPSTREAM-FACT-REPAIR":
         raise SystemExit("upstream repair response mismatch")
     if not env.get("model_id") or not env.get("endpoint_id"):
@@ -368,7 +368,7 @@ def ingest_upstream_repair_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_upstream_repair_critic_cmd(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir).resolve(); env = read_json(Path(args.response_file).resolve())
+    run_dir = Path(args.run_dir).resolve(); env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage3_project_definition")
     set_contract_trace_context(run_dir, "ingest_upstream_repair_critic_cmd")
     if env.get("call_key") != UPSTREAM_REPAIR_CRITIC_CALL_KEY or env.get("prompt_id") != "P-STAGE3-UPSTREAM-FACT-REPAIR-CRITIC":
         raise SystemExit("upstream repair critic mismatch")
@@ -482,7 +482,7 @@ def schedule_generator_repair_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_generator_cmd(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir).resolve(); env = read_json(Path(args.response_file).resolve())
+    run_dir = Path(args.run_dir).resolve(); env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage3_project_definition")
     set_contract_trace_context(run_dir, "ingest_generator_cmd")
     if env.get("call_key") != GENERATOR_CALL_KEY or env.get("prompt_id") != "P-STAGE3-PROJECT-DEFINITION":
         raise SystemExit("generator response mismatch")
@@ -508,7 +508,7 @@ def ingest_generator_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_generator_repair_cmd(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir).resolve(); env = read_json(Path(args.response_file).resolve())
+    run_dir = Path(args.run_dir).resolve(); env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage3_project_definition")
     set_contract_trace_context(run_dir, "ingest_generator_repair_cmd")
     if env.get("call_key") != GENERATOR_REPAIR_CALL_KEY or env.get("prompt_id") != "P-STAGE3-PROJECT-DEFINITION-REPAIR":
         raise SystemExit("generator repair response mismatch")
@@ -533,7 +533,7 @@ def ingest_generator_repair_cmd(args: argparse.Namespace) -> None:
     _create_project_definition_critic_request(run_dir, candidate, report, stage2)
 
 def ingest_critic_cmd(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir).resolve(); env = read_json(Path(args.response_file).resolve())
+    run_dir = Path(args.run_dir).resolve(); env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage3_project_definition")
     set_contract_trace_context(run_dir, "ingest_critic_cmd")
     if env.get("call_key") != CRITIC_CALL_KEY or env.get("prompt_id") != "P-STAGE3-PROJECT-DEFINITION-CRITIC":
         raise SystemExit("critic response mismatch")

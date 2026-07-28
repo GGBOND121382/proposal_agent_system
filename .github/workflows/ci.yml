@@ -60,7 +60,7 @@ jobs:
         run: |
           python scripts/validate_contract_registry.py
           python scripts/validate_status_contract.py
-          python -m pytest -q tests/test_contract_registry_v3.py tests/test_contract_migration_v3.py tests/test_status_ontology.py
+          python -m pytest -q tests/test_contract_registry_v3.py tests/test_contract_migration_v3.py tests/test_status_ontology.py tests/test_output_container_contract_v5.py
 
       - name: Run test suite
         run: python -m pytest -q

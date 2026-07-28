@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 
 from app.util import sha256_json, utc_now
 from app.status_ontology import CANONICAL_KNOWLEDGE_STATUSES, normalize_stage2_candidate
-from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
+from app.staged_contracts import normalize_in_place, prepare_staged_artifact, require_model_response_envelope, set_contract_trace_context
 
 MODEL_ID = "gpt-5.6-thinking"
 ENDPOINT_ID = "chatgpt-conversation-file-bridge"
@@ -321,7 +321,7 @@ def init_cmd(args: argparse.Namespace) -> None:
 def ingest_generator_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
     set_contract_trace_context(run_dir, "ingest_generator_cmd")
-    envelope = read_json(Path(args.response_file).resolve())
+    envelope = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage2_guide_fact_base")
     if envelope.get("call_key") != GENERATOR_CALL_KEY or envelope.get("prompt_id") != "P-STAGE2-GUIDE-FACT-BASE":
         raise SystemExit("generator response envelope does not match request")
     if not envelope.get("model_id") or not envelope.get("endpoint_id"):
@@ -357,7 +357,7 @@ def ingest_generator_cmd(args: argparse.Namespace) -> None:
 def ingest_critic_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
     set_contract_trace_context(run_dir, "ingest_critic_cmd")
-    envelope = read_json(Path(args.response_file).resolve())
+    envelope = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage2_guide_fact_base")
     if envelope.get("call_key") != CRITIC_CALL_KEY or envelope.get("prompt_id") != "P-STAGE2-GUIDE-FACT-CRITIC":
         raise SystemExit("critic response envelope does not match request")
     if not envelope.get("model_id") or not envelope.get("endpoint_id"):

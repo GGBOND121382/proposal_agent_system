@@ -34,6 +34,27 @@ def clear_contract_trace_context() -> None:
     _TRACE_INDEX = 0
 
 
+def require_model_response_envelope(value: Any, *, label: str = "model response") -> dict[str, Any]:
+    """Return a file-bridge response envelope or fail with a controlled error.
+
+    Stage 1--5 use an outer bridge envelope whose ``output`` member contains
+    the schema-governed model object.  Historically those commands called
+    ``.get`` on the envelope before checking its root type, allowing a JSON
+    array/scalar to escape as ``AttributeError``/``TypeError``.  Keep this
+    boundary independent from stage-specific semantic validation.
+    """
+    if not isinstance(value, dict):
+        raise SystemExit(
+            f"{label} envelope must be a JSON object; received {type(value).__name__}"
+        )
+    if "output" in value and not isinstance(value.get("output"), dict):
+        raise SystemExit(
+            f"{label} envelope.output must be a JSON object; "
+            f"received {type(value.get('output')).__name__}"
+        )
+    return value
+
+
 def _safe_label(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in value)[:120]
 

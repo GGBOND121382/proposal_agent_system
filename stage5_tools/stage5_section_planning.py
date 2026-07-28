@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.util import sha256_json, utc_now
-from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
+from app.staged_contracts import normalize_in_place, prepare_staged_artifact, require_model_response_envelope, set_contract_trace_context
 
 STAGE = "STAGE_5_PROVISIONAL_SECTION_PLANNING"
 GENERATOR_CALL_KEY = "stage5-section-plan-generator-001"
@@ -416,7 +416,7 @@ def issue_critic(run_dir: Path, candidate: dict[str, Any], report: dict[str, Any
 def ingest_generator_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
     set_contract_trace_context(run_dir, "ingest_generator_cmd")
-    env = read_json(Path(args.response_file).resolve())
+    env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage5_section_planning")
     validate_envelope(env, GENERATOR_CALL_KEY, "P-STAGE5-PROVISIONAL-SECTION-PLANNING")
     candidate = env.get("output")
     inputs, hashes = load_inputs(run_dir)
@@ -442,7 +442,7 @@ def ingest_repair_cmd(args: argparse.Namespace) -> None:
     set_contract_trace_context(run_dir, "ingest_repair_cmd")
     if (run_dir / "responses" / "002_section_plan_repair.json").exists():
         raise SystemExit("repair attempt already consumed")
-    env = read_json(Path(args.response_file).resolve())
+    env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage5_section_planning")
     validate_envelope(env, REPAIR_CALL_KEY, "P-STAGE5-PROVISIONAL-SECTION-PLANNING-REPAIR")
     candidate = env.get("output")
     inputs, hashes = load_inputs(run_dir)
@@ -487,7 +487,7 @@ def revalidate_original_cmd(args: argparse.Namespace) -> None:
 def ingest_critic_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve()
     set_contract_trace_context(run_dir, "ingest_critic_cmd")
-    env = read_json(Path(args.response_file).resolve())
+    env = require_model_response_envelope(read_json(Path(args.response_file).resolve()), label="stage5_section_planning")
     validate_envelope(env, CRITIC_CALL_KEY, "P-STAGE5-PROVISIONAL-SECTION-PLANNING-CRITIC")
     output = env.get("output")
     errors = validate_schema(output, load_schema("section_plan_critic.schema.json"))

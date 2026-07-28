@@ -24,7 +24,7 @@ from .status_ontology import (
     normalize_temporal_status,
 )
 
-CONTRACT_REGISTRY_VERSION = "3.0.0"
+CONTRACT_REGISTRY_VERSION = "3.1.0"
 
 # Canonical vocabularies that are shared across stages.  Stage-specific enums
 # remain authoritative in their JSON Schemas; aliases below are selected only
@@ -254,6 +254,13 @@ def _choose_branch(value: Any, branches: Iterable[Any], root_schema: Mapping[str
         for branch in candidates:
             if _resolve_local_ref(branch, root_schema).get("type") == "array":
                 return branch
+    if value is None:
+        for branch in candidates:
+            resolved = _resolve_local_ref(branch, root_schema)
+            branch_type = resolved.get("type")
+            types = [branch_type] if isinstance(branch_type, str) else list(branch_type or [])
+            if "null" in types or None in _enum_values(resolved):
+                return branch
     for branch in candidates:
         branch_type = _resolve_local_ref(branch, root_schema).get("type")
         if branch_type == "string" and isinstance(value, str):
@@ -371,6 +378,23 @@ def normalize_against_schema(
 
     def visit(node: Any, node_schema: Mapping[str, Any], path: str, parent: Mapping[str, Any] | None = None, field: str = "") -> Any:
         effective = _effective_schema(node_schema, node, root_schema)
+
+        # Providers frequently use JSON null for an omitted object/array even
+        # when the schema requires an actual container.  Existing normalizers
+        # already interpret these values as empty via ``or {}`` / ``or []``.
+        # Make that behavior explicit and auditable before any business code
+        # dereferences the value.  Schemas that explicitly allow null are left
+        # unchanged.
+        if node is None:
+            declared = effective.get("type")
+            declared_types = [declared] if isinstance(declared, str) else list(declared or [])
+            if "null" not in declared_types:
+                if "object" in declared_types and "array" not in declared_types:
+                    record(path, field, None, {}, "NULL_CONTAINER_DEFAULT", "null object normalized to empty object")
+                    node = {}
+                elif "array" in declared_types and "object" not in declared_types:
+                    record(path, field, None, [], "NULL_CONTAINER_DEFAULT", "null array normalized to empty array")
+                    node = []
 
         if isinstance(node, dict):
             props = _property_schemas(effective, node, root_schema)

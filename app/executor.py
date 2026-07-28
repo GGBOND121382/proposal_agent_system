@@ -41,7 +41,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-07-27.v3-unified-contract"
+OUTPUT_NORMALIZER_VERSION = "2026-07-28.v5-container-guard"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -814,9 +814,35 @@ class PromptExecutor:
     def _normalize_output(
         self,
         prompt_id: str,
-        output: dict[str, Any],
+        output: Any,
         envelope: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # Normalization intentionally runs before the final semantic schema
+        # validation so registered enum aliases and authoritative protocol
+        # fields can be repaired.  It must not, however, dereference a list as
+        # an object (or vice versa).  Reject incompatible declared container
+        # shapes before any business normalizer calls ``.get``/``.append``.
+        structure_validator = getattr(self.pack, "validate_structure", None)
+        if callable(structure_validator):
+            structure_errors = structure_validator(prompt_id, "output", output)
+            if structure_errors:
+                raise PromptExecutionError(
+                    "Output container structure validation failed",
+                    validation_errors=structure_errors,
+                )
+        elif not isinstance(output, dict):
+            raise PromptExecutionError(
+                "Output container structure validation failed",
+                validation_errors=[f"/: expected object, received {type(output).__name__}"],
+            )
+        if not isinstance(output, dict):
+            # A defensive invariant for custom PromptPack implementations whose
+            # structure validator does not enforce the root type.
+            raise PromptExecutionError(
+                "Output container structure validation failed",
+                validation_errors=[f"/: expected object, received {type(output).__name__}"],
+            )
+
         schema_reader = getattr(self.pack, "inlined_schema", None)
         if not callable(schema_reader):
             schema_reader = getattr(self.pack, "schema", None)
@@ -858,8 +884,16 @@ class PromptExecutor:
                 if field not in result_object:
                     continue
                 nested_value = result_object.pop(field)
+                if nested_value is not None and not isinstance(nested_value, list):
+                    raise PromptExecutionError(
+                        "Misplaced response-envelope field has invalid container type",
+                        validation_errors=[
+                            f"/result/{field}: expected array before lifting to /{field}, "
+                            f"received {type(nested_value).__name__}"
+                        ],
+                    )
                 if field not in output or output.get(field) is None:
-                    output[field] = nested_value
+                    output[field] = nested_value or []
                 elif isinstance(output.get(field), list) and isinstance(nested_value, list):
                     for item in nested_value:
                         if item not in output[field]:
@@ -2112,6 +2146,14 @@ class PromptExecutor:
                 or {}
             )
             repaired_object = repair_result.get("repaired_object") or {}
+            if not isinstance(repaired_object, dict):
+                raise PromptExecutionError(
+                    "Targeted repair object has invalid container type",
+                    validation_errors=[
+                        "/result/repaired_object: expected object, "
+                        f"received {type(repaired_object).__name__}"
+                    ],
+                )
             repaired_content = (
                 repaired_object.get("content")
                 if isinstance(repaired_object.get("content"), dict)
@@ -2789,6 +2831,14 @@ class PromptExecutor:
                     )
             if self.quality_guard_enabled:
                 output = self.quality_guard.apply(prompt_id, quality_context_envelope, output)
+            structure_validator = getattr(self.pack, "validate_structure", None)
+            if callable(structure_validator):
+                post_structure_errors = structure_validator(prompt_id, "output", output)
+                if post_structure_errors:
+                    raise PromptExecutionError(
+                        "Post-normalization output container structure validation failed",
+                        validation_errors=post_structure_errors,
+                    )
             output_errors = self.pack.validate(prompt_id, "output", output)
             if output_errors:
                 raise PromptExecutionError("Output schema validation failed", validation_errors=output_errors)
@@ -2823,6 +2873,49 @@ class PromptExecutor:
                 input_compaction=input_compaction,
             )
             raise PromptExecutionError(error, validation_errors=details) from exc
+        except (AttributeError, TypeError, IndexError) as exc:
+            # Last-resort execution boundary.  Declared model-output container
+            # mismatches should already be reported by the structure preflight;
+            # reaching this branch therefore indicates an internal contract
+            # processing defect.  Persist it as an explicit workflow error
+            # instead of allowing an untracked exception to escape.
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            error = (
+                "INTERNAL_OUTPUT_CONTRACT_PROCESSING_ERROR: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            self._save_run(
+                run_id,
+                project_id,
+                workflow_id,
+                prompt_id,
+                "ERROR",
+                route.model_id if route else None,
+                route.endpoint_id if route else None,
+                input_hash,
+                model_envelope,
+                output,
+                error,
+                duration_ms,
+            )
+            self._save_trace(
+                project_id,
+                workflow_id,
+                prompt_id,
+                model_envelope,
+                system_prompt,
+                raw_response_text,
+                output_schema,
+                route.environment if route else None,
+                route.model_id if route else None,
+                route.endpoint_id if route else None,
+                duration_ms,
+                "ERROR",
+                error,
+                quality_context_envelope=quality_context_envelope if input_compaction else None,
+                input_compaction=input_compaction,
+            )
+            raise PromptExecutionError(error) from exc
 
     @staticmethod
     def _compact_paragraph_text(text: str, *, limit: int = 180) -> str:
