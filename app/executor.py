@@ -2158,6 +2158,7 @@ class PromptExecutor:
                 if isinstance(finding, dict) and finding.get("target_path_or_span")
             )
             allowed_paragraph_fields: dict[str, set[str]] = {}
+            allowed_collection_fields: dict[str, dict[str, set[str]]] = {}
             allowed_content_fields: set[str] = set()
             for scope_value in repair_scope_paths:
                 for scope_path in split_repair_paths(scope_value):
@@ -2181,6 +2182,21 @@ class PromptExecutor:
                             if identity:
                                 allowed_paragraph_fields.setdefault(identity, set()).add(field)
                         continue
+                    collection_match = re.fullmatch(
+                        r"content\.([A-Za-z_][A-Za-z0-9_]*)\[([^\]]+)\](?:\.(.+))?",
+                        scope_path,
+                    )
+                    if collection_match:
+                        collection_name = collection_match.group(1)
+                        selector = collection_match.group(2).strip()
+                        field_path = str(collection_match.group(3) or "*")
+                        field = field_path.split(".", 1)[0]
+                        if selector:
+                            allowed_collection_fields.setdefault(
+                                collection_name,
+                                {},
+                            ).setdefault(selector, set()).add(field)
+                        continue
                     semantic_match = re.search(
                         r"(?:^|\.)((?:P|para)-[A-Za-z0-9-]+)(?:\.([A-Za-z_][A-Za-z0-9_]*))?$",
                         scope_path,
@@ -2200,6 +2216,7 @@ class PromptExecutor:
                         allowed_content_fields.add(content_match.group(1))
 
             restored_out_of_scope_fields = 0
+            actual_changed_paths: list[str] = []
             if repaired_paragraphs and original_content.get("paragraphs"):
                 original_list = [
                     item
@@ -2222,33 +2239,17 @@ class PromptExecutor:
                         continue
                     allowed_fields = set(allowed_paragraph_fields.get(str(index), set()))
                     allowed_fields.update(allowed_paragraph_fields.get(paragraph_id, set()))
-                    if "*" in allowed_fields:
-                        continue
-                    for field in set(original_paragraph) | set(repaired_paragraph):
-                        if field in allowed_fields:
-                            continue
-                        if repaired_paragraph.get(field) == original_paragraph.get(field):
-                            continue
-                        if field in original_paragraph:
-                            repaired_paragraph[field] = copy.deepcopy(original_paragraph[field])
-                        else:
-                            repaired_paragraph.pop(field, None)
-                        restored_out_of_scope_fields += 1
-                for field in (
-                    (set(original_content) | set(repaired_content))
-                    - {"paragraphs"}
-                ):
-                    if field in allowed_content_fields:
-                        continue
-                    if repaired_content.get(field) == original_content.get(field):
-                        continue
-                    if field in original_content:
-                        repaired_content[field] = copy.deepcopy(original_content[field])
-                    else:
-                        repaired_content.pop(field, None)
-                    restored_out_of_scope_fields += 1
-
-                actual_changed_paths: list[str] = []
+                    if "*" not in allowed_fields:
+                        for field in set(original_paragraph) | set(repaired_paragraph):
+                            if field in allowed_fields:
+                                continue
+                            if repaired_paragraph.get(field) == original_paragraph.get(field):
+                                continue
+                            if field in original_paragraph:
+                                repaired_paragraph[field] = copy.deepcopy(original_paragraph[field])
+                            else:
+                                repaired_paragraph.pop(field, None)
+                            restored_out_of_scope_fields += 1
                 for index, repaired_paragraph in enumerate(repaired_paragraphs):
                     if not isinstance(repaired_paragraph, dict) or index >= len(original_list):
                         continue
@@ -2258,14 +2259,158 @@ class PromptExecutor:
                             actual_changed_paths.append(
                                 f"content.paragraphs[{index}].{field}"
                             )
-                for field in sorted((set(original_content) | set(repaired_content)) - {"paragraphs"}):
+
+            repair_item_id_fields = (
+                "claim_id",
+                "item_id",
+                "node_id",
+                "edge_id",
+                "paragraph_id",
+                "section_id",
+                "plan_id",
+                "candidate_id",
+                "blueprint_id",
+                "package_id",
+                "template_id",
+                "object_id",
+                "id",
+            )
+
+            def selector_matches(selector: str, index: int, item: dict[str, Any]) -> bool:
+                selector = str(selector or "").strip()
+                if selector == "*":
+                    return True
+                if selector.isdigit():
+                    return int(selector) == index
+                if "=" in selector:
+                    field, expected = selector.split("=", 1)
+                    return str(item.get(field.strip()) or "") == expected.strip()
+                return any(
+                    str(item.get(field) or "") == selector
+                    for field in repair_item_id_fields
+                )
+
+            def item_identity(item: dict[str, Any], index: int) -> tuple[str | None, str]:
+                for field in repair_item_id_fields:
+                    value = item.get(field)
+                    if isinstance(value, (str, int)) and str(value).strip():
+                        return field, str(value).strip()
+                return None, str(index)
+
+            for collection_name, selector_rules in allowed_collection_fields.items():
+                if collection_name == "paragraphs" or collection_name in allowed_content_fields:
+                    continue
+                original_collection = original_content.get(collection_name)
+                repaired_collection = repaired_content.get(collection_name)
+                if not isinstance(original_collection, list):
+                    continue
+                if not isinstance(repaired_collection, list):
+                    repaired_content[collection_name] = copy.deepcopy(original_collection)
+                    restored_out_of_scope_fields += 1
+                    continue
+
+                repaired_by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+                for repaired_index, repaired_item in enumerate(repaired_collection):
+                    if not isinstance(repaired_item, dict):
+                        continue
+                    identity_field, identity_value = item_identity(repaired_item, repaired_index)
+                    if identity_field:
+                        repaired_by_identity[(identity_field, identity_value)] = repaired_item
+
+                normalized_collection: list[Any] = []
+                matched_repaired_ids: set[int] = set()
+                for index, original_item in enumerate(original_collection):
+                    if not isinstance(original_item, dict):
+                        candidate = (
+                            repaired_collection[index]
+                            if index < len(repaired_collection)
+                            else original_item
+                        )
+                        if candidate != original_item:
+                            restored_out_of_scope_fields += 1
+                        normalized_collection.append(copy.deepcopy(original_item))
+                        continue
+                    identity_field, identity_value = item_identity(original_item, index)
+                    repaired_item = (
+                        repaired_by_identity.get((identity_field, identity_value))
+                        if identity_field
+                        else None
+                    )
+                    if repaired_item is None and index < len(repaired_collection):
+                        indexed_item = repaired_collection[index]
+                        if isinstance(indexed_item, dict):
+                            repaired_item = indexed_item
+                    if repaired_item is None:
+                        repaired_item = original_item
+                    else:
+                        matched_repaired_ids.add(id(repaired_item))
+
+                    allowed_fields: set[str] = set()
+                    for selector, fields in selector_rules.items():
+                        if selector_matches(selector, index, original_item):
+                            allowed_fields.update(fields)
+                    if "*" in allowed_fields:
+                        normalized_item = copy.deepcopy(repaired_item)
+                    else:
+                        normalized_item = copy.deepcopy(original_item)
+                        for field in allowed_fields:
+                            if field in repaired_item:
+                                normalized_item[field] = copy.deepcopy(repaired_item[field])
+                            else:
+                                normalized_item.pop(field, None)
+                        for field in set(original_item) | set(repaired_item):
+                            if field not in allowed_fields and repaired_item.get(field) != original_item.get(field):
+                                restored_out_of_scope_fields += 1
+
+                    normalized_collection.append(normalized_item)
+                    path_selector = (
+                        f"{identity_field}={identity_value}"
+                        if identity_field
+                        else str(index)
+                    )
+                    for field in sorted(set(original_item) | set(normalized_item)):
+                        if normalized_item.get(field) != original_item.get(field):
+                            actual_changed_paths.append(
+                                f"content.{collection_name}[{path_selector}].{field}"
+                            )
+
+                added_items = sum(
+                    1
+                    for item in repaired_collection
+                    if isinstance(item, dict) and id(item) not in matched_repaired_ids
+                )
+                if len(repaired_collection) != len(original_collection):
+                    restored_out_of_scope_fields += abs(
+                        len(repaired_collection) - len(original_collection)
+                    )
+                elif added_items:
+                    restored_out_of_scope_fields += added_items
+                repaired_content[collection_name] = normalized_collection
+
+            protected_structural_fields = {
+                "paragraphs",
+                *allowed_collection_fields.keys(),
+            }
+            for field in sorted(set(original_content) | set(repaired_content)):
+                if field in protected_structural_fields:
+                    continue
+                if field in allowed_content_fields:
                     if repaired_content.get(field) != original_content.get(field):
                         actual_changed_paths.append(f"content.{field}")
-                repair_result["changed_paths"] = actual_changed_paths
+                    continue
+                if repaired_content.get(field) == original_content.get(field):
+                    continue
+                if field in original_content:
+                    repaired_content[field] = copy.deepcopy(original_content[field])
+                else:
+                    repaired_content.pop(field, None)
+                restored_out_of_scope_fields += 1
+
+            repair_result["changed_paths"] = list(dict.fromkeys(actual_changed_paths))
             if restored_out_of_scope_fields:
                 output.setdefault("warnings", []).append(
                     "SYSTEM_NORMALIZATION: restored "
-                    f"{restored_out_of_scope_fields} repaired paragraph field(s) "
+                    f"{restored_out_of_scope_fields} repaired field or collection change(s) "
                     "outside the critic-authorized path scope"
                 )
             budget_limit = 0

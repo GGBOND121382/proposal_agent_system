@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import copy
 import re
 from typing import Any
 
 from .executor import PromptExecutionError
-from .util import new_id, sha256_json
+from .util import sha256_json
 from .workflow_defs import CRITIC_PRODUCER
 
 
@@ -77,6 +78,161 @@ class WorkflowRepairMixin:
         key = self._repair_state_key(prompt_id, state)
         return int(state.setdefault("repair_attempts", {}).get(key, 0)) < 1
 
+    _REPAIR_ID_FIELDS = (
+        "claim_id",
+        "item_id",
+        "node_id",
+        "edge_id",
+        "paragraph_id",
+        "section_id",
+        "plan_id",
+        "candidate_id",
+        "blueprint_id",
+        "package_id",
+        "template_id",
+        "object_id",
+        "id",
+    )
+
+    @classmethod
+    def _repair_content_adapter(
+        cls,
+        original: Any,
+        result_key: str | None,
+    ) -> tuple[dict[str, Any], str | None]:
+        """Adapt producer results to the object-only targeted-repair contract.
+
+        ``P-TARGETED-REPAIR`` intentionally accepts an object as
+        ``original_object.content``.  Most producer results are objects, while
+        ``P-FACT-EXTRACT`` exposes the ``fact_candidates`` result as a list.
+        Wrap collection-shaped results under their canonical result key and
+        remember that key so the repaired value can be restored to its original
+        shape before it is placed in ``repair_overrides``.
+        """
+        if isinstance(original, dict):
+            return copy.deepcopy(original), None
+        if isinstance(original, list):
+            collection_key = str(result_key or "items").strip() or "items"
+            return {collection_key: copy.deepcopy(original)}, collection_key
+        raise TypeError(
+            "Targeted repair only supports object or list producer results; "
+            f"received {type(original).__name__}"
+        )
+
+    @classmethod
+    def _repair_object_id(
+        cls,
+        content: dict[str, Any],
+        producer: str,
+    ) -> str:
+        for field in cls._REPAIR_ID_FIELDS:
+            value = content.get(field)
+            if isinstance(value, (str, int)) and str(value).strip():
+                return str(value).strip()
+        producer_slug = producer.removeprefix("P-").lower().replace("_", "-")
+        return f"repair:{producer_slug}:{sha256_json(content)[:16]}"
+
+    @classmethod
+    def _collection_selector(
+        cls,
+        items: list[Any],
+        identity: str,
+    ) -> str | None:
+        identity = str(identity or "").strip()
+        if not identity:
+            return None
+        for field in cls._REPAIR_ID_FIELDS:
+            for item in items:
+                if isinstance(item, dict) and str(item.get(field) or "") == identity:
+                    return f"{field}={identity}"
+        return None
+
+    @classmethod
+    def _canonical_repair_path(
+        cls,
+        raw_path: str,
+        *,
+        content: dict[str, Any],
+        collection_key: str | None,
+    ) -> str:
+        path = str(raw_path or "").strip().replace("/", ".")
+        path = re.sub(r"\.+", ".", path).strip(".")
+        path = re.sub(r"^\$\.?", "", path)
+        path = re.sub(r"^(?:result|payload)\.", "", path)
+        if path.startswith("content."):
+            path = path[len("content.") :]
+        if not path or path in {"result", "payload", "content"}:
+            return f"content.{collection_key}" if collection_key else "content"
+        if not collection_key:
+            return f"content.{path}"
+
+        items = content.get(collection_key)
+        if not isinstance(items, list):
+            return f"content.{path}"
+
+        collection_pattern = re.fullmatch(
+            rf"{re.escape(collection_key)}\[([^\]]+)\](?:\.(.+))?",
+            path,
+        )
+        if collection_pattern:
+            selector = collection_pattern.group(1).strip()
+            suffix = collection_pattern.group(2)
+            if not selector.isdigit() and "=" not in selector:
+                selector = cls._collection_selector(items, selector) or selector
+            canonical = f"content.{collection_key}[{selector}]"
+            return canonical + (f".{suffix}" if suffix else "")
+
+        if path == collection_key:
+            return f"content.{collection_key}"
+
+        dotted_collection_pattern = re.fullmatch(
+            rf"{re.escape(collection_key)}\.([^.]*)?(?:\.(.+))?",
+            path,
+        )
+        if dotted_collection_pattern:
+            selector = str(dotted_collection_pattern.group(1) or "").strip()
+            suffix = dotted_collection_pattern.group(2)
+            if selector:
+                if not selector.isdigit() and "=" not in selector:
+                    selector = cls._collection_selector(items, selector) or selector
+                canonical = f"content.{collection_key}[{selector}]"
+                return canonical + (f".{suffix}" if suffix else "")
+            return f"content.{collection_key}"
+
+        identity, separator, suffix = path.partition(".")
+        selector = cls._collection_selector(items, identity)
+        if selector:
+            canonical = f"content.{collection_key}[{selector}]"
+            return canonical + (f".{suffix}" if separator and suffix else "")
+
+        if len(items) == 1 and isinstance(items[0], dict) and identity in items[0]:
+            return f"content.{collection_key}[0].{path}"
+        return f"content.{collection_key}.{path}"
+
+    @staticmethod
+    def _restore_repaired_shape(
+        repaired_object: Any,
+        collection_key: str | None,
+    ) -> tuple[bool, Any]:
+        value = repaired_object
+        if isinstance(value, dict) and isinstance(value.get("content"), dict):
+            is_metadata_wrapper = any(
+                key in value for key in ("object_id", "object_type", "object_hash")
+            )
+            is_plain_wrapper = set(value) == {"content"}
+            contains_wrapped_collection = bool(
+                collection_key and collection_key in value["content"]
+            )
+            if is_metadata_wrapper or is_plain_wrapper or contains_wrapped_collection:
+                value = value["content"]
+        if collection_key:
+            if not isinstance(value, dict) or not isinstance(value.get(collection_key), list):
+                return False, None
+            return True, copy.deepcopy(value[collection_key])
+        if not isinstance(value, dict):
+            return False, None
+        return True, copy.deepcopy(value)
+
     async def _auto_repair(self, wf: dict[str, Any], critic_prompt: str, critic_input: dict[str, Any], critic_output: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
         producer = CRITIC_PRODUCER[critic_prompt]
         findings = [item for item in critic_output.get("findings", []) if item.get("repairable", False)]
@@ -95,24 +251,24 @@ class WorkflowRepairMixin:
             original = self.context_builder._result(wf["project_id"], producer, result_key)
         if original is None:
             return None
+        try:
+            repair_content, collection_key = self._repair_content_adapter(
+                original,
+                result_key,
+            )
+        except TypeError:
+            return None
 
         attempt_key = self._repair_state_key(critic_prompt, state)
         state.setdefault("repair_attempts", {})[attempt_key] = int(
             state.setdefault("repair_attempts", {}).get(attempt_key, 0)
         ) + 1
-        object_id = str(
-            original.get("plan_id")
-            or original.get("candidate_id")
-            or original.get("blueprint_id")
-            or original.get("package_id")
-            or original.get("template_id")
-            or new_id("repair-object")
-        )
+        object_id = self._repair_object_id(repair_content, producer)
         original_object = {
             "object_type": producer.removeprefix("P-").replace("-", "_"),
             "object_id": object_id,
-            "object_hash": sha256_json(original),
-            "content": original,
+            "object_hash": sha256_json(repair_content),
+            "content": repair_content,
         }
         original_ref = {
             "object_id": object_id,
@@ -125,7 +281,7 @@ class WorkflowRepairMixin:
         allowed_paths = []
         original_paragraph_ids = [
             str(item.get("paragraph_id"))
-            for item in original.get("paragraphs") or []
+            for item in repair_content.get("paragraphs") or []
             if isinstance(item, dict) and item.get("paragraph_id")
         ]
         def split_target_paths(value: str) -> list[str]:
@@ -184,11 +340,14 @@ class WorkflowRepairMixin:
                 if item.strip() and not item.strip().isdigit()
             ]
             for part in target_parts:
-                path = part.strip().replace("/", ".")
-                if not path:
+                if not str(part or "").strip():
                     continue
                 allowed_paths.append(
-                    path if path.startswith("content.") else f"content.{path}"
+                    self._canonical_repair_path(
+                        part,
+                        content=repair_content,
+                        collection_key=collection_key,
+                    )
                 )
             if producer in {"P-WRITE-CONTENT", "P-WRITE-BLUEPRINT"}:
                 paragraph_ids = [
@@ -266,6 +425,13 @@ class WorkflowRepairMixin:
             return None
         if repaired["status"] != "PASS":
             return None
+        repaired_object = repaired["output"]["result"]["repaired_object"]
+        restored, repaired_value = self._restore_repaired_shape(
+            repaired_object,
+            collection_key,
+        )
+        if not restored:
+            return None
         self.quality_manager.record_targeted_repair(
             project_id=wf["project_id"],
             workflow_id=str(state.get("quality_parent_workflow_id") or wf["id"]),
@@ -274,7 +440,15 @@ class WorkflowRepairMixin:
             workflow_state=state,
         )
         override_key = self._repair_override_key(producer, state)
-        state.setdefault("repair_overrides", {})[override_key] = repaired["output"]["result"]["repaired_object"]
+        state.setdefault("repair_overrides", {})[override_key] = repaired_value
+        if collection_key:
+            state.setdefault("repair_shape_adaptations", []).append({
+                "producer_prompt": producer,
+                "critic_prompt": critic_prompt,
+                "collection_key": collection_key,
+                "object_id": object_id,
+                "repair_run_id": repaired["run_id"],
+            })
         state["original_environment"] = repaired["route"]["environment"]
         self._update(wf, state=state)
         return repaired

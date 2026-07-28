@@ -150,7 +150,9 @@
             "PROJECT_KNOWLEDGE_AGENT",
             "TEMPLATE_AGENT",
             "PLANNING_AGENT",
-            "WRITING_AGENT"
+            "WRITING_AGENT",
+            "ARGUMENT_ARCHITECTURE_AGENT",
+            "EXPRESSION_EDITOR_AGENT"
           ]
         },
         "findings_to_repair": {

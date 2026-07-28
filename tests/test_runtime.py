@@ -1210,3 +1210,69 @@ def test_all_workflows_and_docx_export(runtime):
     package = exporter.export_package(project_id)
     assert package.exists()
     assert package.stat().st_size > 10_000
+
+
+def test_targeted_repair_normalizer_enforces_fact_collection_scope(runtime):
+    _, pack, _, _, _, executor, _, _ = runtime
+    output = pack.replay_output("P-TARGETED-REPAIR", "normal")
+    envelope = pack.replay_input("P-TARGETED-REPAIR")
+    original = {
+        "fact_candidates": [
+            {
+                "claim_id": "METRIC-PROJ-001",
+                "claim_text": "项目拟形成评价指标。",
+                "claim_type": "FACT",
+            },
+            {
+                "claim_id": "FACT-PROJ-002",
+                "claim_text": "来源材料为项目设计输入。",
+                "claim_type": "FACT",
+            },
+        ]
+    }
+    envelope["payload"]["original_object"]["content"] = copy.deepcopy(original)
+    envelope["payload"]["allowed_paths"] = [
+        "content.fact_candidates[claim_id=METRIC-PROJ-001].claim_type",
+    ]
+    envelope["payload"]["findings_to_repair"] = [{
+        "code": "FACT_CRITIC_STATUS_UPGRADE",
+        "severity": "P1",
+        "category": "FACT",
+        "target_type": "FACT_CANDIDATE",
+        "target_path_or_span": "fact_candidates[METRIC-PROJ-001].claim_type",
+        "description": "项目预期指标被误标为既成事实。",
+        "evidence_refs": [],
+        "repairable": True,
+        "repair_instruction": "将claim_type改为EXPECTED_RESULT。",
+        "suggested_route": "ORIGINAL_PRODUCER",
+        "blocking": True,
+    }]
+    assert pack.validate("P-TARGETED-REPAIR", "input", envelope) == []
+    repaired = copy.deepcopy(original)
+    repaired["fact_candidates"][0]["claim_type"] = "EXPECTED_RESULT"
+    repaired["fact_candidates"][0]["claim_text"] = "unauthorized rewrite"
+    repaired["fact_candidates"][1]["claim_type"] = "PLAN"
+    repaired["fact_candidates"].append({
+        "claim_id": "UNAUTHORIZED-003",
+        "claim_text": "unauthorized addition",
+        "claim_type": "FACT",
+    })
+    output["status"] = "REVISE"
+    output["result"]["repaired_object"]["content"] = repaired
+    output["result"]["resolved_finding_codes"] = ["FACT_CRITIC_STATUS_UPGRADE"]
+    output["result"]["unresolved_finding_codes"] = []
+    output["findings"] = []
+
+    normalized = executor._normalize_output("P-TARGETED-REPAIR", output, envelope)
+    assert pack.validate("P-TARGETED-REPAIR", "output", normalized) == []
+
+    facts = normalized["result"]["repaired_object"]["content"]["fact_candidates"]
+    assert len(facts) == 2
+    assert facts[0]["claim_type"] == "EXPECTED_RESULT"
+    assert facts[0]["claim_text"] == original["fact_candidates"][0]["claim_text"]
+    assert facts[1] == original["fact_candidates"][1]
+    assert normalized["result"]["changed_paths"] == [
+        "content.fact_candidates[claim_id=METRIC-PROJ-001].claim_type",
+    ]
+    assert normalized["status"] == "PASS"
+    assert any("outside the critic-authorized path scope" in warning for warning in normalized["warnings"])
