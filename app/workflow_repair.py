@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import re
 from typing import Any
 
@@ -39,12 +40,44 @@ PRODUCER_ROLE = {
 
 
 class WorkflowRepairMixin:
+    def _context_result(
+        self,
+        project_id: str,
+        prompt_id: str,
+        key: str | None = None,
+        *,
+        workflow_id: str | None = None,
+        exact_workflow: bool = False,
+    ) -> Any:
+        """Read a context result with workflow scoping when the builder supports it.
+
+        Lightweight test/dry-run builders may implement the legacy three-argument
+        interface. Signature inspection preserves that compatibility without
+        swallowing TypeError raised inside a real builder implementation.
+        """
+        reader = self.context_builder._result
+        parameters = inspect.signature(reader).parameters
+        if "workflow_id" in parameters:
+            return reader(
+                project_id,
+                prompt_id,
+                key,
+                workflow_id=workflow_id,
+                exact_workflow=exact_workflow,
+            )
+        return reader(project_id, prompt_id, key)
+
     async def _run_public_search(self, wf: dict[str, Any], state: dict[str, Any]) -> None:
         mode = self.executor.gateway.settings.runtime_mode
         if mode in {"REPLAY", "MOCK"}:
             state["public_search_results"] = {"sources": [], "passages": [], "queries": [], "mode": mode}
             return
-        plan = self.context_builder._result(wf["project_id"], "P-PUBLIC-RESEARCH-PLAN") or {}
+        plan = self._context_result(
+            wf["project_id"],
+            "P-PUBLIC-RESEARCH-PLAN",
+            workflow_id=wf["id"],
+            exact_workflow=True,
+        ) or {}
         provider = self.executor.gateway.settings.public_search_provider
         if mode == "SIMULATED" and provider == "disabled":
             state["public_search_results"] = self.research_service.simulated_search(plan)
@@ -248,7 +281,13 @@ class WorkflowRepairMixin:
                 key=result_key,
             )
         else:
-            original = self.context_builder._result(wf["project_id"], producer, result_key)
+            original = self._context_result(
+                wf["project_id"],
+                producer,
+                result_key,
+                workflow_id=wf["id"],
+                exact_workflow=True,
+            )
         if original is None:
             return None
         try:

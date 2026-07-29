@@ -778,6 +778,12 @@
             "expression_patterns",
             "quality_anti_patterns"
           ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,

@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
   "prompt_registry": {
     "version": "2.0",
@@ -116,6 +116,7 @@
     "workflow_statuses": [
       "RUNNING",
       "WAITING_GATE",
+      "WAITING_PREREQUISITE",
       "BLOCKED",
       "COMPLETED",
       "CANCELLED"
@@ -145,6 +146,11 @@
       "PLAN_CONFIRMATION": "PROJECT_OWNER",
       "CANDIDATE_REVIEW": "CONTENT_OPERATOR",
       "OUTBOUND_SECURITY_APPROVAL": "SECURITY_REVIEWER",
+      "PUBLIC_RESEARCH_NEED_INPUT": "PROJECT_OWNER",
+      "PROJECT_MATERIAL_INPUT": "PROJECT_OWNER",
+      "APPLICATION_GUIDE_INPUT": "PROJECT_OWNER",
+      "REFERENCE_TEMPLATE_INPUT": "CONTENT_OPERATOR",
+      "CURRENT_PROPOSAL_INPUT": "CONTENT_OPERATOR",
       "ONLINE_RESULT_IMPORT_APPROVAL": "SECURITY_REVIEWER",
       "FINAL_CONTENT_SECURITY_APPROVAL": "SECURITY_REVIEWER",
       "FINAL_EXPORT_APPROVAL": "EXPORT_APPROVER"
@@ -154,6 +160,31 @@
         "APPROVE",
         "RETURN",
         "REJECT",
+        "CANCEL"
+      ],
+      "PUBLIC_RESEARCH_NEED_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
+        "CANCEL"
+      ],
+      "PROJECT_MATERIAL_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
+        "CANCEL"
+      ],
+      "APPLICATION_GUIDE_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
+        "CANCEL"
+      ],
+      "REFERENCE_TEMPLATE_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
+        "CANCEL"
+      ],
+      "CURRENT_PROPOSAL_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
         "CANCEL"
       ],
       "ONLINE_RESULT_IMPORT_APPROVAL": [
@@ -332,6 +363,258 @@
       "owner": "Track E",
       "reason": "Extend the whole-proposal critic routing enum to the explicit upstream and downstream responsibility agents used by deterministic findings.",
       "approval_reference": "docs/FULL_INTEGRATION_CRITIC_ACCEPTANCE.md"
+    },
+    {
+      "path": "app/executor.py",
+      "blob_sha": "0df14f75aa5464b1d9ce89abedc439957a0c1416",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "app/workflow_defs.py",
+      "blob_sha": "f1ce26031f47672b476cee271e8faa97dcd5cf9e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/config/prompt_registry.json",
+      "blob_sha": "54012e8937f04f5ae5446fc4d195982dda9bdfa4",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/prompts/template/template_extract.md",
+      "blob_sha": "7e6e6980fdada9d988ae28d8bada446d98afb212",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/human_resolution.schema.json",
+      "blob_sha": "434c6eaeb6ea3b00944b84836225a731f5fb65a5",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/argument_architecture_critic_input.schema.json",
+      "blob_sha": "326486b99fa1ec8c572b92bffd97ff36befb0cde",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/argument_architecture_input.schema.json",
+      "blob_sha": "064e02cfc4a618869703026dbf34dd71d6ab7695",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/expression_critic_input.schema.json",
+      "blob_sha": "ea190935c0530af0663caa2356440eb0e2326b33",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/expression_polish_input.schema.json",
+      "blob_sha": "f495441b2f3f742cc454352787d5b39fd652657e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/fact_critic_input.schema.json",
+      "blob_sha": "5c2870a8306013826d4a17373ba1a5985a3523a1",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/fact_extract_input.schema.json",
+      "blob_sha": "3e097930af10e85d2fea90fc4e83d83bd9667fd0",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/final_confidentiality_review_input.schema.json",
+      "blob_sha": "7ccb7a544bd2d983d2e39ad3a44923c10b1c08e0",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/integration_critic_input.schema.json",
+      "blob_sha": "9b05e43881a33d9399155978829a3c8f5b6f9c68",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+      "blob_sha": "451c7c32affe615874c52cd5f37a3467ef8bf89a",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/project_definition_critic_input.schema.json",
+      "blob_sha": "6d7ab5de2179041933605db6dde9a93b880daf74",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/project_definition_extract_input.schema.json",
+      "blob_sha": "e770b1ecd8559c416732c71ee35805d1a8217d50",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/project_readiness_critic_input.schema.json",
+      "blob_sha": "0bb2f66e08998099c3b78fe8a9a548769d00b6d8",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/public_research_critic_input.schema.json",
+      "blob_sha": "f3a7bac478d394bd8d1d0020cb1968d91a68941d",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/public_research_plan_input.schema.json",
+      "blob_sha": "e54ce3fd9d787e142add23a1929ba1cf230cc551",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/public_research_synthesis_input.schema.json",
+      "blob_sha": "97ed6d4f03ba4dc2a7292632087d928cc7eef0ce",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/revision_plan_critic_input.schema.json",
+      "blob_sha": "f24c3508404ebc5fa05648f34304431ba4fb9e6f",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/revision_plan_input.schema.json",
+      "blob_sha": "8ae5e487f9b66f32deba50d48b902ab289c20993",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+      "blob_sha": "e364c277f5034a2bd999c9df4c01b0ff710b2764",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+      "blob_sha": "770cc6af3c6bdfecfb1581d069b79ceb70267149",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/scheme_critic_input.schema.json",
+      "blob_sha": "194007ef13db8ae622aaac855deafc2ed7a8e5fc",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/scheme_extract_input.schema.json",
+      "blob_sha": "96798be2fd98f837b2a21f49998a04a3129ccc43",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/security_classify_critic_input.schema.json",
+      "blob_sha": "9f1d3b064747e02d8c2ed87c2d71dd0f4f57464c",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/security_classify_input.schema.json",
+      "blob_sha": "0a4a73793927bcccba1975a9886a12ddab23d846",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/targeted_repair_input.schema.json",
+      "blob_sha": "9b90bb5a21c6cb979a02e56c1489e015254db0b4",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/template_critic_input.schema.json",
+      "blob_sha": "c2c0c1fa70320ef75d2db2498afbe510c115123f",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/template_extract_input.schema.json",
+      "blob_sha": "8e4f365c71bf4434b636cbec9f54ef357b83d53c",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/template_extract_output.schema.json",
+      "blob_sha": "cc465ea4b74b78e6e6ae7ed3473e04ba602380bd",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_blueprint_critic_input.schema.json",
+      "blob_sha": "442605a1f8a1c7fa5590d3f7050169362f5878fb",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_blueprint_input.schema.json",
+      "blob_sha": "c2ead650ebe5067f5a36eb5b93b3c04802fd6a8d",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_content_input.schema.json",
+      "blob_sha": "844c2b343fbc8786cce3f8550c5e9a62e6e12e19",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_critic_input.schema.json",
+      "blob_sha": "0aced4869d6129a7c8e6bfd0fb7ee6946d9fe4bf",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved cumulative structured-output and workflow-input integrity hardening; preserves strict schemas, provenance, prerequisite binding, and human-input traceability.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
     }
   ]
 }

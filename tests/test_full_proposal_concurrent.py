@@ -276,7 +276,7 @@ def test_full_proposal_restart_reuses_completed_group_and_does_not_unlock_export
     )["n"]
 
     premature_export = engine.start(project_id, "WF-5_SECURITY_REVIEW_AND_EXPORT")
-    assert premature_export["status"] == "BLOCKED"
+    assert premature_export["status"] == "WAITING_PREREQUISITE"
     assert "WF-4_PROPOSAL_AUTHORING" in premature_export["state"]["last_error"]
 
     restarted = WorkflowEngine(

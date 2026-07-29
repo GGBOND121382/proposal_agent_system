@@ -237,6 +237,12 @@
             "prohibited_outputs",
             "security_level"
           ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,

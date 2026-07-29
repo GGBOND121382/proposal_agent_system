@@ -6,6 +6,11 @@ from typing import Any
 from .util import new_id, sha256_json, utc_now
 from .workflow_defs import GATE_ACTIONS, GATE_ROLE
 from .wf3_input import WF3_INPUT_GATE_TYPE, options_from_gate_answers
+from .workflow_input import (
+    MATERIAL_INPUT_GATE_TYPES,
+    build_human_resolutions,
+    resolution_overrides,
+)
 
 
 class WorkflowGateMixin:
@@ -15,7 +20,15 @@ class WorkflowGateMixin:
             return existing["id"]
         gate_id = new_id("gate")
         context_hash = sha256_json({"workflow": wf["id"], "step": wf["current_step"], "state": wf["state"]})
-        allowed = GATE_ACTIONS.get(gate_type, ["CONFIRM", "RETURN", "REJECT", "CANCEL"])
+        allowed = list(GATE_ACTIONS.get(gate_type, ["CONFIRM", "RETURN", "REJECT", "CANCEL"]))
+        security_decision_gates = {
+            "OUTBOUND_SECURITY_APPROVAL",
+            "ONLINE_RESULT_IMPORT_APPROVAL",
+            "FINAL_CONTENT_SECURITY_APPROVAL",
+            "FINAL_EXPORT_APPROVAL",
+        }
+        if questions and gate_type not in security_decision_gates and "PROVIDE_INFORMATION" not in allowed:
+            allowed.insert(0, "PROVIDE_INFORMATION")
         now = utc_now()
         self.db.execute(
             """INSERT INTO gates(id,project_id,workflow_id,gate_type,target_id,target_version,context_hash,question_version,required_role,allowed_actions_json,questions_json,security_level,status,decision_json,created_at,updated_at)
@@ -42,8 +55,8 @@ class WorkflowGateMixin:
         wf = self.get(gate["workflow_id"])
         next_step = wf["current_step"]
         state = wf["state"]
+        questions = json.loads(gate["questions_json"])
         if approved and gate["gate_type"] == WF3_INPUT_GATE_TYPE:
-            questions = json.loads(gate["questions_json"])
             state["options"] = options_from_gate_answers(
                 current_options=state.get("options") or {},
                 questions=questions,
@@ -56,23 +69,65 @@ class WorkflowGateMixin:
                 "origin": "USER_INPUT_GATE",
                 "target_task_type": state["options"].get("target_task_type"),
             }
+        if approved and gate["gate_type"] in MATERIAL_INPUT_GATE_TYPES:
+            state.pop("workflow_input_required", None)
+            state.pop("last_error", None)
+            state.setdefault("technical_retry_attempts", {}).pop(str(wf["current_step"]), None)
+
+        current_result = state.get("step_results", {}).get(str(wf["current_step"])) or {}
+        target_prompt_id = str(
+            current_result.get("prompt_id")
+            or (state.get("workflow_input_required") or {}).get("prompt_id")
+            or ""
+        )
+        resolutions: list[dict[str, Any]] = []
+        if approved and answers and target_prompt_id and gate["gate_type"] not in MATERIAL_INPUT_GATE_TYPES:
+            resolutions = build_human_resolutions(
+                gate_id=gate_id,
+                prompt_id=target_prompt_id,
+                questions=questions,
+                answers=answers,
+                decided_by=decided_by,
+                decided_role=decided_role,
+            )
+            if resolutions:
+                stored = state.setdefault("human_resolutions", {})
+                prompt_resolutions = stored.setdefault(target_prompt_id, [])
+                prompt_resolutions.extend(resolutions)
+                del prompt_resolutions[:-50]
+                state.setdefault("human_input_overrides", {}).setdefault(target_prompt_id, {}).update(
+                    resolution_overrides(resolutions)
+                )
         status = "APPROVED" if approved else ("CANCELLED" if action == "CANCEL" else "REJECTED")
         decision = {"action": action, "comment": comment, "answers": answers or [], "decided_by": decided_by, "decided_role": decided_role, "decided_at": utc_now(), "context_hash": gate["context_hash"]}
         self.db.execute("UPDATE gates SET status=?,decision_json=?,updated_at=? WHERE id=?", (status, json.dumps(decision, ensure_ascii=False), utc_now(), gate_id))
         if approved:
-            current_result = state.get("step_results", {}).get(str(wf["current_step"])) or {}
             if (
                 gate.get("target_id") == current_result.get("run_id")
                 and current_result.get("status") in {"REVISE", "NEED_USER_INPUT"}
             ):
-                state.setdefault("accepted_step_results", {})[str(wf["current_step"])] = {
-                    "run_id": current_result["run_id"],
-                    "status": current_result["status"],
-                    "gate_id": gate_id,
-                    "action": action,
-                    "answers": answers or [],
-                }
-                next_step += 1
+                if resolutions and action in {"PROVIDE_INFORMATION", "RESOLVE"}:
+                    step_key = str(wf["current_step"])
+                    state.setdefault("superseded_step_results", {}).setdefault(step_key, []).append(current_result)
+                    state.get("step_results", {}).pop(step_key, None)
+                    state.setdefault("repair_attempts", {})[target_prompt_id] = int(
+                        state.setdefault("repair_attempts", {}).get(target_prompt_id, 0)
+                    ) + 1
+                    state["rerun_from_human_input"] = {
+                        "gate_id": gate_id,
+                        "prompt_id": target_prompt_id,
+                        "resolution_ids": [item["resolution_id"] for item in resolutions],
+                    }
+                    state.pop("last_error", None)
+                else:
+                    state.setdefault("accepted_step_results", {})[str(wf["current_step"])] = {
+                        "run_id": current_result["run_id"],
+                        "status": current_result["status"],
+                        "gate_id": gate_id,
+                        "action": action,
+                        "answers": answers or [],
+                    }
+                    next_step += 1
         self._update(
             wf,
             status="RUNNING" if approved else "BLOCKED",

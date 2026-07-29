@@ -389,6 +389,12 @@
             "$ref": "../common/finding.schema.json"
           },
           "description": "来自上一轮全篇审查、需要当前上游阶段处理的结构化意见；首次运行时为空数组。"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "required": [

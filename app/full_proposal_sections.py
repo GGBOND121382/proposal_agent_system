@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .executor import PromptExecutionError
+from .workflow_input import WorkflowInputRequired
 
 
 class FullProposalSectionsMixin:
@@ -24,6 +25,7 @@ class FullProposalSectionsMixin:
         response instead of duplicating model calls or artifacts.
         """
         options = state.get("options") or {}
+        state["current_workflow_id"] = wf["id"]
         sections = self._target_sections(wf["project_id"], options, state)
         if bool(options.get("single_section_complete_chain")) and len(sections) != 1:
             state["last_error"] = (
@@ -42,6 +44,7 @@ class FullProposalSectionsMixin:
                 continue
             state["active_section_id"] = section_id
             state["active_section_title"] = section.get("title")
+            state["active_section"] = section
             progress = progress_map.setdefault(
                 section_id,
                 {
@@ -66,6 +69,8 @@ class FullProposalSectionsMixin:
                     envelope, result = await self._execute_section_prompt(
                         wf, state, section, progress, prompt_id, role="INITIAL_REVIEW" if prompt_id.endswith("CRITIC") else "PRODUCER",
                     )
+                except WorkflowInputRequired:
+                    raise
                 except (PromptExecutionError, ValueError, KeyError) as exc:
                     return self._block_section_chain(wf, state, section, str(exc))
 
@@ -170,6 +175,7 @@ class FullProposalSectionsMixin:
 
         state.pop("active_section_id", None)
         state.pop("active_section_title", None)
+        state.pop("active_section", None)
         state.pop("integration_repair_section_ids", None)
         state.pop("last_error", None)
         wf["current_step"] += 1

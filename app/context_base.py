@@ -3,8 +3,10 @@ from __future__ import annotations
 import copy
 import json
 import re
+from contextvars import ContextVar
 from typing import Any
 
+from .privacy import find_sensitive_values
 from .util import new_id, sha256_json, sha256_text
 from .wf3_input import (
     WF3_INPUT_GATE_TYPE,
@@ -13,8 +15,20 @@ from .wf3_input import (
     input_gate_questions,
     normalize_target_task_type,
 )
+from .workflow_input import (
+    APPLICATION_GUIDE_INPUT,
+    CURRENT_PROPOSAL_INPUT,
+    PROJECT_MATERIAL_INPUT,
+    REFERENCE_TEMPLATE_INPUT,
+    material_input_questions,
+)
 
 HASH_PLACEHOLDER = "a" * 64
+
+_CURRENT_WORKFLOW_ID: ContextVar[str | None] = ContextVar(
+    "proposal_context_workflow_id",
+    default=None,
+)
 
 CRITICAL_CONTEXT_PATHS = {
     "payload.project_definition", "payload.project_subgraph", "payload.proposal_contract",
@@ -72,7 +86,20 @@ class ContextBuilder:
             }
         )
         envelope["scope"]["project_id"] = project_id
-        self._apply_common_payload(envelope, prompt_id, project, config, docs, context_hash, workflow_state or {}, workflow_id)
+        workflow_token = _CURRENT_WORKFLOW_ID.set(workflow_id)
+        try:
+            self._apply_common_payload(
+                envelope,
+                prompt_id,
+                project,
+                config,
+                docs,
+                context_hash,
+                workflow_state or {},
+                workflow_id,
+            )
+        finally:
+            _CURRENT_WORKFLOW_ID.reset(workflow_token)
         if overrides:
             for path, value in overrides.items():
                 self._set_path_if_valid(prompt_id, envelope, path, value, strict=True)
@@ -356,18 +383,155 @@ class ContextBuilder:
             })
         return sections
 
-    def _latest_output(self, project_id: str, prompt_id: str) -> dict[str, Any] | None:
+    def _workflow_lineage_ids(self, workflow_id: str | None) -> list[str]:
+        """Return current workflow followed by its explicit parent chain."""
+        if not workflow_id:
+            return []
+        lineage: list[str] = []
+        seen: set[str] = set()
+        current = str(workflow_id)
+        project_id: str | None = None
+        for _ in range(8):
+            if not current or current in seen:
+                break
+            row = self.db.fetchone(
+                "SELECT id,project_id,state_json FROM workflows WHERE id=?",
+                (current,),
+            )
+            if not row:
+                break
+            if project_id is None:
+                project_id = str(row["project_id"])
+            elif str(row["project_id"]) != project_id:
+                break
+            lineage.append(current)
+            seen.add(current)
+            state = json.loads(row.get("state_json") or "{}")
+            current = str(state.get("parent_workflow_id") or "").strip()
+        return lineage
+
+    def _workflow_artifact_source_ids(self, workflow_id: str | None) -> list[str]:
+        """Return the frozen artifact source set for a workflow.
+
+        Sources are limited to the current workflow, its explicit parent chain,
+        and prerequisite workflow ids captured when the workflow started (or was
+        migrated).  Arbitrary completed workflows are deliberately excluded so a
+        later rerun cannot silently change the context of an in-flight workflow.
+        """
+        lineage = self._workflow_lineage_ids(workflow_id)
+        source_ids: list[str] = list(lineage)
+        seen = set(source_ids)
+        for lineage_id in lineage:
+            row = self.db.fetchone("SELECT state_json FROM workflows WHERE id=?", (lineage_id,))
+            if not row:
+                continue
+            state = json.loads(row.get("state_json") or "{}")
+            bindings = state.get("prerequisite_workflow_ids") or {}
+            if not isinstance(bindings, dict):
+                continue
+            for bound_id in bindings.values():
+                candidate = str(bound_id or "").strip()
+                if not candidate or candidate in seen:
+                    continue
+                candidate_row = self.db.fetchone(
+                    "SELECT project_id,status FROM workflows WHERE id=?",
+                    (candidate,),
+                )
+                current_row = self.db.fetchone(
+                    "SELECT project_id FROM workflows WHERE id=?",
+                    (lineage_id,),
+                )
+                if (
+                    not candidate_row
+                    or not current_row
+                    or str(candidate_row["project_id"]) != str(current_row["project_id"])
+                    or str(candidate_row["status"]) != "COMPLETED"
+                ):
+                    continue
+                source_ids.append(candidate)
+                seen.add(candidate)
+        return source_ids
+
+    def _latest_output(
+        self,
+        project_id: str,
+        prompt_id: str,
+        *,
+        workflow_id: str | None = None,
+        exact_workflow: bool = False,
+    ) -> dict[str, Any] | None:
+        """Return only usable prompt artifacts.
+
+        A consumer may read artifacts produced earlier in its own workflow, or
+        artifacts from a completed prerequisite workflow.  Failed, rejected,
+        still-running, or unrelated concurrent workflow artifacts are excluded.
+        This prevents a newer BLOCK/REVISE artifact from shadowing the last
+        confirmed PASS result.
+        """
+        active_workflow_id = workflow_id or _CURRENT_WORKFLOW_ID.get()
+        params: list[Any] = [project_id, prompt_id]
+        scope_sql = ""
+        ordering = "a.version DESC,a.created_at DESC"
+        status_sql = "a.status='PASS'"
+        if exact_workflow:
+            if not active_workflow_id:
+                return None
+            scope_sql = " AND a.workflow_id=?"
+            params.append(active_workflow_id)
+        elif active_workflow_id:
+            source_ids = self._workflow_artifact_source_ids(active_workflow_id)
+            if source_ids:
+                placeholders = ",".join("?" for _ in source_ids)
+                scope_sql = f" AND a.workflow_id IN ({placeholders})"
+                params.extend(source_ids)
+                if len(source_ids) > 1:
+                    secondary_placeholders = ",".join("?" for _ in source_ids[1:])
+                    ordering = (
+                        "CASE WHEN a.workflow_id=? THEN 0 "
+                        f"WHEN a.workflow_id IN ({secondary_placeholders}) THEN 1 ELSE 2 END,"
+                        "a.version DESC,a.created_at DESC"
+                    )
+                    params.append(source_ids[0])
+                    params.extend(source_ids[1:])
+                else:
+                    ordering = "CASE WHEN a.workflow_id=? THEN 0 ELSE 1 END,a.version DESC,a.created_at DESC"
+                    params.append(source_ids[0])
+            else:
+                # Direct prompt execution and isolated tests may not have a
+                # persisted workflow row. Project-level PASS artifacts remain
+                # usable there, but a real workflow never consumes them.
+                scope_sql = " AND (a.workflow_id IS NULL OR w.status='COMPLETED')"
+                status_sql = "a.status IN ('PASS','CANDIDATE')"
+        else:
+            scope_sql = " AND (a.workflow_id IS NULL OR w.status='COMPLETED')"
+            status_sql = "a.status IN ('PASS','CANDIDATE')"
         row = self.db.fetchone(
-            """SELECT content_json FROM artifacts
-               WHERE project_id=? AND prompt_id=?
-                 AND artifact_type IN ('PROMPT_OUTPUT','SKILL_ENRICHED_PROMPT_OUTPUT')
-               ORDER BY version DESC,created_at DESC LIMIT 1""",
-            (project_id, prompt_id),
+            f"""SELECT a.content_json FROM artifacts a
+                LEFT JOIN workflows w ON w.id=a.workflow_id
+                WHERE a.project_id=? AND a.prompt_id=?
+                  AND a.artifact_type IN ('PROMPT_OUTPUT','SKILL_ENRICHED_PROMPT_OUTPUT')
+                  AND {status_sql}
+                  {scope_sql}
+                ORDER BY {ordering} LIMIT 1""",
+            tuple(params),
         )
         return json.loads(row["content_json"]) if row else None
 
-    def _result(self, project_id: str, prompt_id: str, key: str | None = None) -> Any:
-        output = self._latest_output(project_id, prompt_id)
+    def _result(
+        self,
+        project_id: str,
+        prompt_id: str,
+        key: str | None = None,
+        *,
+        workflow_id: str | None = None,
+        exact_workflow: bool = False,
+    ) -> Any:
+        output = self._latest_output(
+            project_id,
+            prompt_id,
+            workflow_id=workflow_id,
+            exact_workflow=exact_workflow,
+        )
         if not output:
             return None
         result = output.get("result")
@@ -524,18 +688,36 @@ class ContextBuilder:
                 "display_name": str(document.get("title") or document.get("document_id") or "项目材料")[:200],
             })
 
+        active_workflow_id = _CURRENT_WORKFLOW_ID.get()
+        active_exists = bool(
+            active_workflow_id
+            and self.db.fetchone("SELECT id FROM workflows WHERE id=?", (active_workflow_id,))
+        )
+        artifact_params: list[Any] = [project["id"]]
+        if active_exists:
+            source_ids = self._workflow_artifact_source_ids(active_workflow_id)
+            if source_ids:
+                placeholders = ",".join("?" for _ in source_ids)
+                workflow_scope = f"a.workflow_id IN ({placeholders})"
+                artifact_params.extend(source_ids)
+            else:
+                workflow_scope = "0=1"
+        else:
+            workflow_scope = "(a.workflow_id IS NULL OR w.status='COMPLETED')"
         rows = self.db.fetchall(
-            """SELECT id,prompt_id,version,security_level,context_hash,created_at
-               FROM artifacts
-               WHERE project_id=? AND status='PASS'
-                 AND prompt_id IN (
+            f"""SELECT a.id,a.prompt_id,a.version,a.security_level,a.context_hash,a.created_at
+               FROM artifacts a
+               LEFT JOIN workflows w ON w.id=a.workflow_id
+               WHERE a.project_id=? AND a.status='PASS'
+                 AND {workflow_scope}
+                 AND a.prompt_id IN (
                    'P-SCHEME-EXTRACT',
                    'P-PROJECT-DEFINITION-EXTRACT',
                    'P-FACT-EXTRACT',
                    'P-PROJECT-READINESS-CRITIC'
                  )
-               ORDER BY created_at DESC,id DESC""",
-            (project["id"],),
+               ORDER BY a.created_at DESC,a.id DESC""",
+            tuple(artifact_params),
         )
         latest_by_prompt: dict[str, dict[str, Any]] = {}
         for row in rows:
@@ -605,6 +787,132 @@ class ContextBuilder:
             "target_task_type": target_task_type,
         }
 
+    @staticmethod
+    def _wf3_source_summary(source_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        summary: list[dict[str, Any]] = []
+        for item in source_items:
+            if not isinstance(item, dict) or not item.get("object_id"):
+                continue
+            display_name = str(item.get("display_name") or item.get("object_type") or "项目来源对象").strip()
+            object_type = str(item.get("object_type") or "SOURCE_OBJECT").strip()
+            summary.append({
+                "source_item_id": str(item["object_id"]),
+                "abstracted_summary": f"来源类型：{object_type}；抽象名称：{display_name[:160]}",
+                "original_security_level": str(item.get("security_level") or "INTERNAL"),
+            })
+        return summary
+
+    @staticmethod
+    def _wf3_deterministic_scan(
+        package_candidate: dict[str, Any],
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        matches = find_sensitive_values(package_candidate, config, include_generic_patterns=True)
+        matched_rules = sorted({f"{item.entity_type}:{item.path}" for item in matches})
+        redacted_fields = sorted({
+            str(item)
+            for item in package_candidate.get("removed_fields") or []
+            if str(item).strip()
+        })
+        return {
+            "passed": not matches,
+            "matched_rules": matched_rules,
+            "redacted_fields": redacted_fields,
+        }
+
+    @staticmethod
+    def _wf3_time_constraints(options: dict[str, Any]) -> dict[str, Any]:
+        raw = options.get("time_constraints") if isinstance(options.get("time_constraints"), dict) else {}
+        return {
+            "start_date": raw.get("start_date"),
+            "end_date": raw.get("end_date"),
+            "freshness_required": bool(raw.get("freshness_required", True)),
+        }
+
+    @staticmethod
+    def _wf3_evidence_requirements(options: dict[str, Any]) -> list[str]:
+        configured = [
+            str(item).strip()
+            for item in options.get("evidence_requirements") or []
+            if str(item).strip()
+        ]
+        return configured or [
+            "优先使用官方机构、标准组织、原始论文或其他一手公开来源",
+            "每个实质结论必须绑定可访问来源并记录发布日期或访问时间",
+            "明确区分来源事实、跨来源综合和模型推断",
+            "比较代表性方法时同时记录适用边界、局限和时间范围",
+        ]
+
+    def _approved_public_claims(
+        self,
+        project_id: str,
+        *,
+        workflow_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return only claims accepted by the WF-3 bound to the active workflow."""
+        active_workflow_id = workflow_id or _CURRENT_WORKFLOW_ID.get()
+        params: list[Any] = [project_id]
+        workflow_filter = ""
+        if active_workflow_id:
+            source_ids = self._workflow_artifact_source_ids(active_workflow_id)
+            wf3_ids: list[str] = []
+            for source_id in source_ids:
+                row = self.db.fetchone(
+                    "SELECT workflow_type FROM workflows WHERE id=?",
+                    (source_id,),
+                )
+                if row and row.get("workflow_type") == "WF-3_HYBRID_ONLINE_ASSIST":
+                    wf3_ids.append(source_id)
+            if not wf3_ids:
+                return []
+            placeholders = ",".join("?" for _ in wf3_ids)
+            workflow_filter = f" AND w.id IN ({placeholders})"
+            params.extend(wf3_ids)
+        review_row = self.db.fetchone(
+            f"""SELECT a.workflow_id,a.content_json
+               FROM artifacts a
+               JOIN workflows w ON w.id=a.workflow_id
+               JOIN gates g ON g.workflow_id=w.id
+               WHERE a.project_id=?
+                 AND a.prompt_id='P-ONLINE-RESULT-IMPORT-CRITIC'
+                 AND a.artifact_type IN ('PROMPT_OUTPUT','SKILL_ENRICHED_PROMPT_OUTPUT')
+                 AND a.status='PASS'
+                 AND w.workflow_type='WF-3_HYBRID_ONLINE_ASSIST'
+                 AND w.status='COMPLETED'
+                 AND g.gate_type='ONLINE_RESULT_IMPORT_APPROVAL'
+                 AND g.status='APPROVED'
+                 {workflow_filter}
+               ORDER BY w.updated_at DESC,a.version DESC,a.created_at DESC LIMIT 1""",
+            tuple(params),
+        )
+        if not review_row:
+            return []
+        review_output = json.loads(review_row["content_json"])
+        review = review_output.get("result") if isinstance(review_output, dict) else None
+        accepted_ids = {
+            str(item)
+            for item in (review or {}).get("accepted_claim_ids") or []
+            if str(item).strip()
+        }
+        if not accepted_ids:
+            return []
+        synthesis = self._result(
+            project_id,
+            "P-PUBLIC-RESEARCH-SYNTHESIS",
+            workflow_id=str(review_row["workflow_id"]),
+            exact_workflow=True,
+        ) or {}
+        return [
+            copy.deepcopy(claim)
+            for claim in synthesis.get("claims") or []
+            if isinstance(claim, dict) and str(claim.get("claim_id") or "") in accepted_ids
+        ]
+
+    @staticmethod
+    def _human_resolutions_for_prompt(state: dict[str, Any], prompt_id: str) -> list[dict[str, Any]]:
+        records = (state.get("human_resolutions") or {}).get(prompt_id) or []
+        return [copy.deepcopy(item) for item in records[-50:] if isinstance(item, dict)]
+
     def _first_section(self, docs: list[dict[str, Any]], roles: set[str] | None = None) -> dict[str, Any] | None:
         for doc in docs:
             if roles and doc.get("document_role") not in roles:
@@ -615,6 +923,25 @@ class ContextBuilder:
 
     def _apply_common_payload(self, envelope: dict[str, Any], prompt_id: str, project: dict[str, Any], config: dict[str, Any], docs: list[dict[str, Any]], context_hash: str, state: dict[str, Any], workflow_id: str | None) -> None:
         payload = envelope["payload"]
+        strict_live_inputs = str(getattr(self, "runtime_mode", "REPLAY")).upper() == "LIVE"
+        material_dependent_fields = {
+            "object_context",
+            "original_object",
+            "source_documents",
+            "guide_documents",
+            "reference_document",
+            "source_section",
+            "document_structure",
+            "section_tree",
+        }
+        if strict_live_inputs and not docs and material_dependent_fields.intersection(payload):
+            raise WorkflowInputRequired(
+                prompt_id,
+                gate_type=PROJECT_MATERIAL_INPUT,
+                missing_paths=[f"payload.{field}" for field in sorted(material_dependent_fields.intersection(payload))],
+                questions=material_input_questions(PROJECT_MATERIAL_INPUT),
+                message="当前步骤缺少真实项目材料。请先上传材料；系统不会使用 Replay 或 Schema 占位对象代替。",
+            )
         security_profile = self._security_profile(project, config, context_hash)
         for field in ["security_policy"]:
             if field in payload:
@@ -636,31 +963,54 @@ class ContextBuilder:
                     if any(keyword in str(section.get("title") or "") for keyword in guide_keywords)
                 ]
                 if not selected:
-                    selected = list(document.get("sections", []))[:12]
-                if not selected:
                     continue
                 compact_document = copy.deepcopy(document)
                 compact_document["sections"] = selected
                 guide_docs.append(compact_document)
-        guide_docs = guide_docs or docs
+        if strict_live_inputs and prompt_id in {"P-SCHEME-EXTRACT", "P-SCHEME-CRITIC"} and not guide_docs:
+            raise WorkflowInputRequired(
+                prompt_id,
+                gate_type=APPLICATION_GUIDE_INPUT,
+                missing_paths=["payload.guide_documents", "payload.document_structure"],
+                questions=material_input_questions(APPLICATION_GUIDE_INPUT),
+                message="未找到 APPLICATION_GUIDE 材料，且其他材料中没有可可靠识别的指南章节。",
+            )
         source_docs = [d for d in docs if d.get("document_role") != "REFERENCE_PROPOSAL"] or docs
         reference_doc = next((d for d in docs if d.get("document_role") == "REFERENCE_PROPOSAL"), None)
-        if reference_doc is None and prompt_id in {"P-TEMPLATE-EXTRACT", "P-TEMPLATE-CRITIC"}:
-            # A current proposal can supply a provisional structural template when
-            # no dedicated reference proposal was uploaded.  It must not be
-            # presented as an official application template.
-            reference_doc = next(
-                (d for d in docs if d.get("document_role") == "CURRENT_PROPOSAL"),
-                None,
+        if strict_live_inputs and reference_doc is None and prompt_id in {"P-TEMPLATE-EXTRACT", "P-TEMPLATE-CRITIC"}:
+            raise WorkflowInputRequired(
+                prompt_id,
+                gate_type=REFERENCE_TEMPLATE_INPUT,
+                missing_paths=["payload.reference_document", "payload.section_tree"],
+                questions=material_input_questions(REFERENCE_TEMPLATE_INPUT),
+                message="未找到 REFERENCE_PROPOSAL。当前申请书不得被静默当作参考模板。",
             )
         active_section_id = state.get("active_section_id")
         current_section = None
-        if active_section_id:
+        explicit_active_section = state.get("active_section")
+        if (
+            isinstance(explicit_active_section, dict)
+            and explicit_active_section.get("section_id")
+            and (
+                not active_section_id
+                or str(explicit_active_section.get("section_id")) == str(active_section_id)
+            )
+        ):
+            current_section = copy.deepcopy(explicit_active_section)
+        if current_section is None and active_section_id:
             current_section = next(
                 (section for doc in docs for section in doc.get("sections", []) if section.get("section_id") == active_section_id),
                 None,
             )
-        current_section = current_section or self._first_section(docs, {"CURRENT_PROPOSAL"}) or self._first_section(docs)
+        current_section = current_section or self._first_section(docs, {"CURRENT_PROPOSAL"})
+        if strict_live_inputs and "source_section" in payload and current_section is None:
+            raise WorkflowInputRequired(
+                prompt_id,
+                gate_type=CURRENT_PROPOSAL_INPUT,
+                missing_paths=["payload.source_section"],
+                questions=material_input_questions(CURRENT_PROPOSAL_INPUT),
+                message="当前步骤需要 CURRENT_PROPOSAL 中的真实章节；其他材料不会被替代为待写章节。",
+            )
 
         requested_target_ids = [
             str(section_id)
@@ -678,6 +1028,7 @@ class ContextBuilder:
             current_section = requested_target_sections[0]
 
         replacements: list[tuple[str, Any]] = []
+        human_override_paths: set[str] = set()
         if prompt_id == "P-SAFE-ONLINE-PACKAGE":
             wf3_payload = self._wf3_online_assist_payload(
                 project=project,
@@ -690,6 +1041,40 @@ class ContextBuilder:
                 ("payload.source_items", wf3_payload["source_items"]),
                 ("payload.target_task_type", wf3_payload["target_task_type"]),
             ])
+        if prompt_id == "P-SAFE-ONLINE-PACKAGE-CRITIC":
+            wf3_payload = self._wf3_online_assist_payload(
+                project=project,
+                config=config,
+                docs=docs,
+                state=state,
+            )
+            package_candidate = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE") or {}
+            replacements.extend([
+                ("payload.source_summary", self._wf3_source_summary(wf3_payload["source_items"])),
+                ("payload.deterministic_scan", self._wf3_deterministic_scan(package_candidate, config)),
+            ])
+        if prompt_id == "P-PUBLIC-RESEARCH-PLAN":
+            options = state.get("options") if isinstance(state.get("options"), dict) else {}
+            safe_package_for_plan = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE") or {}
+            task_type = normalize_target_task_type(
+                options.get("target_task_type") or safe_package_for_plan.get("task_type")
+            )
+            known_sources = options.get("known_public_sources")
+            if not isinstance(known_sources, list):
+                known_sources = []
+            replacements.extend([
+                ("payload.task_type", task_type),
+                ("payload.known_public_sources", known_sources),
+                ("payload.time_constraints", self._wf3_time_constraints(options)),
+                ("payload.evidence_requirements", self._wf3_evidence_requirements(options)),
+            ])
+        human_resolutions = self._human_resolutions_for_prompt(state, prompt_id)
+        if "human_resolutions" in payload:
+            replacements.append(("payload.human_resolutions", human_resolutions))
+        for path, value in ((state.get("human_input_overrides") or {}).get(prompt_id) or {}).items():
+            if isinstance(path, str) and path:
+                human_override_paths.add(path)
+                replacements.append((path, copy.deepcopy(value)))
         if prompt_id == "P-REVISION-PLAN" and requested_target_sections:
             replacements.extend([
                 ("scope.target_object_ids", requested_target_ids),
@@ -875,11 +1260,7 @@ class ContextBuilder:
         argument_graph_seed = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed")
         argument_graph = self._result(project["id"], "P-ARGUMENT-ARCHITECTURE", "argument_architecture") or argument_graph_seed
         internal_facts = self._result(project["id"], "P-FACT-EXTRACT", "fact_candidates") or []
-        public_claims = self._result(project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS", "claims") or []
-        import_review = self._result(project["id"], "P-ONLINE-RESULT-IMPORT-CRITIC") or {}
-        accepted_public_ids = set(import_review.get("accepted_claim_ids") or [])
-        if accepted_public_ids:
-            public_claims = [claim for claim in public_claims if claim.get("claim_id") in accepted_public_ids]
+        public_claims = self._approved_public_claims(project["id"])
         facts = [*internal_facts, *public_claims]
         scheme = self._result(project["id"], "P-SCHEME-EXTRACT", "scheme_profile")
         template = self._result(project["id"], "P-TEMPLATE-EXTRACT", "template")
@@ -1043,16 +1424,17 @@ class ContextBuilder:
             # The online planner must receive the approved PUBLIC task content, not merely
             # an opaque object reference.  This field contains only the deterministic,
             # sanitized Safe Online Package and is validated by the prompt input schema.
-            replacements.append(("payload.safe_online_package_content", {
-                "package_id": safe_package.get("package_id", new_id("online")),
-                "task_type": safe_package.get("task_type", "PUBLIC_RESEARCH"),
-                "task_description": safe_package.get("task_description", "公开资料检索"),
-                "queries": list(safe_package.get("queries") or []),
-                "allowed_context": list(safe_package.get("allowed_context") or []),
-                "prohibited_inferences": list(safe_package.get("prohibited_inferences") or []),
-                "prohibited_outputs": list(safe_package.get("prohibited_outputs") or []),
-                "security_level": "PUBLIC",
-            }))
+            if "safe_online_package_content" in payload:
+                replacements.append(("payload.safe_online_package_content", {
+                    "package_id": safe_package.get("package_id", new_id("online")),
+                    "task_type": safe_package.get("task_type", "PUBLIC_RESEARCH"),
+                    "task_description": safe_package.get("task_description", "公开资料检索"),
+                    "queries": list(safe_package.get("queries") or []),
+                    "allowed_context": list(safe_package.get("allowed_context") or []),
+                    "prohibited_inferences": list(safe_package.get("prohibited_inferences") or []),
+                    "prohibited_outputs": list(safe_package.get("prohibited_outputs") or []),
+                    "security_level": "PUBLIC",
+                }))
         if "approved_safe_package" in payload and safe_package:
             replacements.append(("payload.approved_safe_package", self._object_ref(safe_package.get("package_id", new_id("online")), "SAFE_ONLINE_PACKAGE", "PUBLIC", sha256_json(safe_package), "批准的在线任务包")))
         if "result_package" in payload and research_synthesis:
@@ -1266,7 +1648,13 @@ class ContextBuilder:
                 replacements.append(("payload.public_sources", search_results.get("sources", [])))
 
         for path, value in replacements:
-            self._set_path_if_valid(prompt_id, envelope, path, value, strict=path in CRITICAL_CONTEXT_PATHS)
+            self._set_path_if_valid(
+                prompt_id,
+                envelope,
+                path,
+                value,
+                strict=path in CRITICAL_CONTEXT_PATHS or path in human_override_paths,
+            )
 
     @staticmethod
     def _structured_task_instruction(

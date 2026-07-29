@@ -68,33 +68,12 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 remaining.append(record)
         return remaining, accepted
 
-    def start(self, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
-        if workflow_type not in WORKFLOWS:
-            raise KeyError(f"Unknown workflow: {workflow_type}")
-        if not self.db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
-            raise KeyError(f"Project not found: {project_id}")
-        workflow_id = new_id("wf")
-        now = utc_now()
-        state = {
-            "workflow_type": workflow_type,
-            "options": options or {},
-            "step_results": {},
-            "repair_attempts": {},
-            "repair_overrides": {},
-            "public_search_results": None,
-        }
-        prerequisite_error = self._workflow_prerequisite_error(project_id, workflow_type, options or {})
-        status = "BLOCKED" if prerequisite_error else "RUNNING"
-        if prerequisite_error:
-            state["last_error"] = prerequisite_error
-        self.db.execute(
-            "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-            (workflow_id, project_id, workflow_type, status, 0, json.dumps(state, ensure_ascii=False), now, now),
-        )
-        self.db.audit("WORKFLOW_STARTED", project_id=project_id, object_id=workflow_id, metadata={"workflow_type": workflow_type})
-        return self.get(workflow_id)
-
-    def _workflow_prerequisite_error(self, project_id: str, workflow_type: str, options: dict[str, Any]) -> str | None:
+    def _required_workflow_types(
+        self,
+        project_id: str,
+        workflow_type: str,
+        options: dict[str, Any],
+    ) -> list[str]:
         required: list[str] = []
         if workflow_type == "WF-3_HYBRID_ONLINE_ASSIST":
             required = ["WF-1_PROJECT_INTAKE"]
@@ -106,19 +85,27 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 required.append("WF-3_HYBRID_ONLINE_ASSIST")
         elif workflow_type == "WF-5_SECURITY_REVIEW_AND_EXPORT":
             required = ["WF-4_PROPOSAL_AUTHORING"]
-        missing = []
-        for required_type in required:
+        return required
+
+    def _resolve_prerequisite_workflows(
+        self,
+        project_id: str,
+        workflow_type: str,
+        options: dict[str, Any],
+    ) -> tuple[dict[str, str], list[str]]:
+        """Resolve and freeze the concrete completed workflows consumed downstream."""
+        bindings: dict[str, str] = {}
+        missing: list[str] = []
+        for required_type in self._required_workflow_types(project_id, workflow_type, options):
             if required_type == "WF-4_PROPOSAL_AUTHORING":
-                # Concurrent authoring groups reuse the frozen WF-4 state machine
-                # but are explicitly marked as child workflows.  A completed
-                # group is not a completed proposal and must never unlock WF-5.
                 rows = self.db.fetchall(
                     "SELECT id,state_json FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC",
                     (project_id, required_type),
                 )
                 row = next(
                     (
-                        item for item in rows
+                        item
+                        for item in rows
                         if not json.loads(item.get("state_json") or "{}").get("parent_workflow_id")
                     ),
                     None,
@@ -128,11 +115,78 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     "SELECT id FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC LIMIT 1",
                     (project_id, required_type),
                 )
-            if not row:
+            if row:
+                bindings[required_type] = str(row["id"])
+            else:
                 missing.append(required_type)
-        if missing:
-            return "工作流前置条件未满足：" + "、".join(missing) + "。不得使用Replay样例或空上下文代替已完成的前序结果。"
-        return None
+        return bindings, missing
+
+    @staticmethod
+    def _prerequisite_error(missing: list[str]) -> str | None:
+        if not missing:
+            return None
+        return (
+            "工作流前置条件未满足："
+            + "、".join(missing)
+            + "。不得使用Replay样例或空上下文代替已完成的前序结果。"
+        )
+
+    def start(self, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
+        if workflow_type not in WORKFLOWS:
+            raise KeyError(f"Unknown workflow: {workflow_type}")
+        if not self.db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+            raise KeyError(f"Project not found: {project_id}")
+        active_rows = self.db.fetchall(
+            """SELECT id,status,state_json FROM workflows
+               WHERE project_id=? AND workflow_type=?
+                 AND status IN ('RUNNING','WAITING_GATE','WAITING_PREREQUISITE','BLOCKED')
+               ORDER BY created_at DESC""",
+            (project_id, workflow_type),
+        )
+        active_parent = next(
+            (
+                row
+                for row in active_rows
+                if not json.loads(row.get("state_json") or "{}").get("parent_workflow_id")
+            ),
+            None,
+        )
+        if active_parent:
+            raise ValueError(
+                f"同一项目已有未结束的 {workflow_type} 工作流：{active_parent['id']} "
+                f"（{active_parent['status']}）。请继续或取消该工作流，不要并发启动重复实例。"
+            )
+        workflow_id = new_id("wf")
+        now = utc_now()
+        prerequisite_bindings, missing_prerequisites = self._resolve_prerequisite_workflows(
+            project_id,
+            workflow_type,
+            options or {},
+        )
+        state = {
+            "workflow_type": workflow_type,
+            "options": options or {},
+            "step_results": {},
+            "repair_attempts": {},
+            "repair_overrides": {},
+            "public_search_results": None,
+            "prerequisite_workflow_ids": prerequisite_bindings,
+        }
+        prerequisite_error = self._prerequisite_error(missing_prerequisites)
+        status = "WAITING_PREREQUISITE" if prerequisite_error else "RUNNING"
+        if prerequisite_error:
+            state["last_error"] = prerequisite_error
+            state["waiting_prerequisite"] = True
+        self.db.execute(
+            "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            (workflow_id, project_id, workflow_type, status, 0, json.dumps(state, ensure_ascii=False), now, now),
+        )
+        self.db.audit("WORKFLOW_STARTED", project_id=project_id, object_id=workflow_id, metadata={"workflow_type": workflow_type})
+        return self.get(workflow_id)
+
+    def _workflow_prerequisite_error(self, project_id: str, workflow_type: str, options: dict[str, Any]) -> str | None:
+        _, missing = self._resolve_prerequisite_workflows(project_id, workflow_type, options)
+        return self._prerequisite_error(missing)
 
     @staticmethod
     def _has_nonconfirmable_quality_failure(output: dict[str, Any]) -> bool:
@@ -172,6 +226,42 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             )
         )
 
+    def _pause_for_workflow_input(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        exc: WorkflowInputRequired,
+    ) -> dict[str, Any]:
+        prompt_id = exc.prompt_id
+        state["last_error"] = str(exc)
+        state["workflow_input_required"] = {
+            "prompt_id": prompt_id,
+            "gate_type": exc.gate_type,
+            "missing_paths": exc.missing_paths,
+        }
+        state.setdefault("technical_retry_attempts", {}).pop(str(wf["current_step"]), None)
+        self._update(wf, state=state)
+        refreshed = self.get(wf["id"])
+        gate_id = self._create_gate(
+            refreshed,
+            exc.gate_type,
+            target_id=f"input:{prompt_id}:{wf['id']}",
+            questions=exc.questions,
+        )
+        self.db.audit(
+            "WORKFLOW_INPUT_REQUIRED",
+            project_id=wf["project_id"],
+            object_id=gate_id,
+            metadata={
+                "workflow_id": wf["id"],
+                "prompt_id": prompt_id,
+                "gate_type": exc.gate_type,
+                "missing_paths": exc.missing_paths,
+            },
+        )
+        self._update(refreshed, status="WAITING_GATE", state=state)
+        return self.get(wf["id"])
+
     def get(self, workflow_id: str) -> dict[str, Any]:
         row = self.db.fetchone("SELECT * FROM workflows WHERE id=?", (workflow_id,))
         if not row:
@@ -184,6 +274,42 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         wf = self.get(workflow_id)
         if wf["status"] in {"COMPLETED", "CANCELLED"}:
             return wf
+        state = wf["state"]
+        legacy_prerequisite_block = (
+            wf["status"] == "BLOCKED"
+            and str(state.get("last_error") or "").startswith("工作流前置条件未满足：")
+            and not state.get("step_results")
+        )
+        needs_binding_migration = (
+            "prerequisite_workflow_ids" not in state
+            and bool(self._required_workflow_types(
+                wf["project_id"],
+                wf["workflow_type"],
+                state.get("options") or {},
+            ))
+        )
+        if wf["status"] == "WAITING_PREREQUISITE" or legacy_prerequisite_block or needs_binding_migration:
+            prerequisite_bindings, missing_prerequisites = self._resolve_prerequisite_workflows(
+                wf["project_id"],
+                wf["workflow_type"],
+                state.get("options") or {},
+            )
+            prerequisite_error = self._prerequisite_error(missing_prerequisites)
+            state["prerequisite_workflow_ids"] = prerequisite_bindings
+            if prerequisite_error:
+                state["last_error"] = prerequisite_error
+                state["waiting_prerequisite"] = True
+                self._update(wf, status="WAITING_PREREQUISITE", state=state)
+                return self.get(workflow_id)
+            state.pop("last_error", None)
+            state.pop("waiting_prerequisite", None)
+            state["recovered_from"] = (
+                "WAITING_PREREQUISITE"
+                if wf["status"] in {"WAITING_PREREQUISITE", "BLOCKED"}
+                else "PREREQUISITE_BINDING_MIGRATION"
+            )
+            self._update(wf, status="RUNNING", state=state)
+            wf = self.get(workflow_id)
         if self._is_legacy_wf3_input_block(wf, wf["state"]):
             state = wf["state"]
             state["recovered_from"] = state.get("last_error") or "LEGACY_WF3_INPUT_BLOCK"
@@ -307,6 +433,8 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             if step.get("type") == "WRITE_SECTIONS":
                 try:
                     result = await self._write_sections(wf, state)
+                except WorkflowInputRequired as exc:
+                    return self._pause_for_workflow_input(wf, state, exc)
                 except (ValueError, KeyError) as exc:
                     state["last_error"] = str(exc)
                     self._update(wf, status="BLOCKED", state=state)
@@ -332,34 +460,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     self._validate_full_proposal_integration_envelope(state, envelope)
                 result = await self.executor.execute(prompt_id, envelope, project_id=wf["project_id"], workflow_id=workflow_id, original_environment=state.get("original_environment"))
             except WorkflowInputRequired as exc:
-                state["last_error"] = str(exc)
-                state["workflow_input_required"] = {
-                    "prompt_id": exc.prompt_id,
-                    "gate_type": exc.gate_type,
-                    "missing_paths": exc.missing_paths,
-                }
-                state.setdefault("technical_retry_attempts", {}).pop(str(wf["current_step"]), None)
-                self._update(wf, state=state)
-                refreshed = self.get(workflow_id)
-                gate_id = self._create_gate(
-                    refreshed,
-                    exc.gate_type,
-                    target_id=f"input:{prompt_id}:{workflow_id}",
-                    questions=exc.questions,
-                )
-                self.db.audit(
-                    "WORKFLOW_INPUT_REQUIRED",
-                    project_id=wf["project_id"],
-                    object_id=gate_id,
-                    metadata={
-                        "workflow_id": workflow_id,
-                        "prompt_id": prompt_id,
-                        "gate_type": exc.gate_type,
-                        "missing_paths": exc.missing_paths,
-                    },
-                )
-                self._update(refreshed, status="WAITING_GATE", state=state)
-                return self.get(workflow_id)
+                return self._pause_for_workflow_input(wf, state, exc)
             except (PromptExecutionError, ValueError, KeyError) as exc:
                 state["last_error"] = str(exc)
                 self._update(wf, status="BLOCKED", state=state)

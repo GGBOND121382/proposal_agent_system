@@ -93,7 +93,13 @@ class ContextBuilder(BaseContextBuilder):
         key: str | None = None,
     ) -> Any:
         if not workflow_id or not section_id:
-            return super()._result(project_id, prompt_id, key)
+            return super()._result(
+                project_id,
+                prompt_id,
+                key,
+                workflow_id=workflow_id,
+                exact_workflow=bool(workflow_id),
+            )
         rows = self.db.fetchall(
             """SELECT input_json,output_json FROM prompt_runs
                WHERE project_id=? AND workflow_id=? AND prompt_id=? AND status='PASS'
@@ -112,10 +118,23 @@ class ContextBuilder(BaseContextBuilder):
             return result.get(key) if key and isinstance(result, dict) else result
         return None
 
-    def _result(self, project_id: str, prompt_id: str, key: str | None = None) -> Any:
-        workflow_id = getattr(self, "_active_workflow_id", None)
+    def _result(
+        self,
+        project_id: str,
+        prompt_id: str,
+        key: str | None = None,
+        *,
+        workflow_id: str | None = None,
+        exact_workflow: bool = False,
+    ) -> Any:
+        workflow_id = workflow_id or getattr(self, "_active_workflow_id", None)
         section_id = getattr(self, "_active_section_id", None)
-        if prompt_id in self._SCOPED_SECTION_PRODUCERS and workflow_id and section_id:
+        if (
+            not exact_workflow
+            and prompt_id in self._SCOPED_SECTION_PRODUCERS
+            and workflow_id
+            and section_id
+        ):
             return self._section_prompt_result(
                 project_id,
                 prompt_id,
@@ -123,4 +142,10 @@ class ContextBuilder(BaseContextBuilder):
                 section_id=section_id,
                 key=key,
             )
-        return super()._result(project_id, prompt_id, key)
+        return super()._result(
+            project_id,
+            prompt_id,
+            key,
+            workflow_id=workflow_id,
+            exact_workflow=exact_workflow,
+        )

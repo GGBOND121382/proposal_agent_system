@@ -22,6 +22,7 @@ from app.security import RoutingDenied, SecurityRouter
 from app.util import new_id, sha256_json, utc_now
 from app.runtime_api import WorkflowEngine
 from app.agent_prompt_kernel import _substantive_numeric_tokens
+from app.workflow_input import APPLICATION_GUIDE_INPUT, WorkflowInputRequired
 
 
 @pytest.fixture()
@@ -1215,15 +1216,10 @@ def test_live_security_context_uses_uploaded_document_labels(tmp_path: Path, mon
     assert critic_envelope["payload"]["original_object"]["content"]["title"] == "brief"
     assert critic_envelope["payload"]["deterministic_findings"] == producer_output["findings"]
 
-    scheme_envelope = ContextBuilder(db, pack).build("P-SCHEME-EXTRACT", project_id)
-    assert pack.validate("P-SCHEME-EXTRACT", "input", scheme_envelope) == []
-    assert scheme_envelope["payload"]["extraction_scope"] == ["全部已上传材料及其章节"]
-    assert scheme_envelope["payload"]["document_structure"][0] == {
-        "section_id": parsed["sections"][0]["section_id"],
-        "title": parsed["sections"][0]["title"],
-        "level": parsed["sections"][0]["level"],
-        "text_hash": parsed["sections"][0]["text_hash"],
-    }
+    with pytest.raises(WorkflowInputRequired) as exc_info:
+        ContextBuilder(db, pack).build("P-SCHEME-EXTRACT", project_id)
+    assert exc_info.value.gate_type == APPLICATION_GUIDE_INPUT
+    assert "payload.guide_documents" in exc_info.value.missing_paths
 
 
 def test_security_router_blocks_unapproved_online(runtime):

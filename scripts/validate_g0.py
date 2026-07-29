@@ -122,6 +122,29 @@ def current_blob_sha(root: Path, relative_path: str) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+def _git_changed_paths(root: Path, pathspecs: list[str]) -> set[str]:
+    """Return committed, staged, unstaged and untracked changes in frozen paths.
+
+    G0 is frequently validated before a change-control commit is created.  The
+    previous implementation inspected only ``baseline..HEAD`` and therefore
+    treated correctly registered approvals as stale until after commit, while
+    ignoring unapproved working-tree edits.  The contract now evaluates the
+    complete repository state without weakening the frozen-path check.
+    """
+    changed: set[str] = set()
+    commands = (
+        ("diff", "--name-only", "HEAD", "--", *pathspecs),
+        ("diff", "--cached", "--name-only", "HEAD", "--", *pathspecs),
+        ("ls-files", "--others", "--exclude-standard", "--", *pathspecs),
+    )
+    for command in commands:
+        result = run_git(root, *command, check=False)
+        if result.returncode != 0:
+            continue
+        changed.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+    return changed
+
+
 def validate_frozen_paths(
     root: Path,
     *,
@@ -137,7 +160,9 @@ def validate_frozen_paths(
         return [f"{label}: baseline commit is not an ancestor of HEAD: {baseline_commit}"]
 
     result = run_git(root, "diff", "--name-only", baseline_commit, "HEAD", "--", *pathspecs)
-    changed = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    committed = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    pending = _git_changed_paths(root, pathspecs)
+    changed = committed | pending
     approved_by_path = {str(item.get("path")): item for item in approved_changes}
 
     undeclared = sorted(changed - set(approved_by_path))

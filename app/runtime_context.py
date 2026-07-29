@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .context import ContextBuilder as BaseContextBuilder
+from .context_base import _CURRENT_WORKFLOW_ID
 from .runtime_policy import CapabilityPolicy, LIVE_ENVELOPE_REGISTRY
 from .util import sha256_json, utc_now
 
@@ -329,6 +330,7 @@ class LiveContextBuilder(BaseContextBuilder):
             }
         )
         envelope["expected_output_schema"] = self.pack.entry(prompt_id)["output_schema"]
+        workflow_token = _CURRENT_WORKFLOW_ID.set(workflow_id)
         self._assembling_live_context = True
         try:
             self._apply_common_payload(
@@ -343,6 +345,7 @@ class LiveContextBuilder(BaseContextBuilder):
             )
         finally:
             self._assembling_live_context = False
+            _CURRENT_WORKFLOW_ID.reset(workflow_token)
 
         fallback_values = {
             "payload.task_instruction": config.get("task_instruction") or project.get("description") or project.get("name"),

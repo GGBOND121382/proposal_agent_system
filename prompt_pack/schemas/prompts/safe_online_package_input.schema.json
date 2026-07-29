@@ -173,6 +173,12 @@
             "PUBLIC_TEMPLATE_ANALYSIS",
             "GENERIC_LANGUAGE_ASSIST"
           ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,

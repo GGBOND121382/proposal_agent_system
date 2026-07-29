@@ -3330,6 +3330,9 @@ class PromptExecutor:
         )
         return (
             base_prompt
+            + "\n\n# 人工输入约束\n"
+            + "若输入 payload.human_resolutions 非空，这些记录是已经通过门禁确认的人工回答。"
+              "必须在其 target_paths 和当前任务范围内使用；不得忽略、扩大解释或改写为未经确认的事实。"
             + "\n\n# 运行时强制输出Schema\n"
             + json.dumps(output_schema, ensure_ascii=False)
         )

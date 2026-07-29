@@ -11,6 +11,18 @@ from scripts.validate_g0 import ROOT, validate_repository
 from scripts.verify_g0_recovery_bundle import extract_bundle, verify_bundle
 
 
+def _baseline_history_available() -> bool:
+    contract = json.loads((ROOT / "governance" / "g0" / "interface_contract.json").read_text(encoding="utf-8"))
+    baseline = str(contract["baseline_commit"])
+    probe = subprocess.run(
+        ["git", "-C", str(ROOT), "cat-file", "-e", f"{baseline}^{{commit}}"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return probe.returncode == 0
+
+
 def test_g0_semantic_contract_passes() -> None:
     report = validate_repository(ROOT, skip_git_history=True)
     assert report["status"] == "PASS", report["errors"]
@@ -23,8 +35,8 @@ def test_g0_frozen_paths_pass_when_git_history_is_available() -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    if probe.returncode != 0:
-        pytest.skip("Git history is not available")
+    if probe.returncode != 0 or not _baseline_history_available():
+        pytest.skip("G0 baseline Git history is not available")
     report = validate_repository(ROOT)
     assert report["status"] == "PASS", report["errors"]
 
@@ -36,8 +48,8 @@ def test_g0_recovery_bundle_is_self_verifying(tmp_path: Path) -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    if probe.returncode != 0:
-        pytest.skip("Git checkout is required to build the recovery bundle")
+    if probe.returncode != 0 or not _baseline_history_available():
+        pytest.skip("G0 baseline Git history is required to build the recovery bundle")
 
     bundle = tmp_path / "g0-recovery.zip"
     result = build_bundle(bundle, root=ROOT)

@@ -205,6 +205,12 @@
             "$ref": "../common/object_ref.schema.json"
           },
           "minItems": 1
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,

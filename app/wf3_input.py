@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .util import sha256_json
+from .workflow_input import WorkflowInputRequired
 
 
 WF3_INPUT_GATE_TYPE = "PUBLIC_RESEARCH_NEED_INPUT"
@@ -28,23 +29,6 @@ class WF3InputResolution:
     target_task_type: str
     origin: str
     missing_paths: tuple[str, ...] = ()
-
-
-class WorkflowInputRequired(ValueError):
-    def __init__(
-        self,
-        prompt_id: str,
-        *,
-        gate_type: str,
-        missing_paths: list[str],
-        questions: list[dict[str, Any]],
-        message: str,
-    ):
-        self.prompt_id = prompt_id
-        self.gate_type = gate_type
-        self.missing_paths = list(missing_paths)
-        self.questions = copy.deepcopy(questions)
-        super().__init__(message)
 
 
 def _clean_text(value: Any) -> str:

@@ -463,6 +463,12 @@
             "$ref": "../common/finding.schema.json"
           },
           "description": "来自上一轮全篇质量审查、且明确指向当前章节的结构化修订意见；首次生成时为空数组。"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,

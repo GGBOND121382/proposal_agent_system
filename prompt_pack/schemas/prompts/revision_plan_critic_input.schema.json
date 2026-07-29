@@ -519,6 +519,12 @@
         },
         "argument_graph": {
           "$ref": "../common/argument_graph.schema.json"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,

@@ -283,6 +283,12 @@
             "matched_rules",
             "redacted_fields"
           ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,

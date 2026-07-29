@@ -246,6 +246,7 @@ class FullProposalWorkersMixin:
         wf: dict[str, Any],
         state: dict[str, Any],
     ) -> dict[str, Any] | None:
+        state["current_workflow_id"] = wf["id"]
         sections = self._target_sections(wf["project_id"], state.get("options") or {}, state)
         contract = state.get("full_proposal_contract") or {}
         by_group = {item["group_id"]: item for item in contract.get("groups") or []}

@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
   "scope": "Security classification, security-level mapping, outbound package protection, model routing, approval gates, and the security steps in WF-1/WF-3/WF-5.",
   "security_levels": [
@@ -58,5 +58,69 @@
     "prompt_pack/policies/model_routing.yaml",
     "prompt_pack/config/model_endpoints.yaml"
   ],
-  "approved_changes": []
+  "approved_changes": [
+    {
+      "path": "app/llm.py",
+      "blob_sha": "794ac54bef6c76956ffb82473e65bf9e752c7b3d",
+      "owner": "Security Runtime Maintainers",
+      "reason": "Approved input-integrity and structured-output hardening. Security gate roles/actions and offline/online routing invariants remain unchanged.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "app/workflow_defs.py",
+      "blob_sha": "f1ce26031f47672b476cee271e8faa97dcd5cf9e",
+      "owner": "Security Runtime Maintainers",
+      "reason": "Approved input-integrity and structured-output hardening. Security gate roles/actions and offline/online routing invariants remain unchanged.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "app/workflow_gates.py",
+      "blob_sha": "f6fef49e1adb63d62cb6c254a15ebd7427d16e9a",
+      "owner": "Security Runtime Maintainers",
+      "reason": "Approved input-integrity and structured-output hardening. Security gate roles/actions and offline/online routing invariants remain unchanged.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/final_confidentiality_review_input.schema.json",
+      "blob_sha": "7ccb7a544bd2d983d2e39ad3a44923c10b1c08e0",
+      "owner": "Security Runtime Maintainers",
+      "reason": "Approved input-integrity and structured-output hardening. Security gate roles/actions and offline/online routing invariants remain unchanged.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+      "blob_sha": "451c7c32affe615874c52cd5f37a3467ef8bf89a",
+      "owner": "Security Runtime Maintainers",
+      "reason": "Approved input-integrity and structured-output hardening. Security gate roles/actions and offline/online routing invariants remain unchanged.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+      "blob_sha": "e364c277f5034a2bd999c9df4c01b0ff710b2764",
+      "owner": "Security Runtime Maintainers",
+      "reason": "Approved input-integrity and structured-output hardening. Security gate roles/actions and offline/online routing invariants remain unchanged.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+      "blob_sha": "770cc6af3c6bdfecfb1581d069b79ceb70267149",
+      "owner": "Security Runtime Maintainers",
+      "reason": "Approved input-integrity and structured-output hardening. Security gate roles/actions and offline/online routing invariants remain unchanged.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/security_classify_critic_input.schema.json",
+      "blob_sha": "9f1d3b064747e02d8c2ed87c2d71dd0f4f57464c",
+      "owner": "Security Runtime Maintainers",
+      "reason": "Approved input-integrity and structured-output hardening. Security gate roles/actions and offline/online routing invariants remain unchanged.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/security_classify_input.schema.json",
+      "blob_sha": "0a4a73793927bcccba1975a9886a12ddab23d846",
+      "owner": "Security Runtime Maintainers",
+      "reason": "Approved input-integrity and structured-output hardening. Security gate roles/actions and offline/online routing invariants remain unchanged.",
+      "approval_reference": "docs/WORKFLOW_INPUT_INTEGRITY_HARDENING_20260729.md"
+    }
+  ]
 }

@@ -276,6 +276,12 @@
         },
         "safe_online_package": {
           "$ref": "../common/object_ref.schema.json"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,

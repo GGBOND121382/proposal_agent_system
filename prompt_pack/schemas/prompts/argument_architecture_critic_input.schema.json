@@ -596,6 +596,12 @@
             "scope_decision",
             "readiness"
           ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "required": [

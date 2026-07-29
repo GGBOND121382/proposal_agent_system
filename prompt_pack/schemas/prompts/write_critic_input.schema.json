@@ -578,6 +578,12 @@
             "$ref": "../common/prior_section_digest.schema.json"
           },
           "description": "已完成章节的结构化语义推进摘要，用于跨章节唯一性检查。"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,

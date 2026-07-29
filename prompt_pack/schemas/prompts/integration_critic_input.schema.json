@@ -345,6 +345,12 @@
         "narrative_architecture": {
           "type": "object",
           "minProperties": 5
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,
