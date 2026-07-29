@@ -5,6 +5,7 @@ from typing import Any
 
 from .util import new_id, sha256_json, utc_now
 from .workflow_defs import GATE_ACTIONS, GATE_ROLE
+from .wf3_input import WF3_INPUT_GATE_TYPE, options_from_gate_answers
 
 
 class WorkflowGateMixin:
@@ -38,12 +39,26 @@ class WorkflowGateMixin:
         if context_hash and context_hash != gate["context_hash"]:
             raise ValueError("Gate context hash is stale")
         approved = action in {"APPROVE", "CONFIRM", "RESOLVE", "PROVIDE_INFORMATION"}
-        status = "APPROVED" if approved else ("CANCELLED" if action == "CANCEL" else "REJECTED")
-        decision = {"action": action, "comment": comment, "answers": answers or [], "decided_by": decided_by, "decided_role": decided_role, "decided_at": utc_now(), "context_hash": gate["context_hash"]}
-        self.db.execute("UPDATE gates SET status=?,decision_json=?,updated_at=? WHERE id=?", (status, json.dumps(decision, ensure_ascii=False), utc_now(), gate_id))
         wf = self.get(gate["workflow_id"])
         next_step = wf["current_step"]
         state = wf["state"]
+        if approved and gate["gate_type"] == WF3_INPUT_GATE_TYPE:
+            questions = json.loads(gate["questions_json"])
+            state["options"] = options_from_gate_answers(
+                current_options=state.get("options") or {},
+                questions=questions,
+                answers=answers or [],
+            )
+            state.pop("workflow_input_required", None)
+            state.pop("last_error", None)
+            state.setdefault("technical_retry_attempts", {}).pop(str(wf["current_step"]), None)
+            state["wf3_input_resolution"] = {
+                "origin": "USER_INPUT_GATE",
+                "target_task_type": state["options"].get("target_task_type"),
+            }
+        status = "APPROVED" if approved else ("CANCELLED" if action == "CANCEL" else "REJECTED")
+        decision = {"action": action, "comment": comment, "answers": answers or [], "decided_by": decided_by, "decided_role": decided_role, "decided_at": utc_now(), "context_hash": gate["context_hash"]}
+        self.db.execute("UPDATE gates SET status=?,decision_json=?,updated_at=? WHERE id=?", (status, json.dumps(decision, ensure_ascii=False), utc_now(), gate_id))
         if approved:
             current_result = state.get("step_results", {}).get(str(wf["current_step"])) or {}
             if (
@@ -65,6 +80,17 @@ class WorkflowGateMixin:
             state=state,
         )
         self.db.audit("GATE_DECIDED", project_id=gate["project_id"], object_id=gate_id, metadata={"gate_type": gate["gate_type"], "status": status, "decided_role": decided_role})
+        if approved and gate["gate_type"] == WF3_INPUT_GATE_TYPE:
+            self.db.audit(
+                "WF3_RESEARCH_NEED_PROVIDED",
+                project_id=gate["project_id"],
+                object_id=gate["workflow_id"],
+                metadata={
+                    "gate_id": gate_id,
+                    "target_task_type": state.get("options", {}).get("target_task_type"),
+                    "answer_count": len(answers or []),
+                },
+            )
         return self._gate(gate_id)
 
     def list_gates(self, project_id: str | None = None, workflow_id: str | None = None) -> list[dict[str, Any]]:

@@ -11,6 +11,7 @@ from .workflow_authoring import WorkflowAuthoringMixin
 from .workflow_defs import WORKFLOWS
 from .workflow_gates import WorkflowGateMixin
 from .workflow_repair import WorkflowRepairMixin
+from .wf3_input import WorkflowInputRequired
 
 
 class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMixin):
@@ -153,6 +154,24 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 return True
         return False
 
+    @staticmethod
+    def _is_legacy_wf3_input_block(wf: dict[str, Any], state: dict[str, Any]) -> bool:
+        if wf.get("workflow_type") != "WF-3_HYBRID_ONLINE_ASSIST" or int(wf.get("current_step") or 0) != 0:
+            return False
+        if str(wf.get("status") or "") != "BLOCKED":
+            return False
+        if str(0) in (state.get("step_results") or {}):
+            return False
+        last_error = str(state.get("last_error") or "")
+        return (
+            "P-SAFE-ONLINE-PACKAGE" in last_error
+            and (
+                "unresolved schema scaffold" in last_error
+                or "payload.research_need" in last_error
+                or "WF-3 缺少可批准的公开研究问题" in last_error
+            )
+        )
+
     def get(self, workflow_id: str) -> dict[str, Any]:
         row = self.db.fetchone("SELECT * FROM workflows WHERE id=?", (workflow_id,))
         if not row:
@@ -165,6 +184,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         wf = self.get(workflow_id)
         if wf["status"] in {"COMPLETED", "CANCELLED"}:
             return wf
+        if self._is_legacy_wf3_input_block(wf, wf["state"]):
+            state = wf["state"]
+            state["recovered_from"] = state.get("last_error") or "LEGACY_WF3_INPUT_BLOCK"
+            state.pop("last_error", None)
+            state.pop("runtime_recoverable", None)
+            state.setdefault("technical_retry_attempts", {}).pop(str(wf["current_step"]), None)
+            self._update(wf, status="RUNNING", state=state)
+            wf = self.get(workflow_id)
         if wf["status"] == "BLOCKED":
             state = wf["state"]
             step_key = str(wf["current_step"])
@@ -304,6 +331,35 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     self._validate_three_section_integration_envelope(state, envelope)
                     self._validate_full_proposal_integration_envelope(state, envelope)
                 result = await self.executor.execute(prompt_id, envelope, project_id=wf["project_id"], workflow_id=workflow_id, original_environment=state.get("original_environment"))
+            except WorkflowInputRequired as exc:
+                state["last_error"] = str(exc)
+                state["workflow_input_required"] = {
+                    "prompt_id": exc.prompt_id,
+                    "gate_type": exc.gate_type,
+                    "missing_paths": exc.missing_paths,
+                }
+                state.setdefault("technical_retry_attempts", {}).pop(str(wf["current_step"]), None)
+                self._update(wf, state=state)
+                refreshed = self.get(workflow_id)
+                gate_id = self._create_gate(
+                    refreshed,
+                    exc.gate_type,
+                    target_id=f"input:{prompt_id}:{workflow_id}",
+                    questions=exc.questions,
+                )
+                self.db.audit(
+                    "WORKFLOW_INPUT_REQUIRED",
+                    project_id=wf["project_id"],
+                    object_id=gate_id,
+                    metadata={
+                        "workflow_id": workflow_id,
+                        "prompt_id": prompt_id,
+                        "gate_type": exc.gate_type,
+                        "missing_paths": exc.missing_paths,
+                    },
+                )
+                self._update(refreshed, status="WAITING_GATE", state=state)
+                return self.get(workflow_id)
             except (PromptExecutionError, ValueError, KeyError) as exc:
                 state["last_error"] = str(exc)
                 self._update(wf, status="BLOCKED", state=state)

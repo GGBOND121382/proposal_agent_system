@@ -34,7 +34,8 @@
             <label>项目名称<input name="name" required /></label>
             <label>说明<textarea name="description"></textarea></label>
             <label>安全等级<select name="security_level"><option>INTERNAL</option><option>PUBLIC</option><option>SENSITIVE</option><option>CLASSIFIED</option></select></label>
-            <label class="check"><input type="checkbox" name="internet_access_allowed" /> 允许经审批后使用在线公共研究</label>
+            <label class="check"><input type="checkbox" name="internet_access_allowed" /> 允许经审批后访问互联网</label>
+            <label class="check"><input type="checkbox" name="anonymized_external_processing_allowed" /> 允许经安全脱敏和人工审批后外发公共研究任务</label>
             <button type="submit">创建</button>
           </form>
           <div class="card">
@@ -70,6 +71,13 @@
           <button id="startWorkflow">启动并运行至下一个门禁</button>
           <button id="advanceWorkflow">继续选中的工作流</button>
           <button id="exportDocx">导出 DOCX</button><button id="exportPackage">导出审计包</button>
+          <div id="wf3Options" class="workflow-options" hidden>
+            <h4>WF-3 公开研究需求（可留空，由系统从 WF-1 结果推导；无法推导时转人工门禁）</h4>
+            <label>公开研究问题<textarea id="wf3Question" placeholder="例如：检索与核心研究问题最接近的公开工作、代表性基线和评价指标。"></textarea></label>
+            <label>必须联网的原因<textarea id="wf3Reason">需要检索可公开访问且可核验的资料，以补足内部材料无法独立确认的相关工作、比较基线或评价依据。</textarea></label>
+            <label>期望输出<textarea id="wf3Desired">返回带来源绑定的代表性公开资料、方法或基线、评价指标、适用边界及可用于申请书论证的结论摘要。</textarea></label>
+            <label>任务类型<select id="wf3TaskType"><option>PUBLIC_RESEARCH</option><option>PUBLIC_TEMPLATE_ANALYSIS</option><option>GENERIC_LANGUAGE_ASSIST</option></select></label>
+          </div>
         </div>
         <div id="workflowList"></div>
       </div>

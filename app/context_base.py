@@ -6,6 +6,13 @@ import re
 from typing import Any
 
 from .util import new_id, sha256_json, sha256_text
+from .wf3_input import (
+    WF3_INPUT_GATE_TYPE,
+    WorkflowInputRequired,
+    build_research_need,
+    input_gate_questions,
+    normalize_target_task_type,
+)
 
 HASH_PLACEHOLDER = "a" * 64
 
@@ -485,6 +492,119 @@ class ContextBuilder:
             "rules": rules,
         }
 
+    def _wf3_source_items(
+        self,
+        project: dict[str, Any],
+        docs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Return references to persisted source objects without copying their content.
+
+        P-SAFE-ONLINE-PACKAGE runs offline and needs provenance to decide what may be
+        summarized into an outbound package. Object references are sufficient here;
+        the subsequent security prompt remains responsible for minimization and
+        anonymization.
+        """
+        refs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def append(ref: dict[str, Any]) -> None:
+            object_id = str(ref.get("object_id") or "").strip()
+            if not object_id or object_id in seen:
+                return
+            seen.add(object_id)
+            refs.append(ref)
+
+        for document in docs[:24]:
+            append({
+                "object_id": str(document.get("document_id") or ""),
+                "object_type": "SOURCE_DOCUMENT:" + str(document.get("document_role") or "OTHER"),
+                "version": 1,
+                "object_hash": document.get("document_hash"),
+                "security_level": str(document.get("security_level") or project["security_level"]),
+                "display_name": str(document.get("title") or document.get("document_id") or "项目材料")[:200],
+            })
+
+        rows = self.db.fetchall(
+            """SELECT id,prompt_id,version,security_level,context_hash,created_at
+               FROM artifacts
+               WHERE project_id=? AND status='PASS'
+                 AND prompt_id IN (
+                   'P-SCHEME-EXTRACT',
+                   'P-PROJECT-DEFINITION-EXTRACT',
+                   'P-FACT-EXTRACT',
+                   'P-PROJECT-READINESS-CRITIC'
+                 )
+               ORDER BY created_at DESC,id DESC""",
+            (project["id"],),
+        )
+        latest_by_prompt: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            prompt_id = str(row.get("prompt_id") or "")
+            if prompt_id and prompt_id not in latest_by_prompt:
+                latest_by_prompt[prompt_id] = row
+        for prompt_id, row in latest_by_prompt.items():
+            append({
+                "object_id": str(row["id"]),
+                "object_type": "PROMPT_ARTIFACT:" + prompt_id,
+                "version": max(1, int(row.get("version") or 1)),
+                "object_hash": row.get("context_hash"),
+                "security_level": str(row.get("security_level") or project["security_level"]),
+                "display_name": prompt_id,
+            })
+        return refs[:30]
+
+    def _wf3_online_assist_payload(
+        self,
+        *,
+        project: dict[str, Any],
+        config: dict[str, Any],
+        docs: list[dict[str, Any]],
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
+        options = copy.deepcopy(state.get("options")) if isinstance(state.get("options"), dict) else {}
+        if isinstance(options.get("wf3"), dict):
+            nested = copy.deepcopy(options["wf3"])
+            nested.update({key: value for key, value in options.items() if key != "wf3"})
+            options = nested
+        argument_graph = (
+            self._result(project["id"], "P-ARGUMENT-ARCHITECTURE", "argument_architecture")
+            or self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed")
+        )
+        research_need, origin = build_research_need(
+            project_id=project["id"],
+            options=options,
+            project=project,
+            config=config,
+            argument_graph=argument_graph,
+        )
+        if research_need is None:
+            missing = ["payload.research_need.question"]
+            raise WorkflowInputRequired(
+                "P-SAFE-ONLINE-PACKAGE",
+                gate_type=WF3_INPUT_GATE_TYPE,
+                missing_paths=missing,
+                questions=input_gate_questions(),
+                message=(
+                    "WF-3 缺少可批准的公开研究问题，且无法从已确认的研究问题或研究差距中可靠推导。"
+                    "请通过用户输入门禁补充研究问题；系统不会将 Schema 占位值发送给模型。"
+                ),
+            )
+        source_items = options.get("source_items") if isinstance(options.get("source_items"), list) else None
+        if source_items is None:
+            source_items = self._wf3_source_items(project, docs)
+        target_task_type = normalize_target_task_type(options.get("target_task_type"))
+        state["wf3_input_resolution"] = {
+            "origin": origin,
+            "need_id": research_need["need_id"],
+            "target_task_type": target_task_type,
+            "source_item_count": len(source_items),
+        }
+        return {
+            "research_need": research_need,
+            "source_items": source_items,
+            "target_task_type": target_task_type,
+        }
+
     def _first_section(self, docs: list[dict[str, Any]], roles: set[str] | None = None) -> dict[str, Any] | None:
         for doc in docs:
             if roles and doc.get("document_role") not in roles:
@@ -558,6 +678,18 @@ class ContextBuilder:
             current_section = requested_target_sections[0]
 
         replacements: list[tuple[str, Any]] = []
+        if prompt_id == "P-SAFE-ONLINE-PACKAGE":
+            wf3_payload = self._wf3_online_assist_payload(
+                project=project,
+                config=config,
+                docs=docs,
+                state=state,
+            )
+            replacements.extend([
+                ("payload.research_need", wf3_payload["research_need"]),
+                ("payload.source_items", wf3_payload["source_items"]),
+                ("payload.target_task_type", wf3_payload["target_task_type"]),
+            ])
         if prompt_id == "P-REVISION-PLAN" and requested_target_sections:
             replacements.extend([
                 ("scope.target_object_ids", requested_target_ids),
