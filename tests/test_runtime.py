@@ -17,7 +17,7 @@ from app.llm import ModelGateway
 from app.pack import PromptPack
 from app.research import PublicResearchService
 from app.security import RoutingDenied, SecurityRouter
-from app.util import new_id, utc_now
+from app.util import new_id, sha256_json, utc_now
 from app.workflows import WorkflowEngine
 from app.agent_prompt_kernel import _substantive_numeric_tokens
 
@@ -785,24 +785,31 @@ def test_argument_normalizer_materializes_prior_work_and_team_evidence(runtime):
 
 
 def test_project_definition_normalizes_deterministic_model_fields(runtime):
-    _, pack, *_ = runtime
+    _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-PROJECT-DEFINITION-EXTRACT", "normal")
     project_definition = output["result"]["project_definition"]
     project_definition["items"][0]["item_hash"] = "model-placeholder"
     project_definition["package_hash"] = "model-placeholder"
     project_definition["domain_readiness"][0]["missing_item_types"] = [
         "OBJECTIVE",
-        "RESEARCH_FOUNDATION",
+        "CLOSEST_PRIOR_WORK",
     ]
     questions = output["result"]["argument_graph_seed"]["research_questions"]
     output["result"]["argument_graph_seed"]["research_questions"] = questions * 3
     output["source_refs"] = [dict(project_definition["items"][0]["source_refs"][0])]
     output["source_refs"][0]["section_id"] = "含非规范字符的章节"
 
-    normalized = PromptExecutor._normalize_project_definition_output(output)
+    normalized = executor._normalize_output(
+        "P-PROJECT-DEFINITION-EXTRACT",
+        output,
+        {},
+    )
 
     assert len(normalized["result"]["argument_graph_seed"]["research_questions"]) == 4
-    assert normalized["result"]["project_definition"]["domain_readiness"][0]["missing_item_types"] == ["OBJECTIVE"]
+    assert normalized["result"]["project_definition"]["domain_readiness"][0]["missing_item_types"] == [
+        "OBJECTIVE",
+        "EXISTING_APPROACH",
+    ]
     assert normalized["source_refs"][0]["section_id"] is None
     assert normalized["result"]["project_definition"]["items"][0]["item_hash"] != "model-placeholder"
     assert pack.validate("P-PROJECT-DEFINITION-EXTRACT", "output", normalized) == []
@@ -893,6 +900,82 @@ def test_runtime_call_key_changes_when_execution_spec_changes(runtime):
     second = executor._call_key(**args)
 
     assert first != second
+
+
+def test_runtime_call_key_changes_when_contract_registry_changes(runtime, monkeypatch):
+    _, _, _, _, _, executor, _, _ = runtime
+    args = {
+        "prompt_id": "P-PROJECT-READINESS-CRITIC",
+        "project_id": "project-test",
+        "workflow_id": "workflow-test",
+        "input_hash": "b" * 64,
+        "requested_call_key": None,
+    }
+    first = executor._call_key(**args)
+    monkeypatch.setattr(
+        "app.runtime_executor.CONTRACT_REGISTRY_VERSION",
+        "future-contract-version",
+    )
+    second = executor._call_key(**args)
+
+    assert first != second
+
+
+def test_runtime_renormalizes_prior_enum_only_failure_without_model_call(runtime, monkeypatch):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    envelope = pack.replay_input("P-PROJECT-READINESS-CRITIC")
+    envelope["scope"]["project_id"] = project_id
+    provider_output = pack.replay_output("P-PROJECT-READINESS-CRITIC")
+    provider_output["result"]["domain_scores"][0]["missing_item_types"] = [
+        "CLOSEST_PRIOR_WORK"
+    ]
+    input_hash = sha256_json(envelope)
+    failed_run_id = new_id("run")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id,
+            project_id,
+            workflow_id,
+            "P-PROJECT-READINESS-CRITIC",
+            "ERROR",
+            "offline-critic-primary",
+            "offline-primary",
+            input_hash,
+            sha256_json(provider_output),
+            json.dumps(envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Output schema validation failed | "
+            "/result/domain_scores/0/missing_item_types/0: "
+            "'CLOSEST_PRIOR_WORK' is not one of ['EXISTING_APPROACH']",
+            100,
+            utc_now(),
+        ),
+    )
+
+    async def model_must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("identical enum-only failure must be re-normalized locally")
+
+    monkeypatch.setattr(executor.gateway, "invoke", model_must_not_be_called)
+    result = asyncio.run(
+        executor.execute(
+            "P-PROJECT-READINESS-CRITIC",
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+        )
+    )
+
+    assert result["status"] in {"PASS", "REVISE", "NEED_USER_INPUT"}
+    assert result["contract_recovered_from_run_id"] == failed_run_id
+    assert result["output"]["result"]["domain_scores"][0]["missing_item_types"] == [
+        "EXISTING_APPROACH"
+    ]
 
 
 def test_project_definition_model_input_uses_minimal_sufficient_compaction(runtime):

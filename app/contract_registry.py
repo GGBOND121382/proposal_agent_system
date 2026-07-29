@@ -24,7 +24,101 @@ from .status_ontology import (
     normalize_temporal_status,
 )
 
-CONTRACT_REGISTRY_VERSION = "3.1.0"
+CONTRACT_REGISTRY_VERSION = "4.0.0"
+
+# Cross-workflow vocabularies live here rather than in prompt-specific
+# normalizers.  JSON Schemas remain the strict authority for a concrete path;
+# these domains define which vocabulary a field belongs to and which
+# cross-domain spelling has the same unambiguous business meaning.
+CANONICAL_PROJECT_ITEM_TYPES: tuple[str, ...] = (
+    "PROJECT_BASIC",
+    "STAKEHOLDER",
+    "DEMAND",
+    "SCENARIO",
+    "CURRENT_STATE",
+    "EXISTING_APPROACH",
+    "GAP",
+    "ROOT_CAUSE",
+    "PROBLEM",
+    "OBJECTIVE",
+    "WORK_PACKAGE",
+    "METHOD",
+    "DATA_RESOURCE",
+    "EXPERIMENT",
+    "INNOVATION",
+    "DELIVERABLE",
+    "METRIC",
+    "ACHIEVEMENT",
+    "CAPABILITY",
+    "TEAM_MEMBER",
+    "SCHEDULE_PHASE",
+    "RISK",
+    "RESOURCE_REQUIREMENT",
+    "BUDGET_ITEM",
+    "COMPLIANCE_ITEM",
+)
+
+CANONICAL_ARGUMENT_NODE_TYPES: tuple[str, ...] = (
+    "RESEARCH_GAP",
+    "OBJECTIVE",
+    "RESEARCH_CONTENT",
+    "WORK_PACKAGE",
+    "FORMAL_MODEL",
+    "MECHANISM",
+    "BASELINE",
+    "EXPERIMENT_DESIGN",
+    "EVALUATION_METRIC",
+    "NOVEL_MECHANISM",
+    "CLOSEST_PRIOR_WORK",
+    "TEAM_EVIDENCE",
+    "BOUNDARY_CONDITION",
+    "RISK",
+)
+
+ENUM_DOMAINS: dict[str, tuple[str, ...]] = {
+    "project_item_type": CANONICAL_PROJECT_ITEM_TYPES,
+    "argument_node_type": CANONICAL_ARGUMENT_NODE_TYPES,
+}
+
+# Array items inherit their containing field name in ``visit``.  Consequently
+# ``missing_item_types[*]`` is resolved through the same project-item domain as
+# scalar item-type fields, independent of the prompt or JSON path.
+FIELD_ENUM_DOMAINS: dict[str, str] = {
+    "item_type": "project_item_type",
+    "source_item_type": "project_item_type",
+    "target_item_type": "project_item_type",
+    "missing_item_types": "project_item_type",
+    "node_type": "argument_node_type",
+}
+
+# These are domain adapters, not loose synonyms.  They translate a concept
+# between the project-definition vocabulary and the argument-graph vocabulary.
+# Ambiguous concepts (for example TEAM_EVIDENCE, which could mean an
+# ACHIEVEMENT, CAPABILITY, or TEAM_MEMBER) are intentionally not guessed.
+DOMAIN_ALIAS_CANDIDATES: dict[str, dict[str, tuple[str, ...]]] = {
+    "project_item_type": {
+        "CLOSEST_PRIOR_WORK": ("EXISTING_APPROACH",),
+        "BASELINE": ("EXISTING_APPROACH",),
+        "RESEARCH_GAP": ("GAP",),
+        "RESEARCH_QUESTION": ("PROBLEM",),
+        "RESEARCH_CONTENT": ("WORK_PACKAGE",),
+        "FORMAL_MODEL": ("METHOD",),
+        "EXPERIMENT_DESIGN": ("EXPERIMENT",),
+        "EVALUATION_METRIC": ("METRIC",),
+        "NOVEL_MECHANISM": ("INNOVATION",),
+    },
+    "argument_node_type": {
+        "EXISTING_APPROACH": ("CLOSEST_PRIOR_WORK",),
+        "GAP": ("RESEARCH_GAP",),
+        "METHOD": ("FORMAL_MODEL",),
+        "EXPERIMENT": ("EXPERIMENT_DESIGN",),
+        "METRIC": ("EVALUATION_METRIC",),
+        "INNOVATION": ("NOVEL_MECHANISM",),
+        "ACHIEVEMENT": ("TEAM_EVIDENCE",),
+        "CAPABILITY": ("TEAM_EVIDENCE",),
+        "TEAM_MEMBER": ("TEAM_EVIDENCE",),
+    },
+}
 
 # Canonical vocabularies that are shared across stages.  Stage-specific enums
 # remain authoritative in their JSON Schemas; aliases below are selected only
@@ -42,6 +136,7 @@ CANONICAL_ENUMS: dict[str, tuple[str, ...]] = {
         "QUALIFIED_USER_ASSERTED",
         "BOUNDARY_STATEMENT",
     ),
+    **ENUM_DOMAINS,
 }
 
 # Semantic equivalences whose target is chosen from the current schema.  A
@@ -223,6 +318,29 @@ def _enum_values(schema: Mapping[str, Any]) -> list[Any]:
     return []
 
 
+def _domain_alias(field: str, value: Any, allowed: Iterable[Any]) -> tuple[Any | None, str | None]:
+    domain = FIELD_ENUM_DOMAINS.get(field)
+    if domain is None:
+        return None, None
+    targets = DOMAIN_ALIAS_CANDIDATES.get(domain, {}).get(_token(value), ())
+    matches = [
+        target
+        for target in targets
+        if any(
+            isinstance(candidate, str) and _token(candidate) == _token(target)
+            for candidate in allowed
+        )
+    ]
+    if len(matches) != 1:
+        return None, None
+    canonical = next(
+        candidate
+        for candidate in allowed
+        if isinstance(candidate, str) and _token(candidate) == _token(matches[0])
+    )
+    return canonical, f"registered {domain} cross-domain adapter"
+
+
 def _resolve_local_ref(schema: Mapping[str, Any], root_schema: Mapping[str, Any]) -> Mapping[str, Any]:
     ref = schema.get("$ref")
     if not isinstance(ref, str) or not ref.startswith("#/"):
@@ -243,12 +361,46 @@ def _choose_branch(value: Any, branches: Iterable[Any], root_schema: Mapping[str
         return {}
     if isinstance(value, Mapping):
         keys = set(value)
+
+        def branch_score(branch: Mapping[str, Any]) -> tuple[int, int, int, int]:
+            resolved = _resolve_local_ref(branch, root_schema)
+            properties = resolved.get("properties") or {}
+            discriminator_score = 0
+            discriminator_misses = 0
+            for key in keys & set(properties):
+                child = properties.get(key)
+                if not isinstance(child, Mapping):
+                    continue
+                allowed = _enum_values(_resolve_local_ref(child, root_schema))
+                if not allowed:
+                    continue
+                raw = value.get(key)
+                exact = any(
+                    raw == candidate
+                    or (
+                        isinstance(raw, str)
+                        and isinstance(candidate, str)
+                        and _token(raw) == _token(candidate)
+                    )
+                    for candidate in allowed
+                )
+                alias, _ = _domain_alias(str(key), raw, allowed)
+                if exact:
+                    discriminator_score += 4
+                elif alias is not None:
+                    discriminator_score += 3
+                else:
+                    discriminator_misses += 1
+            return (
+                discriminator_score,
+                -discriminator_misses,
+                len(keys & set(properties)),
+                len(set(resolved.get("required") or []) & keys),
+            )
+
         return max(
             candidates,
-            key=lambda branch: (
-                len(keys & set((_resolve_local_ref(branch, root_schema).get("properties") or {}).keys())),
-                len(set(_resolve_local_ref(branch, root_schema).get("required") or []) & keys),
-            ),
+            key=branch_score,
         )
     if isinstance(value, list):
         for branch in candidates:
@@ -326,6 +478,10 @@ def _choose_alias(field: str, value: Any, allowed: list[Any], parent: Mapping[st
         decision = normalize_temporal_status(value)
         if decision.normalized and decision.canonical_value in allowed:
             return decision.canonical_value, decision.reason
+
+    domain_value, domain_reason = _domain_alias(field, value, allowed)
+    if domain_value is not None:
+        return domain_value, domain_reason
 
     # Stage-4 node status needs node-type-aware conservative mapping.
     if field == "status" and "CONFIRMED_DESIGN" in allowed_strings:
@@ -559,6 +715,12 @@ def dump_registry() -> dict[str, Any]:
         "field_alias_candidates": {
             field: {alias: list(targets) for alias, targets in aliases.items()}
             for field, aliases in FIELD_ALIAS_CANDIDATES.items()
+        },
+        "enum_domains": {name: list(values) for name, values in ENUM_DOMAINS.items()},
+        "field_enum_domains": dict(FIELD_ENUM_DOMAINS),
+        "domain_alias_candidates": {
+            domain: {alias: list(targets) for alias, targets in aliases.items()}
+            for domain, aliases in DOMAIN_ALIAS_CANDIDATES.items()
         },
         "swappable_field_pairs": [list(x) for x in SWAPPABLE_FIELD_PAIRS],
     }

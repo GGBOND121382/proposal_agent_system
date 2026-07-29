@@ -5,10 +5,12 @@ import json
 from pathlib import Path
 
 from app.contract_registry import (
+    CANONICAL_PROJECT_ITEM_TYPES,
     CONTRACT_REGISTRY_VERSION,
     augment_prompt_with_enum_contract,
     normalize_against_schema,
 )
+from app.pack import PromptPack
 from app.status_ontology import normalize_stage2_candidate, normalize_stage3_candidate
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +64,108 @@ def test_unknown_enum_drift_is_not_silently_guessed() -> None:
     assert normalized == raw
     assert report["normalized_count"] == 0
     assert report["unresolved_count"] == 1
+
+
+def test_cross_domain_node_type_is_normalized_to_project_item_type() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "domain_scores": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "missing_item_types": {
+                            "type": "array",
+                            "items": {"enum": list(CANONICAL_PROJECT_ITEM_TYPES)},
+                        }
+                    },
+                },
+            }
+        },
+    }
+    raw = {
+        "domain_scores": [
+            {"missing_item_types": ["CLOSEST_PRIOR_WORK", "FORMAL_MODEL", "METRIC"]}
+        ]
+    }
+    normalized, report = normalize_against_schema(raw, schema, contract_id="readiness")
+    assert normalized["domain_scores"][0]["missing_item_types"] == [
+        "EXISTING_APPROACH",
+        "METHOD",
+        "METRIC",
+    ]
+    assert report["unresolved_count"] == 0
+    assert all(
+        change["rule"] == "REGISTERED_ALIAS"
+        for change in report["changes"]
+    )
+
+
+def test_cross_domain_alias_selects_the_correct_oneof_branch() -> None:
+    schema = {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "item_type": {"const": "PROJECT_BASIC"},
+                    "content": {"type": "object"},
+                },
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "item_type": {"const": "EXISTING_APPROACH"},
+                    "content": {"type": "object"},
+                },
+            },
+        ]
+    }
+    normalized, report = normalize_against_schema(
+        {"item_type": "CLOSEST_PRIOR_WORK", "content": {}},
+        schema,
+        contract_id="project-item",
+    )
+    assert normalized["item_type"] == "EXISTING_APPROACH"
+    assert report["unresolved_count"] == 0
+
+
+def test_ambiguous_or_unknown_domain_value_is_not_guessed() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "missing_item_types": {
+                "type": "array",
+                "items": {"enum": list(CANONICAL_PROJECT_ITEM_TYPES)},
+            }
+        },
+    }
+    raw = {"missing_item_types": ["TEAM_EVIDENCE", "UNREGISTERED_DESIGN_OBJECT"]}
+    normalized, report = normalize_against_schema(raw, schema, contract_id="strict")
+    assert normalized == raw
+    assert report["unresolved_count"] == 2
+
+
+def test_real_readiness_schema_normalizes_historical_failure() -> None:
+    pack = PromptPack(ROOT / "prompt_pack")
+    output = copy.deepcopy(
+        pack.replay_case("P-PROJECT-READINESS-CRITIC", "normal")["expected_output"]
+    )
+    output["result"]["domain_scores"][0]["missing_item_types"] = [
+        "CLOSEST_PRIOR_WORK",
+        "EXPERIMENT_DESIGN",
+    ]
+    normalized, report = normalize_against_schema(
+        output,
+        pack.inlined_schema("P-PROJECT-READINESS-CRITIC", "output"),
+        contract_id="historical:run-0b34b90415814a23",
+    )
+    assert normalized["result"]["domain_scores"][0]["missing_item_types"] == [
+        "EXISTING_APPROACH",
+        "EXPERIMENT",
+    ]
+    assert report["unresolved_count"] == 0
+    assert pack.validate("P-PROJECT-READINESS-CRITIC", "output", normalized) == []
 
 
 def test_stage2_role_and_time_aliases_are_migrated_before_schema_validation() -> None:

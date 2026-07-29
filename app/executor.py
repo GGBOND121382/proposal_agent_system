@@ -190,15 +190,6 @@ class PromptExecutor:
                 changes.append("research_questions truncated to the schema maximum of 4")
             graph["research_questions"] = valid_questions
 
-        valid_item_types = {
-            "PROJECT_BASIC", "STAKEHOLDER", "DEMAND", "SCENARIO",
-            "CURRENT_STATE", "EXISTING_APPROACH", "GAP", "ROOT_CAUSE",
-            "PROBLEM", "OBJECTIVE", "WORK_PACKAGE", "METHOD",
-            "DATA_RESOURCE", "EXPERIMENT", "INNOVATION", "DELIVERABLE",
-            "METRIC", "ACHIEVEMENT", "CAPABILITY", "TEAM_MEMBER",
-            "SCHEDULE_PHASE", "RISK", "RESOURCE_REQUIREMENT", "BUDGET_ITEM",
-            "COMPLIANCE_ITEM",
-        }
         domain_readiness = [
             readiness
             for readiness in project_definition.get("domain_readiness") or []
@@ -207,14 +198,6 @@ class PromptExecutor:
         if len(domain_readiness) != len(project_definition.get("domain_readiness") or []):
             project_definition["domain_readiness"] = domain_readiness
             changes.append("null or invalid domain readiness entries removed")
-        for readiness in domain_readiness:
-            missing = readiness.get("missing_item_types")
-            if isinstance(missing, list):
-                filtered = [item for item in missing if item in valid_item_types]
-                if filtered != missing:
-                    readiness["missing_item_types"] = filtered
-                    changes.append("invalid domain aliases removed from missing_item_types")
-
         original_items = project_definition.get("items") or []
         items = [item for item in original_items if isinstance(item, dict)]
         if len(items) != len(original_items):

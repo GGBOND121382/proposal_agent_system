@@ -5,6 +5,7 @@ import json
 import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from .executor import (
@@ -12,6 +13,7 @@ from .executor import (
     PromptExecutionError,
     PromptExecutor as BasePromptExecutor,
 )
+from .contract_registry import CONTRACT_REGISTRY_VERSION
 from .llm import LLMError
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
 from .runtime_evidence import EvidenceIntegrityError, InjectedFailure, ModelCallEvidenceStore
@@ -68,6 +70,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     "model_profile": profiles.get(profile_name),
                     "output_schema": self.pack.inlined_schema(prompt_id, "output"),
                     "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
+                    "contract_registry_version": CONTRACT_REGISTRY_VERSION,
                 }
             except (AttributeError, KeyError, TypeError):
                 execution_spec = {"prompt_id": prompt_id}
@@ -107,6 +110,60 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "call_key": call_key,
             "reused_committed_result": True,
         }
+
+    @staticmethod
+    def _is_enum_only_schema_error(error: Any) -> bool:
+        message = str(error or "")
+        prefix = "Output schema validation failed | "
+        if not message.startswith(prefix):
+            return False
+        details = [
+            item.strip()
+            for item in message[len(prefix):].split(";")
+            if item.strip()
+        ]
+        return bool(details) and all(" is not one of " in item for item in details)
+
+    def _recoverable_enum_output(
+        self,
+        *,
+        project_id: str,
+        workflow_id: str | None,
+        prompt_id: str,
+        input_hash: str,
+    ) -> dict[str, Any] | None:
+        """Return an immutable prior provider object eligible for re-normalization.
+
+        Contract upgrades must not resend an identical prompt merely because a
+        previously unknown enum alias became registered.  Recovery is limited
+        to the same project/workflow/prompt/input hash and to failures whose
+        complete validation error set consists only of enum violations.
+        """
+        rows = self.db.fetchall(
+            """SELECT id,model_id,endpoint_id,output_json,error,created_at
+               FROM prompt_runs
+               WHERE project_id=? AND workflow_id IS ? AND prompt_id=?
+                 AND input_hash=? AND status='ERROR' AND output_json IS NOT NULL
+               ORDER BY created_at DESC""",
+            (project_id, workflow_id, prompt_id, input_hash),
+        )
+        for row in rows:
+            if not self._is_enum_only_schema_error(row.get("error")):
+                continue
+            try:
+                provider_output = json.loads(row["output_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(provider_output, dict):
+                continue
+            return {
+                "run_id": str(row["id"]),
+                "model_id": row.get("model_id"),
+                "endpoint_id": row.get("endpoint_id"),
+                "provider_output": provider_output,
+                "failed_at": row.get("created_at"),
+            }
+        return None
 
     async def execute(
         self,
@@ -160,7 +217,27 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 assert_online_payload_safe(model_envelope, project_config)
             output_schema = self.pack.inlined_schema(prompt_id, "output")
             system_prompt = self._system_prompt(prompt_id, output_schema)
-            if getattr(self.gateway, "supports_runtime_evidence", False):
+            enum_recovery = self._recoverable_enum_output(
+                project_id=project_id,
+                workflow_id=workflow_id,
+                prompt_id=prompt_id,
+                input_hash=input_hash,
+            )
+            if enum_recovery is not None:
+                result = SimpleNamespace(
+                    output=copy.deepcopy(enum_recovery["provider_output"]),
+                    raw_text=None,
+                    model_id=enum_recovery.get("model_id") or route.model_id,
+                    endpoint_id=enum_recovery.get("endpoint_id") or route.endpoint_id,
+                    evidence={
+                        "recovery_kind": "ENUM_CONTRACT_RENORMALIZATION",
+                        "recovered_from_run_id": enum_recovery["run_id"],
+                        "failed_at": enum_recovery.get("failed_at"),
+                        "contract_registry_version": CONTRACT_REGISTRY_VERSION,
+                    },
+                    reused_response=True,
+                )
+            elif getattr(self.gateway, "supports_runtime_evidence", False):
                 result = await self.gateway.invoke(
                     route,
                     prompt_id,
@@ -246,6 +323,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "output": consumed_output,
                 "call_key": call_key,
                 "reused_committed_result": False,
+                "contract_recovered_from_run_id": (
+                    enum_recovery["run_id"] if enum_recovery is not None else None
+                ),
             }
         except InjectedFailure as exc:
             raise RecoverablePromptExecutionError(str(exc)) from exc

@@ -12,8 +12,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.contract_registry import (
+    CANONICAL_ARGUMENT_NODE_TYPES,
+    CANONICAL_PROJECT_ITEM_TYPES,
     CONTRACT_REGISTRY_VERSION,
+    DOMAIN_ALIAS_CANDIDATES,
+    ENUM_DOMAINS,
     FIELD_ALIAS_CANDIDATES,
+    FIELD_ENUM_DOMAINS,
     normalize_against_schema,
 )
 from app.status_ontology import (
@@ -63,13 +68,41 @@ def walk_schema(node: Any, path: str = "$") -> Iterable[tuple[str, str, list[Any
         yield from walk_schema(value, current)
 
 
+def walk_named_enum_values(
+    node: Any,
+    *,
+    active_field: str | None = None,
+) -> Iterable[tuple[str, list[Any]]]:
+    """Yield enum/const values while retaining their owning property name."""
+    if isinstance(node, list):
+        for item in node:
+            yield from walk_named_enum_values(item, active_field=active_field)
+        return
+    if not isinstance(node, dict):
+        return
+    if active_field is not None and ("enum" in node or "const" in node):
+        yield active_field, list(node.get("enum", [node.get("const")]))
+    properties = node.get("properties")
+    if isinstance(properties, dict):
+        for field, child in properties.items():
+            yield from walk_named_enum_values(child, active_field=str(field))
+    for key, child in node.items():
+        if key == "properties":
+            continue
+        yield from walk_named_enum_values(child, active_field=active_field)
+
+
 def audit(root: Path) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     enum_paths: list[dict[str, Any]] = []
     field_vocabularies: dict[str, set[tuple[str, ...]]] = defaultdict(set)
+    domain_field_values: dict[str, set[str]] = defaultdict(set)
 
     for path in schema_files(root):
         document = json.loads(path.read_text(encoding="utf-8"))
+        for field, allowed in walk_named_enum_values(document):
+            if field in FIELD_ENUM_DOMAINS:
+                domain_field_values[field].update(str(value) for value in allowed)
         for field, json_path, allowed in walk_schema(document):
             enum_paths.append({
                 "file": str(path.relative_to(root)),
@@ -89,6 +122,45 @@ def audit(root: Path) -> dict[str, Any]:
                         "path": json_path,
                         "illegal_values": illegal,
                     })
+
+    expected_domain_values = {
+        "item_type": set(CANONICAL_PROJECT_ITEM_TYPES),
+        "source_item_type": set(CANONICAL_PROJECT_ITEM_TYPES),
+        "target_item_type": set(CANONICAL_PROJECT_ITEM_TYPES),
+        "missing_item_types": set(CANONICAL_PROJECT_ITEM_TYPES),
+        "node_type": set(CANONICAL_ARGUMENT_NODE_TYPES),
+    }
+    for field, expected in expected_domain_values.items():
+        actual = domain_field_values.get(field, set())
+        if actual != expected:
+            findings.append({
+                "code": "ENUM_DOMAIN_SCHEMA_DRIFT",
+                "severity": "BLOCKING",
+                "field": field,
+                "domain": FIELD_ENUM_DOMAINS[field],
+                "missing_values": sorted(expected - actual),
+                "extra_values": sorted(actual - expected),
+            })
+
+    knowledge_path = root / "prompt_pack" / "knowledge" / "project_item_types.yaml"
+    if knowledge_path.exists():
+        import yaml
+
+        knowledge = yaml.safe_load(knowledge_path.read_text(encoding="utf-8")) or {}
+        knowledge_types = {
+            str(item.get("item_type"))
+            for item in knowledge.get("item_types") or []
+            if isinstance(item, dict) and item.get("item_type")
+        }
+        registry_types = set(CANONICAL_PROJECT_ITEM_TYPES)
+        if knowledge_types != registry_types:
+            findings.append({
+                "code": "PROJECT_ITEM_KNOWLEDGE_DRIFT",
+                "severity": "BLOCKING",
+                "file": str(knowledge_path.relative_to(root)),
+                "missing_values": sorted(registry_types - knowledge_types),
+                "extra_values": sorted(knowledge_types - registry_types),
+            })
 
     # All staged model-response entry points must share the same pre-schema
     # normalizer and all request writers must inject the registry-derived enum
@@ -167,6 +239,45 @@ def audit(root: Path) -> dict[str, Any]:
     for failure in alias_failures:
         findings.append({"code": "REGISTERED_ALIAS_NOT_CONSUMABLE", "severity": "BLOCKING", **failure})
 
+    domain_alias_test_count = 0
+    domain_alias_failures: list[dict[str, Any]] = []
+    field_for_domain = {
+        domain: next(field for field, assigned in FIELD_ENUM_DOMAINS.items() if assigned == domain)
+        for domain in ENUM_DOMAINS
+    }
+    for domain, aliases in DOMAIN_ALIAS_CANDIDATES.items():
+        field = field_for_domain[domain]
+        allowed = list(ENUM_DOMAINS[domain])
+        for alias, targets in aliases.items():
+            expected = next((target for target in targets if target in allowed), None)
+            if expected is None:
+                continue
+            domain_alias_test_count += 1
+            schema = {
+                "type": "object",
+                "properties": {field: {"type": "string", "enum": allowed}},
+            }
+            normalized, report = normalize_against_schema(
+                {field: alias},
+                schema,
+                contract_id="domain-registry-self-test",
+            )
+            if normalized.get(field) != expected:
+                domain_alias_failures.append({
+                    "domain": domain,
+                    "field": field,
+                    "alias": alias,
+                    "expected": expected,
+                    "actual": normalized.get(field),
+                    "report": report,
+                })
+    for failure in domain_alias_failures:
+        findings.append({
+            "code": "DOMAIN_ALIAS_NOT_CONSUMABLE",
+            "severity": "BLOCKING",
+            **failure,
+        })
+
     ambiguous_fields = {
         field: [list(values) for values in sorted(vocabularies)]
         for field, vocabularies in field_vocabularies.items()
@@ -185,6 +296,21 @@ def audit(root: Path) -> dict[str, Any]:
         "registered_alias_self_tests": {
             "executed": alias_test_count,
             "failed": len(alias_failures),
+        },
+        "registered_domain_alias_self_tests": {
+            "executed": domain_alias_test_count,
+            "failed": len(domain_alias_failures),
+        },
+        "enum_domains": {
+            domain: {
+                "canonical_values": list(values),
+                "fields": sorted(
+                    field
+                    for field, assigned in FIELD_ENUM_DOMAINS.items()
+                    if assigned == domain
+                ),
+            }
+            for domain, values in ENUM_DOMAINS.items()
         },
         "path_scoped_multiple_vocabularies": ambiguous_fields,
         "findings": findings,
