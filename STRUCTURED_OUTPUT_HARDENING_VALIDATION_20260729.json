@@ -1,0 +1,44 @@
+{
+  "date": "2026-07-29",
+  "project_version": "0.6.0",
+  "status": "PASS_WITH_ENVIRONMENT_CAVEAT",
+  "python_environment": "3.13.5",
+  "pytest_environment": "9.0.2",
+  "declared_ci_environment": "Python 3.12 + pytest 8.x",
+  "checks": {
+    "python_compileall": "PASS",
+    "prompt_pack_validator": {
+      "status": "PASS",
+      "prompts": 30,
+      "replays": 150,
+      "managed_files": 312
+    },
+    "contract_registry_validator": {
+      "status": "PASS",
+      "registry_version": "5.1.0",
+      "registered_alias_tests": 619,
+      "registered_domain_alias_tests": 18
+    },
+    "metadata_sync": "PASS",
+    "pytest_collection": 395,
+    "pytest_aggregate": {
+      "passed": 393,
+      "skipped": 2,
+      "failed_assertions": 0,
+      "execution": "All cases executed in bounded groups; the six full-proposal concurrency cases were also executed individually."
+    },
+    "stage_1_to_8_regression": "84 passed",
+    "core_contract_runtime_regression": "Targeted runtime, recovery, MiniMax, schema-ownership and output-container suites passed"
+  },
+  "environment_caveat": {
+    "single_process_full_suite": "NOT_COMPLETED",
+    "reason": "The undeclared Python 3.13/pytest 9 environment retains an order-related stall around the early integration suite. test_full_proposal_concurrent.py also reached process status 137 when all six memory-heavy cases were run in one process; every case passed individually.",
+    "required_follow_up": "Run the unchanged test suite in the declared Python 3.12/pytest 8.x CI environment."
+  },
+  "security": {
+    "security_router_weakened": false,
+    "human_gates_weakened": false,
+    "privacy_guards_weakened": false,
+    "ambiguous_schema_drift_policy": "BLOCK rather than guess"
+  }
+}

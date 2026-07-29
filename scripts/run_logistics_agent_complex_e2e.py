@@ -25,17 +25,17 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import Settings
-from app.context import ContextBuilder
+from app.runtime_api import ContextBuilder
 from app.db import Database
 from app.documents import parse_document
-from app.executor import PromptExecutor
-from app.exporter import DocxExporter
-from app.llm import ModelGateway
+from app.runtime_api import PromptExecutor
+from app.runtime_api import DocxExporter
+from app.runtime_api import ModelGateway
 from app.pack import PromptPack
 from app.research import PublicResearchService
 from app.security import SecurityRouter
 from app.util import new_id, sha256_bytes, utc_now, write_json
-from app.workflows import WorkflowEngine
+from app.runtime_api import WorkflowEngine
 from app.logistics_application_content import SECTION_TITLES, REF_CATALOG
 
 WORKFLOWS = ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION", "WF-3_HYBRID_ONLINE_ASSIST", "WF-4_PROPOSAL_AUTHORING", "WF-5_SECURITY_REVIEW_AND_EXPORT"]

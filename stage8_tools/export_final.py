@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -23,28 +24,48 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Inches, Pt, RGBColor
 from pypdf import PdfReader
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.staged_workflow_config import safe_output_stem
+
 
 FONT_SERIF = "Noto Serif CJK SC"
 FONT_SANS = "Noto Sans CJK SC"
 MATPLOTLIB_SANS = FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
 MATPLOTLIB_SERIF = FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc")
 
+CHINESE_DIGITS = "零一二三四五六七八九"
+
+# Compatibility fixture only. Runtime numbering is derived from markdown order.
 CHAPTER_NUMBERS = {
-    "摘要与项目概览": "一",
-    "研究背景与意义": "二",
-    "相关工作与现有差距": "三",
-    "核心概念与理论框架": "四",
-    "研究问题与目标": "五",
-    "研究内容与工作包": "六",
-    "关键科学与技术问题": "七",
-    "技术路线与人机协同流程": "八",
-    "创新点": "九",
-    "评价指标与验证方案": "十",
-    "研究基础与条件": "十一",
-    "研究计划与里程碑": "十二",
-    "风险与组织管理": "十三",
-    "结论": "十四",
+    title: number for title, number in [
+        ("摘要与项目概览", "一"), ("研究背景与意义", "二"),
+        ("相关工作与现有差距", "三"), ("核心概念与理论框架", "四"),
+        ("研究问题与目标", "五"), ("研究内容与工作包", "六"),
+        ("关键科学与技术问题", "七"), ("技术路线与人机协同流程", "八"),
+        ("创新点", "九"), ("评价指标与验证方案", "十"),
+        ("研究基础与条件", "十一"), ("研究计划与里程碑", "十二"),
+        ("风险与组织管理", "十三"), ("结论", "十四"),
+    ]
 }
+
+
+def chapter_number(index: int) -> str:
+    if index <= 0:
+        raise ValueError("chapter index must be positive")
+    if index < 10:
+        return CHINESE_DIGITS[index]
+    if index == 10:
+        return "十"
+    if index < 20:
+        return "十" + CHINESE_DIGITS[index % 10]
+    if index < 100:
+        tens, ones = divmod(index, 10)
+        return CHINESE_DIGITS[tens] + "十" + (CHINESE_DIGITS[ones] if ones else "")
+    return str(index)
+
 
 TABLE_SPECS = {
     "TAB-01": {
@@ -502,8 +523,9 @@ def build_docx(md_path: Path, out_docx: Path, asset_dir: Path) -> dict:
     add_header_footer(body_section, title, True)
 
     in_refs = False
-    ref_start_marker = ""
     h1_count = 0
+    used_tables: set[str] = set()
+    used_figures: set[str] = set()
     for kind, value in blocks:
         if kind == "h1":
             if value == "参考文献":
@@ -515,7 +537,7 @@ def build_docx(md_path: Path, out_docx: Path, asset_dir: Path) -> dict:
                 set_run_font(r, 15, True, True)
                 continue
             h1_count += 1
-            num = CHAPTER_NUMBERS.get(value, str(h1_count))
+            num = chapter_number(h1_count)
             p = doc.add_paragraph(style="Heading 1")
             r = p.add_run(f"{num}、{value}")
             set_run_font(r, 15, True, True)
@@ -526,9 +548,9 @@ def build_docx(md_path: Path, out_docx: Path, asset_dir: Path) -> dict:
         elif kind == "visual":
             key = value.split("：", 1)[0].strip()
             if key in FIGURE_SPECS:
-                add_figure(doc, FIGURE_SPECS[key], asset_dir / f"{key}.png")
+                add_figure(doc, FIGURE_SPECS[key], asset_dir / f"{key}.png"); used_figures.add(key)
             elif key in TABLE_SPECS:
-                add_table(doc, TABLE_SPECS[key])
+                add_table(doc, TABLE_SPECS[key]); used_tables.add(key)
         elif kind == "p":
             if in_refs:
                 references = [item.strip() for item in re.split(r"(?=\[\d+\])", value) if item.strip()]
@@ -549,15 +571,15 @@ def build_docx(md_path: Path, out_docx: Path, asset_dir: Path) -> dict:
     doc.core_properties.title = title
     doc.core_properties.subject = "项目申请书"
     doc.core_properties.author = "Proposal Agent System"
-    doc.core_properties.keywords = "人机协同决策, 项目申请书"
+    doc.core_properties.keywords = f"{title}, 项目申请书"
     doc.core_properties.comments = "由智能体工作流冻结正文后进行确定性排版导出。"
     out_docx.parent.mkdir(parents=True, exist_ok=True)
     doc.save(out_docx)
     return {
         "title": title,
         "chapter_count": h1_count,
-        "table_count": len(TABLE_SPECS),
-        "figure_count": len(FIGURE_SPECS),
+        "table_count": len(used_tables),
+        "figure_count": len(used_figures),
         "docx_sha256": sha256(out_docx),
         "docx_size": out_docx.stat().st_size,
     }
@@ -588,32 +610,34 @@ def convert_pdf(docx_path: Path, out_pdf: Path) -> dict:
     }
 
 
-def page_locations(pdf_path: Path) -> dict:
+def page_locations(pdf_path: Path, chapter_titles: list[str] | None = None) -> dict:
     reader = PdfReader(str(pdf_path))
+    chapter_titles = chapter_titles or list(CHAPTER_NUMBERS)
     first_body = None
     refs = None
-    chapters = {}
+    chapters: dict[str, int] = {}
+    chapter_labels = {title: f"{chapter_number(i)}、{title}" for i, title in enumerate(chapter_titles, start=1)}
     for idx, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
-        if first_body is None and "摘要与项目概览" in text:
+        if first_body is None and any(label in text for label in chapter_labels.values()):
             first_body = idx
         if refs is None and re.search(r"参考文献", text) and "[1]" in text:
             refs = idx
-        for title, num in CHAPTER_NUMBERS.items():
-            if f"{num}、{title}" in text and title not in chapters:
+        for title, label in chapter_labels.items():
+            if label in text and title not in chapters:
                 chapters[title] = idx
     if first_body is None:
         raise RuntimeError("Cannot locate first body page")
     if refs is None:
-        raise RuntimeError("Cannot locate references start page")
+        refs = len(reader.pages) + 1
     body_pages = refs - first_body
     return {
         "total_pages": len(reader.pages),
         "cover_pages": first_body - 1,
         "body_start_page": first_body,
-        "references_start_page": refs,
+        "references_start_page": refs if refs <= len(reader.pages) else None,
         "body_page_count": body_pages,
-        "reference_page_count": len(reader.pages) - refs + 1,
+        "reference_page_count": max(0, len(reader.pages) - refs + 1),
         "chapter_start_pages": chapters,
     }
 
@@ -622,15 +646,20 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--output-stem")
     args = ap.parse_args()
     md_path = Path(args.input).resolve()
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    docx_path = out_dir / "人机协同决策优势冲刺关键技术研究_申请书.docx"
-    pdf_path = out_dir / "人机协同决策优势冲刺关键技术研究_申请书.pdf"
+    title, blocks = parse_markdown(md_path)
+    chapter_titles = [value for kind, value in blocks if kind == "h1" and value != "参考文献"]
+    stem = safe_output_stem(args.output_stem or title)
+    docx_path = out_dir / f"{stem}_申请书.docx"
+    pdf_path = out_dir / f"{stem}_申请书.pdf"
     metadata = build_docx(md_path, docx_path, out_dir / "assets")
     metadata.update(convert_pdf(docx_path, pdf_path))
-    metadata.update(page_locations(pdf_path))
+    metadata.update(page_locations(pdf_path, chapter_titles))
+    metadata["output_stem"] = stem
     metadata["input_sha256"] = sha256(md_path)
     metadata["input_file"] = str(md_path)
     (out_dir / "stage8_export_metadata.json").write_text(

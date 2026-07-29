@@ -5,7 +5,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .llm import LLMResult, ModelGateway as BaseModelGateway, _extract_json
+from .llm import (
+    JSON_PARSER_VERSION,
+    LLMResult,
+    ModelGateway as BaseModelGateway,
+    _extract_json_with_report,
+)
 from .runtime_evidence import ModelCallEvidenceStore
 from .runtime_policy import CapabilityPolicy
 from .util import new_id, sha256_json
@@ -70,11 +75,17 @@ class AuditedModelGateway(BaseModelGateway):
                 call_key=call_key,
                 evidence={**request_meta, **verified.metadata},
                 reused_response=True,
+                parse_report=dict(verified.metadata.get("json_parse_report") or {}),
+                response_contract_mode=str(
+                    verified.metadata.get("response_contract_mode") or "UNSPECIFIED"
+                ),
+                provider_attempts=int(verified.metadata.get("provider_attempts") or 1),
+                fallback_reason=verified.metadata.get("fallback_reason"),
             )
 
         self.evidence_store.faults.hit("before_model_request", call_key, prompt_id=prompt_id)
         result = await super().invoke(route, prompt_id, system_prompt, envelope, output_schema)
-        raw_parsed = _extract_json(result.raw_text)
+        raw_parsed, raw_parse_report = _extract_json_with_report(result.raw_text)
         response_meta = self.evidence_store.write_response(
             call_key,
             raw_text=result.raw_text,
@@ -87,6 +98,11 @@ class AuditedModelGateway(BaseModelGateway):
                 "model_id": result.model_id,
                 "endpoint_id": result.endpoint_id,
                 "request_sha256": request_meta["request_sha256"],
+                "json_parse_report": dict(result.parse_report or raw_parse_report),
+                "json_parser_version": JSON_PARSER_VERSION,
+                "response_contract_mode": result.response_contract_mode,
+                "provider_attempts": result.provider_attempts,
+                "fallback_reason": result.fallback_reason,
             },
         )
         self.evidence_store.faults.hit("after_response_persist", call_key, prompt_id=prompt_id)
@@ -98,4 +114,8 @@ class AuditedModelGateway(BaseModelGateway):
             call_key=call_key,
             evidence={**request_meta, **response_meta},
             reused_response=False,
+            parse_report=dict(result.parse_report or raw_parse_report),
+            response_contract_mode=result.response_contract_mode,
+            provider_attempts=result.provider_attempts,
+            fallback_reason=result.fallback_reason,
         )

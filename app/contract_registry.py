@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass, asdict
 from typing import Any, Iterable, Mapping
 
+from jsonschema import Draft202012Validator
+
 from .status_ontology import (
     CANONICAL_CLAIM_TYPES,
     CANONICAL_KNOWLEDGE_STATUSES,
@@ -24,7 +26,7 @@ from .status_ontology import (
     normalize_temporal_status,
 )
 
-CONTRACT_REGISTRY_VERSION = "4.0.0"
+CONTRACT_REGISTRY_VERSION = "5.1.0"
 
 # Cross-workflow vocabularies live here rather than in prompt-specific
 # normalizers.  JSON Schemas remain the strict authority for a concrete path;
@@ -510,6 +512,76 @@ def _property_schemas(schema: Mapping[str, Any], value: Mapping[str, Any], root_
     }
 
 
+def required_null_container_errors(
+    value: Any,
+    schema: Mapping[str, Any],
+) -> list[str]:
+    """Report required object/array properties that providers returned as null.
+
+    Optional containers may be deterministically defaulted to ``{}``/``[]`` by
+    :func:`normalize_against_schema`.  A required container is different: null
+    means the provider omitted a contractually required section.  Replacing it
+    with an empty value can make semantically incomplete output pass schemas
+    whose arrays allow zero items, so required nulls are rejected before any
+    prompt-specific normalizer can dereference or mask them.
+    """
+
+    root_schema = copy.deepcopy(dict(schema))
+    errors: list[str] = []
+
+    def pointer(path: tuple[Any, ...]) -> str:
+        if not path:
+            return "/"
+        escaped = [str(part).replace("~", "~0").replace("/", "~1") for part in path]
+        return "/" + "/".join(escaped)
+
+    def container_types(node_schema: Mapping[str, Any], node: Any) -> tuple[set[str], bool]:
+        effective = _effective_schema(node_schema, node, root_schema)
+        declared = effective.get("type")
+        declared_types = {declared} if isinstance(declared, str) else set(declared or [])
+        if not declared_types:
+            if isinstance(effective.get("properties"), Mapping):
+                declared_types.add("object")
+            if isinstance(effective.get("items"), Mapping):
+                declared_types.add("array")
+        return {str(item) for item in declared_types}, "null" in declared_types
+
+    def visit(node: Any, node_schema: Mapping[str, Any], path: tuple[Any, ...]) -> None:
+        effective = _effective_schema(node_schema, node, root_schema)
+        if isinstance(node, Mapping):
+            properties = effective.get("properties") or {}
+            required = {str(item) for item in effective.get("required") or []}
+            for key, child in node.items():
+                child_schema = properties.get(key)
+                if child_schema is None:
+                    additional = effective.get("additionalProperties")
+                    child_schema = additional if isinstance(additional, Mapping) else {}
+                if not isinstance(child_schema, Mapping):
+                    continue
+                child_path = (*path, key)
+                if str(key) in required and child is None:
+                    types, nullable = container_types(child_schema, child)
+                    expected = sorted(types & {"object", "array"})
+                    if expected and not nullable:
+                        errors.append(
+                            f"{pointer(child_path)}: required {'/'.join(expected)} container "
+                            "is null; provider must return the required structured content"
+                        )
+                        continue
+                if child is not None:
+                    visit(child, child_schema, child_path)
+            return
+        if isinstance(node, list):
+            item_schema = effective.get("items")
+            if isinstance(item_schema, Mapping):
+                for index, child in enumerate(node):
+                    if child is not None:
+                        visit(child, item_schema, (*path, index))
+
+    visit(value, root_schema, ())
+    return errors
+
+
 def normalize_against_schema(
     value: Any,
     schema: Mapping[str, Any],
@@ -641,6 +713,440 @@ def normalize_against_schema(
         "unresolved": [asdict(x) for x in unresolved],
     }
     return normalized, report
+
+
+def _json_pointer(path: tuple[Any, ...]) -> str:
+    if not path:
+        return "/"
+    return "/" + "/".join(
+        str(token).replace("~", "~0").replace("/", "~1")
+        for token in path
+    )
+
+
+def _path_related(left: tuple[Any, ...], right: tuple[Any, ...]) -> bool:
+    """Return whether two object paths are on the same ancestor chain.
+
+    Ownership repair deliberately does not move fields between sibling
+    business objects.  A misplaced field may be lifted to an ancestor or moved
+    into a descendant object, but crossing between siblings is semantically
+    ambiguous and must remain a schema error.
+    """
+
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    return longer[: len(shorter)] == shorter
+
+
+def _collect_runtime_objects(
+    value: Any,
+    schema: Mapping[str, Any],
+    root_schema: Mapping[str, Any],
+    *,
+    path: tuple[Any, ...] = (),
+) -> list[tuple[tuple[Any, ...], dict[str, Any], dict[str, Any]]]:
+    """Collect actual object nodes paired with their effective schemas."""
+
+    effective = _effective_schema(schema, value, root_schema)
+    collected: list[tuple[tuple[Any, ...], dict[str, Any], dict[str, Any]]] = []
+    if isinstance(value, dict):
+        collected.append((path, value, effective))
+        properties = effective.get("properties") or {}
+        additional = effective.get("additionalProperties")
+        for key, child in value.items():
+            child_schema = properties.get(key)
+            if child_schema is None and isinstance(additional, Mapping):
+                child_schema = additional
+            if isinstance(child_schema, Mapping):
+                collected.extend(
+                    _collect_runtime_objects(
+                        child,
+                        child_schema,
+                        root_schema,
+                        path=(*path, key),
+                    )
+                )
+    elif isinstance(value, list):
+        item_schema = effective.get("items")
+        if isinstance(item_schema, Mapping):
+            for index, child in enumerate(value):
+                collected.extend(
+                    _collect_runtime_objects(
+                        child,
+                        item_schema,
+                        root_schema,
+                        path=(*path, index),
+                    )
+                )
+    return collected
+
+
+def _schema_error_count(value: Any, schema: Mapping[str, Any]) -> int:
+    validator = Draft202012Validator(
+        dict(schema),
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
+    )
+    return sum(1 for _ in validator.iter_errors(value))
+
+
+def _schema_declares_object(schema: Mapping[str, Any]) -> bool:
+    declared = schema.get("type")
+    if declared == "object":
+        return True
+    if isinstance(declared, list) and "object" in declared:
+        return True
+    return isinstance(schema.get("properties"), Mapping)
+
+
+def _field_target_is_safe(
+    field: str,
+    target_path: tuple[Any, ...],
+    target_schema: Mapping[str, Any],
+) -> bool:
+    """Return whether an ownership target is deterministic enough to repair.
+
+    Required fields are safe because the strict schema independently proves
+    that the value is missing at that exact owner.  Optional fields are not
+    moved generically: a same-named optional field on an ancestor (for example
+    ``source_refs`` or ``status``) may carry different business semantics.
+    Such exceptional mirrors are handled by explicit prompt contracts.
+    """
+
+    del target_path  # retained in the signature for future registered rules
+    return field in set(target_schema.get("required") or [])
+
+
+def _missing_required_child_move_candidates(
+    normalized: dict[str, Any],
+    runtime_objects: list[tuple[tuple[Any, ...], dict[str, Any], dict[str, Any]]],
+    root_schema: Mapping[str, Any],
+    baseline_errors: int,
+) -> list[dict[str, Any]]:
+    """Return safe one-level container creation candidates.
+
+    Providers sometimes flatten the fields of a required object into its
+    parent and omit the wrapper object itself.  Creating an arbitrary container
+    would be unsafe, so this adapter requires all of the following:
+
+    * the missing child object is required by its parent;
+    * every moved field is currently forbidden at the parent;
+    * each field validates against exactly one missing required child object;
+    * at least one required child field is present;
+    * the complete strict-schema error count decreases after the batch move.
+    """
+
+    candidates: list[dict[str, Any]] = []
+    for source_path, source_object, source_schema in runtime_objects:
+        if source_schema.get("additionalProperties") is not False:
+            continue
+        source_properties = source_schema.get("properties") or {}
+        required_children: dict[str, Mapping[str, Any]] = {}
+        for child_name in source_schema.get("required") or []:
+            if child_name in source_object:
+                continue
+            child_schema = source_properties.get(child_name)
+            if not isinstance(child_schema, Mapping):
+                continue
+            effective_child = _effective_schema(child_schema, None, root_schema)
+            if _schema_declares_object(effective_child):
+                required_children[str(child_name)] = effective_child
+        if not required_children:
+            continue
+
+        extras = {
+            field: source_object[field]
+            for field in source_object
+            if field not in source_properties
+        }
+        if not extras:
+            continue
+
+        ownership: dict[str, list[str]] = {}
+        for field, field_value in extras.items():
+            owners: list[str] = []
+            for child_name, child_schema in required_children.items():
+                field_schema = (child_schema.get("properties") or {}).get(field)
+                if not isinstance(field_schema, Mapping):
+                    continue
+                validator = Draft202012Validator(
+                    dict(field_schema),
+                    format_checker=Draft202012Validator.FORMAT_CHECKER,
+                )
+                if not any(validator.iter_errors(field_value)):
+                    owners.append(child_name)
+            ownership[field] = owners
+
+        for child_name, child_schema in required_children.items():
+            child_fields = [
+                field
+                for field, owners in ownership.items()
+                if owners == [child_name]
+            ]
+            child_required = set(child_schema.get("required") or [])
+            if not child_fields or not child_required.intersection(child_fields):
+                continue
+
+            trial = copy.deepcopy(normalized)
+            source_cursor: Any = trial
+            for token in source_path:
+                source_cursor = source_cursor[token]
+            child_object: dict[str, Any] = {}
+            for field in child_fields:
+                child_object[field] = source_cursor.pop(field)
+            source_cursor[child_name] = child_object
+            trial_errors = _schema_error_count(trial, root_schema)
+            if trial_errors >= baseline_errors:
+                continue
+            candidates.append(
+                {
+                    "field": child_name,
+                    "source_path": source_path,
+                    "target_path": (*source_path, child_name),
+                    "trial": trial,
+                    "before_errors": baseline_errors,
+                    "after_errors": trial_errors,
+                    "distance": 1,
+                    "rule": "CREATE_REQUIRED_OBJECT_AND_MOVE_FIELDS",
+                    "moved_fields": sorted(child_fields),
+                }
+            )
+    return candidates
+
+
+def repair_field_ownership_against_schema(
+    value: Any,
+    schema: Mapping[str, Any],
+    *,
+    contract_id: str,
+    max_moves: int = 32,
+) -> tuple[Any, dict[str, Any]]:
+    """Repair deterministic object-level field ownership drift.
+
+    Large language models commonly emit a valid field under an adjacent parent
+    or child object.  This repair is intentionally conservative:
+
+    * the field must be forbidden at its current object;
+    * a same-named required target property must exist on the same ancestor chain;
+    * the target property must currently be absent;
+    * the value must independently validate against the target property schema;
+    * exactly one best move must reduce the complete output-schema error count.
+
+    It can also recreate one missing *required* child object when the provider
+    flattened uniquely owned child fields into the parent.  The function never
+    creates business content, overwrites an existing value, moves optional
+    same-named fields generically, or crosses between sibling business objects.
+    Ambiguous cases remain untouched and are reported for strict validation to
+    block.
+    """
+
+    normalized = copy.deepcopy(value)
+    root_schema = copy.deepcopy(dict(schema))
+    changes: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    unresolved_keys: set[tuple[str, str, tuple[str, ...]]] = set()
+
+    if not isinstance(normalized, dict):
+        return normalized, {
+            "schema_version": "1.0",
+            "normalizer_version": CONTRACT_REGISTRY_VERSION,
+            "contract_id": contract_id,
+            "normalized_count": 0,
+            "changes": [],
+            "unresolved_count": 0,
+            "unresolved": [],
+        }
+
+    for _ in range(max_moves):
+        baseline_errors = _schema_error_count(normalized, root_schema)
+        runtime_objects = _collect_runtime_objects(normalized, root_schema, root_schema)
+        candidate_moves: list[dict[str, Any]] = _missing_required_child_move_candidates(
+            normalized,
+            runtime_objects,
+            root_schema,
+            baseline_errors,
+        )
+
+        for source_path, source_object, source_schema in runtime_objects:
+            source_properties = source_schema.get("properties") or {}
+            if source_schema.get("additionalProperties") is not False:
+                continue
+            for field in list(source_object.keys()):
+                if field in source_properties:
+                    continue
+                source_value = source_object[field]
+                matching_targets: list[dict[str, Any]] = []
+                for target_path, target_object, target_schema in runtime_objects:
+                    if target_path == source_path or not _path_related(source_path, target_path):
+                        continue
+                    target_properties = target_schema.get("properties") or {}
+                    target_field_schema = target_properties.get(field)
+                    if not isinstance(target_field_schema, Mapping):
+                        continue
+                    if field in target_object:
+                        continue
+                    if not _field_target_is_safe(field, target_path, target_schema):
+                        continue
+                    field_validator = Draft202012Validator(
+                        dict(target_field_schema),
+                        format_checker=Draft202012Validator.FORMAT_CHECKER,
+                    )
+                    if any(field_validator.iter_errors(source_value)):
+                        continue
+
+                    trial = copy.deepcopy(normalized)
+                    source_cursor: Any = trial
+                    for token in source_path:
+                        source_cursor = source_cursor[token]
+                    target_cursor: Any = trial
+                    for token in target_path:
+                        target_cursor = target_cursor[token]
+                    moved_value = source_cursor.pop(field)
+                    target_cursor[field] = moved_value
+                    trial_errors = _schema_error_count(trial, root_schema)
+                    if trial_errors >= baseline_errors:
+                        continue
+                    matching_targets.append(
+                        {
+                            "field": field,
+                            "source_path": source_path,
+                            "target_path": target_path,
+                            "trial": trial,
+                            "before_errors": baseline_errors,
+                            "after_errors": trial_errors,
+                            "distance": abs(len(source_path) - len(target_path)),
+                            "rule": "SCHEMA_FIELD_OWNERSHIP_MOVE",
+                            "moved_fields": [field],
+                        }
+                    )
+
+                if not matching_targets:
+                    continue
+                matching_targets.sort(
+                    key=lambda item: (
+                        item["after_errors"],
+                        item["distance"],
+                        _json_pointer(item["target_path"]),
+                    )
+                )
+                best_score = (
+                    matching_targets[0]["after_errors"],
+                    matching_targets[0]["distance"],
+                )
+                best = [
+                    item
+                    for item in matching_targets
+                    if (item["after_errors"], item["distance"]) == best_score
+                ]
+                if len(best) == 1:
+                    candidate_moves.append(best[0])
+                else:
+                    target_paths = tuple(
+                        sorted(_json_pointer(item["target_path"]) for item in best)
+                    )
+                    unresolved_key = (_json_pointer(source_path), field, target_paths)
+                    if unresolved_key not in unresolved_keys:
+                        unresolved_keys.add(unresolved_key)
+                        unresolved.append(
+                            {
+                                "field": field,
+                                "source_path": _json_pointer(source_path),
+                                "candidate_target_paths": list(target_paths),
+                                "reason": "ambiguous field ownership; strict schema validation must decide",
+                            }
+                        )
+
+        if not candidate_moves:
+            break
+        candidate_moves.sort(
+            key=lambda item: (
+                item["after_errors"],
+                item["distance"],
+                _json_pointer(item["source_path"]),
+                item["field"],
+            )
+        )
+        selected = candidate_moves[0]
+        normalized = selected["trial"]
+        changes.append(
+            {
+                "field": selected["field"],
+                "source_path": _json_pointer(selected["source_path"]),
+                "target_path": _json_pointer(selected["target_path"]),
+                "moved_fields": list(selected.get("moved_fields") or [selected["field"]]),
+                "rule": selected.get("rule") or "SCHEMA_FIELD_OWNERSHIP_MOVE",
+                "reason": "unique schema-owned target reduced strict schema errors",
+                "schema_errors_before": selected["before_errors"],
+                "schema_errors_after": selected["after_errors"],
+            }
+        )
+
+    return normalized, {
+        "schema_version": "1.0",
+        "normalizer_version": CONTRACT_REGISTRY_VERSION,
+        "contract_id": contract_id,
+        "normalized_count": len(changes),
+        "changes": changes,
+        "unresolved_count": len(unresolved),
+        "unresolved": unresolved,
+    }
+
+
+def field_ownership_contract_lines(schema: Mapping[str, Any]) -> list[str]:
+    """Return compact direct-child ownership rules generated from a schema."""
+
+    root_schema = dict(schema)
+    rows: list[str] = []
+
+    def walk(node_schema: Mapping[str, Any], path: str, depth: int) -> None:
+        effective = _effective_schema(node_schema, None, root_schema)
+        properties = effective.get("properties") or {}
+        if properties and effective.get("additionalProperties") is False and depth <= 3:
+            required = set(effective.get("required") or [])
+            ordered = [
+                f"{name}{'*' if name in required else ''}"
+                for name in properties
+            ]
+            rows.append(
+                f"- `{path}` 的直接字段仅允许：" + " / ".join(ordered)
+            )
+        for key, child in properties.items():
+            if isinstance(child, Mapping):
+                walk(child, f"{path}.{key}", depth + 1)
+        items = effective.get("items")
+        if isinstance(items, Mapping):
+            walk(items, f"{path}[*]", depth + 1)
+
+    walk(root_schema, "$", 0)
+    return rows
+
+
+FIELD_OWNERSHIP_CONTRACT_START = "<!-- FIELD_OWNERSHIP_CONTRACT:START -->"
+FIELD_OWNERSHIP_CONTRACT_END = "<!-- FIELD_OWNERSHIP_CONTRACT:END -->"
+
+
+def augment_prompt_with_field_ownership_contract(
+    prompt: str,
+    schema: Mapping[str, Any],
+    *,
+    contract_id: str,
+) -> str:
+    """Append an idempotent, schema-generated object ownership contract."""
+
+    rows = field_ownership_contract_lines(schema)
+    if not rows:
+        return prompt
+    base = prompt
+    if FIELD_OWNERSHIP_CONTRACT_START in base:
+        base = base.split(FIELD_OWNERSHIP_CONTRACT_START, 1)[0].rstrip()
+    block = (
+        FIELD_OWNERSHIP_CONTRACT_START
+        + "\n# 自动生成的字段归属契约\n"
+        + f"契约ID：`{contract_id}`；注册表版本：`{CONTRACT_REGISTRY_VERSION}`。\n"
+        + "星号表示必填字段。字段只能出现在列出的直接父对象下，不得上移、下沉或放入相邻对象。\n"
+        + "\n".join(rows)
+        + "\n"
+        + FIELD_OWNERSHIP_CONTRACT_END
+    )
+    return base + "\n\n" + block + "\n"
 
 
 def enum_contract_lines(schema: Mapping[str, Any]) -> list[str]:

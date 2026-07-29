@@ -214,6 +214,30 @@ def test_response_evidence_detects_tampering(tmp_path):
         store.load_verified_response("call-1")
 
 
+def test_response_evidence_survives_json_parser_upgrade(tmp_path, monkeypatch):
+    store = ModelCallEvidenceStore(tmp_path / "evidence")
+    store.write_request("call-parser-upgrade", {"prompt": "p"})
+    store.write_response(
+        "call-parser-upgrade",
+        raw_text='```json\n{"status":"PASS"}\n```',
+        parsed_output={"status": "PASS"},
+        raw_parsed_output={"status": "PASS"},
+        metadata={
+            "model_id": "m",
+            "endpoint_id": "e",
+            "json_parser_version": "old-parser",
+        },
+    )
+
+    def changed_parser(_text):
+        raise AssertionError("immutable evidence must not be reparsed after parser upgrade")
+
+    monkeypatch.setattr("app.runtime_evidence._extract_json_object", changed_parser)
+    verified = store.load_verified_response("call-parser-upgrade")
+    assert verified.parsed_output == {"status": "PASS"}
+    assert verified.metadata["raw_parsed_object_sha256"] == verified.metadata["parsed_object_sha256"]
+
+
 class ExecutorPack:
     def validate(self, prompt_id, kind, value):
         return []

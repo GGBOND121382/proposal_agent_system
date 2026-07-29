@@ -53,8 +53,29 @@ def parse_fastapi_version(path: Path) -> str | None:
         if not (isinstance(func, ast.Name) and func.id == "FastAPI"):
             continue
         for keyword in node.value.keywords:
-            if keyword.arg == "version" and isinstance(keyword.value, ast.Constant):
+            if keyword.arg != "version":
+                continue
+            if isinstance(keyword.value, ast.Constant):
                 return str(keyword.value.value)
+            if isinstance(keyword.value, ast.Name) and keyword.value.id == "__version__":
+                version_file = path.parent / "version.py"
+                if not version_file.exists():
+                    return None
+                version_tree = ast.parse(version_file.read_text(encoding="utf-8"), filename=str(version_file))
+                for version_node in ast.walk(version_tree):
+                    if not isinstance(version_node, ast.Assign):
+                        continue
+                    if not any(isinstance(target, ast.Name) and target.id == "__version__" for target in version_node.targets):
+                        continue
+                    if isinstance(version_node.value, ast.Constant):
+                        return str(version_node.value.value)
+                    if (
+                        isinstance(version_node.value, ast.Call)
+                        and isinstance(version_node.value.func, ast.Name)
+                        and version_node.value.func.id == "project_version"
+                    ):
+                        project = tomllib.loads((path.parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+                        return str(project["project"]["version"])
     return None
 
 

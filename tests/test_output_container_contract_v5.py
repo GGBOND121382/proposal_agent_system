@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from app.executor import PromptExecutionError, PromptExecutor
+from app.executor import PromptExecutionError
+from app.runtime_api import PromptExecutor
 from app.pack import PromptPack
 from app.proposal_quality import ProposalQualityGuard
 from app.staged_contracts import require_model_response_envelope
@@ -212,3 +213,107 @@ def test_stage_status_normalizers_return_schema_rejectable_objects_for_wrong_roo
     assert stage3 == {}
     assert report2["unresolved_count"] == 1
     assert report3["unresolved_count"] == 1
+
+
+def test_required_null_containers_are_never_defaulted_into_valid_outputs(
+    pack: PromptPack,
+) -> None:
+    """A required null container is an omission, not a harmless empty value."""
+    from app.contract_registry import required_null_container_errors
+
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    failures: list[str] = []
+    exercised = 0
+
+    for prompt_id in pack.prompt_ids():
+        output = pack.replay_output(prompt_id)
+        envelope = pack.replay_input(prompt_id)
+        structure_schema = pack.structure_schema(prompt_id, "output")
+        output_schema = pack.inlined_schema(prompt_id, "output")
+        for path in _declared_container_paths(output, structure_schema):
+            malformed = _replace(output, path, None)
+            contract_errors = required_null_container_errors(malformed, output_schema)
+            if not contract_errors:
+                continue
+            exercised += 1
+            try:
+                executor._normalize_output(prompt_id, malformed, envelope)
+            except PromptExecutionError as exc:
+                if "Required output container is null" not in str(exc):
+                    failures.append(
+                        f"{prompt_id}{_pointer(path)} raised unexpected controlled error: {exc}"
+                    )
+            except Exception as exc:  # pragma: no cover - regression diagnostic
+                failures.append(
+                    f"{prompt_id}{_pointer(path)} leaked {type(exc).__name__}: {exc}"
+                )
+            else:
+                failures.append(
+                    f"{prompt_id}{_pointer(path)} was silently defaulted despite being required"
+                )
+
+    assert exercised >= 200
+    assert not failures, "\n".join(failures[:30])
+
+
+def test_staged_contract_gateway_injects_field_paths_and_repairs_unique_ownership(tmp_path) -> None:
+    from app.staged_contracts import normalize_in_place, prepare_staged_artifact
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "result": {
+                "type": "object",
+                "properties": {
+                    "template": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                        "required": ["name"],
+                        "additionalProperties": False,
+                    },
+                    "source_fact_exclusions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["template", "source_fact_exclusions"],
+                "additionalProperties": False,
+            }
+        },
+        "required": ["result"],
+        "additionalProperties": False,
+    }
+    request_path = tmp_path / "requests" / "request.json"
+    request_path.parent.mkdir()
+    request = prepare_staged_artifact(
+        request_path,
+        {"prompt_id": "P-STAGED", "system_prompt": "base", "output_schema": schema},
+    )
+    assert "FIELD_OWNERSHIP_CONTRACT:START" in request["system_prompt"]
+    assert request["model_contract"]["field_ownership_contract_registry_version"]
+
+    value = {
+        "result": {
+            "template": {"name": "template", "source_fact_exclusions": ["fact"]}
+        }
+    }
+    report = normalize_in_place(value, schema, contract_id="test-staged")
+    assert value["result"]["source_fact_exclusions"] == ["fact"]
+    assert "source_fact_exclusions" not in value["result"]["template"]
+    assert report["normalized_count"] >= 1
+
+
+def test_staged_contract_gateway_preserves_required_null_for_strict_rejection() -> None:
+    from app.staged_contracts import normalize_in_place
+
+    schema = {
+        "type": "object",
+        "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+    value = {"items": None}
+    report = normalize_in_place(value, schema, contract_id="test-required-null")
+    assert value["items"] is None
+    assert report["required_null_errors"]

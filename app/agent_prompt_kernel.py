@@ -18,6 +18,7 @@ from .proposal_quality import (
     _normalized_sentences,
     _template_skeleton,
 )
+from .full_integration_quality import FullProposalQualityGuard
 
 
 CRITIC_PROMPTS = {
@@ -233,7 +234,7 @@ class AgentPromptKernelValidator:
 
     def __init__(self, pack=None):
         self.pack = pack
-        self.base_guard = ProposalQualityGuard()
+        self.base_guard = FullProposalQualityGuard()
 
     def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
         payload = envelope.get("payload") or {}

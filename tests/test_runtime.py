@@ -8,17 +8,19 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.context import ContextBuilder
+from app.runtime_api import ContextBuilder
+from app.llm import LLMResult
+from app.executor import PromptExecutionError
 from app.db import Database
 from app.documents import parse_document
-from app.executor import PromptExecutor
-from app.exporter import DocxExporter
-from app.llm import ModelGateway
+from app.runtime_api import PromptExecutor
+from app.runtime_api import DocxExporter
+from app.runtime_api import ModelGateway
 from app.pack import PromptPack
 from app.research import PublicResearchService
 from app.security import RoutingDenied, SecurityRouter
 from app.util import new_id, sha256_json, utc_now
-from app.workflows import WorkflowEngine
+from app.runtime_api import WorkflowEngine
 from app.agent_prompt_kernel import _substantive_numeric_tokens
 
 
@@ -978,6 +980,66 @@ def test_runtime_renormalizes_prior_enum_only_failure_without_model_call(runtime
     ]
 
 
+def test_runtime_recovers_prior_field_ownership_failure_without_model_call(runtime, monkeypatch):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    envelope = pack.replay_input("P-TEMPLATE-EXTRACT")
+    envelope["scope"]["project_id"] = project_id
+    provider_output = pack.replay_output("P-TEMPLATE-EXTRACT")
+    exclusions = provider_output["result"].pop("source_fact_exclusions")
+    provider_output["result"]["template"]["source_fact_exclusions"] = exclusions
+    model_envelope, _ = executor._prepare_model_envelope(
+        "P-TEMPLATE-EXTRACT",
+        envelope,
+    )
+    input_hash = sha256_json(model_envelope)
+    failed_run_id = new_id("run")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id,
+            project_id,
+            workflow_id,
+            "P-TEMPLATE-EXTRACT",
+            "ERROR",
+            "offline-general-primary",
+            "offline-primary",
+            input_hash,
+            sha256_json(provider_output),
+            json.dumps(model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Output schema validation failed | "
+            "/result: 'source_fact_exclusions' is a required property; "
+            "/result/template: Additional properties are not allowed "
+            "('source_fact_exclusions' was unexpected)",
+            107000,
+            utc_now(),
+        ),
+    )
+
+    async def model_must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("recoverable field ownership drift must be repaired locally")
+
+    monkeypatch.setattr(executor.gateway, "invoke", model_must_not_be_called)
+    result = asyncio.run(
+        executor.execute(
+            "P-TEMPLATE-EXTRACT",
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+        )
+    )
+
+    assert result["contract_recovered_from_run_id"] == failed_run_id
+    assert result["output"]["result"]["source_fact_exclusions"] == exclusions
+    assert "source_fact_exclusions" not in result["output"]["result"]["template"]
+    assert pack.validate("P-TEMPLATE-EXTRACT", "output", result["output"]) == []
+
+
 def test_project_definition_model_input_uses_minimal_sufficient_compaction(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     envelope = pack.replay_input("P-PROJECT-DEFINITION-EXTRACT")
@@ -1359,3 +1421,236 @@ def test_targeted_repair_normalizer_enforces_fact_collection_scope(runtime):
     ]
     assert normalized["status"] == "PASS"
     assert any("outside the critic-authorized path scope" in warning for warning in normalized["warnings"])
+
+
+def test_runtime_does_not_reuse_failed_output_from_changed_prompt_contract(runtime, monkeypatch):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-TEMPLATE-EXTRACT"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    input_hash = sha256_json(model_envelope)
+    failed_run_id = new_id("run")
+    provider_output = pack.replay_output(prompt_id)
+    exclusions = provider_output["result"].pop("source_fact_exclusions")
+    provider_output["result"]["template"]["source_fact_exclusions"] = exclusions
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id, project_id, workflow_id, prompt_id, "ERROR",
+            "offline-general-primary", "offline-primary", input_hash,
+            sha256_json(provider_output), json.dumps(model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Output schema validation failed | ownership drift", 100, utc_now(),
+        ),
+    )
+    db.audit(
+        "MODEL_CALL_FAILED",
+        project_id=project_id,
+        object_id="call-old-contract",
+        metadata={
+            "run_id": failed_run_id,
+            "deterministic_recoverable": True,
+            "model_request_spec_hash": "old-prompt-contract-hash",
+        },
+    )
+    calls = {"count": 0}
+
+    async def fresh_model(*_args, **_kwargs):
+        calls["count"] += 1
+        output = pack.replay_output(prompt_id)
+        return LLMResult(
+            output=output,
+            raw_text=json.dumps(output, ensure_ascii=False),
+            model_id="offline-general-primary",
+            endpoint_id="offline-primary",
+        )
+
+    monkeypatch.setattr(executor.gateway, "invoke", fresh_model)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+        )
+    )
+
+    assert calls["count"] == 1
+    assert result["contract_recovered_from_run_id"] is None
+
+
+def test_runtime_does_not_reuse_non_contract_failure(runtime, monkeypatch):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-TEMPLATE-EXTRACT"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    input_hash = sha256_json(model_envelope)
+    failed_run_id = new_id("run")
+    provider_output = pack.replay_output(prompt_id)
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id, project_id, workflow_id, prompt_id, "ERROR",
+            "offline-general-primary", "offline-primary", input_hash,
+            sha256_json(provider_output), json.dumps(model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "LLM endpoint returned 500: provider unavailable", 100, utc_now(),
+        ),
+    )
+    calls = {"count": 0}
+
+    async def fresh_model(*_args, **_kwargs):
+        calls["count"] += 1
+        output = pack.replay_output(prompt_id)
+        return LLMResult(
+            output=output,
+            raw_text=json.dumps(output, ensure_ascii=False),
+            model_id="offline-general-primary",
+            endpoint_id="offline-primary",
+        )
+
+    monkeypatch.setattr(executor.gateway, "invoke", fresh_model)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+        )
+    )
+
+    assert calls["count"] == 1
+    assert result["contract_recovered_from_run_id"] is None
+
+
+def test_normalization_audit_records_paths_without_copying_values(runtime):
+    _, _, _, _, _, executor, _, _ = runtime
+    before = {"result": {"template": {"source_fact_exclusions": ["secret"]}}}
+    after = {"result": {"source_fact_exclusions": ["secret"], "template": {}}}
+
+    audit = executor._normalization_audit(before, after)
+
+    assert audit["changed"] is True
+    paths = {(item["operation"], item["path"]) for item in audit["changes"]}
+    assert ("REMOVE", "/result/template/source_fact_exclusions") in paths
+    assert ("ADD", "/result/source_fact_exclusions") in paths
+    assert all("before_value" not in item and "after_value" not in item for item in audit["changes"])
+
+
+def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, monkeypatch):
+    """A new normalizer can revalidate persisted provider output without another model call."""
+    _, pack, db, _, builder, executor, engine, _ = runtime
+    project_id = create_project(db)
+    workflow = engine.start(project_id, "WF-2_TEMPLATE_EXTRACTION")
+    state = workflow["state"]
+    state["technical_retry_attempts"] = {"0": 2}
+    state["last_error"] = "old output schema validation failed"
+    engine._update(workflow, status="BLOCKED", current_step=0, state=state)
+
+    provider_output = pack.replay_output("P-TEMPLATE-EXTRACT")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            new_id("run"),
+            project_id,
+            workflow["id"],
+            "P-TEMPLATE-EXTRACT",
+            "ERROR",
+            "offline-general-primary",
+            "offline-primary",
+            "old-input-hash",
+            sha256_json(provider_output),
+            "{}",
+            json.dumps(provider_output, ensure_ascii=False),
+            "old contract failure",
+            1,
+            utc_now(),
+        ),
+    )
+
+    def build(prompt_id, project_id_arg, **_kwargs):
+        envelope = pack.replay_input(prompt_id)
+        envelope["scope"]["project_id"] = project_id_arg
+        return envelope
+
+    calls: list[str] = []
+
+    async def execute(prompt_id, envelope, **_kwargs):
+        calls.append(prompt_id)
+        output = pack.replay_output(prompt_id)
+        if prompt_id == "P-TEMPLATE-CRITIC":
+            output["status"] = "NEED_USER_INPUT"
+            output["user_questions"] = ["请确认模板范围。"]
+        return {
+            "run_id": new_id("run"),
+            "status": output["status"],
+            "route": {
+                "environment": "OFFLINE_LOCAL",
+                "model_id": "test-model",
+                "endpoint_id": "test-endpoint",
+            },
+            "output": output,
+        }
+
+    monkeypatch.setattr(builder, "build", build)
+    monkeypatch.setattr(executor, "execute", execute)
+
+    advanced = asyncio.run(engine.advance(workflow["id"]))
+
+    assert calls[:2] == ["P-TEMPLATE-EXTRACT", "P-TEMPLATE-CRITIC"]
+    assert advanced["status"] == "WAITING_GATE"
+    assert advanced["state"]["technical_retry_attempts"]["0"] == 2
+    assert advanced["state"]["contract_migration_retry_versions"]["0"] == executor.output_normalizer_version
+
+
+def test_runtime_surfaces_secondary_error_evidence_persistence_failure(runtime, monkeypatch):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    prompt_id = "P-TEMPLATE-EXTRACT"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+
+    async def invalid_model_output(*_args, **_kwargs):
+        return LLMResult(
+            output={},
+            raw_text="{}",
+            model_id="offline-general-primary",
+            endpoint_id="offline-primary",
+        )
+
+    monkeypatch.setattr(executor.gateway, "invoke", invalid_model_output)
+    monkeypatch.setattr(
+        executor,
+        "_commit_error",
+        lambda **_kwargs: "OSError: simulated disk full",
+    )
+
+    with pytest.raises(PromptExecutionError) as captured:
+        asyncio.run(
+            executor.execute(
+                prompt_id,
+                envelope,
+                project_id=project_id,
+                workflow_id=new_id("wf"),
+            )
+        )
+
+    message = str(captured.value)
+    assert message.startswith("Output schema validation failed")
+    assert "ERROR_EVIDENCE_PERSISTENCE_FAILED" in message
+    assert "simulated disk full" in message

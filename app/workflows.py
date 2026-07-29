@@ -194,13 +194,42 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 )
                 and int(retries.get(step_key, 0)) < retry_limit
             )
+            normalizer_version = str(
+                getattr(self.executor, "output_normalizer_version", "") or ""
+            )
+            migration_versions = state.setdefault(
+                "contract_migration_retry_versions",
+                {},
+            )
+            failed_provider_output_exists = False
+            if (
+                normalizer_version
+                and current_prompt_id
+                and step_key not in state.get("step_results", {})
+            ):
+                failed_provider_output_exists = bool(
+                    self.db.fetchone(
+                        """SELECT id FROM prompt_runs
+                           WHERE project_id=? AND workflow_id=? AND prompt_id=?
+                             AND status='ERROR' AND output_json IS NOT NULL
+                           ORDER BY created_at DESC LIMIT 1""",
+                        (wf["project_id"], workflow_id, current_prompt_id),
+                    )
+                )
+            contract_migration_retryable = (
+                failed_provider_output_exists
+                and str(migration_versions.get(step_key) or "") != normalizer_version
+            )
             technical_retryable = (
                 wf["current_step"] < len(steps)
                 and (
                     step_key not in state.get("step_results", {})
                     or deterministic_recheck
                 )
-                and int(retries.get(step_key, 0)) < retry_limit
+                and (
+                    int(retries.get(step_key, 0)) < retry_limit
+                    or contract_migration_retryable
+                )
             )
             completion_recheck = (
                 wf["current_step"] >= len(steps)
@@ -209,7 +238,16 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             if not technical_retryable and not completion_recheck:
                 return wf
             if technical_retryable:
-                retries[step_key] = int(retries.get(step_key, 0)) + 1
+                if contract_migration_retryable:
+                    migration_versions[step_key] = normalizer_version
+                    state["contract_migration_recovery"] = {
+                        "step": int(step_key),
+                        "prompt_id": current_prompt_id,
+                        "output_normalizer_version": normalizer_version,
+                        "reason": "revalidate persisted provider output under the upgraded contract layer",
+                    }
+                else:
+                    retries[step_key] = int(retries.get(step_key, 0)) + 1
                 if deterministic_recheck:
                     previous = state.get("step_results", {}).pop(step_key)
                     state.setdefault("superseded_step_results", {}).setdefault(

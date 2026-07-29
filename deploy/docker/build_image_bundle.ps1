@@ -8,7 +8,7 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Out = Join-Path $Root $OutputDir
 if (Test-Path $Out) { Remove-Item $Out -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
-$Image = "proposal-agent:0.5.0-offline"
+$Image = "proposal-agent:0.6.0-offline"
 docker build -f "$Root\deploy\docker\Dockerfile.offline" -t $Image $Root
 docker save -o "$Out\proposal-agent-image.tar" $Image
 if ($Mode -eq "hybrid") {

@@ -11,44 +11,33 @@ from fastapi.staticfiles import StaticFiles
 
 from .api_models import GateDecisionRequest, ProjectCreate, PromptExecuteRequest, WorkflowStartRequest
 from .config import Settings
-from .context import ContextBuilder
 from .db import Database
-from .diagram_enrichment import DiagramEnrichmentService
 from .documents import ALLOWED_EXTENSIONS, parse_document
-from .executor import PromptExecutionError, PromptExecutor
-from .exporter import DocxExporter, ExportDenied
-from .llm import ModelGateway
 from .pack import PromptPack
-from .post_export_acceptance import PostExportAcceptanceError, PostExportAcceptanceManager
-from .research import PublicResearchService
-from .skill_setup import build_skill_executor
-from .security import SecurityRouter
-from .track_b import TrackBAgentPromptValidator
+from .executor import PromptExecutionError
+from .exporter import ExportDenied
+from .post_export_acceptance import PostExportAcceptanceError
+from .runtime_factory import build_runtime_stack
+from .version import __version__
+from .workflow_catalog import ALL_WORKFLOWS
 from .util import new_id, safe_filename, sha256_json, utc_now
-from .workflows import WORKFLOWS, WorkflowEngine
 
 settings = Settings.load()
 pack = PromptPack(settings.prompt_pack_dir)
 db = Database(settings.db_path)
-router = SecurityRouter(pack)
-gateway = ModelGateway(settings, pack)
-context_builder = ContextBuilder(db, pack)
-executor = PromptExecutor(
-    db,
-    pack,
-    router,
-    gateway,
-    quality_guard=TrackBAgentPromptValidator(pack),
-    quality_guard_enabled=settings.proposal_quality_guard_enabled,
-)
-skill_executor = build_skill_executor(db, settings)
-research = PublicResearchService(settings, skill_executor)
-diagram_enrichment = DiagramEnrichmentService(db, pack, skill_executor)
-workflows = WorkflowEngine(db, pack, context_builder, executor, research, diagram_enrichment)
-exporter = DocxExporter(db, settings)
-post_export_acceptance = PostExportAcceptanceManager(db, settings, exporter)
+runtime = build_runtime_stack(settings, pack, db)
+router = runtime.router
+gateway = runtime.gateway
+context_builder = runtime.context_builder
+executor = runtime.executor
+skill_executor = runtime.skill_executor
+research = runtime.research
+diagram_enrichment = runtime.diagram_enrichment
+workflows = runtime.workflows
+exporter = runtime.exporter
+post_export_acceptance = runtime.post_export_acceptance
 
-app = FastAPI(title="项目申请书智能体系统", version="0.6.0")
+app = FastAPI(title="项目申请书智能体系统", version=__version__)
 app.mount("/static", StaticFiles(directory=settings.root_dir / "app" / "static"), name="static")
 
 
@@ -197,6 +186,8 @@ async def start_workflow(req: WorkflowStartRequest) -> dict[str, Any]:
         return await workflows.advance(wf["id"]) if req.auto_advance else wf
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.post("/api/workflows/{workflow_id}/advance")
@@ -224,6 +215,14 @@ def list_workflows(project_id: str | None = None) -> list[dict[str, Any]]:
 def get_workflow(workflow_id: str) -> dict[str, Any]:
     try:
         return workflows.get(workflow_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/workflows/{workflow_id}/staged-files")
+def staged_workflow_files(workflow_id: str) -> dict[str, Any]:
+    try:
+        return workflows.staged_files(workflow_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
 
@@ -406,4 +405,4 @@ def latest_post_export_acceptance(project_id: str) -> dict[str, Any]:
 
 @app.get("/api/workflow-types")
 def workflow_types() -> dict[str, Any]:
-    return WORKFLOWS
+    return ALL_WORKFLOWS

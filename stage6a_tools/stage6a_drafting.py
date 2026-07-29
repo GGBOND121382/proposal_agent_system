@@ -20,12 +20,35 @@ if str(ROOT) not in sys.path:
 
 from app.util import sha256_json, utc_now
 from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
+from app.staged_workflow_config import (
+    batch_spec, page_totals, project_title as resolve_project_title,
+    section_ids_for_batch, section_ids_from_run, stage_boundary,
+)
 
 STAGE = "STAGE_6A_PROVISIONAL_DRAFTING"
 BATCH_ID = "STAGE-6A"
-SECTION_IDS = [f"SEC-{i:02d}" for i in range(1, 6)]
+DEFAULT_SECTION_IDS = [f"SEC-{i:02d}" for i in range(1, 6)]
+SECTION_IDS = list(DEFAULT_SECTION_IDS)
 MODEL_ID = "gpt-5.6-thinking"
 ENDPOINT_ID = "chatgpt-conversation-file-bridge"
+
+
+def configure_section_ids(*, run_dir: Path | None = None, stage5: dict[str, Any] | None = None) -> list[str]:
+    global SECTION_IDS
+    if stage5 is not None:
+        SECTION_IDS = section_ids_for_batch(stage5, BATCH_ID, DEFAULT_SECTION_IDS)
+    elif run_dir is not None:
+        SECTION_IDS = section_ids_from_run(run_dir, BATCH_ID, DEFAULT_SECTION_IDS)
+    else:
+        SECTION_IDS = list(DEFAULT_SECTION_IDS)
+    if not SECTION_IDS:
+        raise ValueError(f"{BATCH_ID} has no configured sections")
+    return SECTION_IDS
+
+
+def require_section_id(section_id: str) -> None:
+    if section_id not in SECTION_IDS:
+        raise SystemExit(f"section {section_id} is not part of {BATCH_ID}: {SECTION_IDS}")
 
 
 def read_json(path: Path) -> Any:
@@ -209,7 +232,7 @@ def make_writer_request(run_dir: Path, section_id: str) -> dict[str, Any]:
             "metric_boundaries": stage4a["metric_justification"],
             "open_items": stage4a["open_items_remaining"],
             "prior_section_digest": completed_digest(run_dir),
-            "stage_boundary": "STAGE_6A_SECTIONS_01_TO_05_ONLY",
+            "stage_boundary": stage_boundary(BATCH_ID, SECTION_IDS),
         },
         "output_schema": load_schema("section_draft.schema.json"),
         "requested_at": utc_now(),
@@ -272,7 +295,7 @@ def make_batch_critic_request(run_dir: Path) -> dict[str, Any]:
         "executor_role": "Independent Batch Integration Critic",
         "model_contract": {"independent_from_all_section_writers": True, "response_format": "JSON", "actual_model_id_required": True, "endpoint_id_required": True},
         "system_prompt": (
-            "你是阶段6A批次Critic。检查五章是否围绕同一中心命题推进，三项研究问题是否完整覆盖，相关工作边界是否克制，"
+            "你是阶段6A批次Critic。检查本批次各章是否围绕同一中心命题推进，章节合同规定的研究问题是否完整覆盖，相关工作边界是否克制，"
             "理论框架是否自然导向研究目标，章节之间是否重复，来源状态是否一致，篇幅是否符合阶段5预算。"
         ),
         "task_prompt": "逐章、逐研究问题和逐质量维度检查，只有没有实质问题时才允许进入阶段6B。",
@@ -424,9 +447,8 @@ def init_cmd(args: argparse.Namespace) -> None:
     }
     values = {k: read_json(p) for k, p in paths.items()}
     stage5 = values["stage5"]
-    batch = next(b for b in stage5["draft_batches"] if b["batch_id"] == BATCH_ID)
-    if batch["section_ids"] != SECTION_IDS:
-        raise SystemExit("stage5 batch 6A section IDs mismatch")
+    batch = batch_spec(stage5, BATCH_ID, DEFAULT_SECTION_IDS)
+    configure_section_ids(stage5=stage5)
     hashes = {k: sha256_file(p) for k, p in paths.items()}
     for key, p in paths.items():
         atomic_json(run_dir / "source_snapshots" / f"{key}_{p.name}", values[key])
@@ -448,6 +470,7 @@ def init_cmd(args: argparse.Namespace) -> None:
 
 def ingest_writer_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve(); sid = args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid)
     set_contract_trace_context(run_dir, "ingest_writer_cmd")
     response = read_json(Path(args.response_file).resolve())
     errors = validate_schema(response, load_schema("section_draft.schema.json"))
@@ -479,6 +502,7 @@ def ingest_writer_cmd(args: argparse.Namespace) -> None:
 
 def ingest_writer_repair_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve(); sid = args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid)
     set_contract_trace_context(run_dir, "ingest_writer_repair_cmd")
     response = read_json(Path(args.response_file).resolve())
     errors = validate_schema(response, load_schema("section_draft.schema.json"))
@@ -517,7 +541,8 @@ def ingest_writer_repair_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_critic_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); sid=args.section_id; response=read_json(Path(args.response_file).resolve())
+    run_dir=Path(args.run_dir).resolve(); sid=args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid); response=read_json(Path(args.response_file).resolve())
     set_contract_trace_context(run_dir, "ingest_critic_cmd")
     errors=validate_schema(response,load_schema("section_critic.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
@@ -532,7 +557,8 @@ def ingest_critic_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_polish_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); sid=args.section_id; response=read_json(Path(args.response_file).resolve())
+    run_dir=Path(args.run_dir).resolve(); sid=args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid); response=read_json(Path(args.response_file).resolve())
     set_contract_trace_context(run_dir, "ingest_polish_cmd")
     errors=validate_schema(response,load_schema("expression_polish.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
@@ -551,7 +577,8 @@ def ingest_polish_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_expression_critic_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); sid=args.section_id; response=read_json(Path(args.response_file).resolve())
+    run_dir=Path(args.run_dir).resolve(); sid=args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid); response=read_json(Path(args.response_file).resolve())
     set_contract_trace_context(run_dir, "ingest_expression_critic_cmd")
     errors=validate_schema(response,load_schema("expression_critic.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
@@ -572,7 +599,8 @@ def ingest_expression_critic_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_batch_critic_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); response=read_json(Path(args.response_file).resolve())
+    run_dir=Path(args.run_dir).resolve()
+    configure_section_ids(run_dir=run_dir); response=read_json(Path(args.response_file).resolve())
     set_contract_trace_context(run_dir, "ingest_batch_critic_cmd")
     errors=validate_schema(response,load_schema("batch_critic.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
@@ -580,14 +608,15 @@ def ingest_batch_critic_cmd(args: argparse.Namespace) -> None:
         raise SystemExit("batch critic did not accept")
     path=run_dir/"responses"/"021_stage6a_batch_critic.json"; atomic_json(path,response); atomic_json(run_dir/"quality"/"batch_integration_critic.json",response)
     append_event(run_dir,"MODEL_RESPONSE_INGESTED",response_file=str(path.relative_to(run_dir)),actual_model_id=response["actual_model_id"],endpoint_id=response["endpoint_id"])
-    gate={"schema_version":"1.0","gate_id":"stage6a-batch-confirmation-001","gate_type":"BATCH_DRAFT_CONFIRMATION","batch_id":BATCH_ID,"candidate_hashes":{sid:sha256_json(read_json(run_dir/"intermediate"/sid/"polished_candidate.json")) for sid in SECTION_IDS},"question":"是否确认阶段6A五章草稿作为后续阶段的冻结上游工件？","allowed_actions":["CONFIRM","REJECT"],"requested_at":utc_now()}
+    gate={"schema_version":"1.0","gate_id":"stage6a-batch-confirmation-001","gate_type":"BATCH_DRAFT_CONFIRMATION","batch_id":BATCH_ID,"candidate_hashes":{sid:sha256_json(read_json(run_dir/"intermediate"/sid/"polished_candidate.json")) for sid in SECTION_IDS},"question":f"是否确认{BATCH_ID}的{len(SECTION_IDS)}章草稿作为后续阶段的冻结上游工件？","allowed_actions":["CONFIRM","REJECT"],"requested_at":utc_now()}
     atomic_json(run_dir/"human_gate"/"stage6a_gate_request.json",gate); append_event(run_dir,"HUMAN_GATE_REQUESTED",gate_id=gate["gate_id"])
     set_state(run_dir,"WAITING_GATE","BATCH_DRAFT_CONFIRMATION",completed_section_ids=SECTION_IDS)
 
 
 def build_outputs(run_dir: Path) -> dict[str, Any]:
     stage5=read_json(run_dir/"source_snapshots"/"stage5_section_plan.json")
-    sections=[]; combined=["# 人机协同决策优势冲刺关键技术研究（阶段6A草稿）",""]
+    title=resolve_project_title(stage5, read_json(run_dir/"source_snapshots"/"stage3_project_definition.json"), read_json(run_dir/"source_snapshots"/"stage1_design_input.json"))
+    sections=[]; combined=[f"# {title}（阶段6A草稿）",""]
     for sid in SECTION_IDS:
         c=read_json(run_dir/"intermediate"/sid/"polished_candidate.json")
         md=canonical_markdown(c["section_name"],c)
@@ -598,7 +627,8 @@ def build_outputs(run_dir: Path) -> dict[str, Any]:
         atomic_json(run_dir/"outputs"/f"{sid}_{c['section_name']}.json",record)
         combined += [md.rstrip(),""]
     total_chars=sum(x["effective_char_count"] for x in sections)
-    result={"schema_version":"1.0","stage":STAGE,"batch_id":BATCH_ID,"project_title":"人机协同决策优势冲刺关键技术研究","sections":sections,"total_effective_char_count":total_chars,"target_pages":5.4,"max_pages":6.4,"readiness":{"ready_for_stage6b":True,"ready_for_final_submission":False,"next_stage":"STAGE_6B_PROVISIONAL_DRAFTING"},"open_items_inherited":read_json(run_dir/"source_snapshots"/"stage4a_evidence_completion.json")["open_items_remaining"],"completed_at":utc_now()}
+    target_pages, max_pages = page_totals(stage5, SECTION_IDS)
+    result={"schema_version":"1.0","stage":STAGE,"batch_id":BATCH_ID,"project_title":title,"sections":sections,"total_effective_char_count":total_chars,"target_pages":target_pages,"max_pages":max_pages,"readiness":{"ready_for_stage6b":True,"ready_for_final_submission":False,"next_stage":"STAGE_6B_PROVISIONAL_DRAFTING"},"open_items_inherited":read_json(run_dir/"source_snapshots"/"stage4a_evidence_completion.json")["open_items_remaining"],"completed_at":utc_now()}
     atomic_text(run_dir/"outputs"/"stage6a_batch_draft.md","\n".join(combined).rstrip()+"\n"); atomic_json(run_dir/"outputs"/"stage6a_batch_draft.json",result)
     with (run_dir/"outputs"/"stage6a_section_summary.csv").open("w",encoding="utf-8-sig",newline="") as f:
         w=csv.DictWriter(f,fieldnames=["section_id","section_name","effective_char_count","target_pages","max_pages","candidate_hash"]); w.writeheader(); w.writerows([{k:x[k] for k in w.fieldnames} for x in sections])
@@ -622,7 +652,8 @@ def manifest_and_zip(run_dir: Path) -> tuple[Path, dict[str, Any]]:
 
 
 def finalize_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); gate=read_json(Path(args.gate_response).resolve())
+    run_dir=Path(args.run_dir).resolve()
+    configure_section_ids(run_dir=run_dir); gate=read_json(Path(args.gate_response).resolve())
     request=read_json(run_dir/"human_gate"/"stage6a_gate_request.json")
     if gate.get("gate_id")!=request["gate_id"] or gate.get("action")!="CONFIRM": raise SystemExit("gate mismatch")
     atomic_json(run_dir/"human_gate"/"stage6a_gate_response.json",gate); append_event(run_dir,"HUMAN_GATE_CONSUMED",gate_id=gate["gate_id"],action=gate["action"])
@@ -653,7 +684,7 @@ def main() -> None:
     ap=argparse.ArgumentParser(); subs=ap.add_subparsers(dest="cmd",required=True)
     p=subs.add_parser("init"); p.add_argument("--run-dir",required=True); p.add_argument("--design-input",required=True); p.add_argument("--project-definition",required=True); p.add_argument("--argument-architecture",required=True); p.add_argument("--evidence-completion",required=True); p.add_argument("--section-plan",required=True); p.set_defaults(fn=init_cmd)
     for name,fn in [("ingest-writer",ingest_writer_cmd),("ingest-writer-repair",ingest_writer_repair_cmd),("ingest-critic",ingest_critic_cmd),("ingest-polish",ingest_polish_cmd),("ingest-expression-critic",ingest_expression_critic_cmd)]:
-        p=subs.add_parser(name); p.add_argument("--run-dir",required=True); p.add_argument("--section-id",required=True,choices=SECTION_IDS); p.add_argument("--response-file",required=True); p.set_defaults(fn=fn)
+        p=subs.add_parser(name); p.add_argument("--run-dir",required=True); p.add_argument("--section-id",required=True); p.add_argument("--response-file",required=True); p.set_defaults(fn=fn)
     p=subs.add_parser("ingest-batch-critic"); p.add_argument("--run-dir",required=True); p.add_argument("--response-file",required=True); p.set_defaults(fn=ingest_batch_critic_cmd)
     p=subs.add_parser("finalize"); p.add_argument("--run-dir",required=True); p.add_argument("--gate-response",required=True); p.set_defaults(fn=finalize_cmd)
     p=subs.add_parser("validate"); p.add_argument("--run-dir",required=True); p.set_defaults(fn=validate_cmd)

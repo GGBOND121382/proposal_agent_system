@@ -4,13 +4,16 @@ import asyncio
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
 from .security import Route
 from .simulated_llm import SimulatedLLM
+
+
+JSON_PARSER_VERSION = "2026-07-29.v1-audited-local-repairs"
 
 
 class LLMError(RuntimeError):
@@ -23,9 +26,17 @@ class LLMResult:
     raw_text: str
     model_id: str
     endpoint_id: str
+    parse_report: dict[str, Any] = field(default_factory=dict)
+    response_contract_mode: str = "UNSPECIFIED"
+    provider_attempts: int = 1
+    fallback_reason: str | None = None
 
 
-def _loads_with_local_json_repairs(candidate: str) -> Any:
+def _loads_with_local_json_repairs(
+    candidate: str,
+    *,
+    repair_log: list[dict[str, Any]] | None = None,
+) -> Any:
     """Repair a bounded set of local JSON punctuation errors.
 
     MiniMax occasionally emits an otherwise complete JSON object with a missing
@@ -44,10 +55,12 @@ def _loads_with_local_json_repairs(candidate: str) -> Any:
         except json.JSONDecodeError as exc:
             pos = exc.pos
             changed = False
+            repair_kind = ""
             if exc.msg == "Expecting ',' delimiter" and pos < len(repaired):
                 if repaired[pos] == '"':
                     repaired = repaired[:pos] + "," + repaired[pos:]
                     changed = True
+                    repair_kind = "INSERT_MISSING_COMMA"
                 elif repaired[pos] in "[{":
                     # A common long-response failure is two complete array/object
                     # members emitted back-to-back: `}{` or `][`.  The parser
@@ -61,6 +74,7 @@ def _loads_with_local_json_repairs(candidate: str) -> Any:
                     ):
                         repaired = repaired[:pos] + "," + repaired[pos:]
                         changed = True
+                        repair_kind = "INSERT_MISSING_COMMA"
                 elif re.match(r"[-0-9tfn]", repaired[pos]):
                     # Likewise recover a missing comma before a scalar value,
                     # without attempting to synthesize or close any value.
@@ -73,6 +87,7 @@ def _loads_with_local_json_repairs(candidate: str) -> Any:
                     ):
                         repaired = repaired[:pos] + "," + repaired[pos:]
                         changed = True
+                        repair_kind = "INSERT_MISSING_COMMA"
                 else:
                     quote = pos - 1
                     while quote >= 0 and repaired[quote].isspace():
@@ -80,6 +95,7 @@ def _loads_with_local_json_repairs(candidate: str) -> Any:
                     if quote >= 0 and repaired[quote] == '"':
                         repaired = repaired[:quote] + '\\"' + repaired[quote + 1 :]
                         changed = True
+                        repair_kind = "ESCAPE_STRING_QUOTE"
             elif exc.msg.startswith("Invalid control character") and pos < len(repaired):
                 replacement = {
                     "\n": "\\n",
@@ -89,6 +105,7 @@ def _loads_with_local_json_repairs(candidate: str) -> Any:
                 if replacement:
                     repaired = repaired[:pos] + replacement + repaired[pos + 1 :]
                     changed = True
+                    repair_kind = "ESCAPE_CONTROL_CHARACTER"
             elif exc.msg == "Expecting property name enclosed in double quotes" and pos < len(repaired):
                 if repaired[pos] in "}]":
                     comma = pos - 1
@@ -97,9 +114,11 @@ def _loads_with_local_json_repairs(candidate: str) -> Any:
                     if comma >= 0 and repaired[comma] == ",":
                         repaired = repaired[:comma] + repaired[comma + 1 :]
                         changed = True
+                        repair_kind = "REMOVE_TRAILING_OR_DUPLICATE_COMMA"
                 elif repaired[pos] == ",":
                     repaired = repaired[:pos] + repaired[pos + 1 :]
                     changed = True
+                    repair_kind = "REMOVE_DUPLICATE_COMMA"
                 elif repaired[pos] == "'":
                     closing = repaired.find("'", pos + 1)
                     colon = repaired.find(":", pos + 1)
@@ -112,6 +131,7 @@ def _loads_with_local_json_repairs(candidate: str) -> Any:
                             + repaired[closing + 1 :]
                         )
                         changed = True
+                        repair_kind = "QUOTE_PROPERTY_NAME"
                 elif re.match(r"[A-Za-z_]", repaired[pos]):
                     colon = repaired.find(":", pos + 1)
                     if colon > pos:
@@ -119,6 +139,7 @@ def _loads_with_local_json_repairs(candidate: str) -> Any:
                         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", key):
                             repaired = repaired[:pos] + json.dumps(key) + repaired[colon:]
                             changed = True
+                            repair_kind = "QUOTE_PROPERTY_NAME"
             elif exc.msg == "Expecting value" and pos < len(repaired):
                 if repaired[pos] in "]}":
                     comma = pos - 1
@@ -127,31 +148,65 @@ def _loads_with_local_json_repairs(candidate: str) -> Any:
                     if comma >= 0 and repaired[comma] == ",":
                         repaired = repaired[:comma] + repaired[comma + 1 :]
                         changed = True
+                        repair_kind = "REMOVE_TRAILING_OR_DUPLICATE_COMMA"
+            if changed and repair_log is not None:
+                repair_log.append(
+                    {
+                        "kind": repair_kind or "LOCAL_JSON_PUNCTUATION_REPAIR",
+                        "position": pos,
+                        "parser_error": exc.msg,
+                    }
+                )
             if not changed:
                 raise
     raise json.JSONDecodeError("local JSON repair limit exceeded", repaired, 0)
 
 
-def _extract_json(text: str) -> dict[str, Any]:
+def _extract_json_with_report(text: str) -> tuple[dict[str, Any], dict[str, Any]]:
     stripped = text.strip()
+    code_fence_removed = False
     if stripped.startswith("```"):
+        code_fence_removed = True
         stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.I)
         stripped = re.sub(r"\s*```$", "", stripped)
     try:
         value = json.loads(stripped)
+        report = {
+            "mode": "STRICT_JSON",
+            "repair_count": 0,
+            "repairs": [],
+            "code_fence_removed": code_fence_removed,
+            "surrounding_text_removed": False,
+        }
     except json.JSONDecodeError:
         start = stripped.find("{")
         end = stripped.rfind("}")
         if start < 0 or end <= start:
             raise LLMError("Model response does not contain a JSON object")
+        repairs: list[dict[str, Any]] = []
         try:
-            value = _loads_with_local_json_repairs(stripped[start : end + 1])
+            value = _loads_with_local_json_repairs(
+                stripped[start : end + 1],
+                repair_log=repairs,
+            )
         except json.JSONDecodeError as exc:
             raise LLMError(
                 f"Model response contains malformed JSON at character {exc.pos}: {exc.msg}"
             ) from exc
+        report = {
+            "mode": "LOCALLY_REPAIRED_JSON" if repairs else "EXTRACTED_JSON",
+            "repair_count": len(repairs),
+            "repairs": repairs,
+            "code_fence_removed": code_fence_removed,
+            "surrounding_text_removed": start > 0 or end < len(stripped) - 1,
+        }
     if not isinstance(value, dict):
         raise LLMError("Model response JSON must be an object")
+    return value, report
+
+
+def _extract_json(text: str) -> dict[str, Any]:
+    value, _ = _extract_json_with_report(text)
     return value
 
 
@@ -167,12 +222,55 @@ class ModelGateway:
             output = self.pack.replay_output(prompt_id, "normal")
             if mode == "MOCK":
                 output.setdefault("warnings", []).append("MOCK模式：输出来自静态样例，不代表真实模型质量。")
-            return LLMResult(output=output, raw_text=json.dumps(output, ensure_ascii=False), model_id=f"{mode.lower()}-provider", endpoint_id="local-static")
+            return LLMResult(
+                output=output,
+                raw_text=json.dumps(output, ensure_ascii=False),
+                model_id=f"{mode.lower()}-provider",
+                endpoint_id="local-static",
+                response_contract_mode=f"{mode}_SCHEMA_REPLAY",
+            )
         if mode == "SIMULATED":
             output = self.simulator.invoke(prompt_id, envelope)
             output.setdefault("warnings", []).append("SIMULATED模式：输出由本地确定性智能体模拟器生成，用于端到端测试与审计。")
-            return LLMResult(output=output, raw_text=json.dumps(output, ensure_ascii=False), model_id="simulated-provider", endpoint_id="local-simulated")
+            return LLMResult(
+                output=output,
+                raw_text=json.dumps(output, ensure_ascii=False),
+                model_id="simulated-provider",
+                endpoint_id="local-simulated",
+                response_contract_mode="SIMULATED_SCHEMA_OUTPUT",
+            )
         return await self._invoke_live(route, prompt_id, system_prompt, envelope, output_schema)
+
+    @staticmethod
+    def _is_structured_output_rejection(status_code: int, body: str) -> bool:
+        """Return whether an endpoint rejected the structured-output feature.
+
+        Do not silently downgrade on unrelated 4xx errors.  In particular, a
+        404 usually means the endpoint path/model is wrong and retrying with a
+        weaker response format only hides the real configuration problem.
+        """
+        if status_code not in {400, 422}:
+            return False
+        text = str(body or "").lower()
+        feature_tokens = (
+            "response_format",
+            "json_schema",
+            "json schema",
+            "structured output",
+            "structured_outputs",
+        )
+        rejection_tokens = (
+            "unsupported",
+            "not support",
+            "unknown",
+            "unrecognized",
+            "invalid parameter",
+            "invalid request",
+            "not allowed",
+        )
+        return any(token in text for token in feature_tokens) and any(
+            token in text for token in rejection_tokens
+        )
 
     async def _invoke_live(self, route: Route, prompt_id: str, system_prompt: str, envelope: dict[str, Any], output_schema: dict[str, Any]) -> LLMResult:
         endpoint = route.endpoint
@@ -207,7 +305,11 @@ class ModelGateway:
 
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
         is_minimax = self._is_minimax(base_url, route.provider_model_name)
+        response_contract_mode = "JSON_SCHEMA_STRICT"
+        fallback_reason: str | None = None
+        provider_attempts = 0
         if is_minimax:
+            response_contract_mode = "JSON_OBJECT_MINIMAX"
             request["response_format"] = {"type": "json_object"}
             request["reasoning_split"] = True
             request["stream"] = True
@@ -217,6 +319,7 @@ class ModelGateway:
                     if is_minimax:
                         try:
                             async with asyncio.timeout(self.settings.request_timeout_seconds):
+                                provider_attempts += 1
                                 content = await self._stream_chat_completion(
                                     client,
                                     f"{base_url}/chat/completions",
@@ -228,7 +331,7 @@ class ModelGateway:
                                 f"LLM stream exceeded the total timeout of {self.settings.request_timeout_seconds} seconds"
                             ) from exc
                         try:
-                            output = _extract_json(content)
+                            output, parse_report = _extract_json_with_report(content)
                         except LLMError as exc:
                             if attempt < 2:
                                 await asyncio.sleep(2 ** attempt)
@@ -241,12 +344,36 @@ class ModelGateway:
                             raw_text=content,
                             model_id=route.model_id,
                             endpoint_id=route.endpoint_id,
+                            parse_report=parse_report,
+                            response_contract_mode=response_contract_mode,
+                            provider_attempts=provider_attempts,
+                            fallback_reason=fallback_reason,
                         )
 
-                    response = await client.post(f"{base_url}/chat/completions", headers=headers, json=request)
-                    if response.status_code >= 400 and response.status_code in {400, 404, 422}:
-                        request["response_format"] = {"type": "json_object"}
-                        response = await client.post(f"{base_url}/chat/completions", headers=headers, json=request)
+                    provider_attempts += 1
+                    response = await client.post(
+                        f"{base_url}/chat/completions",
+                        headers=headers,
+                        json=request,
+                    )
+                    if response.status_code >= 400:
+                        first_error_body = response.text[:1000]
+                        if self._is_structured_output_rejection(
+                            response.status_code,
+                            first_error_body,
+                        ):
+                            request["response_format"] = {"type": "json_object"}
+                            response_contract_mode = "JSON_OBJECT_FALLBACK"
+                            fallback_reason = (
+                                f"provider rejected json_schema with HTTP {response.status_code}: "
+                                + first_error_body
+                            )[:1200]
+                            provider_attempts += 1
+                            response = await client.post(
+                                f"{base_url}/chat/completions",
+                                headers=headers,
+                                json=request,
+                            )
                     try:
                         response.raise_for_status()
                     except httpx.HTTPStatusError as exc:
@@ -271,8 +398,17 @@ class ModelGateway:
             raise LLMError("Invalid OpenAI-compatible response structure") from exc
         if isinstance(content, list):
             content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-        output = _extract_json(str(content))
-        return LLMResult(output=output, raw_text=str(content), model_id=route.model_id, endpoint_id=route.endpoint_id)
+        output, parse_report = _extract_json_with_report(str(content))
+        return LLMResult(
+            output=output,
+            raw_text=str(content),
+            model_id=route.model_id,
+            endpoint_id=route.endpoint_id,
+            parse_report=parse_report,
+            response_contract_mode=response_contract_mode,
+            provider_attempts=provider_attempts,
+            fallback_reason=fallback_reason,
+        )
 
     @staticmethod
     def _is_minimax(base_url: str, provider_model_name: str) -> bool:

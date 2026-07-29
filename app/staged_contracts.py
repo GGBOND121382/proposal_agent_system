@@ -11,7 +11,10 @@ from typing import Any, Mapping
 from .contract_registry import (
     CONTRACT_REGISTRY_VERSION,
     augment_prompt_with_enum_contract,
+    augment_prompt_with_field_ownership_contract,
     normalize_against_schema,
+    repair_field_ownership_against_schema,
+    required_null_container_errors,
 )
 
 _TRACE_DIR: Path | None = None
@@ -98,21 +101,75 @@ def prepare_staged_artifact(path: str | Path, value: Any) -> Any:
         return value
     prepared = copy.deepcopy(value)
     contract_id = f"staged-request:{prepared.get('prompt_id') or target.stem}:output"
-    prepared["system_prompt"] = augment_prompt_with_enum_contract(
+    prepared_prompt = augment_prompt_with_enum_contract(
         system_prompt, output_schema, contract_id=contract_id
     )
-    prepared.setdefault("model_contract", {})["enum_contract_registry_version"] = CONTRACT_REGISTRY_VERSION
+    prepared["system_prompt"] = augment_prompt_with_field_ownership_contract(
+        prepared_prompt,
+        output_schema,
+        contract_id=f"{contract_id}:field-ownership",
+    )
+    model_contract = prepared.setdefault("model_contract", {})
+    model_contract["enum_contract_registry_version"] = CONTRACT_REGISTRY_VERSION
+    model_contract["field_ownership_contract_registry_version"] = CONTRACT_REGISTRY_VERSION
     return prepared
 
 def normalize_in_place(value: Any, schema: Mapping[str, Any], *, contract_id: str) -> dict[str, Any]:
-    """Normalize registered enum drift and mutate ``value`` in place.
+    """Apply the shared output-contract gateway to a staged model object.
 
-    Mutation keeps existing staged scripts backward compatible because their
-    validators and downstream deterministic checks continue to operate on the
-    same object reference.  Unknown values are retained for strict validation.
+    Required null containers remain untouched so the stage's strict validator
+    rejects the omission.  Registered enum aliases and unique ancestor-chain
+    field ownership drift are repaired deterministically and traced.
     """
     raw = copy.deepcopy(value)
-    normalized, report = normalize_against_schema(value, schema, contract_id=contract_id)
+    null_errors = required_null_container_errors(value, schema)
+    if null_errors:
+        normalized = copy.deepcopy(value)
+        report: dict[str, Any] = {
+            "schema_version": "1.0",
+            "normalizer_version": CONTRACT_REGISTRY_VERSION,
+            "contract_id": contract_id,
+            "normalized_count": 0,
+            "changes": [],
+            "unresolved_count": len(null_errors),
+            "unresolved": [
+                {
+                    "path": error.split(":", 1)[0],
+                    "field": "",
+                    "value": None,
+                    "allowed_values": ["object", "array"],
+                    "reason": error,
+                }
+                for error in null_errors
+            ],
+            "required_null_errors": null_errors,
+        }
+    else:
+        normalized, enum_report = normalize_against_schema(
+            value,
+            schema,
+            contract_id=contract_id,
+        )
+        normalized, ownership_report = repair_field_ownership_against_schema(
+            normalized,
+            schema,
+            contract_id=f"{contract_id}:field-ownership",
+        )
+        enum_changes = list(enum_report.get("changes") or [])
+        ownership_changes = list(ownership_report.get("changes") or [])
+        enum_unresolved = list(enum_report.get("unresolved") or [])
+        ownership_unresolved = list(ownership_report.get("unresolved") or [])
+        report = {
+            "schema_version": "1.0",
+            "normalizer_version": CONTRACT_REGISTRY_VERSION,
+            "contract_id": contract_id,
+            "normalized_count": len(enum_changes) + len(ownership_changes),
+            "changes": enum_changes + ownership_changes,
+            "unresolved_count": len(enum_unresolved) + len(ownership_unresolved),
+            "unresolved": enum_unresolved + ownership_unresolved,
+            "enum_report": enum_report,
+            "field_ownership_report": ownership_report,
+        }
     if isinstance(value, dict) and isinstance(normalized, dict):
         value.clear()
         value.update(normalized)
@@ -120,3 +177,4 @@ def normalize_in_place(value: Any, schema: Mapping[str, Any], *, contract_id: st
         value[:] = normalized
     _write_trace(raw, normalized, report)
     return report
+

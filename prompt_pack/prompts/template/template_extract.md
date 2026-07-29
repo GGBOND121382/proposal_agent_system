@@ -2,7 +2,7 @@
 
 ## 元数据
 
-- 版本：`3.0.0`
+- 版本：`3.0.1`
 - 执行角色：`Template Agent`
 - 执行环境：`OFFLINE_LOCAL`
 - 模型配置：`extraction`
@@ -39,7 +39,7 @@
 
 ## 专用规则
 
-- 版本：`3.0.0`
+- 版本：`3.0.1`
 - 角色：`Template & Exemplars Analyst`
 
 你的输出不是目录抄录。你只学习优秀范例的章节功能、论证推进和表达方式，绝不引入范例事实。
@@ -51,7 +51,10 @@
 3. 提取至少三种 `expression_patterns`：问题收束、证据转折、创新对比、方法可行性、段落衔接等；例句必须去实体化并注明禁止复制。
 4. 提取至少五种 `quality_anti_patterns`：背景铺陈过长、技术名词堆叠、系统说明替代研究、指标无基线、重复六段式、虚假研究基础等。
 5. 明确哪些主题只能进入附件。
-6. 参考申请书中的名称、数字、成果、方法和指标全部列入排除项。
+6. 参考申请书中的名称、数字、成果、方法和指标全部列入
+   `result.source_fact_exclusions`。该字段必须与 `result.template` 同级，
+   严禁放入 `result.template.source_fact_exclusions`；`result.template` 只能
+   包含Schema列出的模板结构、论证模式、表达模式和反模式字段。
 
 只返回符合输出Schema的JSON。
 
@@ -87,4 +90,4 @@ Finding必须包含严重级别、类别、目标对象与路径、具体证据�
 
 ## 输出要求
 
-只返回符合 `schemas/prompts/template_extract_output.schema.json` 的JSON对象。`prompt_id`必须为`P-TEMPLATE-EXTRACT`，`prompt_version`必须为`3.0.0`。不得输出Markdown代码块、解释文字或Schema之外的字段。
+只返回符合 `schemas/prompts/template_extract_output.schema.json` 的JSON对象。`prompt_id`必须为`P-TEMPLATE-EXTRACT`，`prompt_version`必须为`3.0.1`。不得输出Markdown代码块、解释文字或Schema之外的字段。

@@ -1,5 +1,17 @@
 # 项目申请书智能体系统
 
+
+<!-- BEGIN GENERATED BUILD STATS -->
+## 当前构建统计
+
+- 产品版本：`0.6.0`；
+- Prompt 注册项：30；
+- Prompt Pack Schema：89；Stage Schema：34；
+- Replay 用例：150；
+- pytest 收集用例：395。
+
+以上统计由 `scripts/sync_project_metadata.py` 从代码与测试自动生成；历史版本章节中的旧数字仅描述当时版本。
+<!-- END GENERATED BUILD STATS -->
 本项目把附件 `proposal_prompt_pack_v2` 从静态 Prompt 交接包落成一个可运行的多智能体系统。运行时动态读取 30 个 Prompt、60 个Prompt专用输入/输出 Schema、模型路由与安全策略，不在业务代码中复制 Prompt 正文。
 
 ## 已实现
@@ -107,7 +119,7 @@ python scripts/run_outdoor_thermos_simulated_e2e.py \
   --output-dir data/outdoor_thermos_simulated_e2e
 ```
 
-该脚本以 REPLAY 模型边界运行五条工作流和十二章逐章编制，用于验证编排、门禁、候选聚合和导出。隐私替换与在线调用阻断由自动化测试覆盖；本脚本不等同于真实大模型语义能力测评。
+该脚本以 REPLAY 模型边界运行五条工作流和模板定义的全部章节逐章编制，用于验证编排、门禁、候选聚合和导出。隐私替换与在线调用阻断由自动化测试覆盖；本脚本不等同于真实大模型语义能力测评。
 
 ## v0.2.0 完整申请书编制修复
 
@@ -248,17 +260,17 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 bash scripts/validate.sh
 ```
 
-当前自动测试共19项，覆盖：
+当前 pytest 收集用例共395项，覆盖：
 
-- 26 个 Prompt 的正常 Replay 输入/输出；
+- 30 个已注册 Prompt 的正常 Replay 输入/输出；
 - 材料解析与 Context Builder；
 - 未审批在线调用阻断；
 - 在线任务包确定性脱敏与调用前个人信息阻断；
 - 工作流门禁暂停；
 - 五条工作流完整运行；
 - 多章节逐章生成、真实候选聚合和终审输入；
-- 十二章模拟模型端到端申请书生成；
-- 41章复杂申请书、26/26 Prompt覆盖和定向修复闭环；
+- 模板定义章节的模拟模型端到端申请书生成；
+- 复杂申请书、全部已注册 Prompt 覆盖和定向修复闭环；
 - 全量System Prompt、输入、输出Schema、原始响应和路由Trace；
 - 公开证据进入写作上下文、参考文献与图形工件导出；
 - Research Agent 原始查询覆盖、39个公开来源快照和哈希复核；

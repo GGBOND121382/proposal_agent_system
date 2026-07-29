@@ -94,14 +94,14 @@ def make_generator_request(inputs: dict[str, Any], hashes: dict[str, str]) -> di
         },
         "system_prompt": (
             "你是阶段5可逆章节规划Agent。只能规划章节、页数、章节生成合同、图表和分批写作顺序，不得生成正文。"
-            "必须严格继承阶段1的14个一级章节名称、顺序和页数预算，正文计划页数控制在14至18页，硬上限20页。"
+            "必须严格继承阶段1冻结的一级章节名称、顺序和页数预算；目标页数区间与硬上限均以阶段1 document_contract 为准。"
             "规划必须覆盖阶段4的中心命题、三个研究问题、研究内容、方法、实验、指标、创新假设与研究基础，并使用阶段4A的公开来源和证据边界。"
             "正式指南和模板尚未提供，因此所有章节合同均为可逆合同，收到指南、模板、团队证明或场景基线后必须重新校验。"
             "不得把暂定指标写成实测结果，不得把用户陈述或内部Trace写成正式验收成果，不得宣称绝对首创。"
-            "创新章必须同时绑定最近工作和新增机制；结论章必须逐一回答RQ-1至RQ-3、回扣中心命题和三项创新假设。"
+            "承担创新比较职责的章节必须同时绑定最近工作和新增机制；承担结论职责的章节必须回答全部冻结研究问题并回扣中心命题。"
         ),
         "task_prompt": (
-            "生成14章可逆内容计划。对每章给出职责、必须回答的问题、必须包含和禁止声称的内容、引用的论证节点/来源/指标、"
+            f"生成{len(inputs['stage1_design_input']['page_budget'])}章可逆内容计划。对每章给出职责、必须回答的问题、必须包含和禁止声称的内容、引用的论证节点/来源/指标、"
             "子节和段落角色、目标页数与最大页数、预计字数及图表。制定4个正文批次STAGE-6A至STAGE-6D，确保依赖顺序清晰。"
             "给出跨章闭环控制和重新验证触发条件。只允许放行STAGE_6A_PROVISIONAL_DRAFTING，不允许放行最终提交。"
         ),
@@ -163,7 +163,7 @@ def make_critic_request(candidate: dict[str, Any], report: dict[str, Any]) -> di
             "创新章与结论章是否闭环、研究基础和指标是否越界、图表是否服务论证、分批依赖是否合理，"
             "以及规划是否保持可逆并保留重新验证条件。不得因正式模板缺失而否定可逆内容规划。"
         ),
-        "task_prompt": "逐一检查14个章节、全部图表、4个批次和7项质量维度。",
+        "task_prompt": f"逐一检查{len(candidate['sections'])}个章节、全部图表、全部批次和质量维度。",
         "input_envelope": {"candidate": candidate, "deterministic_report": report},
         "output_schema": load_schema("section_plan_critic.schema.json"),
         "requested_at": utc_now(),
@@ -198,11 +198,11 @@ def deterministic_validate(candidate: Any, stage1: dict[str, Any], stage3: dict[
     expected_budget = {x["section_id"]: x for x in stage1["page_budget"]}
     sections = candidate["sections"]
     section_ids = [x["section_id"] for x in sections]
-    expected_ids = [f"SEC-{i:02d}" for i in range(1, 15)]
+    expected_ids = [x["section_id"] for x in stage1["page_budget"]]
     if section_ids != expected_ids:
-        add("SECTION_SEQUENCE_MISMATCH", "BLOCKING", "必须按SEC-01至SEC-14顺序覆盖14个章节。")
-    if [x["order"] for x in sections] != list(range(1, 15)):
-        add("SECTION_ORDER_MISMATCH", "BLOCKING", "章节order必须为1至14。")
+        add("SECTION_SEQUENCE_MISMATCH", "BLOCKING", f"章节必须按阶段1冻结顺序覆盖：{expected_ids}。")
+    if [x["order"] for x in sections] != list(range(1, len(expected_ids) + 1)):
+        add("SECTION_ORDER_MISMATCH", "BLOCKING", f"章节order必须为1至{len(expected_ids)}。")
 
     node_ids = {x["node_id"] for x in stage4["nodes"]}
     node_ids.add(stage4["central_proposition"]["node_id"])
@@ -234,7 +234,8 @@ def deterministic_validate(candidate: Any, stage1: dict[str, Any], stage3: dict[
         unknown_sources = set(sec["required_source_ids"]) - source_ids
         if unknown_sources:
             add("SECTION_UNKNOWN_SOURCE", "BLOCKING", f"{sid}引用未知来源{sorted(unknown_sources)}。")
-        if set(sec["required_metric_ids"]) - {f"MET-{i}" for i in range(1, 9)}:
+        valid_metric_ids = {x["metric_id"] for x in stage4a.get("metric_justification", [])}
+        if set(sec["required_metric_ids"]) - valid_metric_ids:
             add("SECTION_UNKNOWN_METRIC", "BLOCKING", f"{sid}引用未知指标。")
         if set(sec["visual_ids"]) - visual_ids:
             add("SECTION_UNKNOWN_VISUAL", "BLOCKING", f"{sid}引用未知图表。")
@@ -248,11 +249,14 @@ def deterministic_validate(candidate: Any, stage1: dict[str, Any], stage3: dict[
         max_sum += float(sec["max_pages"])
 
     contract = candidate["document_contract"]
-    if abs(target_sum - 16.9) > 1e-9 or abs(float(contract["planned_body_pages"]) - target_sum) > 1e-9:
-        add("TARGET_PAGE_TOTAL_MISMATCH", "BLOCKING", f"目标正文页数应为16.9，当前为{target_sum:.2f}。")
-    if abs(max_sum - 20.0) > 1e-9 or abs(float(contract["max_body_pages"]) - max_sum) > 1e-9:
-        add("MAX_PAGE_TOTAL_MISMATCH", "BLOCKING", f"最大正文页数应为20，当前为{max_sum:.2f}。")
-    if contract["body_page_limit"] != 20 or not contract["references_outside_body_limit"]:
+    expected_target_sum = sum(float(x["target_pages"]) for x in stage1["page_budget"])
+    expected_max_sum = sum(float(x["max_pages"]) for x in stage1["page_budget"])
+    stage1_contract = stage1["document_contract"]
+    if abs(target_sum - expected_target_sum) > 1e-9 or abs(float(contract["planned_body_pages"]) - target_sum) > 1e-9:
+        add("TARGET_PAGE_TOTAL_MISMATCH", "BLOCKING", f"目标正文页数应为{expected_target_sum:.2f}，当前为{target_sum:.2f}。")
+    if abs(max_sum - expected_max_sum) > 1e-9 or abs(float(contract["max_body_pages"]) - max_sum) > 1e-9:
+        add("MAX_PAGE_TOTAL_MISMATCH", "BLOCKING", f"最大正文页数应为{expected_max_sum:.2f}，当前为{max_sum:.2f}。")
+    if contract["body_page_limit"] != stage1_contract["body_page_limit"] or contract["references_outside_body_limit"] != stage1_contract["references_outside_body_limit"]:
         add("DOCUMENT_LIMIT_DRIFT", "BLOCKING", "正文硬上限或参考文献计页规则改变。")
 
     visuals = candidate["visual_plan"]
@@ -266,26 +270,40 @@ def deterministic_validate(candidate: Any, stage1: dict[str, Any], stage3: dict[
         if set(vis["required_node_ids"]) - node_ids:
             add("VISUAL_UNKNOWN_NODE", "BLOCKING", f"{vis['visual_id']}引用未知节点。")
 
-    required_specific = {
-        "SEC-03": {"PRIOR-1", "PRIOR-2", "PRIOR-3"},
-        "SEC-05": {"CP-1", "RQ-1", "RQ-2", "RQ-3"},
-        "SEC-06": {"RC-1", "RC-2", "RC-3", "RC-4", "WP-1", "WP-2", "WP-3", "WP-4", "WP-5"},
-        "SEC-09": {"PRIOR-1", "PRIOR-2", "PRIOR-3", "INNO-H1", "INNO-H2", "INNO-H3"},
-        "SEC-10": {f"MET-{i}" for i in range(1, 9)},
-        "SEC-11": {"FOUND-1", "FOUND-2", "FOUND-3"},
-        "SEC-14": {"CP-1", "RQ-1", "RQ-2", "RQ-3", "INNO-H1", "INNO-H2", "INNO-H3"},
-    }
-    for sid, required in required_specific.items():
-        missing = required - set(sec_map[sid]["required_node_ids"])
+    # Generic whole-document coverage is derived from frozen upstream contracts.
+    required_rq_ids = {x["node_id"] for x in stage4.get("research_questions", [])}
+    covered_rq_ids = {rq for sec in sections for rq in sec.get("required_rq_ids", [])}
+    for rq in sorted(required_rq_ids - covered_rq_ids):
+        add("RESEARCH_QUESTION_UNCOVERED", "BLOCKING", f"全文章节合同未覆盖研究问题{rq}。")
+    central_id = stage4.get("central_proposition", {}).get("node_id")
+    if central_id and not any(central_id in sec.get("required_node_ids", []) for sec in sections):
+        add("CENTRAL_PROPOSITION_UNCOVERED", "BLOCKING", f"全文章节合同未覆盖中心命题{central_id}。")
+    valid_metric_ids = {x["metric_id"] for x in stage4a.get("metric_justification", [])}
+    covered_metric_ids = {metric for sec in sections for metric in sec.get("required_metric_ids", [])}
+    for metric in sorted(valid_metric_ids - covered_metric_ids):
+        add("METRIC_UNCOVERED", "BLOCKING", f"全文章节合同未覆盖指标{metric}。")
+    node_ids_by_type: dict[str, set[str]] = {}
+    for node in stage4.get("nodes", []):
+        node_ids_by_type.setdefault(str(node.get("node_type") or ""), set()).add(str(node.get("node_id")))
+    innovation_sections = [sec for sec in sections if "创新" in sec.get("section_name", "")]
+    innovation_required = node_ids_by_type.get("CLOSEST_PRIOR_WORK", set()) | node_ids_by_type.get("NOVEL_MECHANISM", set())
+    for sec in innovation_sections:
+        missing = innovation_required - set(sec.get("required_node_ids", []))
         if missing:
-            add("SECTION_REQUIRED_BINDING_MISSING", "BLOCKING", f"{sid}缺少冻结绑定{sorted(missing)}。")
+            add("SECTION_REQUIRED_BINDING_MISSING", "BLOCKING", f"{sec['section_id']}缺少创新比较绑定{sorted(missing)}。")
+    conclusion_sections = [sec for sec in sections if any(key in sec.get("section_name", "") for key in ("结论", "总结"))]
+    conclusion_required = ({central_id} if central_id else set()) | required_rq_ids | node_ids_by_type.get("NOVEL_MECHANISM", set())
+    for sec in conclusion_sections:
+        missing = conclusion_required - set(sec.get("required_node_ids", []))
+        if missing:
+            add("SECTION_REQUIRED_BINDING_MISSING", "BLOCKING", f"{sec['section_id']}缺少全文闭环绑定{sorted(missing)}。")
 
-    if set(sec_map["SEC-10"]["required_metric_ids"]) != {f"MET-{i}" for i in range(1, 9)}:
-        add("METRIC_SECTION_INCOMPLETE", "BLOCKING", "SEC-10必须完整覆盖MET-1至MET-8。")
-    if not sec_map["SEC-03"]["required_source_ids"]:
-        add("PRIOR_WORK_SOURCE_MISSING", "BLOCKING", "SEC-03必须绑定公开研究来源。")
-    if not sec_map["SEC-11"]["required_source_ids"]:
-        add("FOUNDATION_SOURCE_BOUNDARY_MISSING", "BLOCKING", "SEC-11必须绑定用户陈述或内部Trace来源以限定证明范围。")
+    related_sections = [sec for sec in sections if any(key in sec.get("section_name", "") for key in ("相关工作", "研究现状", "文献"))]
+    if related_sections and not any(sec.get("required_source_ids") for sec in related_sections):
+        add("PRIOR_WORK_SOURCE_MISSING", "BLOCKING", "承担相关工作职责的章节必须绑定公开研究来源。")
+    foundation_sections = [sec for sec in sections if "基础" in sec.get("section_name", "")]
+    if foundation_sections and not any(sec.get("required_source_ids") for sec in foundation_sections):
+        add("FOUNDATION_SOURCE_BOUNDARY_MISSING", "BLOCKING", "承担研究基础职责的章节必须绑定来源以限定证明范围。")
 
     batches = candidate["draft_batches"]
     batch_ids = [x["batch_id"] for x in batches]
@@ -293,17 +311,18 @@ def deterministic_validate(candidate: Any, stage1: dict[str, Any], stage3: dict[
         add("BATCH_SEQUENCE_MISMATCH", "BLOCKING", "正文批次必须依次为STAGE-6A至STAGE-6D。")
     flattened = [sid for batch in batches for sid in batch["section_ids"]]
     if sorted(flattened) != sorted(expected_ids) or len(flattened) != len(set(flattened)):
-        add("BATCH_SECTION_PARTITION_INVALID", "BLOCKING", "四个批次必须无重叠完整划分14章。")
+        add("BATCH_SECTION_PARTITION_INVALID", "BLOCKING", f"正文批次必须无重叠完整划分全部{len(expected_ids)}章。")
     for batch in batches:
         expected_total = sum(sec_map[sid]["target_pages"] for sid in batch["section_ids"] if sid in sec_map)
         if abs(float(batch["total_target_pages"]) - float(expected_total)) > 1e-9:
             add("BATCH_PAGE_SUM_MISMATCH", "BLOCKING", f"{batch['batch_id']}页数合计不一致。")
 
     controls = candidate["cross_section_controls"]
-    if not {"SEC-01", "SEC-05", "SEC-14"}.issubset(set(controls["central_proposition_sections"])):
-        add("CENTRAL_PROPOSITION_CLOSURE_MISSING", "BLOCKING", "中心命题至少应在概览、问题目标和结论中闭环。")
-    for rq in ["RQ-1", "RQ-2", "RQ-3"]:
-        listed = set(controls["rq_coverage"][rq])
+    listed_cp = set(controls["central_proposition_sections"])
+    if not listed_cp or not listed_cp.issubset(set(expected_ids)):
+        add("CENTRAL_PROPOSITION_CLOSURE_MISSING", "BLOCKING", "中心命题跨章索引必须非空且只能引用已冻结章节。")
+    for rq in sorted(required_rq_ids):
+        listed = set(controls["rq_coverage"].get(rq, []))
         actual = {s["section_id"] for s in sections if rq in s["required_rq_ids"]}
         if listed != actual:
             add("RQ_COVERAGE_INDEX_MISMATCH", "BLOCKING", f"{rq}跨章索引与章节合同不一致。")

@@ -27,8 +27,9 @@ def test_track_b_repository_contract_covers_b1_to_b10():
 
 
 def test_production_runtime_enables_track_b_validator():
-    source = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
+    source = (ROOT / "app" / "runtime_factory.py").read_text(encoding="utf-8")
     assert "TrackBAgentPromptValidator(pack)" in source
+    assert "build_runtime_stack" in (ROOT / "app" / "main.py").read_text(encoding="utf-8")
 
 
 def test_b1_scheme_extrapolation_cannot_be_mandatory():

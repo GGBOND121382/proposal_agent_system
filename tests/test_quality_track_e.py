@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.db import Database
-from app.exporter import DocxExporter, ExportDenied
+from app.exporter import ExportDenied
+from app.runtime_api import DocxExporter
 from app.pack import PromptPack
 from app.proposal_quality import ProposalQualityGuard
 from app.quality import QualityGateBlocked, QualityLifecycleManager

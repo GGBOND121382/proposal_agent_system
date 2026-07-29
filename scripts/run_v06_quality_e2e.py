@@ -14,17 +14,17 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import Settings
-from app.context import ContextBuilder
+from app.runtime_api import ContextBuilder
 from app.db import Database
 from app.documents import parse_document
-from app.executor import PromptExecutor
-from app.exporter import DocxExporter
-from app.llm import ModelGateway
+from app.runtime_api import PromptExecutor
+from app.runtime_api import DocxExporter
+from app.runtime_api import ModelGateway
 from app.pack import PromptPack
 from app.research import PublicResearchService
 from app.security import SecurityRouter
 from app.util import new_id, utc_now
-from app.workflows import WorkflowEngine
+from app.runtime_api import WorkflowEngine
 
 
 def _add_document(settings: Settings, db: Database, project_id: str, filename: str, role: str, text: str) -> None:

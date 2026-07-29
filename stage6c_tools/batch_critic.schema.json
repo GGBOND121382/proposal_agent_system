@@ -45,14 +45,10 @@
     },
     "checked_section_ids": {
       "type": "array",
-      "minItems": 3,
-      "maxItems": 3,
+      "minItems": 1,
       "items": {
-        "enum": [
-          "SEC-09",
-          "SEC-10",
-          "SEC-11"
-        ]
+        "type": "string",
+        "pattern": "^SEC-[A-Za-z0-9_-]+$"
       },
       "uniqueItems": true
     },

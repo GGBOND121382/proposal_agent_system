@@ -123,7 +123,7 @@
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-TEMPLATE-EXTRACT",
-    "prompt_version": "3.0.0",
+    "prompt_version": "3.0.1",
     "status": "PASS",
     "result": {
       "template": {

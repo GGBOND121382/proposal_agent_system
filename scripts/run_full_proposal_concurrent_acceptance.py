@@ -16,16 +16,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import Settings
-from app.context import ContextBuilder
+from app.runtime_api import ContextBuilder
 from app.db import Database
 from app.documents import parse_document
-from app.executor import PromptExecutor
-from app.llm import ModelGateway
+from app.runtime_api import PromptExecutor
+from app.runtime_api import ModelGateway
 from app.pack import PromptPack
 from app.research import PublicResearchService
 from app.security import SecurityRouter
 from app.util import new_id, sha256_bytes, utc_now, write_json
-from app.workflows import WorkflowEngine
+from app.runtime_api import WorkflowEngine
 
 
 SECTION_TITLES = [

@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 
 from app.quality import QualityLifecycleManager
-from app.workflows import WorkflowEngine
+from app.runtime_api import WorkflowEngine
 from tests.test_runtime import add_standard_materials, create_project, finish_workflow, runtime
 from tests.test_single_section_chain import ChainHarness, SECTION
 

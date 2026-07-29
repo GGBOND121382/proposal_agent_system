@@ -4,7 +4,7 @@ import copy
 import json
 from pathlib import Path
 
-from app.executor import PromptExecutor
+from app.runtime_api import PromptExecutor
 from app.status_ontology import (
     CANONICAL_CLAIM_TYPES,
     CANONICAL_KNOWLEDGE_STATUSES,

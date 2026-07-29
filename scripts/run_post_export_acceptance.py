@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 
 from app.config import Settings
 from app.db import Database
-from app.exporter import DocxExporter
+from app.runtime_api import DocxExporter
 from app.post_export_acceptance import PostExportAcceptanceManager
 from app.post_export_validator import PostExportDeliveryValidator
 from app.util import new_id, sha256_bytes, sha256_json, utc_now, write_json

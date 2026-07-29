@@ -207,9 +207,18 @@ class ModelCallEvidenceStore:
             raise EvidenceIntegrityError(f"Raw response hash mismatch for {call_key}")
         if sha256_json(parsed) != metadata.get("parsed_object_sha256"):
             raise EvidenceIntegrityError(f"Parsed response hash mismatch for {call_key}")
-        raw_object = _extract_json_object(raw_text)
-        if sha256_json(raw_object) != sha256_json(parsed):
-            raise EvidenceIntegrityError(f"Raw response object mismatch for {call_key}")
+        parsed_hash = sha256_json(parsed)
+        persisted_raw_parsed_hash = metadata.get("raw_parsed_object_sha256")
+        if persisted_raw_parsed_hash is not None:
+            # The raw-to-parsed relationship was verified before the response
+            # evidence was committed.  Re-parse only legacy records that lack
+            # this proof: parser upgrades must not invalidate immutable evidence.
+            if persisted_raw_parsed_hash != parsed_hash:
+                raise EvidenceIntegrityError(f"Raw response object mismatch for {call_key}")
+        else:
+            raw_object = _extract_json_object(raw_text)
+            if sha256_json(raw_object) != parsed_hash:
+                raise EvidenceIntegrityError(f"Raw response object mismatch for {call_key}")
         return VerifiedResponse(raw_text=raw_text, parsed_output=parsed, metadata=metadata)
 
     def mark_committed(self, call_key: str, payload: dict[str, Any]) -> Path:

@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 from app.config import Settings
 from app.db import Database
-from app.exporter import DocxExporter
+from app.runtime_api import DocxExporter
 from app.s3_evidence import build_s3_evidence, verify_s3_evidence
 from app.skill_setup import build_skill_executor
 from app.skills.research_claims import validate_public_claims

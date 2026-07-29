@@ -179,7 +179,7 @@
     },
     {
       "prompt_id": "P-TEMPLATE-EXTRACT",
-      "prompt_version": "3.0.0",
+      "prompt_version": "3.0.1",
       "prompt_file": "prompts/template/template_extract.md",
       "input_schema": "schemas/prompts/template_extract_input.schema.json",
       "output_schema": "schemas/prompts/template_extract_output.schema.json",

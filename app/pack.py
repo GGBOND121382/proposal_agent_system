@@ -107,11 +107,10 @@ class PromptPack:
         projected: dict[str, Any] = {}
         if "type" in node:
             declared_type = copy.deepcopy(node["type"])
-            # Nested nulls are commonly used by model providers for omitted
-            # optional values and are safely handled by the deterministic
-            # normalizers through ``or {}`` / ``or []``.  The preflight is
-            # intended to catch non-null container mismatches, not to replace
-            # the final strict schema validation.
+            # Providers commonly emit null for omitted nested values.  The
+            # shape preflight therefore admits null temporarily; the unified
+            # contract layer rejects required null containers and may default
+            # only optional containers before final strict validation.
             if not root:
                 if isinstance(declared_type, str) and declared_type != "null":
                     declared_type = [declared_type, "null"]

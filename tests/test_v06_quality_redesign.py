@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.diagram_enrichment import DiagramEnrichmentService
 from app.documents import parse_document
-from app.executor import PromptExecutor
+from app.runtime_api import PromptExecutor
 from app.pack import PromptPack
 from app.proposal_quality import ProposalQualityGuard
 from app.simulated_llm import SimulatedLLM
@@ -392,7 +392,7 @@ def test_generated_quality_defect_cannot_be_resolved_by_empty_confirmation():
             "suggested_route": "PLANNING_AGENT",
         }]
     }
-    from app.workflows import WorkflowEngine
+    from app.runtime_api import WorkflowEngine
     assert WorkflowEngine._has_nonconfirmable_quality_failure(output) is True
 
 

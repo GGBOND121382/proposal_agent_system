@@ -7,11 +7,21 @@ ROOT=Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
 from app.util import sha256_json, utc_now
 from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
+from app.staged_workflow_config import all_section_ids, project_title as resolve_project_title
 STAGE="STAGE_7_FULL_INTEGRATION"; MODEL_ID="gpt-5.6-thinking"; ENDPOINT_ID="chatgpt-conversation-file-bridge"
-SECTION_IDS=[f"SEC-{i:02d}" for i in range(1,15)]
+DEFAULT_SECTION_IDS=[f"SEC-{i:02d}" for i in range(1,15)]
+SECTION_IDS=list(DEFAULT_SECTION_IDS)
 ID_RE=re.compile(r"(?:CP|RQ|OBJ|WP|RC|M|FM|GAP|PRIOR|INNO-H|MECH|BL|EXP|MET|BOUND|FOUND|RISK|OPEN)-\d+")
 SRC_RE=re.compile(r"SRC-(?:PUB|STD|UA|TRACE)-\d+")
 ENGINEERING_TERMS=("Prompt","Gate","Schema","API","JSON","Trace","哈希","回归测试","文件桥","模型响应")
+
+def configure_section_ids(rd:Path|None=None,stage5:dict|None=None)->list[str]:
+ global SECTION_IDS
+ if stage5 is None and rd is not None:
+  p=rd/'source_snapshots'/'stage5_section_plan.json'
+  if p.exists():stage5=read_json(p)
+ SECTION_IDS=all_section_ids(stage5) if stage5 is not None else list(DEFAULT_SECTION_IDS)
+ return SECTION_IDS
 
 def read_json(p:Path)->Any:return json.loads(p.read_text(encoding='utf-8'))
 def atomic_json(p:Path,v:Any)->None:
@@ -49,9 +59,9 @@ def all_sections(rd:Path,repaired:bool=False)->dict[str,dict]:
   p=rd/'intermediate'/'repaired_sections.json'
   if p.exists():return {x['section_id']:x['candidate'] for x in read_json(p)['sections']}
  out={}
- for fn in ['stage6a_batch_draft.json','stage6b_batch_draft.json','stage6c_batch_draft.json','stage6d_batch_draft.json']:
-  d=read_json(rd/'source_snapshots'/fn)
-  for x in d['sections']:out[x['section_id']]=x['candidate']
+ for path in sorted((rd/'source_snapshots').glob('stage6*_batch_draft.json')):
+  d=read_json(path)
+  for x in d.get('sections',[]):out[x['section_id']]=x['candidate']
  return out
 def citations_in(text:str)->set[int]:
  nums=set()
@@ -62,9 +72,10 @@ def citations_in(text:str)->set[int]:
    elif part.isdigit():nums.add(int(part))
  return nums
 def deterministic_report(rd:Path,sections:dict[str,dict],require_public_citations:bool)->dict:
+ stage5=read_json(rd/'source_snapshots'/'stage5_section_plan.json'); configure_section_ids(stage5=stage5)
  f=[]
  def add(code,sections_,msg):f.append({'code':code,'section_ids':sorted(set(sections_)),'message':msg})
- if list(sorted(sections))!=SECTION_IDS:add('CANDIDATE_SET_INCOMPLETE',sections.keys(),'14章集合不完整。')
+ if set(sections)!=set(SECTION_IDS):add('CANDIDATE_SET_INCOMPLETE',sections.keys(),f'章节集合不完整：期望{SECTION_IDS}，实际{sorted(sections)}。')
  texts={};keys={};internal={};sources={};eng={};citation_missing={}; chars=0
  citation_map={x['source_id']:i+1 for i,x in enumerate([s for s in read_json(rd/'source_snapshots'/'stage4a_evidence_completion.json')['source_registry'] if s['source_id'].startswith(('SRC-PUB','SRC-STD'))])}
  for sid,c in sections.items():
@@ -110,20 +121,26 @@ def deterministic_report(rd:Path,sections:dict[str,dict],require_public_citation
    hits=[msg for pat,msg in awkward_patterns.items() if pat in p['text']]
    if hits:awkward.setdefault(sid,[]).append({'paragraph_id':p['paragraph_id'],'issues':hits})
  if awkward:add('POST_REPAIR_EXPRESSION_ARTIFACTS',awkward.keys(),f'存在{sum(len(v) for v in awkward.values())}个批量编辑遗留句式。')
- stage5=read_json(rd/'source_snapshots'/'stage5_section_plan.json'); target=sum(float(x['target_pages']) for x in stage5['sections']); maxp=sum(float(x['max_pages']) for x in stage5['sections']); est=round(target,1)
- if maxp>20.0001:add('PAGE_BUDGET_EXCEEDED',SECTION_IDS,f'最大预算{maxp}超过20页。')
- # required whole-document metadata closures
+ target=sum(float(x['target_pages']) for x in stage5['sections']); maxp=sum(float(x['max_pages']) for x in stage5['sections']); est=round(target,1)
+ limit=float((stage5.get('document_contract') or {}).get('max_body_pages') or (stage5.get('document_contract') or {}).get('body_page_limit') or 20);
+ if maxp>limit+0.0001:add('PAGE_BUDGET_EXCEEDED',SECTION_IDS,f'最大预算{maxp}超过{limit:g}页。')
+ # required whole-document metadata closures are derived from section contracts
  node_union={n for c in sections.values() for p in paragraphs(c) for n in p.get('node_ids',[])}; rq_union={n for c in sections.values() for p in paragraphs(c) for n in p.get('rq_ids',[])}
- for n in ['CP-1','INNO-H1','INNO-H2','INNO-H3','OBJ-1','OBJ-2','OBJ-3','OBJ-4']:
-  if n not in node_union:add('WHOLE_ARGUMENT_NODE_MISSING',['SEC-14'],f'全文未覆盖{n}。')
- for n in ['RQ-1','RQ-2','RQ-3']:
-  if n not in rq_union:add('WHOLE_RESEARCH_QUESTION_MISSING',['SEC-05','SEC-14'],f'全文未覆盖{n}。')
+ node_owners={};rq_owners={}
+ for contract in stage5.get('sections',[]):
+  sid=contract.get('section_id')
+  for n in contract.get('required_node_ids',[]):node_owners.setdefault(n,[]).append(sid)
+  for n in contract.get('required_rq_ids',[]):rq_owners.setdefault(n,[]).append(sid)
+ for n,owners in node_owners.items():
+  if n not in node_union:add('WHOLE_ARGUMENT_NODE_MISSING',owners,f'全文未覆盖{n}。')
+ for n,owners in rq_owners.items():
+  if n not in rq_union:add('WHOLE_RESEARCH_QUESTION_MISSING',owners,f'全文未覆盖{n}。')
  return {'verdict':'PASS' if not f else 'REVISE','section_count':len(sections),'total_effective_char_count':chars,'target_pages':target,'max_pages':maxp,'estimated_pages':est,'internal_identifier_occurrences':sum(internal.values()),'source_identifier_occurrences':sum(sources.values()),'engineering_term_occurrences':sum(eng.values()),'visible_citation_count':sum(len(citations_in(p['text'])) for c in sections.values() for p in paragraphs(c)),'findings':f,'candidate_set_hash':sha256_json({sid:sha256_json(c) for sid,c in sorted(sections.items())})}
 def write_request(rd:Path,num:int,name:str,payload:dict):
  p=rd/'requests'/f'{num:03d}_{name}.json';atomic_json(p,payload);append_event(rd,'MODEL_REQUEST_CREATED',request_file=str(p.relative_to(rd)),prompt_id=payload['prompt_id']);return p
 def critic_request(rd:Path,round_no:int,sections:dict)->dict:
  report=deterministic_report(rd,sections,require_public_citations=round_no>1);atomic_json(rd/'quality'/f'deterministic_round_{round_no}.json',report)
- return {'schema_version':'1.0','call_key':f'stage7-integration-critic-r{round_no}','prompt_id':'P-STAGE7-FULL-INTEGRATION-CRITIC','prompt_version':'1.0.0','executor_role':'Whole-proposal Scientific Merit Critic','model_contract':{'independent_from_section_writers':True,'response_format':'JSON','actual_model_id_required':True,'endpoint_id_required':True},'system_prompt':'审查14章申请书全文。必须检查中心命题、六类论证链、证据状态、创新比较、研究基础、指标依据、章节独特性、文种、编号引文和20页预算。内部图谱ID、来源ID及工作流标记不得出现在面向评审人的正文。只提出最小可执行修改。','task_prompt':f'执行第{round_no}轮全文集成审查；逐章读取，不得抽样。','input_envelope':{'project_definition':read_json(rd/'source_snapshots'/'stage3_project_definition.json'),'argument_architecture':read_json(rd/'source_snapshots'/'stage4_argument_architecture.json'),'evidence_completion':read_json(rd/'source_snapshots'/'stage4a_evidence_completion.json'),'section_plan':read_json(rd/'source_snapshots'/'stage5_section_plan.json'),'candidate_sections':[{'section_id':sid,'candidate_hash':sha256_json(c),'candidate':c} for sid,c in sorted(sections.items())],'deterministic_report':report,'stage_boundary':'FULL_INTEGRATION_ONLY_NO_EXPORT'},'output_schema':load_schema('integration_critic.schema.json'),'requested_at':utc_now()}
+ return {'schema_version':'1.0','call_key':f'stage7-integration-critic-r{round_no}','prompt_id':'P-STAGE7-FULL-INTEGRATION-CRITIC','prompt_version':'1.0.0','executor_role':'Whole-proposal Scientific Merit Critic','model_contract':{'independent_from_section_writers':True,'response_format':'JSON','actual_model_id_required':True,'endpoint_id_required':True},'system_prompt':f'审查{len(SECTION_IDS)}章申请书全文。必须检查中心命题、论证链、证据状态、创新比较、研究基础、指标依据、章节独特性、文种、编号引文和篇幅预算。内部图谱ID、来源ID及工作流标记不得出现在面向评审人的正文。只提出最小可执行修改。','task_prompt':f'执行第{round_no}轮全文集成审查；逐章读取，不得抽样。','input_envelope':{'project_definition':read_json(rd/'source_snapshots'/'stage3_project_definition.json'),'argument_architecture':read_json(rd/'source_snapshots'/'stage4_argument_architecture.json'),'evidence_completion':read_json(rd/'source_snapshots'/'stage4a_evidence_completion.json'),'section_plan':read_json(rd/'source_snapshots'/'stage5_section_plan.json'),'candidate_sections':[{'section_id':sid,'candidate_hash':sha256_json(c),'candidate':c} for sid,c in sorted(sections.items())],'deterministic_report':report,'stage_boundary':'FULL_INTEGRATION_ONLY_NO_EXPORT'},'output_schema':load_schema('integration_critic.schema.json'),'requested_at':utc_now()}
 def repair_request(rd:Path,critic:dict,repair_round:int)->dict:
  sections=all_sections(rd,repaired=repair_round>1); srcs=[x for x in read_json(rd/'source_snapshots'/'stage4a_evidence_completion.json')['source_registry'] if x['source_id'].startswith(('SRC-PUB','SRC-STD'))]
  return {'schema_version':'1.0','call_key':f'stage7-targeted-document-edit-r{repair_round}','prompt_id':'P-STAGE7-TARGETED-DOCUMENT-EDIT','prompt_version':'1.0.0','executor_role':'Proposal Expression Editor','model_contract':{'semantic_identity_immutable':True,'paragraph_metadata_immutable':True,'response_format':'JSON','actual_model_id_required':True,'endpoint_id_required':True},'system_prompt':'只把内部ID和工程工作标记转换为自然、正式的申报语言，并按给定编号补充公开来源引文。必要时可通过heading_edits规范化子节标题，通过visual_caption_edits规范化图表标题，但不得增删或移动子节、图表。不得改变段落数量、章节结构、事实状态、节点/来源/RQ绑定、信息键、图表位置、开放事项或研究结论。','task_prompt':f'执行第{repair_round}轮定向编辑。针对全文Critic指出的章节逐段编辑；未受影响段落不得列入edits。','input_envelope':{'findings':critic['findings'],'repair_round':repair_round,'sections':[{'section_id':sid,'section_name':c['section_name'],'subsection_titles':[{'subsection_id':sub['subsection_id'],'title':sub['title']} for sub in c.get('subsections',[])],'visual_placeholders':c.get('visual_placeholders',[]),'paragraphs':paragraphs(c)} for sid,c in sorted(sections.items())],'citation_registry':[{'source_id':x['source_id'],'citation_number':i+1,'title':x['title'],'authors':x['authors'],'year':x['year'],'venue':x['venue']} for i,x in enumerate(srcs)]},'output_schema':load_schema('document_repair.schema.json'),'requested_at':utc_now()}
@@ -133,9 +150,9 @@ def init_cmd(a):
  for d in ['source_snapshots','requests','responses','quality','intermediate','outputs','human_gate']: (rd/d).mkdir(parents=True,exist_ok=True)
  files={'stage3_project_definition.json':a.project_definition,'stage4_argument_architecture.json':a.argument_architecture,'stage4a_evidence_completion.json':a.evidence_completion,'stage5_section_plan.json':a.section_plan,'stage6a_batch_draft.json':a.stage6a,'stage6b_batch_draft.json':a.stage6b,'stage6c_batch_draft.json':a.stage6c,'stage6d_batch_draft.json':a.stage6d}
  for name,src in files.items():atomic_json(rd/'source_snapshots'/name,read_json(Path(src).resolve()))
- sections=all_sections(rd);req=critic_request(rd,1,sections);write_request(rd,1,'full_integration_critic_round1',req);set_state(rd,'WAITING_MODEL','INTEGRATION_CRITIC_ROUND_1',candidate_set_hash=req['input_envelope']['deterministic_report']['candidate_set_hash']);print(rd/'requests'/'001_full_integration_critic_round1.json')
+ configure_section_ids(rd=rd); sections=all_sections(rd);req=critic_request(rd,1,sections);write_request(rd,1,'full_integration_critic_round1',req);set_state(rd,'WAITING_MODEL','INTEGRATION_CRITIC_ROUND_1',candidate_set_hash=req['input_envelope']['deterministic_report']['candidate_set_hash']);print(rd/'requests'/'001_full_integration_critic_round1.json')
 def ingest_critic_cmd(a):
- rd=Path(a.run_dir).resolve();resp=read_json(Path(a.response_file).resolve());errs=validate_schema(resp,'integration_critic.schema.json')
+ rd=Path(a.run_dir).resolve();configure_section_ids(rd=rd);resp=read_json(Path(a.response_file).resolve());errs=validate_schema(resp,'integration_critic.schema.json')
  set_contract_trace_context(rd, "ingest_critic_cmd")
  if errs:raise SystemExit('; '.join(errs))
  if set(resp['checked_section_ids'])!=set(SECTION_IDS):raise SystemExit('critic did not check all sections')
@@ -150,9 +167,9 @@ def ingest_critic_cmd(a):
  sections=all_sections(rd,True);report=deterministic_report(rd,sections,True);atomic_json(rd/'quality'/'deterministic_final.json',report)
  if report['verdict']!='PASS':raise SystemExit(f"final deterministic failed: {report['findings']}")
  if resp['verdict']!='ACCEPT' or resp['next_action']!='ALLOW_STAGE_8' or any(x['result']!='PASS' for x in resp['scorecard']):raise SystemExit('final critic did not accept')
- gate={'schema_version':'1.0','gate_id':'stage7-full-integration-confirmation-001','question':'是否确认14章全文集成稿作为最终文档导出的冻结上游工件？','allowed_actions':['CONFIRM','REJECT'],'candidate_set_hash':report['candidate_set_hash'],'requested_at':utc_now()};atomic_json(rd/'human_gate'/'stage7_gate_request.json',gate);append_event(rd,'HUMAN_GATE_REQUESTED',gate_id=gate['gate_id']);set_state(rd,'WAITING_GATE','FULL_INTEGRATION_CONFIRMATION',candidate_set_hash=report['candidate_set_hash'])
+ gate={'schema_version':'1.0','gate_id':'stage7-full-integration-confirmation-001','question':f'是否确认{len(SECTION_IDS)}章全文集成稿作为最终文档导出的冻结上游工件？','allowed_actions':['CONFIRM','REJECT'],'candidate_set_hash':report['candidate_set_hash'],'requested_at':utc_now()};atomic_json(rd/'human_gate'/'stage7_gate_request.json',gate);append_event(rd,'HUMAN_GATE_REQUESTED',gate_id=gate['gate_id']);set_state(rd,'WAITING_GATE','FULL_INTEGRATION_CONFIRMATION',candidate_set_hash=report['candidate_set_hash'])
 def ingest_repair_cmd(a):
- rd=Path(a.run_dir).resolve();resp=read_json(Path(a.response_file).resolve());errs=validate_schema(resp,'document_repair.schema.json')
+ rd=Path(a.run_dir).resolve();configure_section_ids(rd=rd);resp=read_json(Path(a.response_file).resolve());errs=validate_schema(resp,'document_repair.schema.json')
  set_contract_trace_context(rd, "ingest_repair_cmd")
  if errs:raise SystemExit('; '.join(errs))
  repair_round=int(resp['repair_round']);base=all_sections(rd,repaired=repair_round>1)
@@ -224,10 +241,10 @@ def manifest_zip(rd:Path):
    if p.is_file():z.write(p,p.relative_to(rd.parent))
  atomic_json(rd.with_suffix('.archive.json'),{'archive_path':str(zp),'size_bytes':zp.stat().st_size,'sha256':sha256_file(zp),'generated_at':utc_now()});return zp
 def finalize_cmd(a):
- rd=Path(a.run_dir).resolve();gate=read_json(Path(a.gate_response).resolve());req=read_json(rd/'human_gate'/'stage7_gate_request.json')
+ rd=Path(a.run_dir).resolve();configure_section_ids(rd=rd);gate=read_json(Path(a.gate_response).resolve());req=read_json(rd/'human_gate'/'stage7_gate_request.json')
  if gate.get('gate_id')!=req['gate_id'] or gate.get('action')!='CONFIRM':raise SystemExit('gate mismatch')
  atomic_json(rd/'human_gate'/'stage7_gate_response.json',gate);append_event(rd,'HUMAN_GATE_CONSUMED',gate_id=gate['gate_id'],action='CONFIRM')
- secs=all_sections(rd,True);stage5=read_json(rd/'source_snapshots'/'stage5_section_plan.json');source_registry=read_json(rd/'source_snapshots'/'stage4a_evidence_completion.json')['source_registry'];parts=['# 人机协同决策优势冲刺关键技术研究','']
+ secs=all_sections(rd,True);stage5=read_json(rd/'source_snapshots'/'stage5_section_plan.json');source_registry=read_json(rd/'source_snapshots'/'stage4a_evidence_completion.json')['source_registry'];title=resolve_project_title(stage5,read_json(rd/'source_snapshots'/'stage3_project_definition.json'));parts=[f'# {title}','']
  rows=[]
  for sid in SECTION_IDS:
   c=secs[sid];md=canonical_markdown(c);atomic_text(rd/'outputs'/f'{sid}_{c["section_name"]}.md',md);parts += [md.rstrip(),''];ch=sum(len(re.sub(r'\s+','',p['text'])) for p in paragraphs(c));contract=next(x for x in stage5['sections'] if x['section_id']==sid);rows.append({'section_id':sid,'section_name':c['section_name'],'effective_char_count':ch,'target_pages':contract['target_pages'],'max_pages':contract['max_pages'],'candidate_id':c['candidate_id'],'candidate_hash':sha256_json(c)})
@@ -235,7 +252,7 @@ def finalize_cmd(a):
  with (rd/'outputs'/'stage7_section_summary.csv').open('w',encoding='utf-8-sig',newline='') as f:
   w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
  cmap=read_json(rd/'intermediate'/'repaired_sections.json')['citation_map'];atomic_json(rd/'outputs'/'stage7_citation_map.json',cmap)
- final=deterministic_report(rd,secs,True);result={'schema_version':'1.0','stage':STAGE,'status':'PASS','project_title':'人机协同决策优势冲刺关键技术研究','section_count':14,'total_effective_char_count':sum(x['effective_char_count'] for x in rows),'target_pages':sum(float(x['target_pages']) for x in rows),'max_pages':sum(float(x['max_pages']) for x in rows),'estimated_main_body_pages':final['estimated_pages'],'candidate_set_hash':final['candidate_set_hash'],'reference_count':len(cmap),'open_items':read_json(rd/'source_snapshots'/'stage4a_evidence_completion.json')['open_items_remaining'],'next_stage':'STAGE_8_FINAL_EXPORT','final_submission_ready':False,'completed_at':utc_now()};atomic_json(rd/'outputs'/'stage7_integration_result.json',result);atomic_json(rd/'outputs'/'STAGE7_ACCEPTANCE_REPORT.json',result);set_state(rd,'COMPLETED','STAGE_7_COMPLETE',candidate_set_hash=final['candidate_set_hash'],next_stage='STAGE_8_FINAL_EXPORT');zp=manifest_zip(rd);print(json.dumps({'result':result,'trace_zip':str(zp)},ensure_ascii=False,indent=2))
+ final=deterministic_report(rd,secs,True);result={'schema_version':'1.0','stage':STAGE,'status':'PASS','project_title':title,'section_count':len(SECTION_IDS),'total_effective_char_count':sum(x['effective_char_count'] for x in rows),'target_pages':sum(float(x['target_pages']) for x in rows),'max_pages':sum(float(x['max_pages']) for x in rows),'estimated_main_body_pages':final['estimated_pages'],'candidate_set_hash':final['candidate_set_hash'],'reference_count':len(cmap),'open_items':read_json(rd/'source_snapshots'/'stage4a_evidence_completion.json')['open_items_remaining'],'next_stage':'STAGE_8_FINAL_EXPORT','final_submission_ready':False,'completed_at':utc_now()};atomic_json(rd/'outputs'/'stage7_integration_result.json',result);atomic_json(rd/'outputs'/'STAGE7_ACCEPTANCE_REPORT.json',result);set_state(rd,'COMPLETED','STAGE_7_COMPLETE',candidate_set_hash=final['candidate_set_hash'],next_stage='STAGE_8_FINAL_EXPORT');zp=manifest_zip(rd);print(json.dumps({'result':result,'trace_zip':str(zp)},ensure_ascii=False,indent=2))
 def validate_cmd(a):
  rd=Path(a.run_dir).resolve();m=read_json(rd/'TRACE_MANIFEST.json');err=[]
  for x in m['files']:

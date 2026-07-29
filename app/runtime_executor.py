@@ -29,7 +29,13 @@ class RecoverablePromptExecutionError(PromptExecutionError):
 class RuntimePromptExecutor(BasePromptExecutor):
     """Atomic, idempotent prompt executor backed by durable model-call evidence."""
 
+    output_normalizer_version = OUTPUT_NORMALIZER_VERSION
+    contract_registry_version = CONTRACT_REGISTRY_VERSION
+
     def __init__(self, db, pack, router, gateway, *, quality_guard=None, quality_guard_enabled: bool = True):
+        if quality_guard is None:
+            from .full_integration_quality import FullProposalQualityGuard
+            quality_guard = FullProposalQualityGuard()
         super().__init__(
             db,
             pack,
@@ -48,6 +54,37 @@ class RuntimePromptExecutor(BasePromptExecutor):
             store = ModelCallEvidenceStore(root)
         self.evidence_store = store
 
+    def _model_request_spec(self, prompt_id: str) -> dict[str, Any]:
+        """Return the provider-visible request contract for one prompt.
+
+        This deliberately excludes local normalizer versions.  A failed
+        provider object may be re-consumed after a normalizer upgrade only when
+        the prompt text, model profile, registry entry, and output schema that
+        produced it are unchanged.
+        """
+        try:
+            entry = self.pack.entry(prompt_id)
+            profile_name = entry.get("model_profile")
+            profiles = self.pack.profiles.get("profiles") or self.pack.profiles
+            return {
+                "prompt_text": self.pack.prompt_text(prompt_id),
+                "prompt_entry": entry,
+                "model_profile": profiles.get(profile_name),
+                "output_schema": self.pack.inlined_schema(prompt_id, "output"),
+            }
+        except (AttributeError, KeyError, TypeError):
+            return {"prompt_id": prompt_id}
+
+    def _model_request_spec_hash(self, prompt_id: str) -> str:
+        return sha256_json(self._model_request_spec(prompt_id))
+
+    def _execution_spec_hash(self, prompt_id: str) -> str:
+        return sha256_json({
+            "model_request_spec_hash": self._model_request_spec_hash(prompt_id),
+            "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
+            "contract_registry_version": CONTRACT_REGISTRY_VERSION,
+        })
+
     def _call_key(
         self,
         *,
@@ -57,30 +94,16 @@ class RuntimePromptExecutor(BasePromptExecutor):
         input_hash: str,
         requested_call_key: str | None,
     ) -> str:
+        del project_id  # retained for API compatibility and future tenancy salt
         if requested_call_key:
             return requested_call_key
         if workflow_id:
-            try:
-                entry = self.pack.entry(prompt_id)
-                profile_name = entry.get("model_profile")
-                profiles = self.pack.profiles.get("profiles") or self.pack.profiles
-                execution_spec = {
-                    "prompt_text": self.pack.prompt_text(prompt_id),
-                    "prompt_entry": entry,
-                    "model_profile": profiles.get(profile_name),
-                    "output_schema": self.pack.inlined_schema(prompt_id, "output"),
-                    "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
-                    "contract_registry_version": CONTRACT_REGISTRY_VERSION,
-                }
-            except (AttributeError, KeyError, TypeError):
-                execution_spec = {"prompt_id": prompt_id}
-            execution_spec_hash = sha256_json(execution_spec)
             return "call-" + sha256_json(
                 {
                     "workflow_id": workflow_id,
                     "prompt_id": prompt_id,
                     "input_hash": input_hash,
-                    "execution_spec_hash": execution_spec_hash,
+                    "execution_spec_hash": self._execution_spec_hash(prompt_id),
                 }
             )[:32]
         return new_id("call")
@@ -112,43 +135,80 @@ class RuntimePromptExecutor(BasePromptExecutor):
         }
 
     @staticmethod
-    def _is_enum_only_schema_error(error: Any) -> bool:
-        message = str(error or "")
-        prefix = "Output schema validation failed | "
-        if not message.startswith(prefix):
-            return False
-        details = [
-            item.strip()
-            for item in message[len(prefix):].split(";")
-            if item.strip()
-        ]
-        return bool(details) and all(" is not one of " in item for item in details)
+    def _is_deterministic_contract_failure(error: Any) -> bool:
+        message = str(error or "").strip()
+        return message.startswith((
+            "Output schema validation failed",
+            "Output container structure validation failed",
+            "Misplaced response-envelope field",
+        ))
 
-    def _recoverable_enum_output(
+    def _failed_run_audit_metadata(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+    ) -> dict[str, Any]:
+        """Load machine-readable metadata for a failed run when available."""
+        rows = self.db.fetchall(
+            """SELECT metadata_json FROM audit_events
+               WHERE project_id=? AND event_type='MODEL_CALL_FAILED'
+               ORDER BY id DESC LIMIT 200""",
+            (project_id,),
+        )
+        for row in rows:
+            try:
+                metadata = json.loads(row.get("metadata_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if str(metadata.get("run_id") or "") == run_id:
+                return metadata
+        return {}
+
+    def _recoverable_contract_output(
         self,
         *,
         project_id: str,
         workflow_id: str | None,
         prompt_id: str,
         input_hash: str,
+        model_envelope: dict[str, Any],
+        quality_context_envelope: dict[str, Any],
+        project_config: dict[str, Any],
+        model_request_spec_hash: str,
     ) -> dict[str, Any] | None:
-        """Return an immutable prior provider object eligible for re-normalization.
+        """Return a prior provider object that passes the current contract.
 
-        Contract upgrades must not resend an identical prompt merely because a
-        previously unknown enum alias became registered.  Recovery is limited
-        to the same project/workflow/prompt/input hash and to failures whose
-        complete validation error set consists only of enum violations.
+        A successful model response must not be resent merely because an older
+        normalizer, schema adapter, or deterministic quality rule rejected it.
+        Recovery is limited to the identical project/workflow/prompt/input
+        identity.  The immutable provider object is replayed through the entire
+        current deterministic consumption pipeline; it is reusable only when
+        normalization, privacy handling, quality guards, and strict output
+        validation all pass now.
         """
         rows = self.db.fetchall(
             """SELECT id,model_id,endpoint_id,output_json,error,created_at
                FROM prompt_runs
                WHERE project_id=? AND workflow_id IS ? AND prompt_id=?
                  AND input_hash=? AND status='ERROR' AND output_json IS NOT NULL
-               ORDER BY created_at DESC""",
+               ORDER BY created_at DESC
+               LIMIT 20""",
             (project_id, workflow_id, prompt_id, input_hash),
         )
         for row in rows:
-            if not self._is_enum_only_schema_error(row.get("error")):
+            if not self._is_deterministic_contract_failure(row.get("error")):
+                continue
+            failed_metadata = self._failed_run_audit_metadata(
+                project_id=project_id,
+                run_id=str(row["id"]),
+            )
+            if failed_metadata.get("deterministic_recoverable") is False:
+                continue
+            prior_request_hash = str(
+                failed_metadata.get("model_request_spec_hash") or ""
+            )
+            if prior_request_hash and prior_request_hash != model_request_spec_hash:
                 continue
             try:
                 provider_output = json.loads(row["output_json"])
@@ -156,14 +216,67 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 continue
             if not isinstance(provider_output, dict):
                 continue
+            try:
+                consumed_output = self._normalize_output(
+                    prompt_id,
+                    copy.deepcopy(provider_output),
+                    model_envelope,
+                )
+                self.policy.assert_output_unchanged(
+                    provider_output,
+                    consumed_output,
+                    stage="output_normalization",
+                )
+                if prompt_id == "P-SAFE-ONLINE-PACKAGE":
+                    sanitized, redactions = sanitize_safe_online_package(
+                        copy.deepcopy(consumed_output),
+                        project_config,
+                    )
+                    if self.policy.enabled and redactions:
+                        continue
+                    consumed_output = sanitized
+                    if redactions:
+                        consumed_output.setdefault("warnings", []).append(
+                            f"Deterministic outbound privacy guard redacted {len(redactions)} sensitive field occurrence(s)."
+                        )
+                if self.quality_guard_enabled:
+                    guarded = self.quality_guard.apply(
+                        prompt_id,
+                        quality_context_envelope,
+                        copy.deepcopy(consumed_output),
+                    )
+                    self.policy.assert_output_unchanged(
+                        consumed_output,
+                        guarded,
+                        stage="proposal_quality_guard",
+                    )
+                    consumed_output = guarded
+                if self.pack.validate(prompt_id, "output", consumed_output):
+                    continue
+            except (
+                PromptExecutionError,
+                CapabilityModeError,
+                KeyError,
+                TypeError,
+                ValueError,
+            ):
+                continue
             return {
                 "run_id": str(row["id"]),
                 "model_id": row.get("model_id"),
                 "endpoint_id": row.get("endpoint_id"),
                 "provider_output": provider_output,
+                "consumed_output": consumed_output,
                 "failed_at": row.get("created_at"),
+                "previous_error": row.get("error"),
+                "prior_model_request_spec_hash": prior_request_hash or None,
             }
         return None
+
+    # Backward-compatible private entry point retained for downstream tests and
+    # integrations that imported the old enum-only helper.
+    def _recoverable_enum_output(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._recoverable_contract_output(**kwargs)
 
     async def execute(
         self,
@@ -179,6 +292,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         quality_context_envelope = envelope
         model_envelope, input_compaction = self._prepare_model_envelope(prompt_id, envelope)
         input_hash = sha256_json(model_envelope)
+        model_request_spec_hash = self._model_request_spec_hash(prompt_id)
         call_key = self._call_key(
             prompt_id=prompt_id,
             project_id=project_id,
@@ -217,23 +331,30 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 assert_online_payload_safe(model_envelope, project_config)
             output_schema = self.pack.inlined_schema(prompt_id, "output")
             system_prompt = self._system_prompt(prompt_id, output_schema)
-            enum_recovery = self._recoverable_enum_output(
+            contract_recovery = self._recoverable_contract_output(
                 project_id=project_id,
                 workflow_id=workflow_id,
                 prompt_id=prompt_id,
                 input_hash=input_hash,
+                model_envelope=model_envelope,
+                quality_context_envelope=quality_context_envelope,
+                project_config=project_config,
+                model_request_spec_hash=model_request_spec_hash,
             )
-            if enum_recovery is not None:
+            if contract_recovery is not None:
                 result = SimpleNamespace(
-                    output=copy.deepcopy(enum_recovery["provider_output"]),
+                    output=copy.deepcopy(contract_recovery["provider_output"]),
                     raw_text=None,
-                    model_id=enum_recovery.get("model_id") or route.model_id,
-                    endpoint_id=enum_recovery.get("endpoint_id") or route.endpoint_id,
+                    model_id=contract_recovery.get("model_id") or route.model_id,
+                    endpoint_id=contract_recovery.get("endpoint_id") or route.endpoint_id,
                     evidence={
-                        "recovery_kind": "ENUM_CONTRACT_RENORMALIZATION",
-                        "recovered_from_run_id": enum_recovery["run_id"],
-                        "failed_at": enum_recovery.get("failed_at"),
+                        "recovery_kind": "CONTRACT_RENORMALIZATION",
+                        "recovered_from_run_id": contract_recovery["run_id"],
+                        "failed_at": contract_recovery.get("failed_at"),
+                        "previous_error": contract_recovery.get("previous_error"),
+                        "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
                         "contract_registry_version": CONTRACT_REGISTRY_VERSION,
+                        "model_request_spec_hash": model_request_spec_hash,
                     },
                     reused_response=True,
                 )
@@ -250,9 +371,42 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 result = await self.gateway.invoke(route, prompt_id, system_prompt, model_envelope, output_schema)
             raw_response_text = result.raw_text
             provider_output = copy.deepcopy(result.output)
-            consumed_output = self._normalize_output(prompt_id, provider_output, model_envelope)
+            consumed_output = (
+                copy.deepcopy(contract_recovery["consumed_output"])
+                if contract_recovery is not None
+                else self._normalize_output(prompt_id, provider_output, model_envelope)
+            )
+            self.policy.assert_output_unchanged(
+                provider_output,
+                consumed_output,
+                stage="output_normalization",
+            )
+            parse_report = dict(getattr(result, "parse_report", {}) or {})
+            repair_count = int(parse_report.get("repair_count") or 0)
+            code_fence_removed = bool(parse_report.get("code_fence_removed"))
+            surrounding_text_removed = bool(parse_report.get("surrounding_text_removed"))
+            parse_adjusted = repair_count or code_fence_removed or surrounding_text_removed
+            if parse_adjusted:
+                if self.policy.enabled:
+                    raise CapabilityModeError(
+                        "Capability acceptance requires provider-native valid JSON without "
+                        "code-fence stripping, surrounding-text extraction, or local syntax repair; "
+                        f"repairs={repair_count}, code_fence_removed={code_fence_removed}, "
+                        f"surrounding_text_removed={surrounding_text_removed}."
+                    )
+                repair_kinds = sorted(
+                    {str(item.get("kind") or "UNKNOWN") for item in parse_report.get("repairs") or []}
+                )
+                consumed_output.setdefault("warnings", []).append(
+                    "SYSTEM_JSON_PARSE_NORMALIZATION: provider response required "
+                    f"repairs={repair_count}"
+                    f" ({', '.join(repair_kinds) if repair_kinds else 'none'}), "
+                    f"code_fence_removed={code_fence_removed}, "
+                    f"surrounding_text_removed={surrounding_text_removed}; "
+                    "the immutable raw response and detailed parse report are retained in model-call evidence"
+                )
 
-            if prompt_id == "P-SAFE-ONLINE-PACKAGE":
+            if contract_recovery is None and prompt_id == "P-SAFE-ONLINE-PACKAGE":
                 sanitized, redactions = sanitize_safe_online_package(copy.deepcopy(consumed_output), project_config)
                 if self.policy.enabled and redactions:
                     raise CapabilityModeError(
@@ -263,7 +417,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     consumed_output.setdefault("warnings", []).append(
                         f"Deterministic outbound privacy guard redacted {len(redactions)} sensitive field occurrence(s)."
                     )
-            if self.quality_guard_enabled:
+            if contract_recovery is None and self.quality_guard_enabled:
                 guarded = self.quality_guard.apply(prompt_id, quality_context_envelope, copy.deepcopy(consumed_output))
                 self.policy.assert_output_unchanged(consumed_output, guarded, stage="proposal_quality_guard")
                 consumed_output = guarded
@@ -283,6 +437,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 model_id=result.model_id,
                 endpoint_id=result.endpoint_id,
                 input_hash=input_hash,
+                model_request_spec_hash=model_request_spec_hash,
                 model_envelope=model_envelope,
                 consumed_output=consumed_output,
                 provider_output=provider_output,
@@ -324,7 +479,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "call_key": call_key,
                 "reused_committed_result": False,
                 "contract_recovered_from_run_id": (
-                    enum_recovery["run_id"] if enum_recovery is not None else None
+                    contract_recovery["run_id"] if contract_recovery is not None else None
                 ),
             }
         except InjectedFailure as exc:
@@ -333,7 +488,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
             duration_ms = int((time.perf_counter() - started) * 1000)
             details = getattr(exc, "validation_errors", [])
             error = str(exc) + ((" | " + "; ".join(details[:20])) if details else "")
-            self._commit_error(
+            persistence_error = self._commit_error(
                 run_id=run_id,
                 call_key=call_key,
                 project_id=project_id,
@@ -354,6 +509,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 input_compaction=input_compaction,
                 evidence=getattr(result, "evidence", {}) if result else {},
             )
+            if persistence_error:
+                error += " | ERROR_EVIDENCE_PERSISTENCE_FAILED: " + persistence_error
             raise PromptExecutionError(error, validation_errors=details) from exc
 
     def _next_version(self, conn, project_id: str, prompt_id: str, artifact_type: str) -> int:
@@ -362,6 +519,78 @@ class RuntimePromptExecutor(BasePromptExecutor):
             (project_id, prompt_id, artifact_type),
         ).fetchone()
         return int(row[0]) + 1
+
+    @staticmethod
+    def _normalization_audit(
+        provider_output: Any,
+        consumed_output: Any,
+        *,
+        limit: int = 256,
+    ) -> dict[str, Any]:
+        """Return a bounded path-level diff between provider and consumed JSON."""
+        changes: list[dict[str, Any]] = []
+        truncated = False
+
+        def pointer(path: tuple[Any, ...]) -> str:
+            if not path:
+                return "/"
+            return "/" + "/".join(
+                str(token).replace("~", "~0").replace("/", "~1")
+                for token in path
+            )
+
+        def record(operation: str, path: tuple[Any, ...], before: Any, after: Any) -> None:
+            nonlocal truncated
+            if len(changes) >= limit:
+                truncated = True
+                return
+            changes.append({
+                "operation": operation,
+                "path": pointer(path),
+                "before_type": type(before).__name__ if before is not None else "null",
+                "after_type": type(after).__name__ if after is not None else "null",
+                "before_sha256": sha256_json(before) if before is not None else None,
+                "after_sha256": sha256_json(after) if after is not None else None,
+            })
+
+        def walk(before: Any, after: Any, path: tuple[Any, ...]) -> None:
+            nonlocal truncated
+            if truncated:
+                return
+            if type(before) is not type(after):
+                record("REPLACE", path, before, after)
+                return
+            if isinstance(before, dict):
+                before_keys = set(before)
+                after_keys = set(after)
+                for key in sorted(before_keys - after_keys):
+                    record("REMOVE", (*path, key), before[key], None)
+                for key in sorted(after_keys - before_keys):
+                    record("ADD", (*path, key), None, after[key])
+                for key in sorted(before_keys & after_keys):
+                    walk(before[key], after[key], (*path, key))
+                return
+            if isinstance(before, list):
+                common = min(len(before), len(after))
+                for index in range(common):
+                    walk(before[index], after[index], (*path, index))
+                for index in range(common, len(before)):
+                    record("REMOVE", (*path, index), before[index], None)
+                for index in range(common, len(after)):
+                    record("ADD", (*path, index), None, after[index])
+                return
+            if before != after:
+                record("REPLACE", path, before, after)
+
+        if provider_output is not None and consumed_output is not None:
+            walk(provider_output, consumed_output, ())
+        return {
+            "schema_version": "1.0",
+            "changed": bool(changes),
+            "change_count": len(changes),
+            "truncated": truncated,
+            "changes": changes,
+        }
 
     def _trace_payload(self, **kwargs: Any) -> dict[str, Any]:
         return {
@@ -384,11 +613,18 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "error": kwargs.get("error"),
             "call_key": kwargs["call_key"],
             "input_sha256": kwargs["input_hash"],
+            "model_request_spec_hash": kwargs.get("model_request_spec_hash"),
+            "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
+            "contract_registry_version": CONTRACT_REGISTRY_VERSION,
             "provider_object_sha256": sha256_json(kwargs["provider_output"]) if kwargs.get("provider_output") is not None else None,
             "consumed_object_sha256": sha256_json(kwargs["consumed_output"]) if kwargs.get("consumed_output") is not None else None,
             "original_response_immutable": True,
             "capability_acceptance_mode": self.policy.enabled,
             "model_call_evidence": kwargs.get("evidence") or {},
+            "normalization_audit": self._normalization_audit(
+                kwargs.get("provider_output"),
+                kwargs.get("consumed_output"),
+            ),
         }
 
     def _commit_success(self, **kwargs: Any) -> None:
@@ -434,6 +670,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
                             "run_id": kwargs["run_id"], "prompt_id": kwargs["prompt_id"], "workflow_id": kwargs["workflow_id"],
                             "environment": kwargs.get("environment"), "input_hash": kwargs["input_hash"],
                             "output_hash": sha256_json(kwargs["consumed_output"]),
+                            "model_request_spec_hash": kwargs.get("model_request_spec_hash"),
+                            "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
+                            "contract_registry_version": CONTRACT_REGISTRY_VERSION,
                         },
                         ensure_ascii=False,
                     ),
@@ -441,7 +680,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 ),
             )
 
-    def _commit_error(self, **kwargs: Any) -> None:
+    def _commit_error(self, **kwargs: Any) -> str | None:
         security_level = kwargs["model_envelope"].get("security_context", {}).get("input_max_security_level", "INTERNAL")
         context_hash = sha256_json(kwargs["model_envelope"])
         try:
@@ -477,11 +716,23 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     "INSERT INTO audit_events(project_id,event_type,object_id,metadata_json,created_at) VALUES(?,?,?,?,?)",
                     (
                         kwargs["project_id"], "MODEL_CALL_FAILED", kwargs["call_key"],
-                        json.dumps({"run_id": kwargs["run_id"], "prompt_id": kwargs["prompt_id"], "error": kwargs["error"]}, ensure_ascii=False),
+                        json.dumps({
+                            "run_id": kwargs["run_id"],
+                            "prompt_id": kwargs["prompt_id"],
+                            "error": kwargs["error"],
+                            "deterministic_recoverable": self._is_deterministic_contract_failure(kwargs["error"]),
+                            "model_request_spec_hash": kwargs.get("model_request_spec_hash"),
+                            "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
+                            "contract_registry_version": CONTRACT_REGISTRY_VERSION,
+                        }, ensure_ascii=False),
                         utc_now(),
                     ),
                 )
-        except Exception:
-            # The original execution error remains authoritative. A secondary evidence
-            # write failure must not hide it or manufacture a successful run.
-            pass
+        except Exception as evidence_exc:
+            # The original execution error remains authoritative, but silently
+            # discarding a failed error record makes deterministic recovery
+            # impossible. Surface a bounded secondary diagnostic without
+            # manufacturing a successful run or replacing the primary error.
+            detail = f"{type(evidence_exc).__name__}: {evidence_exc}"
+            return detail[:1000]
+        return None

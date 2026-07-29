@@ -9,7 +9,10 @@ from typing import Any
 from .llm import LLMError, ModelGateway
 from .contract_registry import (
     augment_prompt_with_enum_contract,
+    augment_prompt_with_field_ownership_contract,
     normalize_against_schema,
+    repair_field_ownership_against_schema,
+    required_null_container_errors,
     report_warning,
 )
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
@@ -41,7 +44,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-07-28.v5-container-guard"
+OUTPUT_NORMALIZER_VERSION = "2026-07-29.v6-schema-ownership"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -834,6 +837,12 @@ class PromptExecutor:
             if callable(schema_reader)
             else {}
         )
+        required_null_errors = required_null_container_errors(output, output_schema)
+        if required_null_errors:
+            raise PromptExecutionError(
+                "Required output container is null",
+                validation_errors=required_null_errors,
+            )
         output, contract_report = normalize_against_schema(
             output,
             output_schema,
@@ -842,6 +851,25 @@ class PromptExecutor:
         contract_warning = report_warning(contract_report)
         if contract_warning:
             output.setdefault("warnings", []).append(contract_warning)
+        output, ownership_report = repair_field_ownership_against_schema(
+            output,
+            output_schema,
+            contract_id=f"prompt-pack:{prompt_id}:field-ownership",
+        )
+        ownership_changes = list(ownership_report.get("changes") or [])
+        if ownership_changes:
+            descriptions = [
+                f"{item.get('source_path')}/{item.get('field')}"
+                f"->{item.get('target_path')}/{item.get('field')}"
+                for item in ownership_changes[:12]
+            ]
+            if len(ownership_changes) > 12:
+                descriptions.append(f"另有{len(ownership_changes)-12}项详见Trace")
+            output.setdefault("warnings", []).append(
+                "SYSTEM_FIELD_OWNERSHIP_NORMALIZATION"
+                f"[v{ownership_report.get('normalizer_version')}]: "
+                + "; ".join(descriptions)
+            )
         protocol_fields_normalized = 0
         for field in ("schema_version", "prompt_id", "prompt_version"):
             expected = ((output_schema.get("properties") or {}).get(field) or {}).get("const")
@@ -887,6 +915,30 @@ class PromptExecutor:
                 "SYSTEM_NORMALIZATION: "
                 f"lifted {lifted_envelope_fields} standard response-envelope field(s) from result"
             )
+
+        # Two writer contracts intentionally expose the same unresolved-item
+        # list in both the standard response envelope and the content result.
+        # Keep the mirrors losslessly synchronized so a provider cannot pass
+        # schema validation while the two workflow layers disagree.
+        if prompt_id in {"P-WRITE-CONTENT", "P-EXPRESSION-POLISH"}:
+            result_object = output.get("result") or {}
+            root_items = output.get("unresolved_items")
+            result_items = result_object.get("unresolved_items")
+            if isinstance(root_items, list) or isinstance(result_items, list):
+                merged_items: list[Any] = []
+                for collection in (root_items or [], result_items or []):
+                    if not isinstance(collection, list):
+                        continue
+                    for item in collection:
+                        if item not in merged_items:
+                            merged_items.append(copy.deepcopy(item))
+                if root_items != merged_items or result_items != merged_items:
+                    output["unresolved_items"] = copy.deepcopy(merged_items)
+                    result_object["unresolved_items"] = copy.deepcopy(merged_items)
+                    output.setdefault("warnings", []).append(
+                        "SYSTEM_NORMALIZATION: synchronized the mirrored root/result "
+                        "unresolved-item collections without dropping either source"
+                    )
 
         removed_schema_keywords = 0
         normalized_evidence_refs = 0
@@ -2063,6 +2115,36 @@ class PromptExecutor:
                 if isinstance(item, dict) and item.get("code")
             }
             repair_result = output.get("result") or {}
+            repaired_object = repair_result.get("repaired_object")
+            original_content = (
+                ((envelope.get("payload") or {}).get("original_object") or {}).get("content")
+                or {}
+            )
+            lifted_repair_wrapper_fields = 0
+            if isinstance(repaired_object, dict):
+                for field in (
+                    "changed_paths",
+                    "unchanged_protected_hashes",
+                    "resolved_finding_codes",
+                    "unresolved_finding_codes",
+                ):
+                    if field in repair_result or field not in repaired_object:
+                        continue
+                    # repaired_object is the only intentionally open output
+                    # container.  Lift a wrapper field only when the original
+                    # business object did not itself own that field; otherwise
+                    # the placement is genuinely ambiguous and strict schema
+                    # validation must block.
+                    if isinstance(original_content, dict) and field in original_content:
+                        continue
+                    repair_result[field] = repaired_object.pop(field)
+                    lifted_repair_wrapper_fields += 1
+            if lifted_repair_wrapper_fields:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_NORMALIZATION: lifted "
+                    f"{lifted_repair_wrapper_fields} targeted-repair wrapper field(s) "
+                    "from repaired_object after checking the original object contract"
+                )
             resolved_codes: set[str] = set()
             normalized_resolved_codes = 0
             for value in repair_result.get("resolved_finding_codes") or []:
@@ -2806,6 +2888,22 @@ class PromptExecutor:
             result = await self.gateway.invoke(route, prompt_id, system_prompt, model_envelope, output_schema)
             raw_response_text = result.raw_text
             output = self._normalize_output(prompt_id, result.output, model_envelope)
+            parse_report = dict(getattr(result, "parse_report", {}) or {})
+            repair_count = int(parse_report.get("repair_count") or 0)
+            code_fence_removed = bool(parse_report.get("code_fence_removed"))
+            surrounding_text_removed = bool(parse_report.get("surrounding_text_removed"))
+            if repair_count or code_fence_removed or surrounding_text_removed:
+                repair_kinds = sorted(
+                    {str(item.get("kind") or "UNKNOWN") for item in parse_report.get("repairs") or []}
+                )
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_JSON_PARSE_NORMALIZATION: provider response required "
+                    f"repairs={repair_count}"
+                    f" ({', '.join(repair_kinds) if repair_kinds else 'none'}), "
+                    f"code_fence_removed={code_fence_removed}, "
+                    f"surrounding_text_removed={surrounding_text_removed}; "
+                    "the immutable raw response remains in the execution trace"
+                )
             if prompt_id == "P-SAFE-ONLINE-PACKAGE":
                 output, redactions = sanitize_safe_online_package(output, project_config)
                 if redactions:
@@ -3224,6 +3322,11 @@ class PromptExecutor:
             base_prompt,
             output_schema,
             contract_id=f"prompt-pack:{prompt_id}:output",
+        )
+        base_prompt = augment_prompt_with_field_ownership_contract(
+            base_prompt,
+            output_schema,
+            contract_id=f"prompt-pack:{prompt_id}:field-ownership",
         )
         return (
             base_prompt

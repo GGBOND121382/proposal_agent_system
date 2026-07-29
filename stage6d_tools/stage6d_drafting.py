@@ -20,12 +20,35 @@ if str(ROOT) not in sys.path:
 
 from app.util import sha256_json, utc_now
 from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
+from app.staged_workflow_config import (
+    batch_spec, page_totals, project_title as resolve_project_title,
+    section_ids_for_batch, section_ids_from_run, stage_boundary,
+)
 
 STAGE = "STAGE_6D_PROVISIONAL_DRAFTING"
 BATCH_ID = "STAGE-6D"
-SECTION_IDS = [f"SEC-{i:02d}" for i in range(12, 15)]
+DEFAULT_SECTION_IDS = [f"SEC-{i:02d}" for i in range(12, 15)]
+SECTION_IDS = list(DEFAULT_SECTION_IDS)
 MODEL_ID = "gpt-5.6-thinking"
 ENDPOINT_ID = "chatgpt-conversation-file-bridge"
+
+
+def configure_section_ids(*, run_dir: Path | None = None, stage5: dict[str, Any] | None = None) -> list[str]:
+    global SECTION_IDS
+    if stage5 is not None:
+        SECTION_IDS = section_ids_for_batch(stage5, BATCH_ID, DEFAULT_SECTION_IDS)
+    elif run_dir is not None:
+        SECTION_IDS = section_ids_from_run(run_dir, BATCH_ID, DEFAULT_SECTION_IDS)
+    else:
+        SECTION_IDS = list(DEFAULT_SECTION_IDS)
+    if not SECTION_IDS:
+        raise ValueError(f"{BATCH_ID} has no configured sections")
+    return SECTION_IDS
+
+
+def require_section_id(section_id: str) -> None:
+    if section_id not in SECTION_IDS:
+        raise SystemExit(f"section {section_id} is not part of {BATCH_ID}: {SECTION_IDS}")
 
 
 def read_json(path: Path) -> Any:
@@ -192,10 +215,10 @@ def make_writer_request(run_dir: Path, section_id: str) -> dict[str, Any]:
         "executor_role": "Closure-calibrated Proposal Writing Agent",
         "model_contract": {"model_independent": True, "response_format": "JSON", "actual_model_id_required": True, "endpoint_id_required": True, "original_response_immutable": True},
         "system_prompt": (
-            "你是科研项目申请书计划、风险和结论章节写作Agent。严格按章节合同和证据边界写作。"
-            "计划章只能按能力依赖和里程碑组织，不得补造年度、起止日期、经费或已交付成果；"
-            "风险章必须写明触发信号、预防、降级、回滚和人工接管，并保留正式组织信息缺口；"
-            "结论章必须逐一回答RQ-1至RQ-3，回扣CP-1、OBJ-1至OBJ-4和INNO-H1至INNO-H3，说明成立条件、反证条件和开放事项，不得引入新结论。"
+            "你是科研项目申请书收束批次写作Agent。严格按章节合同和证据边界写作。"
+            "计划类章节只能按能力依赖和里程碑组织，不得补造年度、起止日期、经费或已交付成果；"
+            "风险类章节必须写明触发信号、预防、降级、回滚和人工接管，并保留正式组织信息缺口；"
+            "结论类章节必须逐一回答合同绑定的研究问题，回扣中心命题、目标和创新假设，说明成立条件、反证条件和开放事项，不得引入新结论。"
             "每段元数据必须与正文一致，避免重复阶段6A至6C。只返回符合Schema的JSON。"
         ),
         "task_prompt": (
@@ -219,7 +242,7 @@ def make_writer_request(run_dir: Path, section_id: str) -> dict[str, Any]:
             "stage6b_frozen_draft": stage6b,
             "stage6c_frozen_draft": stage6c,
             "prior_section_digest": completed_digest(run_dir),
-            "stage_boundary": "STAGE_6D_SECTIONS_12_TO_14_ONLY",
+            "stage_boundary": stage_boundary(BATCH_ID, SECTION_IDS),
         },
         "output_schema": load_schema("section_draft.schema.json"),
         "requested_at": utc_now(),
@@ -274,6 +297,31 @@ def make_expression_critic_request(section_id: str, original: dict[str, Any], po
 
 
 
+def section_role(name: str) -> str:
+    normalized = re.sub(r"\s+", "", str(name))
+    if "计划" in normalized or "里程碑" in normalized:
+        return "PLAN"
+    if "风险" in normalized or "组织管理" in normalized:
+        return "RISK"
+    if "结论" in normalized or "总结" in normalized:
+        return "CONCLUSION"
+    return "GENERAL"
+
+
+def role_required_tokens(candidate: dict[str, Any]) -> list[str]:
+    role = section_role(candidate.get("section_name", ""))
+    ps = paragraphs(candidate)
+    bound_nodes = sorted({node for p in ps for node in p.get("node_ids", [])})
+    if role == "PLAN":
+        return [node for node in bound_nodes if node.startswith("WP-")] + ["前置条件", "验收证据", "重排"]
+    if role == "RISK":
+        return [node for node in bound_nodes if node.startswith("RISK-")] + ["触发", "降级", "回滚", "人工接管"]
+    if role == "CONCLUSION":
+        closure_nodes = [node for node in bound_nodes if node.startswith(("RQ-", "CP-", "INNO-"))]
+        return closure_nodes + ["反证", "开放事项"]
+    return []
+
+
 def deterministic_validate_batch(run_dir: Path, candidates: dict[str, dict[str, Any]]) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     def add(code: str, message: str, target: str = "batch") -> None:
@@ -297,15 +345,11 @@ def deterministic_validate_batch(run_dir: Path, candidates: dict[str, dict[str, 
     overlap = set(keys) & prior_keys
     if overlap: add("UPSTREAM_INFORMATION_KEY_REUSE", f"复用上游信息键：{sorted(overlap)}。")
     if not (1200 <= total_chars <= 3000): add("BATCH_CHAR_BUDGET_OUT_OF_RANGE", f"有效字符数{total_chars}不在1200—3000内。")
-    required = {
-        "SEC-12": ["WP-1", "WP-5", "前置条件", "验收证据", "周期确定后", "重排"],
-        "SEC-13": ["RISK-1", "RISK-4", "触发", "降级", "回滚", "人工接管", "团队名单"],
-        "SEC-14": ["RQ-1", "RQ-2", "RQ-3", "CP-1", "INNO-H1", "INNO-H2", "INNO-H3", "反证", "开放事项"],
-    }
-    for sid, tokens in required.items():
-        text = "".join(p["text"] for p in paragraphs(candidates[sid]))
-        for tok in tokens:
-            if tok not in text: add("BATCH_SECTION_ROLE_INCOMPLETE", f"{sid}缺少‘{tok}’语义。", sid)
+    for sid, candidate in candidates.items():
+        text = "".join(p["text"] for p in paragraphs(candidate))
+        for tok in role_required_tokens(candidate):
+            if tok not in text:
+                add("BATCH_SECTION_ROLE_INCOMPLETE", f"{sid}缺少‘{tok}’语义。", sid)
     return {"verdict": "PASS" if not findings else "FAIL", "section_ids": SECTION_IDS, "total_effective_char_count": total_chars, "candidate_hashes": {sid: sha256_json(candidates[sid]) for sid in SECTION_IDS}, "findings": findings}
 
 
@@ -319,8 +363,8 @@ def make_batch_critic_request(run_dir: Path) -> dict[str, Any]:
       "schema_version": "1.0", "call_key": "stage6d-batch-critic-001", "prompt_id": "P-STAGE6D-BATCH-CRITIC", "prompt_version": "1.0.0",
       "executor_role": "Independent Closure Batch Critic",
       "model_contract": {"independent_from_all_section_writers": True, "response_format": "JSON", "actual_model_id_required": True, "endpoint_id_required": True},
-      "system_prompt": ("你是阶段6D批次Critic。检查计划章是否只有依赖、里程碑和可调整规则；风险章是否覆盖监测、降级、回滚、人工接管和责任边界；"
-                       "结论章是否逐一回答三项研究问题并回扣中心命题、目标、创新假设、成立条件和开放事项。同时检查跨章不重复及篇幅预算。"),
+      "system_prompt": ("你是阶段6D批次Critic。按实际章节合同检查计划类章节的依赖、里程碑和可调整规则，风险类章节的监测、降级、回滚、人工接管和责任边界，"
+                       "以及结论类章节对全部绑定研究问题、中心命题、目标、创新假设、成立条件和开放事项的闭环。同时检查跨章不重复及篇幅预算。"),
       "task_prompt": "逐章和逐质量维度检查，只有没有实质问题时才允许进入全文集成。",
       "input_envelope": {"central_proposition": stage3["central_proposition"], "research_questions": stage3["research_questions"], "section_contracts": [section_contract(stage5, sid) for sid in SECTION_IDS], "deterministic_batch_report": report, "candidates": candidates},
       "output_schema": load_schema("batch_critic.schema.json"), "requested_at": utc_now()}
@@ -420,25 +464,38 @@ def deterministic_validate_section(candidate: Any, contract: dict[str, Any], sta
     text = "".join(p["text"] for p in ps)
     if re.search(r"非“[^”]+”本身作为", text):
         add("UNGRAMMATICAL_COMPARISON_PHRASE", "正文包含‘非……本身作为……’的不自然比较句式。")
-    if sid == "SEC-12":
-        for token in [*[f"WP-{i}" for i in range(1, 6)], "前置条件", "中间工件", "验收证据", "周期确定后", "重排"]:
-            if token not in text: add("PLAN_MILESTONE_CHAIN_INCOMPLETE", f"研究计划章缺少{token}。")
+    role = section_role(contract.get("section_name", c.get("section_name", "")))
+    unresolved = set(c.get("unresolved_open_item_ids", []))
+    if role == "PLAN":
+        plan_nodes = [node for node in contract.get("required_node_ids", []) if str(node).startswith("WP-")]
+        for token in [*plan_nodes, "前置条件", "中间工件", "验收证据", "周期确定后", "重排"]:
+            if token not in text:
+                add("PLAN_MILESTONE_CHAIN_INCOMPLETE", f"研究计划章缺少{token}。")
         if any(x in text for x in ["第一年", "第二年", "第三年", "第四年", "2026年", "2027年", "已完成", "已交付"]):
             add("UNSUPPORTED_SCHEDULE_OR_RESULT", "研究计划章补造了年度安排或把计划写成已完成。")
-        if not {"OPEN-004", "OPEN-011"}.issubset(set(c.get("unresolved_open_item_ids", []))):
-            add("PLAN_OPEN_ITEMS_MISSING", "研究计划章必须保留OPEN-004和OPEN-011。")
-    if sid == "SEC-13":
-        for token in [*[f"RISK-{i}" for i in range(1, 5)], "触发", "监测", "降级", "回滚", "人工接管", "责任", "团队名单"]:
-            if token not in text: add("RISK_GOVERNANCE_CHAIN_INCOMPLETE", f"风险管理章缺少{token}。")
+        if not unresolved:
+            add("PLAN_OPEN_ITEMS_MISSING", "研究计划章必须保留尚未确定的进度或实施开放事项。")
+    if role == "RISK":
+        risk_nodes = [node for node in contract.get("required_node_ids", []) if str(node).startswith("RISK-")]
+        for token in [*risk_nodes, "触发", "监测", "降级", "回滚", "人工接管", "责任"]:
+            if token not in text:
+                add("RISK_GOVERNANCE_CHAIN_INCOMPLETE", f"风险管理章缺少{token}。")
         if any(x in text for x in ["风险完全消除", "零风险", "负责人为"]):
             add("UNSUPPORTED_RISK_OR_ORG_CLAIM", "风险或正式组织信息被过度承诺。")
-        if "SRC-STD-01" not in source_ids:
-            add("RISK_STANDARD_SOURCE_MISSING", "风险管理章必须引用SRC-STD-01。")
-        if "OPEN-009" not in set(c.get("unresolved_open_item_ids", [])):
-            add("ORGANIZATION_OPEN_ITEM_MISSING", "风险管理章必须保留OPEN-009。")
-    if sid == "SEC-14":
-        for token in ["RQ-1", "RQ-2", "RQ-3", "CP-1", "OBJ-1", "OBJ-2", "OBJ-3", "OBJ-4", "INNO-H1", "INNO-H2", "INNO-H3", "成立条件", "反证", "开放事项"]:
-            if token not in text: add("CONCLUSION_CLOSURE_INCOMPLETE", f"结论章缺少{token}。")
+        required_sources = set(contract.get("required_source_ids", []))
+        if required_sources and not required_sources.issubset(source_ids):
+            add("RISK_STANDARD_SOURCE_MISSING", f"风险管理章缺少合同要求的来源：{sorted(required_sources-source_ids)}。")
+        if not unresolved:
+            add("ORGANIZATION_OPEN_ITEM_MISSING", "风险管理章必须保留尚未确定的组织或治理开放事项。")
+    if role == "CONCLUSION":
+        closure_tokens = list(dict.fromkeys([
+            *contract.get("required_rq_ids", []),
+            *[node for node in contract.get("required_node_ids", []) if str(node).startswith(("CP-", "OBJ-", "INNO-"))],
+            "成立条件", "反证", "开放事项",
+        ]))
+        for token in closure_tokens:
+            if token not in text:
+                add("CONCLUSION_CLOSURE_INCOMPLETE", f"结论章缺少{token}。")
         premature = any(x in text for x in ["本项目已经验证", "研究已经验证", "结果证明了", "试验证明了"])
         readiness_phrase = "最终申报条件已经齐备"
         negated_readiness = any(x in text for x in [
@@ -449,7 +506,7 @@ def deterministic_validate_section(candidate: Any, contract: dict[str, Any], sta
         ])
         if premature or (readiness_phrase in text and not negated_readiness):
             add("CONCLUSION_PREMATURE_CLAIM", "结论将待验证内容写成已证实或声称申报条件齐备。")
-        if not set(c.get("unresolved_open_item_ids", [])):
+        if not unresolved:
             add("CONCLUSION_OPEN_ITEMS_MISSING", "结论必须保留最终开放事项。")
 
     return {"verdict": "PASS" if not findings else "FAIL", "candidate_hash": sha256_json(c), "effective_char_count": chars, "paragraph_count": len(ps), "findings": findings}
@@ -480,8 +537,7 @@ def init_cmd(args: argparse.Namespace) -> None:
     run_dir.mkdir(parents=True,exist_ok=True)
     paths={"stage1":Path(args.design_input).resolve(),"stage3":Path(args.project_definition).resolve(),"stage4":Path(args.argument_architecture).resolve(),"stage4a":Path(args.evidence_completion).resolve(),"stage5":Path(args.section_plan).resolve(),"stage6a":Path(args.stage6a_draft).resolve(),"stage6b":Path(args.stage6b_draft).resolve(),"stage6c":Path(args.stage6c_draft).resolve()}
     values={k:read_json(v) for k,v in paths.items()}; stage5=values["stage5"]
-    batch=next(b for b in stage5["draft_batches"] if b["batch_id"]==BATCH_ID)
-    if batch["section_ids"]!=SECTION_IDS: raise SystemExit("stage5 batch 6D section IDs mismatch")
+    batch=batch_spec(stage5,BATCH_ID,DEFAULT_SECTION_IDS); configure_section_ids(stage5=stage5)
     hashes={k:sha256_file(v) for k,v in paths.items()}
     stable={"stage1":"stage1_design_input.json","stage3":"stage3_project_definition.json","stage4":"stage4_argument_architecture.json","stage4a":"stage4a_evidence_completion.json","stage5":"stage5_section_plan.json","stage6a":"stage6a_batch_draft.json","stage6b":"stage6b_batch_draft.json","stage6c":"stage6c_batch_draft.json"}
     for k,pth in paths.items():
@@ -495,6 +551,7 @@ def init_cmd(args: argparse.Namespace) -> None:
 
 def ingest_writer_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve(); sid = args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid)
     set_contract_trace_context(run_dir, "ingest_writer_cmd")
     response = read_json(Path(args.response_file).resolve())
     errors = validate_schema(response, load_schema("section_draft.schema.json"))
@@ -536,6 +593,7 @@ def writer_repair_response_path(run_dir: Path, section_id: str, attempt: int) ->
 
 def ingest_writer_repair_cmd(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir).resolve(); sid = args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid)
     set_contract_trace_context(run_dir, "ingest_writer_repair_cmd")
     response = read_json(Path(args.response_file).resolve())
     attempt = next_writer_repair_attempt(run_dir, sid)
@@ -587,7 +645,8 @@ def ingest_writer_repair_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_critic_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); sid=args.section_id; response=read_json(Path(args.response_file).resolve())
+    run_dir=Path(args.run_dir).resolve(); sid=args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid); response=read_json(Path(args.response_file).resolve())
     set_contract_trace_context(run_dir, "ingest_critic_cmd")
     errors=validate_schema(response,load_schema("section_critic.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
@@ -602,7 +661,8 @@ def ingest_critic_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_polish_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); sid=args.section_id; response=read_json(Path(args.response_file).resolve())
+    run_dir=Path(args.run_dir).resolve(); sid=args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid); response=read_json(Path(args.response_file).resolve())
     set_contract_trace_context(run_dir, "ingest_polish_cmd")
     errors=validate_schema(response,load_schema("expression_polish.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
@@ -621,7 +681,8 @@ def ingest_polish_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_expression_critic_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); sid=args.section_id; response=read_json(Path(args.response_file).resolve())
+    run_dir=Path(args.run_dir).resolve(); sid=args.section_id
+    configure_section_ids(run_dir=run_dir); require_section_id(sid); response=read_json(Path(args.response_file).resolve())
     set_contract_trace_context(run_dir, "ingest_expression_critic_cmd")
     errors=validate_schema(response,load_schema("expression_critic.schema.json"))
     if errors: raise SystemExit("; ".join(errors))
@@ -642,7 +703,8 @@ def ingest_expression_critic_cmd(args: argparse.Namespace) -> None:
 
 
 def ingest_batch_critic_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); response=read_json(Path(args.response_file).resolve())
+    run_dir=Path(args.run_dir).resolve()
+    configure_section_ids(run_dir=run_dir); response=read_json(Path(args.response_file).resolve())
     set_contract_trace_context(run_dir, "ingest_batch_critic_cmd")
     candidates={sid:read_json(run_dir/"intermediate"/sid/"polished_candidate.json") for sid in SECTION_IDS}
     deterministic_report=deterministic_validate_batch(run_dir,candidates)
@@ -656,14 +718,15 @@ def ingest_batch_critic_cmd(args: argparse.Namespace) -> None:
         raise SystemExit("batch critic did not accept")
     path=run_dir/"responses"/"013_stage6d_batch_critic.json"; atomic_json(path,response); atomic_json(run_dir/"quality"/"batch_integration_critic.json",response)
     append_event(run_dir,"MODEL_RESPONSE_INGESTED",response_file=str(path.relative_to(run_dir)),actual_model_id=response["actual_model_id"],endpoint_id=response["endpoint_id"])
-    gate={"schema_version":"1.0","gate_id":"stage6d-batch-confirmation-001","gate_type":"BATCH_DRAFT_CONFIRMATION","batch_id":BATCH_ID,"candidate_hashes":{sid:sha256_json(read_json(run_dir/"intermediate"/sid/"polished_candidate.json")) for sid in SECTION_IDS},"question":"是否确认阶段6D三章草稿作为全文集成的冻结上游工件？","allowed_actions":["CONFIRM","REJECT"],"requested_at":utc_now()}
+    gate={"schema_version":"1.0","gate_id":"stage6d-batch-confirmation-001","gate_type":"BATCH_DRAFT_CONFIRMATION","batch_id":BATCH_ID,"candidate_hashes":{sid:sha256_json(read_json(run_dir/"intermediate"/sid/"polished_candidate.json")) for sid in SECTION_IDS},"question":f"是否确认{BATCH_ID}的{len(SECTION_IDS)}章草稿作为后续阶段的冻结上游工件？","allowed_actions":["CONFIRM","REJECT"],"requested_at":utc_now()}
     atomic_json(run_dir/"human_gate"/"stage6d_gate_request.json",gate); append_event(run_dir,"HUMAN_GATE_REQUESTED",gate_id=gate["gate_id"])
     set_state(run_dir,"WAITING_GATE","BATCH_DRAFT_CONFIRMATION",completed_section_ids=SECTION_IDS)
 
 
 def build_outputs(run_dir: Path) -> dict[str, Any]:
     stage5=read_json(run_dir/"source_snapshots"/"stage5_section_plan.json")
-    sections=[]; combined=["# 人机协同决策优势冲刺关键技术研究（阶段6D草稿）",""]
+    title=resolve_project_title(stage5, read_json(run_dir/"source_snapshots"/"stage3_project_definition.json"), read_json(run_dir/"source_snapshots"/"stage1_design_input.json"))
+    sections=[]; combined=[f"# {title}（阶段6D草稿）",""]
     for sid in SECTION_IDS:
         c=read_json(run_dir/"intermediate"/sid/"polished_candidate.json")
         md=canonical_markdown(c["section_name"],c)
@@ -674,7 +737,8 @@ def build_outputs(run_dir: Path) -> dict[str, Any]:
         atomic_json(run_dir/"outputs"/f"{sid}_{c['section_name']}.json",record)
         combined += [md.rstrip(),""]
     total_chars=sum(x["effective_char_count"] for x in sections)
-    result={"schema_version":"1.0","stage":STAGE,"batch_id":BATCH_ID,"project_title":"人机协同决策优势冲刺关键技术研究","sections":sections,"total_effective_char_count":total_chars,"target_pages":1.8,"max_pages":2.4,"readiness":{"ready_for_full_integration":True,"ready_for_final_submission":False,"next_stage":"STAGE_7_FULL_INTEGRATION"},"open_items_inherited":read_json(run_dir/"source_snapshots"/"stage4a_evidence_completion.json")["open_items_remaining"],"completed_at":utc_now()}
+    target_pages, max_pages = page_totals(stage5, SECTION_IDS)
+    result={"schema_version":"1.0","stage":STAGE,"batch_id":BATCH_ID,"project_title":title,"sections":sections,"total_effective_char_count":total_chars,"target_pages":target_pages,"max_pages":max_pages,"readiness":{"ready_for_full_integration":True,"ready_for_final_submission":False,"next_stage":"STAGE_7_FULL_INTEGRATION"},"open_items_inherited":read_json(run_dir/"source_snapshots"/"stage4a_evidence_completion.json")["open_items_remaining"],"completed_at":utc_now()}
     atomic_text(run_dir/"outputs"/"stage6d_batch_draft.md","\n".join(combined).rstrip()+"\n"); atomic_json(run_dir/"outputs"/"stage6d_batch_draft.json",result)
     with (run_dir/"outputs"/"stage6d_section_summary.csv").open("w",encoding="utf-8-sig",newline="") as f:
         w=csv.DictWriter(f,fieldnames=["section_id","section_name","effective_char_count","target_pages","max_pages","candidate_hash"]); w.writeheader(); w.writerows([{k:x[k] for k in w.fieldnames} for x in sections])
@@ -698,7 +762,8 @@ def manifest_and_zip(run_dir: Path) -> tuple[Path, dict[str, Any]]:
 
 
 def finalize_cmd(args: argparse.Namespace) -> None:
-    run_dir=Path(args.run_dir).resolve(); gate=read_json(Path(args.gate_response).resolve())
+    run_dir=Path(args.run_dir).resolve()
+    configure_section_ids(run_dir=run_dir); gate=read_json(Path(args.gate_response).resolve())
     request=read_json(run_dir/"human_gate"/"stage6d_gate_request.json")
     if gate.get("gate_id")!=request["gate_id"] or gate.get("action")!="CONFIRM": raise SystemExit("gate mismatch")
     atomic_json(run_dir/"human_gate"/"stage6d_gate_response.json",gate); append_event(run_dir,"HUMAN_GATE_CONSUMED",gate_id=gate["gate_id"],action=gate["action"])
@@ -729,7 +794,7 @@ def main() -> None:
     ap=argparse.ArgumentParser(); subs=ap.add_subparsers(dest="cmd",required=True)
     p=subs.add_parser("init"); p.add_argument("--run-dir",required=True); p.add_argument("--design-input",required=True); p.add_argument("--project-definition",required=True); p.add_argument("--argument-architecture",required=True); p.add_argument("--evidence-completion",required=True); p.add_argument("--section-plan",required=True); p.add_argument("--stage6a-draft",required=True); p.add_argument("--stage6b-draft",required=True); p.add_argument("--stage6c-draft",required=True); p.set_defaults(fn=init_cmd)
     for name,fn in [("ingest-writer",ingest_writer_cmd),("ingest-writer-repair",ingest_writer_repair_cmd),("ingest-critic",ingest_critic_cmd),("ingest-polish",ingest_polish_cmd),("ingest-expression-critic",ingest_expression_critic_cmd)]:
-        p=subs.add_parser(name); p.add_argument("--run-dir",required=True); p.add_argument("--section-id",required=True,choices=SECTION_IDS); p.add_argument("--response-file",required=True); p.set_defaults(fn=fn)
+        p=subs.add_parser(name); p.add_argument("--run-dir",required=True); p.add_argument("--section-id",required=True); p.add_argument("--response-file",required=True); p.set_defaults(fn=fn)
     p=subs.add_parser("ingest-batch-critic"); p.add_argument("--run-dir",required=True); p.add_argument("--response-file",required=True); p.set_defaults(fn=ingest_batch_critic_cmd)
     p=subs.add_parser("finalize"); p.add_argument("--run-dir",required=True); p.add_argument("--gate-response",required=True); p.set_defaults(fn=finalize_cmd)
     p=subs.add_parser("validate"); p.add_argument("--run-dir",required=True); p.set_defaults(fn=validate_cmd)
