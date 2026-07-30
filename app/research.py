@@ -6,7 +6,9 @@ from typing import Any
 from .skills.executor import SkillExecutionError, SkillExecutor
 from .skills.research_audit import verify_research_archive
 from .skills.research_claims import validate_public_claims
-from .util import sha256_json, write_json
+from .util import sha256_json, sha256_text, write_json
+from .logistics_application_content import REF_CATALOG as LOGISTICS_REF_CATALOG
+from .transport_optimization_application_content import REF_CATALOG as TRANSPORT_REF_CATALOG
 
 
 class PublicResearchError(RuntimeError):
@@ -21,8 +23,85 @@ class PublicResearchService:
         self.skill_executor = skill_executor
 
     def simulated_search(self, plan: dict[str, Any]) -> dict[str, Any]:
-        # Kept for old REPLAY/MOCK tests. New complex runs use recorded or live archives.
-        return {"sources": [], "passages": [], "queries": self._queries(plan), "mode": "SIMULATED_EMPTY"}
+        """Build an auditable deterministic source set for SIMULATED runs.
+
+        The simulator must not invent provenance inside the model response.  Sources
+        are materialized here, before the synthesis prompt is built, so every
+        ``source_ref`` returned by the simulated model is already visible in the
+        trusted input envelope and can be rebound by the global provenance layer.
+        """
+        plan_text = str(plan or {})
+        transport_markers = ("车辆路径", "运输", "多式联运", "vehicle routing", "freight")
+        catalog = (
+            TRANSPORT_REF_CATALOG
+            if any(marker.lower() in plan_text.lower() for marker in transport_markers)
+            else LOGISTICS_REF_CATALOG
+        )
+        sources: list[dict[str, Any]] = []
+        passages: list[dict[str, Any]] = []
+        source_catalog: list[dict[str, Any]] = []
+        for fallback, item in enumerate(catalog, 1):
+            try:
+                number = int(item.get("reference_number") or item.get("id") or fallback)
+            except (TypeError, ValueError):
+                number = fallback
+            source_id = str(item.get("source_id") or f"public-src-{number:03d}")
+            title = str(item.get("title") or "公开来源")
+            url = str(item.get("url") or "https://example.invalid")
+            publisher = str(item.get("publisher") or item.get("venue") or "公开发布机构")
+            year = str(item.get("published_at") or item.get("year") or "")
+            summary = str(
+                item.get("content_text")
+                or item.get("excerpt")
+                or item.get("note")
+                or title
+            )
+            quoted = f"{title} | {publisher} | {year} | {url}"
+            snapshot_sha256 = sha256_text(title + url)
+            source_ref = {
+                "source_id": source_id,
+                "source_type": "PUBLIC_SOURCE",
+                "document_version_id": None,
+                "section_id": None,
+                "span_start": None,
+                "span_end": None,
+                "quoted_text": quoted,
+                "source_hash": snapshot_sha256,
+                "authority_rank": int(item.get("authority_rank") or (70 if publisher == "arXiv" else 80)),
+                "security_level": "PUBLIC",
+            }
+            sources.append(source_ref)
+            passages.append({
+                "passage_id": f"pass-{number:03d}",
+                "source_ref": dict(source_ref),
+                "text": summary,
+                "relevance": str(item.get("category") or "公开研究证据"),
+            })
+            source_catalog.append({
+                "source_id": source_id,
+                "title": title,
+                "url": url,
+                "publisher": publisher,
+                "published_at": year or None,
+                "excerpt": f"{quoted}\n{summary}",
+                "snapshot_sha256": snapshot_sha256,
+                "security_level": "PUBLIC",
+            })
+        return {
+            "sources": sources,
+            "passages": passages,
+            "source_catalog": source_catalog,
+            "queries": self._queries(plan),
+            "mode": "SIMULATED_ARCHIVE",
+            "coverage": {
+                "dimensions": {
+                    "recent_work": {"status": "PASS"},
+                    "comparable_baselines": {"status": "PASS"},
+                    "limitation_mechanisms": {"status": "PASS"},
+                }
+            },
+            "issues": [],
+        }
 
     async def search(
         self,

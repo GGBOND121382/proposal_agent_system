@@ -6,7 +6,7 @@ from jsonschema import Draft202012Validator
 ROOT=Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
 from app.util import sha256_json, utc_now
-from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
+from app.staged_contracts import contract_validation_errors, normalize_in_place, prepare_staged_artifact, set_contract_trace_context
 from app.staged_workflow_config import all_section_ids, project_title as resolve_project_title
 STAGE="STAGE_7_FULL_INTEGRATION"; MODEL_ID="gpt-5.6-thinking"; ENDPOINT_ID="chatgpt-conversation-file-bridge"
 DEFAULT_SECTION_IDS=[f"SEC-{i:02d}" for i in range(1,15)]
@@ -37,8 +37,8 @@ def sha256_file(p:Path)->str:
 def load_schema(n:str)->dict:return read_json(ROOT/'stage7_tools'/n)
 def validate_schema(v: Any, n: str) -> list[str]:
  schema_value = load_schema(n)
- normalize_in_place(v, schema_value, contract_id=f"staged:{STAGE}:{n}")
- return [f"{'/'.join(map(str,e.path)) or '$'}: {e.message}" for e in sorted(Draft202012Validator(schema_value).iter_errors(v),key=lambda e:list(e.path))]
+ contract_report = normalize_in_place(v, schema_value, contract_id=f"staged:{STAGE}:{n}")
+ return contract_validation_errors(contract_report)+[f"{'/'.join(map(str,e.path)) or '$'}: {e.message}" for e in sorted(Draft202012Validator(schema_value).iter_errors(v),key=lambda e:list(e.path))]
 def paragraphs(c:dict)->list[dict]:return [p for s in c.get('subsections',[]) for p in s.get('paragraphs',[])]
 def canonical_markdown(c:dict)->str:
  out=[f"# {c['section_name']}",""]

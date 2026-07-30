@@ -1041,6 +1041,91 @@ def test_runtime_recovers_prior_field_ownership_failure_without_model_call(runti
     assert pack.validate("P-TEMPLATE-EXTRACT", "output", result["output"]) == []
 
 
+def test_runtime_recovers_safe_package_scalar_source_ref_drift_without_model_call(
+    runtime,
+    monkeypatch,
+):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-SAFE-ONLINE-PACKAGE"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    provider_output = pack.replay_output(prompt_id)
+    provider_output["source_refs"] = [
+        {
+            "source_id": envelope["payload"]["research_need"]["need_id"],
+            "source_type": "MODEL_INFERENCE",
+            "document_version_id": 1,
+            "section_id": None,
+            "span_start": None,
+            "span_end": None,
+            "quoted_text": None,
+            "source_hash": None,
+            "authority_rank": 60,
+            "security_level": "INTERNAL",
+        },
+        {
+            "source_id": envelope["payload"]["security_policy"]["profile_id"],
+            "source_type": "MODEL_INFERENCE",
+            "document_version_id": 2,
+            "section_id": None,
+            "span_start": None,
+            "span_end": None,
+            "quoted_text": None,
+            "source_hash": envelope["payload"]["security_policy"]["profile_hash"],
+            "authority_rank": 100,
+            "security_level": "INTERNAL",
+        },
+    ]
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    input_hash = sha256_json(model_envelope)
+    failed_run_id = new_id("run")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id,
+            project_id,
+            workflow_id,
+            prompt_id,
+            "ERROR",
+            "offline-general-primary",
+            "offline-primary",
+            input_hash,
+            sha256_json(provider_output),
+            json.dumps(model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Output container structure validation failed | "
+            "/source_refs/0/document_version_id: 1 is not valid under any schema; "
+            "/source_refs/1/document_version_id: 2 is not valid under any schema",
+            30000,
+            utc_now(),
+        ),
+    )
+
+    async def model_must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("trusted source reference drift must be repaired locally")
+
+    monkeypatch.setattr(executor.gateway, "invoke", model_must_not_be_called)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+        )
+    )
+
+    assert result["contract_recovered_from_run_id"] == failed_run_id
+    assert [
+        ref["document_version_id"] for ref in result["output"]["source_refs"]
+    ] == [None, None]
+    assert pack.validate(prompt_id, "output", result["output"]) == []
+
+
 def test_project_definition_model_input_uses_minimal_sufficient_compaction(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     envelope = pack.replay_input("P-PROJECT-DEFINITION-EXTRACT")
@@ -1650,3 +1735,104 @@ def test_runtime_surfaces_secondary_error_evidence_persistence_failure(runtime, 
     assert message.startswith("Output schema validation failed")
     assert "ERROR_EVIDENCE_PERSISTENCE_FAILED" in message
     assert "simulated disk full" in message
+
+
+def test_runtime_recovers_safe_package_source_prefix_alias_without_model_call(
+    runtime,
+    monkeypatch,
+):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-SAFE-ONLINE-PACKAGE"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    need = envelope["payload"]["research_need"]
+    envelope["payload"]["human_resolutions"] = [{
+        "resolution_id": "human-wf3-recovery-001",
+        "gate_id": "gate-wf3-recovery-001",
+        "prompt_id": prompt_id,
+        "question_id": "wf3-research-question",
+        "question": "需要联网检索并核验的公开问题是什么？",
+        "target_paths": ["research_need.question"],
+        "answer": need["question"],
+        "decided_by": "pytest",
+        "decided_role": "PROJECT_OWNER",
+    }]
+    provider_output = pack.replay_output(prompt_id)
+    provider_output["source_refs"] = [{
+        "source_id": f"source-{need['need_id']}",
+        "source_type": "MODEL_INFERENCE",
+        "document_version_id": None,
+        "section_id": None,
+        "span_start": None,
+        "span_end": None,
+        "quoted_text": None,
+        "source_hash": None,
+        "authority_rank": 60,
+        "security_level": "INTERNAL",
+    }]
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    prior_model_envelope = copy.deepcopy(model_envelope)
+    prior_model_envelope["payload"].pop("human_resolutions", None)
+    input_hash = sha256_json(prior_model_envelope)
+    failed_run_id = new_id("run")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id,
+            project_id,
+            workflow_id,
+            prompt_id,
+            "ERROR",
+            "offline-general-primary",
+            "offline-primary",
+            input_hash,
+            sha256_json(provider_output),
+            json.dumps(prior_model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Output provenance is not backed by the trusted input envelope | "
+            f"/source_refs/0/source_id: 'source-{need['need_id']}' is not present in the trusted input envelope",
+            33000,
+            utc_now(),
+        ),
+    )
+    # Simulate the exact migration scenario: the older runtime persisted a
+    # negative recovery classification because source aliases and gate-backed
+    # USER_CONFIRMATION provenance were not supported yet.  The current
+    # normalizer must be allowed to re-evaluate the immutable provider output.
+    db.audit(
+        "MODEL_CALL_FAILED",
+        project_id=project_id,
+        object_id="call-old-source-alias",
+        metadata={
+            "run_id": failed_run_id,
+            "prompt_id": prompt_id,
+            "deterministic_recoverable": False,
+            "model_request_spec_hash": executor._model_request_spec_hash(prompt_id),
+            "output_normalizer_version": "2026-07-29.v8-global-provenance-integrity",
+        },
+    )
+
+    async def model_must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("source prefix alias drift must be rebound from the prior provider output")
+
+    monkeypatch.setattr(executor.gateway, "invoke", model_must_not_be_called)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+        )
+    )
+
+    assert result["contract_recovered_from_run_id"] == failed_run_id
+    source_ref = result["output"]["source_refs"][0]
+    assert source_ref["source_id"] == need["need_id"]
+    assert source_ref["source_type"] == "USER_CONFIRMATION"
+    assert source_ref["authority_rank"] == 100
+    assert pack.validate(prompt_id, "output", result["output"]) == []

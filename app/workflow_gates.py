@@ -56,6 +56,13 @@ class WorkflowGateMixin:
         next_step = wf["current_step"]
         state = wf["state"]
         questions = json.loads(gate["questions_json"])
+        pending_input = state.get("workflow_input_required") if isinstance(state.get("workflow_input_required"), dict) else {}
+        current_result = state.get("step_results", {}).get(str(wf["current_step"])) or {}
+        target_prompt_id = str(
+            current_result.get("prompt_id")
+            or pending_input.get("prompt_id")
+            or ""
+        )
         if approved and gate["gate_type"] == WF3_INPUT_GATE_TYPE:
             state["options"] = options_from_gate_answers(
                 current_options=state.get("options") or {},
@@ -74,12 +81,6 @@ class WorkflowGateMixin:
             state.pop("last_error", None)
             state.setdefault("technical_retry_attempts", {}).pop(str(wf["current_step"]), None)
 
-        current_result = state.get("step_results", {}).get(str(wf["current_step"])) or {}
-        target_prompt_id = str(
-            current_result.get("prompt_id")
-            or (state.get("workflow_input_required") or {}).get("prompt_id")
-            or ""
-        )
         resolutions: list[dict[str, Any]] = []
         if approved and answers and target_prompt_id and gate["gate_type"] not in MATERIAL_INPUT_GATE_TYPES:
             resolutions = build_human_resolutions(

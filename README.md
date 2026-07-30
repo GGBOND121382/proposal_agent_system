@@ -8,7 +8,7 @@
 - Prompt 注册项：30；
 - Prompt Pack Schema：90；Stage Schema：34；
 - Replay 用例：150；
-- pytest 收集用例：411。
+- pytest 收集用例：442。
 
 以上统计由 `scripts/sync_project_metadata.py` 从代码与测试自动生成；历史版本章节中的旧数字仅描述当时版本。
 <!-- END GENERATED BUILD STATS -->
@@ -260,7 +260,7 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 bash scripts/validate.sh
 ```
 
-当前 pytest 收集用例共411项，覆盖：
+当前 pytest 收集用例共442项，覆盖：
 
 - 30 个已注册 Prompt 的正常 Replay 输入/输出；
 - 材料解析与 Context Builder；

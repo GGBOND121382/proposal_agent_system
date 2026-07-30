@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 
 from app.util import sha256_json, utc_now
 from app.status_ontology import CANONICAL_KNOWLEDGE_STATUSES, normalize_stage2_candidate
-from app.staged_contracts import normalize_in_place, prepare_staged_artifact, require_model_response_envelope, set_contract_trace_context
+from app.staged_contracts import contract_validation_errors, normalize_in_place, prepare_staged_artifact, require_model_response_envelope, set_contract_trace_context
 
 MODEL_ID = "gpt-5.6-thinking"
 ENDPOINT_ID = "chatgpt-conversation-file-bridge"
@@ -54,8 +54,8 @@ def schema(name: str) -> dict[str, Any]:
 
 
 def validate_schema(value: Any, schema_value: dict[str, Any]) -> list[str]:
-    normalize_in_place(value, schema_value, contract_id=f"staged:{STAGE}:{schema_value.get('title') or 'anonymous-schema'}")
-    errors: list[str] = []
+    contract_report = normalize_in_place(value, schema_value, contract_id=f"staged:{STAGE}:{schema_value.get('title') or 'anonymous-schema'}")
+    errors: list[str] = contract_validation_errors(contract_report)
     for e in sorted(Draft202012Validator(schema_value).iter_errors(value), key=lambda x: list(x.path)):
         path = "/".join(str(p) for p in e.path) or "$"
         errors.append(f"{path}: {e.message}")

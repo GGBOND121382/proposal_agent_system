@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.util import sha256_json, utc_now
-from app.staged_contracts import normalize_in_place, prepare_staged_artifact, set_contract_trace_context
+from app.staged_contracts import contract_validation_errors, normalize_in_place, prepare_staged_artifact, set_contract_trace_context
 from app.staged_workflow_config import (
     batch_spec, page_totals, project_title as resolve_project_title,
     section_ids_for_batch, section_ids_from_run, stage_boundary,
@@ -83,8 +83,8 @@ def load_schema(name: str) -> dict[str, Any]:
 
 
 def validate_schema(value: Any, schema: dict[str, Any]) -> list[str]:
-    normalize_in_place(value, schema, contract_id=f"staged:{STAGE}:{schema.get('title') or 'anonymous-schema'}")
-    errors: list[str] = []
+    contract_report = normalize_in_place(value, schema, contract_id=f"staged:{STAGE}:{schema.get('title') or 'anonymous-schema'}")
+    errors: list[str] = contract_validation_errors(contract_report)
     for err in sorted(Draft202012Validator(schema).iter_errors(value), key=lambda x: list(x.path)):
         loc = "/".join(str(x) for x in err.path) or "$"
         errors.append(f"{loc}: {err.message}")

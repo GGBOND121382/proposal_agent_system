@@ -16,6 +16,11 @@ from .contract_registry import (
     report_warning,
 )
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
+from .output_integrity import (
+    bind_trusted_source_refs,
+    normalize_reference_id_aliases,
+    validate_reference_ids,
+)
 from .proposal_quality import ProposalQualityGuard
 from .security import RoutingDenied, SecurityRouter
 from .status_ontology import (
@@ -44,7 +49,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-07-29.v6-schema-ownership"
+OUTPUT_NORMALIZER_VERSION = "2026-07-30.v9-source-alias-user-confirmation"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -65,6 +70,52 @@ class PromptExecutor:
         self.gateway = gateway
         self.quality_guard = quality_guard or ProposalQualityGuard()
         self.quality_guard_enabled = quality_guard_enabled
+
+    @staticmethod
+    def _source_ref_authority(source_type: str) -> int:
+        return {
+            "USER_CONFIRMATION": 100,
+            "APPLICATION_GUIDE": 95,
+            "TASK_BOOK": 95,
+            "CONTRACT": 95,
+            "CURRENT_PROPOSAL": 85,
+            "TECHNICAL_MATERIAL": 80,
+            "EVIDENCE_MATERIAL": 80,
+            "PUBLIC_SOURCE": 80,
+            "MODEL_INFERENCE": 60,
+            "HISTORICAL_DOCUMENT": 20,
+            "REFERENCE_PROPOSAL": 30,
+        }.get(source_type, 20)
+
+    def _normalize_safe_package_source_refs(
+        self,
+        output: dict[str, Any],
+        envelope: dict[str, Any] | None,
+    ) -> int:
+        """Apply the shared trusted-provenance binder before global validation.
+
+        Safe Package output is the outbound boundary, so it retains an explicit
+        pre-binding hook.  The hook deliberately delegates to the same global
+        catalog and conservative alias resolver used by every prompt; this avoids
+        a second, drifting source registry while ensuring prompt-specific pipeline
+        ordering cannot silently skip provenance normalization.
+        """
+        if not envelope:
+            return 0
+        normalized, report = bind_trusted_source_refs(
+            output,
+            envelope,
+            db=getattr(self, "db", None),
+        )
+        errors = list(report.get("errors") or [])
+        if errors:
+            raise PromptExecutionError(
+                "Untrusted source reference in Safe Online Package output",
+                validation_errors=errors,
+            )
+        output.clear()
+        output.update(normalized)
+        return int(report.get("normalized_count") or 0)
 
 
     @staticmethod
@@ -717,6 +768,28 @@ class PromptExecutor:
                 section_id = str(source_ref.get("section_id") or "")
                 document = document_by_id.get(source_id)
                 section = section_by_id.get((source_id, section_id))
+                # Replay providers and weaker LIVE providers sometimes emit a
+                # synthetic source ID even though this extraction step has one
+                # unambiguous guide document.  Rebind only in that unique case;
+                # multiple candidate documents remain a blocking ambiguity.
+                if document is None and len(document_by_id) == 1:
+                    source_id, document = next(iter(document_by_id.items()))
+                    source_ref["source_id"] = source_id
+                    candidate_sections = [
+                        item
+                        for item in document.get("sections") or []
+                        if isinstance(item, dict) and item.get("section_id")
+                    ]
+                    if section is None and len(candidate_sections) == 1:
+                        section = candidate_sections[0]
+                        section_id = str(section.get("section_id") or "")
+                        source_ref["section_id"] = section_id
+                if document is not None and section is None and len(document.get("sections") or []) == 1:
+                    only_section = (document.get("sections") or [None])[0]
+                    if isinstance(only_section, dict):
+                        section = only_section
+                        section_id = str(section.get("section_id") or "")
+                        source_ref["section_id"] = section_id
                 if document is None or section is None:
                     continue
                 text = str(section.get("text") or "")
@@ -737,6 +810,12 @@ class PromptExecutor:
                 if document_role:
                     source_ref["source_type"] = _schema_source_type(document_role)
                 enriched_count += 1
+
+        if len(document_by_id) == 1:
+            only_document_id = next(iter(document_by_id))
+            for coverage in result.get("extraction_coverage") or []:
+                if isinstance(coverage, dict) and str(coverage.get("source_id") or "") not in document_by_id:
+                    coverage["source_id"] = only_document_id
 
         if profile:
             profile["profile_hash"] = sha256_json(
@@ -2843,11 +2922,56 @@ class PromptExecutor:
                 "SYSTEM_NORMALIZATION: blocking missing-input findings routed to a human gate"
             )
         if prompt_id == "P-SCHEME-EXTRACT":
-            return self._normalize_scheme_output(output, envelope)
-        if prompt_id == "P-PROJECT-DEFINITION-EXTRACT":
-            return self._normalize_project_definition_output(output)
-        if prompt_id == "P-FACT-EXTRACT":
-            return self._normalize_fact_output(output)
+            output = self._normalize_scheme_output(output, envelope)
+        elif prompt_id == "P-PROJECT-DEFINITION-EXTRACT":
+            output = self._normalize_project_definition_output(output)
+        elif prompt_id == "P-FACT-EXTRACT":
+            output = self._normalize_fact_output(output)
+
+        if prompt_id == "P-SAFE-ONLINE-PACKAGE" and envelope:
+            safe_package_changes = self._normalize_safe_package_source_refs(output, envelope)
+            if safe_package_changes:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_SAFE_PACKAGE_SOURCE_NORMALIZATION: rebound "
+                    f"{safe_package_changes} outbound source reference(s) before global provenance validation"
+                )
+
+        if envelope:
+            output, provenance_report = bind_trusted_source_refs(
+                output,
+                envelope,
+                db=getattr(self, "db", None),
+            )
+            provenance_errors = list(provenance_report.get("errors") or [])
+            if provenance_errors:
+                raise PromptExecutionError(
+                    "Output provenance is not backed by the trusted input envelope",
+                    validation_errors=provenance_errors,
+                )
+            provenance_changes = int(provenance_report.get("normalized_count") or 0)
+            if provenance_changes:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_TRUSTED_SOURCE_REF_NORMALIZATION: rebound "
+                    f"{provenance_changes} source reference(s) from the current "
+                    "trusted input envelope and persisted metadata"
+                )
+            output, reference_alias_report = normalize_reference_id_aliases(
+                output,
+                envelope,
+            )
+            reference_alias_changes = int(reference_alias_report.get("normalized_count") or 0)
+            if reference_alias_changes:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_REFERENCE_ID_ALIAS_NORMALIZATION: rebound "
+                    f"{reference_alias_changes} cross-reference ID(s) to exact entities "
+                    "visible in the current input or output"
+                )
+            reference_errors = validate_reference_ids(output, envelope)
+            if reference_errors:
+                raise PromptExecutionError(
+                    "Output reference integrity validation failed",
+                    validation_errors=reference_errors,
+                )
         return output
 
     async def execute(

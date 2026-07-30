@@ -106,17 +106,35 @@ class PromptPack:
 
         projected: dict[str, Any] = {}
         if "type" in node:
-            declared_type = copy.deepcopy(node["type"])
-            # Providers commonly emit null for omitted nested values.  The
-            # shape preflight therefore admits null temporarily; the unified
-            # contract layer rejects required null containers and may default
-            # only optional containers before final strict validation.
-            if not root:
-                if isinstance(declared_type, str) and declared_type != "null":
-                    declared_type = [declared_type, "null"]
-                elif isinstance(declared_type, list) and "null" not in declared_type:
-                    declared_type = [*declared_type, "null"]
-            projected["type"] = declared_type
+            declared = node["type"]
+            declared_types = (
+                [declared]
+                if isinstance(declared, str)
+                else [item for item in declared if isinstance(item, str)]
+                if isinstance(declared, list)
+                else []
+            )
+            # Preflight distinguishes containers from scalars, not one scalar
+            # primitive from another.  This keeps deterministic repairs such as
+            # integer -> trusted string/null reachable, while preventing a
+            # model-authored object/array from reaching code that calls int(),
+            # set membership, regex helpers, or string methods on a scalar.
+            container_types = [
+                item for item in declared_types if item in {"object", "array"}
+            ]
+            scalar_declared = any(
+                item in {"string", "integer", "number", "boolean", "null"}
+                for item in declared_types
+            )
+            scalar_shape = ["string", "integer", "number", "boolean", "null"]
+            if root and "object" in declared_types:
+                projected["type"] = "object"
+            elif container_types and scalar_declared:
+                projected["type"] = [*container_types, *scalar_shape]
+            elif container_types:
+                projected["type"] = [*container_types, "null"]
+            elif scalar_declared:
+                projected["type"] = scalar_shape
         if isinstance(node.get("properties"), dict):
             projected["properties"] = {
                 key: PromptPack._structure_only_schema(value)

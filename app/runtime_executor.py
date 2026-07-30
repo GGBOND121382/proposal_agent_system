@@ -141,7 +141,38 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "Output schema validation failed",
             "Output container structure validation failed",
             "Misplaced response-envelope field",
+            "Output provenance is not backed by the trusted input envelope",
+            "Untrusted source reference in Safe Online Package output",
+            "Output reference integrity validation failed",
         ))
+
+    @staticmethod
+    def _contract_recovery_input_equivalent(
+        prompt_id: str,
+        prior_envelope: dict[str, Any],
+        current_envelope: dict[str, Any],
+    ) -> tuple[bool, str | None]:
+        """Allow only explicitly registered, non-semantic input migrations.
+
+        The WF-3 provenance upgrade adds persisted ``human_resolutions`` to an
+        otherwise identical Safe Package request.  Older successful provider
+        output may be reused because the research question, source objects,
+        security policy, task and every model-visible semantic field are
+        unchanged.  No other input difference is accepted.
+        """
+        if sha256_json(prior_envelope) == sha256_json(current_envelope):
+            return True, "EXACT"
+        if prompt_id != "P-SAFE-ONLINE-PACKAGE":
+            return False, None
+        prior = copy.deepcopy(prior_envelope)
+        current = copy.deepcopy(current_envelope)
+        prior_payload = prior.get("payload") if isinstance(prior.get("payload"), dict) else {}
+        current_payload = current.get("payload") if isinstance(current.get("payload"), dict) else {}
+        prior_payload.pop("human_resolutions", None)
+        current_payload.pop("human_resolutions", None)
+        if sha256_json(prior) == sha256_json(current):
+            return True, "ADDITIVE_HUMAN_RESOLUTIONS"
+        return False, None
 
     def _failed_run_audit_metadata(
         self,
@@ -188,22 +219,53 @@ class RuntimePromptExecutor(BasePromptExecutor):
         validation all pass now.
         """
         rows = self.db.fetchall(
-            """SELECT id,model_id,endpoint_id,output_json,error,created_at
+            """SELECT id,model_id,endpoint_id,input_hash,input_json,output_json,error,created_at
                FROM prompt_runs
                WHERE project_id=? AND workflow_id IS ? AND prompt_id=?
-                 AND input_hash=? AND status='ERROR' AND output_json IS NOT NULL
+                 AND status='ERROR' AND output_json IS NOT NULL
                ORDER BY created_at DESC
-               LIMIT 20""",
-            (project_id, workflow_id, prompt_id, input_hash),
+               LIMIT 50""",
+            (project_id, workflow_id, prompt_id),
         )
         for row in rows:
+            input_equivalence = "EXACT"
+            if str(row.get("input_hash") or "") != input_hash:
+                try:
+                    prior_envelope = json.loads(row.get("input_json") or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if not isinstance(prior_envelope, dict):
+                    continue
+                equivalent, input_equivalence = self._contract_recovery_input_equivalent(
+                    prompt_id,
+                    prior_envelope,
+                    model_envelope,
+                )
+                if not equivalent:
+                    continue
             if not self._is_deterministic_contract_failure(row.get("error")):
                 continue
             failed_metadata = self._failed_run_audit_metadata(
                 project_id=project_id,
                 run_id=str(row["id"]),
             )
-            if failed_metadata.get("deterministic_recoverable") is False:
+            metadata_recoverable = failed_metadata.get("deterministic_recoverable")
+            metadata_normalizer_version = str(
+                failed_metadata.get("output_normalizer_version") or ""
+            )
+            # A prior runtime may have classified this exact deterministic
+            # contract failure as non-recoverable before the corresponding
+            # normalizer/binder existed.  Such a negative decision is stale
+            # after a normalizer upgrade.  A negative decision emitted by the
+            # current normalizer remains authoritative.  In every allowed
+            # migration case the immutable provider object is still replayed
+            # through the complete current contract, privacy, quality and
+            # schema pipeline below; no failed output is accepted merely on
+            # the basis of this metadata.
+            if (
+                metadata_recoverable is False
+                and metadata_normalizer_version == OUTPUT_NORMALIZER_VERSION
+            ):
                 continue
             prior_request_hash = str(
                 failed_metadata.get("model_request_spec_hash") or ""
@@ -270,6 +332,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "failed_at": row.get("created_at"),
                 "previous_error": row.get("error"),
                 "prior_model_request_spec_hash": prior_request_hash or None,
+                "input_equivalence": input_equivalence,
             }
         return None
 
@@ -352,6 +415,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                         "recovered_from_run_id": contract_recovery["run_id"],
                         "failed_at": contract_recovery.get("failed_at"),
                         "previous_error": contract_recovery.get("previous_error"),
+                        "input_equivalence": contract_recovery.get("input_equivalence"),
                         "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
                         "contract_registry_version": CONTRACT_REGISTRY_VERSION,
                         "model_request_spec_hash": model_request_spec_hash,

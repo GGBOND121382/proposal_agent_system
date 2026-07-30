@@ -20,6 +20,7 @@ from .workflow_input import (
     CURRENT_PROPOSAL_INPUT,
     PROJECT_MATERIAL_INPUT,
     REFERENCE_TEMPLATE_INPUT,
+    build_human_resolutions,
     material_input_questions,
 )
 
@@ -775,6 +776,12 @@ class ContextBuilder:
         if source_items is None:
             source_items = self._wf3_source_items(project, docs)
         target_task_type = normalize_target_task_type(options.get("target_task_type"))
+        previous_resolution = state.get("wf3_input_resolution") if isinstance(state.get("wf3_input_resolution"), dict) else {}
+        if (
+            previous_resolution.get("origin") == "USER_INPUT_GATE"
+            and str(previous_resolution.get("need_id") or research_need["need_id"]) == str(research_need["need_id"])
+        ):
+            origin = "USER_INPUT_GATE"
         state["wf3_input_resolution"] = {
             "origin": origin,
             "need_id": research_need["need_id"],
@@ -908,10 +915,76 @@ class ContextBuilder:
             if isinstance(claim, dict) and str(claim.get("claim_id") or "") in accepted_ids
         ]
 
-    @staticmethod
-    def _human_resolutions_for_prompt(state: dict[str, Any], prompt_id: str) -> list[dict[str, Any]]:
+    def _human_resolutions_for_prompt(
+        self,
+        state: dict[str, Any],
+        prompt_id: str,
+        workflow_id: str | None,
+    ) -> list[dict[str, Any]]:
         records = (state.get("human_resolutions") or {}).get(prompt_id) or []
-        return [copy.deepcopy(item) for item in records[-50:] if isinstance(item, dict)]
+        resolved = [copy.deepcopy(item) for item in records[-50:] if isinstance(item, dict)]
+        if resolved or prompt_id != "P-SAFE-ONLINE-PACKAGE":
+            return resolved
+
+        wf3_resolution = state.get("wf3_input_resolution") if isinstance(state.get("wf3_input_resolution"), dict) else {}
+        origin = str(wf3_resolution.get("origin") or "")
+        if origin not in {"USER_INPUT_GATE", "WORKFLOW_OPTIONS"}:
+            return []
+
+        options = state.get("options") if isinstance(state.get("options"), dict) else {}
+        need = options.get("research_need") if isinstance(options.get("research_need"), dict) else {}
+        question = str(need.get("question") or "").strip()
+        if not question:
+            return []
+
+        questions = input_gate_questions()
+        answers = [
+            {"question_id": "wf3-research-question", "answer": question},
+            {"question_id": "wf3-reason-online-needed", "answer": need.get("reason_online_needed")},
+            {"question_id": "wf3-desired-output", "answer": need.get("desired_output")},
+            {"question_id": "wf3-target-task-type", "answer": options.get("target_task_type") or "PUBLIC_RESEARCH"},
+        ]
+        gate_id = f"workflow-options-{workflow_id or 'unknown'}"
+        decided_by = "workflow-start-request"
+        decided_role = "PROJECT_OWNER"
+
+        gate = None
+        if workflow_id:
+            gate = self.db.fetchone(
+                """SELECT id,questions_json,decision_json,required_role
+                   FROM gates
+                   WHERE workflow_id=? AND gate_type=? AND status='APPROVED'
+                   ORDER BY updated_at DESC LIMIT 1""",
+                (workflow_id, WF3_INPUT_GATE_TYPE),
+            )
+        if gate:
+            try:
+                stored_questions = json.loads(gate.get("questions_json") or "[]")
+                decision = json.loads(gate.get("decision_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                stored_questions, decision = [], {}
+            if isinstance(stored_questions, list) and stored_questions:
+                questions = stored_questions
+            if isinstance(decision.get("answers"), list) and decision.get("answers"):
+                answers = decision["answers"]
+            gate_id = str(gate.get("id") or gate_id)
+            decided_by = str(decision.get("decided_by") or "persisted-approved-gate")
+            decided_role = str(decision.get("decided_role") or gate.get("required_role") or "PROJECT_OWNER")
+        elif origin == "USER_INPUT_GATE":
+            gate_id = f"legacy-approved-wf3-input-{workflow_id or 'unknown'}"
+            decided_by = "persisted-workflow-state"
+
+        try:
+            return build_human_resolutions(
+                gate_id=gate_id,
+                prompt_id=prompt_id,
+                questions=questions,
+                answers=answers,
+                decided_by=decided_by,
+                decided_role=decided_role,
+            )
+        except ValueError:
+            return []
 
     def _first_section(self, docs: list[dict[str, Any]], roles: set[str] | None = None) -> dict[str, Any] | None:
         for doc in docs:
@@ -1068,8 +1141,8 @@ class ContextBuilder:
                 ("payload.time_constraints", self._wf3_time_constraints(options)),
                 ("payload.evidence_requirements", self._wf3_evidence_requirements(options)),
             ])
-        human_resolutions = self._human_resolutions_for_prompt(state, prompt_id)
-        if "human_resolutions" in payload:
+        human_resolutions = self._human_resolutions_for_prompt(state, prompt_id, workflow_id)
+        if "human_resolutions" in payload or human_resolutions:
             replacements.append(("payload.human_resolutions", human_resolutions))
         for path, value in ((state.get("human_input_overrides") or {}).get(prompt_id) or {}).items():
             if isinstance(path, str) and path:

@@ -1,16 +1,29 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from app.executor import PromptExecutionError
+from app.db import Database
 from app.runtime_api import PromptExecutor
 from app.pack import PromptPack
+from app.output_integrity import (
+    bind_trusted_source_refs,
+    normalize_reference_id_aliases,
+    validate_reference_ids,
+)
 from app.proposal_quality import ProposalQualityGuard
-from app.staged_contracts import require_model_response_envelope
+from app.staged_contracts import (
+    clear_contract_trace_context,
+    contract_validation_errors,
+    normalize_in_place,
+    require_model_response_envelope,
+    set_contract_trace_context,
+)
 from app.status_ontology import normalize_stage2_candidate, normalize_stage3_candidate
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,6 +160,114 @@ def test_root_list_is_reported_as_controlled_contract_error(pack: PromptPack) ->
     executor.pack = pack
     with pytest.raises(PromptExecutionError, match="container structure"):
         executor._normalize_output("P-FACT-EXTRACT", [{"unexpected": True}])
+
+
+def test_container_preflight_does_not_reject_repairable_scalar_drift(
+    pack: PromptPack,
+) -> None:
+    output = pack.replay_output("P-SAFE-ONLINE-PACKAGE")
+    output["source_refs"] = [{
+        "source_id": "need-001",
+        "source_type": "MODEL_INFERENCE",
+        "document_version_id": 1,
+        "section_id": None,
+        "span_start": None,
+        "span_end": None,
+        "quoted_text": None,
+        "source_hash": None,
+        "authority_rank": 60,
+        "security_level": "INTERNAL",
+    }]
+
+    assert pack.validate_structure("P-SAFE-ONLINE-PACKAGE", "output", output) == []
+    assert any(
+        "/source_refs/0/document_version_id" in error
+        for error in pack.validate("P-SAFE-ONLINE-PACKAGE", "output", output)
+    )
+
+
+def test_safe_package_source_refs_are_rebuilt_from_persisted_document_metadata(
+    pack: PromptPack,
+    tmp_path: Path,
+) -> None:
+    db = Database(tmp_path / "runtime.sqlite3")
+    parsed_document = {
+        "document_id": "doc-001",
+        "document_version_id": "docv-real-001",
+        "document_role": "APPLICATION_GUIDE",
+        "document_hash": "a" * 64,
+        "authority_rank": 95,
+        "security_level": "INTERNAL",
+        "sections": [],
+    }
+    db.execute(
+        """INSERT INTO projects(
+               id,name,description,security_level,config_json,created_at,updated_at
+           ) VALUES(?,?,?,?,?,?,?)""",
+        (
+            "project-001", "Project", "Description", "INTERNAL", "{}",
+            "2026-07-29T00:00:00Z", "2026-07-29T00:00:00Z",
+        ),
+    )
+    db.execute(
+        """INSERT INTO documents(
+               id,project_id,filename,role,security_level,document_hash,
+               file_path,parsed_json,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?)""",
+        (
+            "doc-001", "project-001", "guide.txt", "APPLICATION_GUIDE",
+            "INTERNAL", "a" * 64, "guide.txt",
+            json.dumps(parsed_document, ensure_ascii=False),
+            "2026-07-29T00:00:00Z",
+        ),
+    )
+    envelope = pack.replay_input("P-SAFE-ONLINE-PACKAGE")
+    envelope["scope"]["project_id"] = "project-001"
+    envelope["payload"]["source_items"] = [{
+        "object_id": "doc-001",
+        "object_type": "SOURCE_DOCUMENT:APPLICATION_GUIDE",
+        "version": 1,
+        "object_hash": "a" * 64,
+        "security_level": "INTERNAL",
+        "display_name": "申报指南",
+    }]
+    output = pack.replay_output("P-SAFE-ONLINE-PACKAGE")
+    output["source_refs"] = [{
+        "source_id": "doc-001",
+        "source_type": "APPLICATION_GUIDE",
+        "document_version_id": 1,
+        "section_id": "invented-section",
+        "span_start": 0,
+        "span_end": 10,
+        "quoted_text": "invented quote",
+        "source_hash": "b" * 64,
+        "authority_rank": 1,
+        "security_level": "PUBLIC",
+    }]
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    executor.db = db
+
+    normalized = executor._normalize_output(
+        "P-SAFE-ONLINE-PACKAGE",
+        output,
+        envelope,
+    )
+
+    source_ref = normalized["source_refs"][0]
+    assert source_ref == {
+        "source_id": "doc-001",
+        "source_type": "APPLICATION_GUIDE",
+        "document_version_id": "docv-real-001",
+        "section_id": None,
+        "span_start": None,
+        "span_end": None,
+        "quoted_text": None,
+        "source_hash": "a" * 64,
+        "authority_rank": 95,
+        "security_level": "INTERNAL",
+    }
+    assert pack.validate("P-SAFE-ONLINE-PACKAGE", "output", normalized) == []
 
 
 def test_misplaced_critic_warning_with_wrong_type_is_controlled(pack: PromptPack) -> None:
@@ -317,3 +438,550 @@ def test_staged_contract_gateway_preserves_required_null_for_strict_rejection() 
     report = normalize_in_place(value, schema, contract_id="test-required-null")
     assert value["items"] is None
     assert report["required_null_errors"]
+
+
+def _declared_scalar_paths(
+    value: Any,
+    schema: dict[str, Any],
+    path: tuple[Any, ...] = (),
+) -> list[tuple[Any, ...]]:
+    schema = _branch_for(schema, value)
+    paths: list[tuple[Any, ...]] = []
+    declared = schema.get("type")
+    types = [declared] if isinstance(declared, str) else list(declared or [])
+    if path and not isinstance(value, (dict, list)) and any(
+        item in types for item in ("string", "integer", "number", "boolean", "null")
+    ):
+        paths.append(path)
+    if isinstance(value, dict):
+        properties = schema.get("properties") or {}
+        additional = schema.get("additionalProperties")
+        for key, child in value.items():
+            child_schema = properties.get(key)
+            if child_schema is None and isinstance(additional, dict):
+                child_schema = additional
+            if isinstance(child_schema, dict):
+                paths.extend(_declared_scalar_paths(child, child_schema, (*path, key)))
+    elif isinstance(value, list):
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, child in enumerate(value):
+                paths.extend(_declared_scalar_paths(child, item_schema, (*path, index)))
+    return paths
+
+
+def test_declared_scalar_positions_reject_container_values_without_leaking_type_errors(
+    pack: PromptPack,
+) -> None:
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    failures: list[str] = []
+    exercised = 0
+    for prompt_id in pack.prompt_ids():
+        output = pack.replay_output(prompt_id)
+        schema_value = pack.inlined_schema(prompt_id, "output")
+        for path in _declared_scalar_paths(output, schema_value):
+            for replacement in ({"unexpected": True}, ["unexpected"]):
+                malformed = _replace(output, path, replacement)
+                exercised += 1
+                try:
+                    executor._normalize_output(prompt_id, malformed)
+                except PromptExecutionError as exc:
+                    if "container structure" not in str(exc):
+                        failures.append(
+                            f"{prompt_id}{_pointer(path)} raised unexpected contract error: {exc}"
+                        )
+                except Exception as exc:  # pragma: no cover - regression diagnostic
+                    failures.append(
+                        f"{prompt_id}{_pointer(path)} leaked {type(exc).__name__}: {exc}"
+                    )
+                else:
+                    failures.append(f"{prompt_id}{_pointer(path)} accepted {type(replacement).__name__}")
+    assert exercised >= 500
+    assert not failures, "\n".join(failures[:30])
+
+
+def test_global_provenance_binder_rejects_invented_nested_source_refs(pack: PromptPack) -> None:
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    envelope = pack.replay_input("P-FACT-EXTRACT")
+    output = pack.replay_output("P-FACT-EXTRACT")
+    output["result"]["fact_candidates"][0]["source_refs"][0] = {
+        "source_id": "invented-source-999",
+        "source_type": "APPLICATION_GUIDE",
+        "document_version_id": "invented-version-999",
+        "section_id": "invented-section-999",
+        "span_start": 0,
+        "span_end": 8,
+        "quoted_text": "invented",
+        "source_hash": "b" * 64,
+        "authority_rank": 95,
+        "security_level": "PUBLIC",
+    }
+    with pytest.raises(PromptExecutionError, match="provenance"):
+        executor._normalize_output("P-FACT-EXTRACT", output, envelope)
+
+
+def test_global_provenance_binder_replaces_model_authored_metadata(pack: PromptPack) -> None:
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    envelope = pack.replay_input("P-FACT-EXTRACT")
+    output = pack.replay_output("P-FACT-EXTRACT")
+    original = output["result"]["fact_candidates"][0]["source_refs"][0]
+    source_id = original["source_id"]
+    original.update({
+        "document_version_id": 999,
+        "source_hash": "b" * 64,
+        "authority_rank": 1,
+        "security_level": "PUBLIC",
+    })
+    normalized = executor._normalize_output("P-FACT-EXTRACT", output, envelope)
+    rebound = normalized["result"]["fact_candidates"][0]["source_refs"][0]
+    assert rebound["source_id"] == source_id
+    assert rebound["document_version_id"] != 999
+    assert rebound["source_hash"] != "b" * 64
+    assert rebound["authority_rank"] != 1
+
+
+def test_reference_integrity_rejects_unknown_claim_ids(pack: PromptPack) -> None:
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    envelope = pack.replay_input("P-ONLINE-RESULT-IMPORT-CRITIC")
+    output = pack.replay_output("P-ONLINE-RESULT-IMPORT-CRITIC")
+    output["result"]["accepted_claim_ids"] = ["not-a-real-claim"]
+    with pytest.raises(PromptExecutionError, match="reference integrity"):
+        executor._normalize_output("P-ONLINE-RESULT-IMPORT-CRITIC", output, envelope)
+
+
+def _stage_reference_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["source_registry", "facts", "checked_item_ids"],
+        "properties": {
+            "source_registry": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["source_id"],
+                    "properties": {"source_id": {"type": "string"}},
+                },
+            },
+            "facts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["item_id", "source_refs"],
+                    "properties": {
+                        "item_id": {"type": "string"},
+                        "source_refs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            "checked_item_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+    }
+
+
+def _write_latest_stage_request(run_dir: Path) -> None:
+    request_dir = run_dir / "requests"
+    request_dir.mkdir(parents=True)
+    (request_dir / "001_request.json").write_text(
+        json.dumps(
+            {
+                "input_envelope": {
+                    "source_registry": [{"source_id": "SRC-001"}],
+                    "candidate": {"facts": [{"item_id": "ITEM-001"}]},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_staged_contract_rejects_unknown_source_and_entity_references(tmp_path: Path) -> None:
+    _write_latest_stage_request(tmp_path)
+    value = {
+        "source_registry": [{"source_id": "SRC-001"}],
+        "facts": [{"item_id": "ITEM-002", "source_refs": ["SRC-999"]}],
+        "checked_item_ids": ["ITEM-999"],
+    }
+    set_contract_trace_context(tmp_path, "staged-reference-test")
+    try:
+        report = normalize_in_place(
+            value,
+            _stage_reference_schema(),
+            contract_id="staged:test:reference-integrity",
+        )
+    finally:
+        clear_contract_trace_context()
+    errors = contract_validation_errors(report)
+    assert any("SRC-999" in error for error in errors)
+    assert any("ITEM-999" in error for error in errors)
+
+
+def test_staged_contract_accepts_input_backed_references(tmp_path: Path) -> None:
+    _write_latest_stage_request(tmp_path)
+    value = {
+        "source_registry": [{"source_id": "SRC-001"}],
+        "facts": [{"item_id": "ITEM-002", "source_refs": ["SRC-001"]}],
+        "checked_item_ids": ["ITEM-001", "ITEM-002"],
+    }
+    set_contract_trace_context(tmp_path, "staged-reference-test")
+    try:
+        report = normalize_in_place(
+            value,
+            _stage_reference_schema(),
+            contract_id="staged:test:reference-integrity",
+        )
+    finally:
+        clear_contract_trace_context()
+    assert not contract_validation_errors(report)
+
+
+def test_all_replay_outputs_pass_full_contract_normalization(pack: PromptPack) -> None:
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    executor.db = None
+    failures: list[str] = []
+    for prompt_id in pack.prompt_ids():
+        try:
+            executor._normalize_output(
+                prompt_id,
+                pack.replay_output(prompt_id),
+                pack.replay_input(prompt_id),
+            )
+        except Exception as exc:  # pragma: no cover - aggregate diagnostic
+            failures.append(f"{prompt_id}: {type(exc).__name__}: {exc}")
+    assert not failures, "\n".join(failures)
+
+
+def test_all_prompts_reject_invented_root_provenance(pack: PromptPack) -> None:
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    executor.db = None
+    invented = {
+        "source_id": "invented-source-999",
+        "source_type": "APPLICATION_GUIDE",
+        "document_version_id": "invented-version-999",
+        "section_id": None,
+        "span_start": None,
+        "span_end": None,
+        "quoted_text": None,
+        "source_hash": "b" * 64,
+        "authority_rank": 95,
+        "security_level": "PUBLIC",
+    }
+    accepted: list[str] = []
+    for prompt_id in pack.prompt_ids():
+        output = pack.replay_output(prompt_id)
+        output["source_refs"] = [dict(invented)]
+        try:
+            executor._normalize_output(prompt_id, output, pack.replay_input(prompt_id))
+        except PromptExecutionError:
+            continue
+        accepted.append(prompt_id)
+    assert not accepted, f"invented provenance accepted by: {accepted}"
+
+
+def test_gate_confirmed_research_need_source_prefix_is_rebound_as_user_confirmation(
+    pack: PromptPack,
+) -> None:
+    envelope = pack.replay_input("P-SAFE-ONLINE-PACKAGE")
+    need = envelope["payload"]["research_need"]
+    envelope["payload"]["human_resolutions"] = [{
+        "resolution_id": "human-wf3-001",
+        "gate_id": "gate-wf3-001",
+        "prompt_id": "P-SAFE-ONLINE-PACKAGE",
+        "question_id": "wf3-research-question",
+        "question": "需要联网检索并核验的公开问题是什么？",
+        "target_paths": ["research_need.question"],
+        "answer": need["question"],
+        "decided_by": "pytest",
+        "decided_role": "PROJECT_OWNER",
+    }]
+    output = pack.replay_output("P-SAFE-ONLINE-PACKAGE")
+    output["source_refs"] = [{
+        "source_id": f"source-{need['need_id']}",
+        "source_type": "MODEL_INFERENCE",
+        "document_version_id": 1,
+        "section_id": None,
+        "span_start": None,
+        "span_end": None,
+        "quoted_text": None,
+        "source_hash": None,
+        "authority_rank": 60,
+        "security_level": "INTERNAL",
+    }]
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    executor.db = None
+
+    normalized = executor._normalize_output(
+        "P-SAFE-ONLINE-PACKAGE",
+        output,
+        envelope,
+    )
+
+    source_ref = normalized["source_refs"][0]
+    assert source_ref["source_id"] == need["need_id"]
+    assert source_ref["source_type"] == "USER_CONFIRMATION"
+    assert source_ref["document_version_id"] is None
+    assert source_ref["authority_rank"] == 100
+    assert source_ref["source_hash"]
+    assert pack.validate("P-SAFE-ONLINE-PACKAGE", "output", normalized) == []
+
+
+def test_source_prefix_alias_binding_applies_to_nested_refs_for_all_prompts(
+    pack: PromptPack,
+) -> None:
+    envelope = pack.replay_input("P-FACT-EXTRACT")
+    output = pack.replay_output("P-FACT-EXTRACT")
+    nested_ref = output["result"]["fact_candidates"][0]["source_refs"][0]
+    nested_ref["source_id"] = "source-src-001"
+    nested_ref["source_type"] = "MODEL_INFERENCE"
+    nested_ref["authority_rank"] = 1
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    executor.db = None
+
+    normalized = executor._normalize_output("P-FACT-EXTRACT", output, envelope)
+
+    rebound = normalized["result"]["fact_candidates"][0]["source_refs"][0]
+    assert rebound["source_id"] == "src-001"
+    assert rebound["source_type"] == "USER_CONFIRMATION"
+    assert rebound["authority_rank"] == 100
+    assert pack.validate("P-FACT-EXTRACT", "output", normalized) == []
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "source-", "Source:", "SOURCE/", "source_",
+        "src-", "Src:", "SRC/", "src_",
+        "ref-", "Ref:", "REF/", "ref_",
+    ],
+)
+def test_registered_source_presentation_prefix_variants_are_canonicalized(prefix: str) -> None:
+    envelope = {
+        "security_context": {"input_max_security_level": "INTERNAL"},
+        "payload": {
+            "research_need": {
+                "need_id": "need-prefix-001",
+                "question": "公开问题",
+                "reason_online_needed": "需要公开证据",
+                "desired_output": "公开来源清单",
+            },
+            "human_resolutions": [{
+                "resolution_id": "human-prefix-001",
+                "gate_id": "gate-prefix-001",
+                "prompt_id": "P-SAFE-ONLINE-PACKAGE",
+                "question_id": "wf3-research-question",
+                "question": "需要联网检索并核验的公开问题是什么？",
+                "target_paths": ["research_need.question"],
+                "answer": "公开问题",
+                "decided_by": "pytest",
+                "decided_role": "PROJECT_OWNER",
+            }],
+        },
+    }
+    output = {"source_refs": [{"source_id": prefix + "need-prefix-001"}]}
+
+    normalized, report = bind_trusted_source_refs(output, envelope)
+
+    assert report["errors"] == []
+    assert normalized["source_refs"][0]["source_id"] == "need-prefix-001"
+    assert normalized["source_refs"][0]["source_type"] == "USER_CONFIRMATION"
+
+
+def test_source_alias_resolution_is_exact_first_and_never_fuzzy() -> None:
+    from app.output_integrity import (
+    bind_trusted_source_refs,
+    normalize_reference_id_aliases,
+    validate_reference_ids,
+)
+
+    envelope = {
+        "security_context": {"input_max_security_level": "INTERNAL"},
+        "payload": {
+            "sources": [
+                {
+                    "source_id": "need-001",
+                    "source_type": "MODEL_INFERENCE",
+                    "authority_rank": 60,
+                    "security_level": "INTERNAL",
+                },
+                {
+                    "source_id": "source-need-001",
+                    "source_type": "USER_CONFIRMATION",
+                    "authority_rank": 100,
+                    "security_level": "INTERNAL",
+                },
+            ]
+        },
+    }
+    exact, exact_report = bind_trusted_source_refs(
+        {"source_refs": [{"source_id": "source-need-001"}]},
+        envelope,
+    )
+    assert exact_report["errors"] == []
+    assert exact["source_refs"][0]["source_id"] == "source-need-001"
+    assert exact["source_refs"][0]["source_type"] == "USER_CONFIRMATION"
+
+    unknown, unknown_report = bind_trusted_source_refs(
+        {"source_refs": [{"source_id": "source-need-002"}]},
+        envelope,
+    )
+    assert unknown["source_refs"][0]["source_id"] == "source-need-002"
+    assert unknown_report["unresolved_count"] == 1
+
+
+def test_cross_reference_presentation_prefix_is_normalized_only_to_visible_id() -> None:
+    envelope = {
+        "payload": {
+            "claims": [
+                {"claim_id": "claim-visible-001"},
+            ]
+        }
+    }
+    output = {
+        "accepted_claim_ids": ["ref-claim-visible-001"],
+        "rejected_claim_ids": ["ref-claim-unknown-999"],
+    }
+
+    normalized, report = normalize_reference_id_aliases(output, envelope)
+
+    assert normalized["accepted_claim_ids"] == ["claim-visible-001"]
+    assert normalized["rejected_claim_ids"] == ["ref-claim-unknown-999"]
+    assert report["normalized_count"] == 1
+    errors = validate_reference_ids(normalized, envelope)
+    assert len(errors) == 1
+    assert "ref-claim-unknown-999" in errors[0]
+
+
+def test_staged_source_prefix_alias_is_normalized_before_integrity_validation() -> None:
+    from app.output_integrity import (
+        normalize_staged_source_ref_aliases,
+        validate_staged_reference_integrity,
+    )
+
+    output = {"items": [{"source_refs": ["source-src-001"]}]}
+    trusted = {"sources": [{"source_id": "src-001"}]}
+    normalized, report = normalize_staged_source_ref_aliases(output, trusted)
+
+    assert normalized["items"][0]["source_refs"] == ["src-001"]
+    assert report["normalized_count"] == 1
+    assert validate_staged_reference_integrity(normalized, trusted) == []
+
+
+def test_all_replay_source_refs_accept_only_registered_presentation_prefix_aliases(
+    pack: PromptPack,
+) -> None:
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    executor.db = None
+    failures: list[str] = []
+    exercised = 0
+
+    def iter_refs(node: Any):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "source_refs" and isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict) and isinstance(item.get("source_id"), str) and item["source_id"]:
+                            yield item
+                yield from iter_refs(value)
+        elif isinstance(node, list):
+            for item in node:
+                yield from iter_refs(item)
+
+    for prompt_id in pack.prompt_ids():
+        envelope = pack.replay_input(prompt_id)
+        output = pack.replay_output(prompt_id)
+        refs = list(iter_refs(output))
+        if not refs:
+            continue
+        for ref in refs:
+            ref["source_id"] = "Source-" + ref["source_id"]
+        exercised += len(refs)
+        try:
+            normalized = executor._normalize_output(prompt_id, output, envelope)
+        except Exception as exc:  # pragma: no cover - regression diagnostic
+            failures.append(f"{prompt_id}: {type(exc).__name__}: {exc}")
+            continue
+        schema_errors = pack.validate(prompt_id, "output", normalized)
+        if schema_errors:
+            failures.append(f"{prompt_id}: {schema_errors[:3]}")
+
+    assert exercised >= 10
+    assert not failures, "\n".join(failures)
+
+
+def test_staged_contract_gateway_applies_source_alias_normalization(tmp_path) -> None:
+    from app.staged_contracts import normalize_in_place
+
+    run_dir = tmp_path / "stage-run"
+    request_dir = run_dir / "requests"
+    request_dir.mkdir(parents=True)
+    (request_dir / "request.json").write_text(
+        json.dumps(
+            {
+                "input_envelope": {
+                    "sources": [{"source_id": "src-stage-001"}],
+                    "claims": [{"claim_id": "claim-stage-001"}],
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_refs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "accepted_claim_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": ["source_refs", "accepted_claim_ids"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+    value = {
+        "items": [{
+            "source_refs": ["source-src-stage-001"],
+            "accepted_claim_ids": ["ref-claim-stage-001"],
+        }]
+    }
+    set_contract_trace_context(run_dir, "stage-source-alias")
+    try:
+        report = normalize_in_place(value, schema, contract_id="stage-source-alias")
+    finally:
+        clear_contract_trace_context()
+
+    assert value["items"][0]["source_refs"] == ["src-stage-001"]
+    assert value["items"][0]["accepted_claim_ids"] == ["claim-stage-001"]
+    assert report["source_alias_report"]["normalized_count"] == 1
+    assert report["reference_alias_report"]["normalized_count"] == 1
+    assert report["reference_integrity_errors"] == []

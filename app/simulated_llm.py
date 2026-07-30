@@ -517,11 +517,32 @@ class SimulatedLLM:
             {"component_id":"component-innovation","section_role":"创新点","input_requirements":["最近工作","局限","新增机制"],"output_function":"形成可比较创新主张","paragraph_patterns":["基线—局限—机制—优势"],"forbidden_project_facts":["泛化形容词"]},
             {"component_id":"component-foundation","section_role":"研究基础","input_requirements":["成果证据","预实验","团队能力"],"output_function":"证明可行性并暴露剩余风险","paragraph_patterns":["证据—支撑关系—边界"],"forbidden_project_facts":["抽象能力声明"]},
         ]
+        reference_document = (envelope.get("payload") or {}).get("reference_document") or {}
+        sections = reference_document.get("sections") or []
+        section_id = next(
+            (
+                str(section.get("section_id"))
+                for section in sections
+                if isinstance(section, dict) and section.get("section_id")
+            ),
+            "reference-template",
+        )
+        base["result"]["coverage"] = [{
+            "section_id": section_id,
+            "component_ids": [component["component_id"] for component in template["components"]],
+        }]
         base["status"] = "PASS"; base["findings"] = []
         return base
 
     def _handle_template_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        candidate = (envelope.get("payload") or {}).get("template_candidate") or {}
         base["result"]["verdict"] = "ACCEPT"
+        base["result"]["checked_component_ids"] = [
+            str(component.get("component_id"))
+            for component in candidate.get("components") or []
+            if isinstance(component, dict) and component.get("component_id")
+        ]
+        base["result"]["contaminated_component_ids"] = []
         base["result"]["logic_pattern_checks"] = self._dimension_checks(["ARGUMENT_SEQUENCE", "SECTION_FUNCTION", "EXPRESSION_PATTERN", "ANTI_PATTERN_COVERAGE", "FACT_CONTAMINATION"])
         base["status"] = "PASS"; base["findings"] = []
         return base
@@ -653,6 +674,16 @@ class SimulatedLLM:
         needs_repair = any("[SIM_REPAIR]" in str(item.get("description", "")) for item in plan.get("issues", []))
         passed = not needs_repair
         base["result"]["verdict"] = "ACCEPT" if passed else "REVISE"
+        base["result"]["checked_issue_ids"] = [
+            str(item.get("issue_id"))
+            for item in plan.get("issues") or []
+            if isinstance(item, dict) and item.get("issue_id")
+        ]
+        base["result"]["checked_task_ids"] = [
+            str(item.get("revision_task_id"))
+            for item in plan.get("tasks") or []
+            if isinstance(item, dict) and item.get("revision_task_id")
+        ]
         base["result"]["architecture_checks"] = self._dimension_checks(["CENTRAL_PROPOSITION", "QUESTION_COUNT", "WORK_PACKAGE_COUNT", "SECTION_PROFILE_MAPPING", "PAGE_BUDGET", "MAIN_BODY_ATTACHMENT_BOUNDARY", "CLAIM_COVERAGE", "REDUNDANCY_PREVENTION"], passed)
         base["status"] = "PASS" if passed else "REVISE"
         base["findings"] = [] if passed else [{"code": "PLAN_SIMULATED_REPAIR", "severity": "P1", "category": "CONTENT", "target_type": "REVISION_PLAN", "target_path_or_span": "issues", "description": "计划中包含模拟缺陷标记。", "evidence_refs": [], "repairable": True, "repair_instruction": "删除标记并保持叙事架构不变。", "suggested_route": "ORIGINAL_PRODUCER", "blocking": True}]

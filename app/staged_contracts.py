@@ -16,10 +16,44 @@ from .contract_registry import (
     repair_field_ownership_against_schema,
     required_null_container_errors,
 )
+from .output_integrity import (
+    normalize_reference_id_aliases,
+    normalize_staged_source_ref_aliases,
+    validate_staged_reference_integrity,
+)
 
 _TRACE_DIR: Path | None = None
 _TRACE_LABEL = "model-output"
 _TRACE_INDEX = 0
+
+
+def _latest_request_input() -> Any | None:
+    """Return the latest persisted staged request input envelope.
+
+    Every staged ingest command sets ``_TRACE_DIR`` to its run directory before
+    validating a model response.  The response being ingested always belongs to
+    the most recently created request in that directory.  Reading only that
+    request avoids trusting stale or rejected model responses from earlier
+    attempts while still giving the shared contract gateway the exact upstream
+    IDs visible to the model.
+    """
+    if _TRACE_DIR is None:
+        return None
+    request_dir = _TRACE_DIR / "requests"
+    if not request_dir.exists():
+        return None
+    candidates = [path for path in request_dir.glob("*.json") if path.is_file()]
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda path: (path.stat().st_mtime_ns, path.name))
+    try:
+        payload = json.loads(latest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    input_envelope = payload.get("input_envelope")
+    return copy.deepcopy(input_envelope) if isinstance(input_envelope, (dict, list)) else None
 
 
 def set_contract_trace_context(run_dir: str | Path | None, label: str) -> None:
@@ -159,16 +193,50 @@ def normalize_in_place(value: Any, schema: Mapping[str, Any], *, contract_id: st
         ownership_changes = list(ownership_report.get("changes") or [])
         enum_unresolved = list(enum_report.get("unresolved") or [])
         ownership_unresolved = list(ownership_report.get("unresolved") or [])
+        trusted_context = _latest_request_input()
+        normalized, source_alias_report = normalize_staged_source_ref_aliases(
+            normalized,
+            trusted_context,
+        )
+        normalized, reference_alias_report = normalize_reference_id_aliases(
+            normalized,
+            trusted_context if isinstance(trusted_context, Mapping) else {},
+        )
+        source_alias_changes = list(source_alias_report.get("changes") or [])
+        reference_alias_changes = list(reference_alias_report.get("changes") or [])
+        reference_errors = validate_staged_reference_integrity(
+            normalized,
+            trusted_context,
+        )
+        reference_unresolved = [
+            {
+                "path": error.split(":", 1)[0],
+                "field": "",
+                "value": None,
+                "allowed_values": [],
+                "reason": error,
+                "kind": "REFERENCE_INTEGRITY",
+            }
+            for error in reference_errors
+        ]
         report = {
             "schema_version": "1.0",
             "normalizer_version": CONTRACT_REGISTRY_VERSION,
             "contract_id": contract_id,
-            "normalized_count": len(enum_changes) + len(ownership_changes),
-            "changes": enum_changes + ownership_changes,
-            "unresolved_count": len(enum_unresolved) + len(ownership_unresolved),
-            "unresolved": enum_unresolved + ownership_unresolved,
+            "normalized_count": (
+                len(enum_changes)
+                + len(ownership_changes)
+                + len(source_alias_changes)
+                + len(reference_alias_changes)
+            ),
+            "changes": enum_changes + ownership_changes + source_alias_changes + reference_alias_changes,
+            "unresolved_count": len(enum_unresolved) + len(ownership_unresolved) + len(reference_unresolved),
+            "unresolved": enum_unresolved + ownership_unresolved + reference_unresolved,
             "enum_report": enum_report,
             "field_ownership_report": ownership_report,
+            "source_alias_report": source_alias_report,
+            "reference_alias_report": reference_alias_report,
+            "reference_integrity_errors": reference_errors,
         }
     if isinstance(value, dict) and isinstance(normalized, dict):
         value.clear()
@@ -178,3 +246,14 @@ def normalize_in_place(value: Any, schema: Mapping[str, Any], *, contract_id: st
     _write_trace(raw, normalized, report)
     return report
 
+
+def contract_validation_errors(report: Mapping[str, Any]) -> list[str]:
+    """Render unresolved shared-contract findings for stage validators."""
+    errors: list[str] = []
+    for item in report.get("unresolved") or []:
+        if not isinstance(item, Mapping):
+            continue
+        reason = str(item.get("reason") or "").strip()
+        if reason:
+            errors.append(reason)
+    return errors

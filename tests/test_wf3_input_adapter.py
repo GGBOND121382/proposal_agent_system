@@ -194,6 +194,8 @@ def test_wf3_missing_question_creates_user_input_gate_without_model_run(wf3_runt
     assert updated["status"] == "RUNNING"
     assert updated["current_step"] == 0
     assert updated["state"]["options"]["research_need"]["question"].startswith("公开研究")
+    stored_resolutions = updated["state"]["human_resolutions"]["P-SAFE-ONLINE-PACKAGE"]
+    assert any(item["question_id"] == "wf3-research-question" for item in stored_resolutions)
 
     envelope = builder.build(
         "P-SAFE-ONLINE-PACKAGE",
@@ -202,6 +204,27 @@ def test_wf3_missing_question_creates_user_input_gate_without_model_run(wf3_runt
         workflow_state=updated["state"],
     )
     assert pack.validate("P-SAFE-ONLINE-PACKAGE", "input", envelope) == []
+    assert any(
+        item["question_id"] == "wf3-research-question"
+        for item in envelope["payload"]["human_resolutions"]
+    )
+
+    # Existing workflows created by the previous patch may have the approved
+    # gate in SQLite but no persisted human_resolutions entry in workflow state.
+    # Context construction must rebuild that evidence locally without reopening
+    # the gate or calling a model.
+    legacy_state = json.loads(json.dumps(updated["state"], ensure_ascii=False))
+    legacy_state.pop("human_resolutions", None)
+    legacy_envelope = builder.build(
+        "P-SAFE-ONLINE-PACKAGE",
+        project_id,
+        workflow_id=workflow["id"],
+        workflow_state=legacy_state,
+    )
+    legacy_resolution = legacy_envelope["payload"]["human_resolutions"][0]
+    assert legacy_resolution["gate_id"] == gate["id"]
+    assert legacy_resolution["decided_by"] == "pytest"
+    assert legacy_resolution["decided_role"] == "PROJECT_OWNER"
 
 
 def test_legacy_live_context_block_recovers_to_input_gate_even_after_retry_limit(wf3_runtime):
