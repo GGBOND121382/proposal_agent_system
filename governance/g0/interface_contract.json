@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.1.0",
+  "contract_version": "1.2.0",
   "baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
   "prompt_registry": {
     "version": "2.0",
@@ -117,6 +117,7 @@
       "RUNNING",
       "WAITING_GATE",
       "WAITING_PREREQUISITE",
+      "WAITING_CONFIGURATION",
       "BLOCKED",
       "COMPLETED",
       "CANCELLED"

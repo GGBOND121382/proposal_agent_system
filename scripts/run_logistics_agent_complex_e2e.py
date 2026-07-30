@@ -106,7 +106,7 @@ async def finish(engine: WorkflowEngine, project_id: str, workflow_type: str) ->
             action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
             engine.decide_gate(gate["id"], action=action, decided_by="complex-e2e", decided_role=gate["required_role"], comment="确定性端到端测试自动批准")
             continue
-        if workflow["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+        if workflow["status"] in {"COMPLETED", "BLOCKED", "WAITING_CONFIGURATION", "WAITING_PREREQUISITE", "CANCELLED"}:
             break
     if workflow["status"] != "COMPLETED":
         raise RuntimeError(f"{workflow_type} failed: {workflow['state'].get('last_error')}")

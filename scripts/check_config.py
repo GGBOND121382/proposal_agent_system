@@ -7,14 +7,14 @@ import os
 import sys
 from pathlib import Path
 
-import httpx
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import Settings
 from app.db import Database
+from app.dependency_preflight import DependencyIssue, RuntimeDependencyPreflight
+from app.pack import PromptPack
 from app.skill_setup import build_skill_executor
 
 
@@ -29,20 +29,6 @@ def load_env(path: Path) -> None:
         os.environ.setdefault(name.strip(), value.strip())
 
 
-def probe_openai(name: str, base_url: str, api_key: str) -> dict:
-    if not base_url:
-        return {"name": name, "status": "SKIP", "reason": "base_url empty"}
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    try:
-        response = httpx.get(f"{base_url.rstrip('/')}/models", headers=headers, timeout=15)
-        response.raise_for_status()
-        payload = response.json()
-        ids = [item.get("id") for item in payload.get("data", []) if isinstance(item, dict)]
-        return {"name": name, "status": "PASS", "models": ids[:20]}
-    except Exception as exc:
-        return {"name": name, "status": "FAIL", "reason": str(exc)}
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
@@ -51,27 +37,11 @@ def main() -> None:
     args = parser.parse_args()
     load_env(args.env_file)
     settings = Settings.load()
-    report = {
-        "runtime_mode": settings.runtime_mode,
-        "data_dir": str(settings.data_dir),
-        "prompt_pack_dir": str(settings.prompt_pack_dir),
-        "mermaid_js_exists": settings.mermaid_js_path.exists(),
-        "public_search_provider": settings.public_search_provider,
-        "checks": [],
-    }
-    if args.probe:
-        report["checks"].append(probe_openai("offline", os.getenv("OFFLINE_LLM_BASE_URL", ""), os.getenv("OFFLINE_LLM_API_KEY", "")))
-        if os.getenv("ONLINE_LLM_ENABLED", "false").lower() == "true":
-            report["checks"].append(probe_openai("online", os.getenv("ONLINE_LLM_BASE_URL", ""), os.getenv("ONLINE_LLM_API_KEY", "")))
-        if settings.public_search_provider == "searxng" and settings.public_search_base_url:
-            try:
-                response = httpx.get(f"{settings.public_search_base_url}/search", params={"q": "test", "format": "json"}, timeout=15)
-                response.raise_for_status()
-                report["checks"].append({"name": "searxng", "status": "PASS"})
-            except Exception as exc:
-                report["checks"].append({"name": "searxng", "status": "FAIL", "reason": str(exc)})
+    pack = PromptPack(settings.prompt_pack_dir)
+    db = Database(settings.db_path)
+    preflight = RuntimeDependencyPreflight(settings, pack, db)
+    dependency_report = preflight.probe() if args.probe else preflight.application_report(require_export=False)
     if args.render_mermaid:
-        db = Database(settings.db_path)
         skills = build_skill_executor(db, settings)
         project_id = "config-check"
         if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
@@ -93,12 +63,27 @@ def main() -> None:
                 workflow_id=None,
                 security_level="INTERNAL",
             )
-            report["checks"].append({"name": "mermaid", "status": "PASS", "png": result.output["png_path"], "source": result.output["source_path"]})
+            dependency_report.checks.append({"name": "MERMAID_RENDER", "status": "PASS", "png": result.output["png_path"], "source": result.output["source_path"]})
         except Exception as exc:
-            report["checks"].append({"name": "mermaid", "status": "FAIL", "reason": str(exc)})
-    report["status"] = "PASS" if all(item.get("status") != "FAIL" for item in report["checks"]) and report["mermaid_js_exists"] else "FAIL"
+            dependency_report.issues.append(
+                DependencyIssue(
+                    code="MERMAID_RENDER_PROBE_FAILED",
+                    dependency="MERMAID",
+                    message=f"Mermaid 渲染探测失败：{type(exc).__name__}: {exc}",
+                    required_settings=("MERMAID_JS_PATH", "MERMAID_BROWSER_EXECUTABLE"),
+                )
+            )
+    report = dependency_report.as_dict()
+    report.update(
+        {
+            "runtime_mode": settings.runtime_mode,
+            "data_dir": str(settings.data_dir),
+            "prompt_pack_dir": str(settings.prompt_pack_dir),
+            "public_search_provider": settings.public_search_provider,
+        }
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    raise SystemExit(0 if report["status"] == "PASS" else 1)
+    raise SystemExit(0 if not dependency_report.blocking_issues else 1)
 
 
 if __name__ == "__main__":

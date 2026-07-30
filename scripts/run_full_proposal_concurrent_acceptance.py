@@ -171,7 +171,7 @@ async def _finish(engine: WorkflowEngine, project_id: str, workflow_type: str, o
         if workflow["status"] == "WAITING_GATE":
             _approve_open_gate(engine, workflow["id"])
             continue
-        if workflow["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+        if workflow["status"] in {"COMPLETED", "BLOCKED", "WAITING_CONFIGURATION", "WAITING_PREREQUISITE", "CANCELLED"}:
             return workflow
     return workflow
 

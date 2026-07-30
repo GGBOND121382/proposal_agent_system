@@ -17,8 +17,10 @@ from .contract_registry import (
     required_null_container_errors,
 )
 from .output_integrity import (
+    attach_trusted_source_catalog,
     normalize_reference_id_aliases,
     normalize_staged_source_ref_aliases,
+    trusted_source_prompt_contract,
     validate_staged_reference_integrity,
 )
 
@@ -134,14 +136,20 @@ def prepare_staged_artifact(path: str | Path, value: Any) -> Any:
     if not isinstance(output_schema, Mapping) or not isinstance(system_prompt, str):
         return value
     prepared = copy.deepcopy(value)
+    input_envelope = prepared.get("input_envelope")
+    if isinstance(input_envelope, Mapping):
+        prepared["input_envelope"] = attach_trusted_source_catalog(input_envelope)
     contract_id = f"staged-request:{prepared.get('prompt_id') or target.stem}:output"
     prepared_prompt = augment_prompt_with_enum_contract(
         system_prompt, output_schema, contract_id=contract_id
     )
-    prepared["system_prompt"] = augment_prompt_with_field_ownership_contract(
+    prepared_prompt = augment_prompt_with_field_ownership_contract(
         prepared_prompt,
         output_schema,
         contract_id=f"{contract_id}:field-ownership",
+    )
+    prepared["system_prompt"] = prepared_prompt + trusted_source_prompt_contract(
+        prepared.get("input_envelope") if isinstance(prepared.get("input_envelope"), Mapping) else None
     )
     model_contract = prepared.setdefault("model_contract", {})
     model_contract["enum_contract_registry_version"] = CONTRACT_REGISTRY_VERSION

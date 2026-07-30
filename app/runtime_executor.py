@@ -16,6 +16,7 @@ from .executor import (
 from .contract_registry import CONTRACT_REGISTRY_VERSION
 from .llm import LLMError
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
+from .output_integrity import TRUSTED_SOURCE_CATALOG_VERSION, attach_trusted_source_catalog
 from .runtime_evidence import EvidenceIntegrityError, InjectedFailure, ModelCallEvidenceStore
 from .runtime_policy import CapabilityModeError, CapabilityPolicy, LIVE_ENVELOPE_REGISTRY
 from .security import RoutingDenied
@@ -71,6 +72,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "prompt_entry": entry,
                 "model_profile": profiles.get(profile_name),
                 "output_schema": self.pack.inlined_schema(prompt_id, "output"),
+                "trusted_source_catalog_contract_version": TRUSTED_SOURCE_CATALOG_VERSION,
             }
         except (AttributeError, KeyError, TypeError):
             return {"prompt_id": prompt_id}
@@ -162,16 +164,27 @@ class RuntimePromptExecutor(BasePromptExecutor):
         """
         if sha256_json(prior_envelope) == sha256_json(current_envelope):
             return True, "EXACT"
-        if prompt_id != "P-SAFE-ONLINE-PACKAGE":
-            return False, None
+
         prior = copy.deepcopy(prior_envelope)
         current = copy.deepcopy(current_envelope)
+        prior_had_catalog = "trusted_source_catalog" in prior
+        current_had_catalog = "trusted_source_catalog" in current
+        prior.pop("trusted_source_catalog", None)
+        current.pop("trusted_source_catalog", None)
+        if sha256_json(prior) == sha256_json(current):
+            if prior_had_catalog != current_had_catalog:
+                return True, "ADDITIVE_TRUSTED_SOURCE_CATALOG"
+            return True, "TRUSTED_SOURCE_CATALOG_REBUILD"
+
+        if prompt_id != "P-SAFE-ONLINE-PACKAGE":
+            return False, None
         prior_payload = prior.get("payload") if isinstance(prior.get("payload"), dict) else {}
         current_payload = current.get("payload") if isinstance(current.get("payload"), dict) else {}
         prior_payload.pop("human_resolutions", None)
         current_payload.pop("human_resolutions", None)
         if sha256_json(prior) == sha256_json(current):
-            return True, "ADDITIVE_HUMAN_RESOLUTIONS"
+            suffix = "_AND_TRUSTED_SOURCE_CATALOG" if prior_had_catalog != current_had_catalog else ""
+            return True, "ADDITIVE_HUMAN_RESOLUTIONS" + suffix
         return False, None
 
     def _failed_run_audit_metadata(
@@ -270,8 +283,16 @@ class RuntimePromptExecutor(BasePromptExecutor):
             prior_request_hash = str(
                 failed_metadata.get("model_request_spec_hash") or ""
             )
+            request_contract_upgrade = None
             if prior_request_hash and prior_request_hash != model_request_spec_hash:
-                continue
+                provenance_failure = str(row.get("error") or "").startswith((
+                    "Output provenance is not backed by the trusted input envelope",
+                    "Untrusted source reference in Safe Online Package output",
+                ))
+                if provenance_failure and "TRUSTED_SOURCE_CATALOG" in str(input_equivalence or ""):
+                    request_contract_upgrade = "TRUSTED_SOURCE_CATALOG_V1"
+                else:
+                    continue
             try:
                 provider_output = json.loads(row["output_json"])
             except (TypeError, json.JSONDecodeError):
@@ -333,6 +354,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "previous_error": row.get("error"),
                 "prior_model_request_spec_hash": prior_request_hash or None,
                 "input_equivalence": input_equivalence,
+                "request_contract_upgrade": request_contract_upgrade,
             }
         return None
 
@@ -354,6 +376,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         started = time.perf_counter()
         quality_context_envelope = envelope
         model_envelope, input_compaction = self._prepare_model_envelope(prompt_id, envelope)
+        model_envelope = attach_trusted_source_catalog(model_envelope)
         input_hash = sha256_json(model_envelope)
         model_request_spec_hash = self._model_request_spec_hash(prompt_id)
         call_key = self._call_key(
@@ -393,7 +416,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
             if route.environment == "ONLINE_PUBLIC":
                 assert_online_payload_safe(model_envelope, project_config)
             output_schema = self.pack.inlined_schema(prompt_id, "output")
-            system_prompt = self._system_prompt(prompt_id, output_schema)
+            system_prompt = self._system_prompt(prompt_id, output_schema, model_envelope)
             contract_recovery = self._recoverable_contract_output(
                 project_id=project_id,
                 workflow_id=workflow_id,

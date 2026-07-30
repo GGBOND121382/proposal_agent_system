@@ -97,6 +97,17 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
         except Exception as exc:
             current = self.get(workflow_id)
             state = current["state"]
+            report = self._runtime_configuration_report(
+                exc,
+                scope="UNEXPECTED_RUNTIME_CONFIGURATION",
+            )
+            if report is not None:
+                return self._pause_for_configuration(
+                    current,
+                    state,
+                    report,
+                    source="UNEXPECTED_RUNTIME_CONFIGURATION",
+                )
             state["last_error"] = f"UNEXPECTED_RUNTIME_ERROR: {type(exc).__name__}: {exc}"
             state["runtime_recoverable"] = True
             state["runtime_failure_point"] = "WORKFLOW_ADVANCE"

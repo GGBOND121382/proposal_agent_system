@@ -29,12 +29,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.staged_workflow_config import safe_output_stem
+from app.dependency_preflight import RuntimeDependencyPreflight
 
 
 FONT_SERIF = "Noto Serif CJK SC"
 FONT_SANS = "Noto Sans CJK SC"
-MATPLOTLIB_SANS = FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
-MATPLOTLIB_SERIF = FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc")
+_SANS_PATH = RuntimeDependencyPreflight._find_font("sans")
+_SERIF_PATH = RuntimeDependencyPreflight._find_font("serif")
+MATPLOTLIB_SANS = FontProperties(fname=_SANS_PATH) if _SANS_PATH else FontProperties(family=FONT_SANS)
+MATPLOTLIB_SERIF = FontProperties(fname=_SERIF_PATH) if _SERIF_PATH else FontProperties(family=FONT_SERIF)
 
 CHINESE_DIGITS = "零一二三四五六七八九"
 
@@ -587,9 +590,14 @@ def build_docx(md_path: Path, out_docx: Path, asset_dir: Path) -> dict:
 
 def convert_pdf(docx_path: Path, out_pdf: Path) -> dict:
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    executable = RuntimeDependencyPreflight._find_libreoffice()
+    if not executable:
+        raise RuntimeError(
+            "LibreOffice/soffice is unavailable; set LIBREOFFICE_EXECUTABLE"
+        )
     with tempfile.TemporaryDirectory(prefix="stage8-lo-") as profile:
         cmd = [
-            shutil.which("libreoffice") or "libreoffice",
+            executable,
             f"-env:UserInstallation={Path(profile).resolve().as_uri()}",
             "--headless", "--convert-to", "pdf:writer_pdf_Export",
             "--outdir", str(out_pdf.parent), str(docx_path),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .dependency_preflight import DependencyIssue, DependencyReport
 from .executor import PromptExecutionError
 from .quality import QualityGateBlocked, QualityLifecycleManager
 from .research import PublicResearchError
@@ -15,7 +16,7 @@ from .wf3_input import WorkflowInputRequired
 
 
 class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMixin):
-    def __init__(self, db, pack, context_builder, executor, research_service, diagram_enrichment=None, quality_manager=None):
+    def __init__(self, db, pack, context_builder, executor, research_service, diagram_enrichment=None, quality_manager=None, dependency_preflight=None):
         self.db = db
         self.pack = pack
         self.context_builder = context_builder
@@ -23,6 +24,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         self.research_service = research_service
         self.diagram_enrichment = diagram_enrichment
         self.quality_manager = quality_manager or QualityLifecycleManager(db)
+        self.dependency_preflight = dependency_preflight
 
 
     def _observe_quality_result(self, wf: dict[str, Any], state: dict[str, Any], prompt_id: str, result: dict[str, Any]) -> None:
@@ -131,6 +133,124 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             + "。不得使用Replay样例或空上下文代替已完成的前序结果。"
         )
 
+    def _pause_for_configuration(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        report: DependencyReport,
+        *,
+        source: str,
+    ) -> dict[str, Any]:
+        payload = report.as_dict()
+        payload.update(
+            {
+                "workflow_id": wf["id"],
+                "workflow_type": wf["workflow_type"],
+                "resume_step": int(wf["current_step"]),
+                "source": source,
+            }
+        )
+        previous = state.get("configuration_wait") or {}
+        if previous.get("first_detected_at"):
+            payload["first_detected_at"] = previous["first_detected_at"]
+        else:
+            payload["first_detected_at"] = utc_now()
+        payload["last_checked_at"] = utc_now()
+        state["configuration_wait"] = payload
+        state["last_error"] = report.summary()
+        state.pop("runtime_recoverable", None)
+        state.pop("runtime_failure_point", None)
+        self._update(wf, status="WAITING_CONFIGURATION", state=state)
+        self.db.audit(
+            "WORKFLOW_WAITING_CONFIGURATION",
+            project_id=wf["project_id"],
+            object_id=wf["id"],
+            metadata={
+                "source": source,
+                "resume_step": int(wf["current_step"]),
+                "issues": [item.as_dict() for item in report.blocking_issues],
+            },
+        )
+        return self.get(wf["id"])
+
+    @staticmethod
+    def _clear_configuration_wait(state: dict[str, Any]) -> None:
+        previous = state.pop("configuration_wait", None)
+        if previous:
+            state["configuration_recovered"] = {
+                "recovered_at": utc_now(),
+                "previous": previous,
+            }
+        if str(state.get("last_error") or "").startswith("运行依赖未满足："):
+            state.pop("last_error", None)
+
+    def _workflow_dependency_report(
+        self,
+        project_id: str,
+        workflow_type: str,
+        options: dict[str, Any],
+    ) -> DependencyReport | None:
+        if self.dependency_preflight is None:
+            return None
+        return self.dependency_preflight.workflow_report(
+            project_id,
+            workflow_type,
+            options,
+        )
+
+    def _configuration_recheck_report(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+    ) -> DependencyReport | None:
+        """Recheck workflow-wide and current-step dependencies before resume."""
+        if self.dependency_preflight is None:
+            return None
+        report = self.dependency_preflight.workflow_report(
+            wf["project_id"],
+            wf["workflow_type"],
+            state.get("options") or {},
+        )
+        steps = WORKFLOWS.get(wf["workflow_type"], [])
+        current_step = int(wf.get("current_step") or 0)
+        if current_step < len(steps):
+            step = steps[current_step]
+            public_plan = None
+            if step.get("type") == "PUBLIC_SEARCH" and hasattr(
+                self.context_builder, "_result"
+            ):
+                public_plan = self._context_result(
+                    wf["project_id"],
+                    "P-PUBLIC-RESEARCH-PLAN",
+                    workflow_id=wf["id"],
+                    exact_workflow=True,
+                ) or {}
+            report.extend(
+                self.dependency_preflight.step_report(
+                    wf["project_id"],
+                    wf["workflow_type"],
+                    step,
+                    state,
+                    public_research_plan=public_plan,
+                )
+            )
+        return report
+
+    def _runtime_configuration_report(
+        self,
+        exc: Exception | str,
+        *,
+        dependency_hint: str | None = None,
+        scope: str,
+    ) -> DependencyReport | None:
+        if self.dependency_preflight is None:
+            return None
+        return self.dependency_preflight.report_from_runtime_error(
+            exc,
+            dependency_hint=dependency_hint,
+            scope=scope,
+        )
+
     def start(self, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
         if workflow_type not in WORKFLOWS:
             raise KeyError(f"Unknown workflow: {workflow_type}")
@@ -139,7 +259,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         active_rows = self.db.fetchall(
             """SELECT id,status,state_json FROM workflows
                WHERE project_id=? AND workflow_type=?
-                 AND status IN ('RUNNING','WAITING_GATE','WAITING_PREREQUISITE','BLOCKED')
+                 AND status IN ('RUNNING','WAITING_GATE','WAITING_PREREQUISITE','WAITING_CONFIGURATION','BLOCKED')
                ORDER BY created_at DESC""",
             (project_id, workflow_type),
         )
@@ -177,11 +297,32 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         if prerequisite_error:
             state["last_error"] = prerequisite_error
             state["waiting_prerequisite"] = True
+        elif self.dependency_preflight is not None:
+            report = self._workflow_dependency_report(project_id, workflow_type, options or {})
+            if report is not None and report.blocking_issues:
+                status = "WAITING_CONFIGURATION"
+                state["configuration_wait"] = {
+                    **report.as_dict(),
+                    "workflow_id": workflow_id,
+                    "workflow_type": workflow_type,
+                    "resume_step": 0,
+                    "source": "WORKFLOW_START_PREFLIGHT",
+                    "first_detected_at": now,
+                    "last_checked_at": now,
+                }
+                state["last_error"] = report.summary()
         self.db.execute(
             "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
             (workflow_id, project_id, workflow_type, status, 0, json.dumps(state, ensure_ascii=False), now, now),
         )
         self.db.audit("WORKFLOW_STARTED", project_id=project_id, object_id=workflow_id, metadata={"workflow_type": workflow_type})
+        if status == "WAITING_CONFIGURATION":
+            self.db.audit(
+                "WORKFLOW_WAITING_CONFIGURATION",
+                project_id=project_id,
+                object_id=workflow_id,
+                metadata=state["configuration_wait"],
+            )
         return self.get(workflow_id)
 
     def _workflow_prerequisite_error(self, project_id: str, workflow_type: str, options: dict[str, Any]) -> str | None:
@@ -310,6 +451,34 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             )
             self._update(wf, status="RUNNING", state=state)
             wf = self.get(workflow_id)
+        legacy_configuration_report = None
+        if wf["status"] == "BLOCKED" and self.dependency_preflight is not None:
+            legacy_configuration_report = self._runtime_configuration_report(
+                state.get("last_error") or "",
+                scope="LEGACY_BLOCKED_CONFIGURATION",
+            )
+        if wf["status"] == "WAITING_CONFIGURATION" or legacy_configuration_report is not None:
+            state = wf["state"]
+            report = self._configuration_recheck_report(wf, state)
+            if report is not None and report.blocking_issues:
+                return self._pause_for_configuration(
+                    wf,
+                    state,
+                    report,
+                    source=(
+                        "WAITING_CONFIGURATION_RECHECK"
+                        if wf["status"] == "WAITING_CONFIGURATION"
+                        else "LEGACY_BLOCKED_CONFIGURATION_MIGRATION"
+                    ),
+                )
+            self._clear_configuration_wait(state)
+            state["recovered_from"] = (
+                "WAITING_CONFIGURATION"
+                if wf["status"] == "WAITING_CONFIGURATION"
+                else "LEGACY_CONFIGURATION_BLOCK"
+            )
+            self._update(wf, status="RUNNING", state=state)
+            wf = self.get(workflow_id)
         if self._is_legacy_wf3_input_block(wf, wf["state"]):
             state = wf["state"]
             state["recovered_from"] = state.get("last_error") or "LEGACY_WF3_INPUT_BLOCK"
@@ -420,10 +589,45 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         state = wf["state"]
         while wf["current_step"] < len(steps):
             step = steps[wf["current_step"]]
+            if self.dependency_preflight is not None:
+                public_plan = None
+                if step.get("type") == "PUBLIC_SEARCH":
+                    public_plan = self._context_result(
+                        wf["project_id"],
+                        "P-PUBLIC-RESEARCH-PLAN",
+                        workflow_id=wf["id"],
+                        exact_workflow=True,
+                    ) or {}
+                report = self.dependency_preflight.step_report(
+                    wf["project_id"],
+                    wf["workflow_type"],
+                    step,
+                    state,
+                    public_research_plan=public_plan,
+                )
+                if report.blocking_issues:
+                    return self._pause_for_configuration(
+                        wf,
+                        state,
+                        report,
+                        source=f"STEP_PREFLIGHT:{wf['current_step']}",
+                    )
             if step.get("type") == "PUBLIC_SEARCH":
                 try:
                     await self._run_public_search(wf, state)
                 except PublicResearchError as exc:
+                    report = self._runtime_configuration_report(
+                        exc,
+                        dependency_hint="PUBLIC_SEARCH",
+                        scope="PUBLIC_SEARCH_RUNTIME",
+                    )
+                    if report is not None:
+                        return self._pause_for_configuration(
+                            wf,
+                            state,
+                            report,
+                            source="PUBLIC_SEARCH_RUNTIME",
+                        )
                     state["last_error"] = str(exc)
                     self._update(wf, status="BLOCKED", state=state)
                     return self.get(workflow_id)
@@ -436,6 +640,17 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 except WorkflowInputRequired as exc:
                     return self._pause_for_workflow_input(wf, state, exc)
                 except (ValueError, KeyError) as exc:
+                    report = self._runtime_configuration_report(
+                        exc,
+                        scope="WRITE_SECTIONS_RUNTIME",
+                    )
+                    if report is not None:
+                        return self._pause_for_configuration(
+                            wf,
+                            state,
+                            report,
+                            source="WRITE_SECTIONS_RUNTIME",
+                        )
                     state["last_error"] = str(exc)
                     self._update(wf, status="BLOCKED", state=state)
                     return self.get(workflow_id)
@@ -462,6 +677,21 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             except WorkflowInputRequired as exc:
                 return self._pause_for_workflow_input(wf, state, exc)
             except (PromptExecutionError, ValueError, KeyError) as exc:
+                required_environment = str(
+                    self.pack.entry(prompt_id).get("required_environment") or ""
+                )
+                report = self._runtime_configuration_report(
+                    exc,
+                    dependency_hint=required_environment,
+                    scope=f"PROMPT_RUNTIME:{prompt_id}",
+                )
+                if report is not None:
+                    return self._pause_for_configuration(
+                        wf,
+                        state,
+                        report,
+                        source=f"PROMPT_RUNTIME:{prompt_id}",
+                    )
                 state["last_error"] = str(exc)
                 self._update(wf, status="BLOCKED", state=state)
                 return self.get(workflow_id)

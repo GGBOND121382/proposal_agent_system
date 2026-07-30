@@ -17,8 +17,11 @@ from .contract_registry import (
 )
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
 from .output_integrity import (
+    TRUSTED_SOURCE_CATALOG_VERSION,
+    attach_trusted_source_catalog,
     bind_trusted_source_refs,
     normalize_reference_id_aliases,
+    trusted_source_prompt_contract,
     validate_reference_ids,
 )
 from .proposal_quality import ProposalQualityGuard
@@ -49,7 +52,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-07-30.v9-source-alias-user-confirmation"
+OUTPUT_NORMALIZER_VERSION = "2026-07-30.v10-trusted-input-object-identity"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -2987,6 +2990,7 @@ class PromptExecutor:
         started = time.perf_counter()
         quality_context_envelope = envelope
         model_envelope, input_compaction = self._prepare_model_envelope(prompt_id, envelope)
+        model_envelope = attach_trusted_source_catalog(model_envelope)
         input_hash = sha256_json(model_envelope)
         route = None
         output: dict[str, Any] | None = None
@@ -3008,7 +3012,7 @@ class PromptExecutor:
             if route.environment == "ONLINE_PUBLIC":
                 assert_online_payload_safe(model_envelope, project_config)
             output_schema = self.pack.inlined_schema(prompt_id, "output")
-            system_prompt = self._system_prompt(prompt_id, output_schema)
+            system_prompt = self._system_prompt(prompt_id, output_schema, model_envelope)
             result = await self.gateway.invoke(route, prompt_id, system_prompt, model_envelope, output_schema)
             raw_response_text = result.raw_text
             output = self._normalize_output(prompt_id, result.output, model_envelope)
@@ -3436,7 +3440,12 @@ class PromptExecutor:
             "quality_guard_uses_full_context": True,
         }
 
-    def _system_prompt(self, prompt_id: str, output_schema: dict[str, Any]) -> str:
+    def _system_prompt(
+        self,
+        prompt_id: str,
+        output_schema: dict[str, Any],
+        envelope: dict[str, Any] | None = None,
+    ) -> str:
         base_prompt = (
             self.pack.shared_prompt
             + "\n\n"
@@ -3452,8 +3461,10 @@ class PromptExecutor:
             output_schema,
             contract_id=f"prompt-pack:{prompt_id}:field-ownership",
         )
+        source_contract = trusted_source_prompt_contract(envelope)
         return (
             base_prompt
+            + source_contract
             + "\n\n# 人工输入约束\n"
             + "若输入 payload.human_resolutions 非空，这些记录是已经通过门禁确认的人工回答。"
               "必须在其 target_paths 和当前任务范围内使用；不得忽略、扩大解释或改写为未经确认的事实。"

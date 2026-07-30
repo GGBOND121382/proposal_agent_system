@@ -1,14 +1,14 @@
 {
   "version": "0.6.0",
-  "built_at": "2026-07-30T02:13:23.197184+00:00",
+  "built_at": "2026-07-30T08:24:51.393770+00:00",
   "status": "METADATA_SYNCED",
   "scope": "Current code-derived metadata only; semantic and end-to-end pass claims require a fresh CI or acceptance run.",
   "counts": {
     "prompt_files": 30,
-    "prompt_schema_files": 90,
+    "prompt_schema_files": 91,
     "staged_schema_files": 34,
     "replay_cases": 150,
-    "automated_tests": 442
+    "automated_tests": 454
   },
   "validation": {
     "metadata_sync": "PASS",

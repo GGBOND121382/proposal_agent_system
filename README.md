@@ -6,9 +6,9 @@
 
 - 产品版本：`0.6.0`；
 - Prompt 注册项：30；
-- Prompt Pack Schema：90；Stage Schema：34；
+- Prompt Pack Schema：91；Stage Schema：34；
 - Replay 用例：150；
-- pytest 收集用例：442。
+- pytest 收集用例：454。
 
 以上统计由 `scripts/sync_project_metadata.py` 从代码与测试自动生成；历史版本章节中的旧数字仅描述当时版本。
 <!-- END GENERATED BUILD STATS -->
@@ -168,6 +168,10 @@ cp .env.example .env
 docker compose up --build
 ```
 
+## 运行依赖预检
+
+模型、公开搜索、证据目录、Mermaid、LibreOffice、字体及 Stage 输入由统一预检器检查。缺失依赖时工作流进入 `WAITING_CONFIGURATION`，修正配置并重启后从原步骤继续。详见 `docs/RUNTIME_DEPENDENCY_PREFLIGHT_20260730.md`。
+
 ## 运行模式
 
 ### REPLAY
@@ -260,7 +264,7 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 bash scripts/validate.sh
 ```
 
-当前 pytest 收集用例共442项，覆盖：
+当前 pytest 收集用例共454项，覆盖：
 
 - 30 个已注册 Prompt 的正常 Replay 输入/输出；
 - 材料解析与 Context Builder；

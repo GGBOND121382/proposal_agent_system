@@ -12,6 +12,7 @@ from app.db import Database
 from app.runtime_api import PromptExecutor
 from app.pack import PromptPack
 from app.output_integrity import (
+    attach_trusted_source_catalog,
     bind_trusted_source_refs,
     normalize_reference_id_aliases,
     validate_reference_ids,
@@ -662,6 +663,101 @@ def test_all_replay_outputs_pass_full_contract_normalization(pack: PromptPack) -
         except Exception as exc:  # pragma: no cover - aggregate diagnostic
             failures.append(f"{prompt_id}: {type(exc).__name__}: {exc}")
     assert not failures, "\n".join(failures)
+
+
+def test_all_prompt_inputs_accept_attached_trusted_source_catalog(pack: PromptPack) -> None:
+    failures: list[str] = []
+    for prompt_id in pack.prompt_ids():
+        envelope = pack.replay_input(prompt_id)
+        prepared = attach_trusted_source_catalog(envelope)
+        errors = pack.validate(prompt_id, "input", prepared)
+        if errors:
+            failures.append(f"{prompt_id}: {errors[:3]}")
+            continue
+        catalog = prepared.get("trusted_source_catalog") or []
+        source_ids = [item.get("source_id") for item in catalog if isinstance(item, dict)]
+        if not source_ids or len(source_ids) != len(set(source_ids)):
+            failures.append(f"{prompt_id}: missing or duplicate trusted source IDs")
+    assert not failures, "\n".join(failures)
+
+
+def test_safe_package_critic_field_name_sources_bind_to_stable_input_objects(
+    pack: PromptPack,
+) -> None:
+    envelope = pack.replay_input("P-SAFE-ONLINE-PACKAGE-CRITIC")
+    prepared = attach_trusted_source_catalog(envelope)
+    catalog_by_path = {
+        item["object_path"]: item
+        for item in prepared["trusted_source_catalog"]
+        if isinstance(item, dict)
+    }
+    assert catalog_by_path["payload.security_policy"]["source_id"] == "security-001"
+    scan_id = catalog_by_path["payload.deterministic_scan"]["source_id"]
+    assert scan_id.startswith("input-p-safe-online-package-critic-deterministic-scan-")
+
+    output = pack.replay_output("P-SAFE-ONLINE-PACKAGE-CRITIC")
+    output["source_refs"] = [
+        {"source_id": "deterministic_scan"},
+        {"source_id": "security_policy"},
+    ]
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    executor.db = None
+
+    normalized = executor._normalize_output(
+        "P-SAFE-ONLINE-PACKAGE-CRITIC",
+        output,
+        prepared,
+    )
+
+    refs = {item["source_id"]: item for item in normalized["source_refs"]}
+    assert refs[scan_id]["source_type"] == "EVIDENCE_MATERIAL"
+    assert refs[scan_id]["document_version_id"] is None
+    assert refs["security-001"]["source_type"] == "CONTRACT"
+    assert refs["security-001"]["source_hash"] == "a" * 64
+    assert pack.validate("P-SAFE-ONLINE-PACKAGE-CRITIC", "output", normalized) == []
+
+
+def test_trusted_source_catalog_is_stable_and_contains_no_input_prose(pack: PromptPack) -> None:
+    envelope = pack.replay_input("P-SAFE-ONLINE-PACKAGE-CRITIC")
+    first = attach_trusted_source_catalog(envelope)["trusted_source_catalog"]
+    second = attach_trusted_source_catalog(copy.deepcopy(envelope))["trusted_source_catalog"]
+    assert first == second
+    serialized = json.dumps(first, ensure_ascii=False)
+    assert "通用研究需求" not in serialized
+    assert "真实项目名称" not in serialized
+
+
+def test_every_referenceable_payload_object_has_one_resolvable_field_name_alias(
+    pack: PromptPack,
+) -> None:
+    failures: list[str] = []
+    exercised = 0
+    for prompt_id in pack.prompt_ids():
+        prepared = attach_trusted_source_catalog(pack.replay_input(prompt_id))
+        for field_name, value in (prepared.get("payload") or {}).items():
+            if not isinstance(value, (dict, list)):
+                continue
+            exercised += 1
+            normalized, report = bind_trusted_source_refs(
+                {"source_refs": [{"source_id": field_name}]},
+                prepared,
+            )
+            if report.get("errors"):
+                failures.append(f"{prompt_id}.payload.{field_name}: {report['errors']}")
+                continue
+            resolved = normalized["source_refs"][0]["source_id"]
+            catalog_ids = {
+                item["source_id"]
+                for item in prepared["trusted_source_catalog"]
+                if isinstance(item, dict)
+            }
+            if resolved not in catalog_ids:
+                failures.append(
+                    f"{prompt_id}.payload.{field_name}: resolved to unregistered {resolved}"
+                )
+    assert exercised >= 200
+    assert not failures, "\n".join(failures[:30])
 
 
 def test_all_prompts_reject_invented_root_provenance(pack: PromptPack) -> None:

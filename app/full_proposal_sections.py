@@ -72,7 +72,7 @@ class FullProposalSectionsMixin:
                 except WorkflowInputRequired:
                     raise
                 except (PromptExecutionError, ValueError, KeyError) as exc:
-                    return self._block_section_chain(wf, state, section, str(exc))
+                    return self._block_section_chain(wf, state, section, str(exc), configuration_error=exc)
 
                 if result["status"] == "PASS":
                     progress["phase"] = next_phase
@@ -133,7 +133,7 @@ class FullProposalSectionsMixin:
                             wf, state, section, progress, prompt_id, role="INDEPENDENT_REVIEW",
                         )
                     except (PromptExecutionError, ValueError, KeyError) as exc:
-                        return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}")
+                        return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}", configuration_error=exc)
                     if reviewed["status"] != "PASS":
                         if (
                             self._acceptance_regenerable_review_status(

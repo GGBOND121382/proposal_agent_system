@@ -38,8 +38,10 @@ class MermaidRenderSkill:
     def __init__(self, settings):
         self.settings = settings
         self.mermaid_js = Path(settings.mermaid_js_path)
-        if not self.mermaid_js.exists():
-            raise FileNotFoundError(f"Bundled Mermaid runtime not found: {self.mermaid_js}")
+        # Missing optional rendering assets must not prevent the API from
+        # starting. RuntimeDependencyPreflight reports the configuration issue,
+        # and an actual render attempt fails at the skill boundary with a clear
+        # recoverable dependency error.
         self._worker: subprocess.Popen[str] | None = None
         self._worker_lock = threading.Lock()
         self._responses: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -49,6 +51,11 @@ class MermaidRenderSkill:
         atexit.register(self.close)
 
     def run(self, payload: dict[str, Any], context: SkillContext) -> SkillResult:
+        if not self.mermaid_js.is_file():
+            raise MermaidRenderError(
+                f"MERMAID_JS_PATH is unavailable: {self.mermaid_js}. "
+                "Configure a readable Mermaid runtime before rendering diagrams."
+            )
         source = self._normalize_source(str(payload.get("mermaid_source") or ""))
         caption = str(payload.get("caption") or "结构图").strip()
         section_id = safe_filename(str(payload.get("section_id") or "section"))

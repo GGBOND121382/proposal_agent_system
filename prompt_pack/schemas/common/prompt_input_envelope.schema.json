@@ -93,5 +93,14 @@
     {
       "$ref": "../prompts/expression_critic_input.schema.json"
     }
-  ]
+  ],
+  "properties": {
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
+    }
+  }
 }

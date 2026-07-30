@@ -53,9 +53,28 @@ class WorkflowAuthoringMixin:
         state: dict[str, Any],
         section: dict[str, Any],
         message: str,
+        *,
+        configuration_error: Exception | str | None = None,
     ) -> dict[str, Any]:
         section_id = str(section.get("section_id") or "")
         progress = state.setdefault("section_progress", {}).setdefault(section_id, {})
+        report = (
+            self._runtime_configuration_report(
+                configuration_error,
+                scope=f"SECTION_CHAIN_RUNTIME:{section_id or 'UNKNOWN'}",
+            )
+            if configuration_error is not None
+            else None
+        )
+        if report is not None:
+            progress["status"] = "WAITING_CONFIGURATION"
+            progress["last_error"] = message
+            return self._pause_for_configuration(
+                wf,
+                state,
+                report,
+                source=f"SECTION_CHAIN_RUNTIME:{section_id or 'UNKNOWN'}",
+            )
         progress["status"] = "BLOCKED"
         progress["last_error"] = message
         state["last_error"] = f"{section.get('title')}: {message}"
@@ -308,7 +327,7 @@ class WorkflowAuthoringMixin:
                 except WorkflowInputRequired:
                     raise
                 except (PromptExecutionError, ValueError, KeyError) as exc:
-                    return self._block_section_chain(wf, state, section, str(exc))
+                    return self._block_section_chain(wf, state, section, str(exc), configuration_error=exc)
 
                 if result["status"] == "PASS":
                     progress["phase"] = next_phase
@@ -369,7 +388,7 @@ class WorkflowAuthoringMixin:
                             wf, state, section, progress, prompt_id, role="INDEPENDENT_REVIEW",
                         )
                     except (PromptExecutionError, ValueError, KeyError) as exc:
-                        return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}")
+                        return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}", configuration_error=exc)
                     if reviewed["status"] != "PASS":
                         if (
                             self._acceptance_regenerable_review_status(

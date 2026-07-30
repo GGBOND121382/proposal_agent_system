@@ -1836,3 +1836,93 @@ def test_runtime_recovers_safe_package_source_prefix_alias_without_model_call(
     assert source_ref["source_type"] == "USER_CONFIRMATION"
     assert source_ref["authority_rank"] == 100
     assert pack.validate(prompt_id, "output", result["output"]) == []
+
+
+def test_runtime_recovers_safe_package_critic_object_path_sources_without_model_call(
+    runtime,
+    monkeypatch,
+):
+    """A legacy critic response may cite input field names instead of stable IDs.
+
+    Adding the trusted-source catalog is a deterministic request-contract
+    upgrade, so the immutable prior provider output must be revalidated locally
+    rather than sent to the model again.
+    """
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-SAFE-ONLINE-PACKAGE-CRITIC"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+
+    provider_output = pack.replay_output(prompt_id)
+    provider_output["source_refs"] = [
+        {"source_id": "deterministic_scan"},
+        {"source_id": "security_policy"},
+    ]
+
+    # This is the exact model envelope shape stored by the v9 runtime: the
+    # catalog had not yet been added to the model request.
+    prior_model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    assert "trusted_source_catalog" not in prior_model_envelope
+    failed_run_id = new_id("run")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id,
+            project_id,
+            workflow_id,
+            prompt_id,
+            "ERROR",
+            "offline-general-primary",
+            "offline-primary",
+            sha256_json(prior_model_envelope),
+            sha256_json(provider_output),
+            json.dumps(prior_model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Output provenance is not backed by the trusted input envelope | "
+            "/source_refs/0/source_id: 'deterministic_scan' is not present in the trusted input envelope | "
+            "/source_refs/1/source_id: 'security_policy' is not present in the trusted input envelope",
+            33000,
+            utc_now(),
+        ),
+    )
+    db.audit(
+        "MODEL_CALL_FAILED",
+        project_id=project_id,
+        object_id="call-old-input-object-identities",
+        metadata={
+            "run_id": failed_run_id,
+            "prompt_id": prompt_id,
+            "deterministic_recoverable": False,
+            "model_request_spec_hash": "legacy-v9-request-contract",
+            "output_normalizer_version": "2026-07-30.v9-source-alias-user-confirmation",
+        },
+    )
+
+    async def model_must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("trusted input object identities must recover the prior provider output locally")
+
+    monkeypatch.setattr(executor.gateway, "invoke", model_must_not_be_called)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+        )
+    )
+
+    assert result["contract_recovered_from_run_id"] == failed_run_id
+    refs = {item["source_id"]: item for item in result["output"]["source_refs"]}
+    assert "security-001" in refs
+    scan_ids = [source_id for source_id in refs if source_id.startswith(
+        "input-p-safe-online-package-critic-deterministic-scan-"
+    )]
+    assert len(scan_ids) == 1
+    assert refs[scan_ids[0]]["source_type"] == "EVIDENCE_MATERIAL"
+    assert refs["security-001"]["source_type"] == "CONTRACT"
+    assert pack.validate(prompt_id, "output", result["output"]) == []

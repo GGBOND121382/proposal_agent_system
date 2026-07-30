@@ -6,11 +6,16 @@ from .staged_workflows import STAGED_WORKFLOW_TYPE, StagedWorkflowCoordinator
 class UnifiedWorkflowEngine:
     """Facade for database-native workflows and file-bridged staged workflows."""
 
-    def __init__(self, runtime_engine, db, settings):
+    def __init__(self, runtime_engine, db, settings, dependency_preflight=None):
         self.runtime = runtime_engine
-        self.staged = StagedWorkflowCoordinator(db, settings)
+        self.staged = StagedWorkflowCoordinator(
+            db,
+            settings,
+            dependency_preflight=dependency_preflight,
+        )
         self.db = db
         self.quality_manager = runtime_engine.quality_manager
+        self.dependency_preflight = dependency_preflight
 
     def start(self, project_id, workflow_type, options=None):
         if workflow_type == STAGED_WORKFLOW_TYPE:

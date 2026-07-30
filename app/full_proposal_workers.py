@@ -5,6 +5,7 @@ import copy
 import json
 from typing import Any
 
+from .dependency_preflight import DependencyIssue, DependencyReport
 from .full_proposal_contract import FULL_PROPOSAL_GROUP_ORDER
 from .util import new_id, sha256_json, utc_now
 
@@ -214,11 +215,22 @@ class FullProposalWorkersMixin:
         record["started_at"] = utc_now()
         record["status"] = "RUNNING"
         self._update(parent_wf, state=parent_state)
+        if child["status"] == "WAITING_CONFIGURATION":
+            report = self._configuration_recheck_report(child, child["state"])
+            if report is not None and report.blocking_issues:
+                self._pause_for_configuration(
+                    child,
+                    child["state"],
+                    report,
+                    source="FULL_PROPOSAL_CHILD_RECHECK",
+                )
+                return self.get(child["id"])
+            self._clear_configuration_wait(child["state"])
         child["status"] = "RUNNING"
         self._update(child, status="RUNNING", state=child["state"])
         result = await self._write_sections_serial(child, child["state"])
         child = self.get(child["id"])
-        if result is not None or child["status"] == "BLOCKED":
+        if result is not None or child["status"] in {"BLOCKED", "WAITING_CONFIGURATION"}:
             return child
         completed = {str(item.get("section_id")) for item in child["state"].get("section_results", [])}
         if not expected <= completed:
@@ -275,13 +287,48 @@ class FullProposalWorkersMixin:
             *(self._run_full_proposal_group(wf, state, record, repair_ids) for record in records),
         )
         failures: list[str] = []
+        configuration_issues: list[DependencyIssue] = []
         children: list[dict[str, Any]] = []
         for record, result in zip(records, results):
             children.append(result)
             record["status"] = result["status"]
-            if result["status"] != "COMPLETED":
+            if result["status"] == "WAITING_CONFIGURATION":
+                for raw in (result["state"].get("configuration_wait") or {}).get("issues") or []:
+                    if not isinstance(raw, dict):
+                        continue
+                    configuration_issues.append(
+                        DependencyIssue(
+                            code=str(raw.get("code") or "CHILD_RUNTIME_DEPENDENCY_UNAVAILABLE"),
+                            dependency=str(raw.get("dependency") or "FULL_PROPOSAL_CHILD"),
+                            message=str(raw.get("message") or result["state"].get("last_error") or "并发章节组等待运行配置"),
+                            required_settings=tuple(str(item) for item in raw.get("required_settings") or []),
+                            severity=str(raw.get("severity") or "ERROR"),
+                            retryable=bool(raw.get("retryable", True)),
+                            details={**(raw.get("details") or {}), "child_workflow_id": result["id"], "group_id": record["group_id"]},
+                        )
+                    )
+                if not configuration_issues:
+                    configuration_issues.append(
+                        DependencyIssue(
+                            code="FULL_PROPOSAL_CHILD_WAITING_CONFIGURATION",
+                            dependency="FULL_PROPOSAL_CHILD",
+                            message=str(result["state"].get("last_error") or f"并发组 {record['group_id']} 等待运行配置"),
+                            details={"child_workflow_id": result["id"], "group_id": record["group_id"]},
+                        )
+                    )
+            elif result["status"] != "COMPLETED":
                 failures.append(f"{record['group_id']}: {result['state'].get('last_error') or result['status']}")
         state["full_proposal_parallel_finished_at"] = utc_now()
+        if configuration_issues:
+            return self._pause_for_configuration(
+                wf,
+                state,
+                DependencyReport(
+                    scope="FULL_PROPOSAL_CHILDREN",
+                    issues=configuration_issues,
+                ),
+                source="FULL_PROPOSAL_CHILDREN",
+            )
         if failures:
             state["last_error"] = "完整申请书并发组失败：" + "；".join(failures)
             self._update(wf, status="BLOCKED", state=state)

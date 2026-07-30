@@ -154,6 +154,37 @@ _SOURCE_ID_ALIAS_PREFIXES = tuple(
     for separator in ("-", ":", "/", "_")
 )
 
+TRUSTED_SOURCE_CATALOG_VERSION = "1.0"
+_NATURAL_SOURCE_ID_KEYS = (
+    "source_id",
+    "document_id",
+    "resolution_id",
+    "profile_id",
+    "need_id",
+    "object_id",
+    "package_id",
+    "plan_id",
+    "candidate_id",
+    "blueprint_id",
+    "template_id",
+    "scheme_id",
+    "claim_id",
+    "fact_id",
+    "item_id",
+    "rule_id",
+    "component_id",
+    "section_id",
+    "paragraph_id",
+    "node_id",
+    "relation_id",
+    "trace_id",
+    "issue_id",
+    "revision_task_id",
+    "question_id",
+)
+_REFERENCEABLE_ENVELOPE_PATHS = ("task", "security_context", "scope", "freshness")
+
+
 
 def _stable_hash(value: Any) -> str:
     return hashlib.sha256(
@@ -315,8 +346,230 @@ def _is_reference_array_field(key: str) -> bool:
     return key in _REFERENCE_ARRAY_FIELDS
 
 
+
+def _slug(value: Any, *, limit: int = 48) -> str:
+    text = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").strip()).strip("-").lower()
+    return (text or "input")[:limit]
+
+
+def _preferred_source_id(node: Any) -> str | None:
+    if not isinstance(node, Mapping):
+        return None
+    for key in _NATURAL_SOURCE_ID_KEYS:
+        value = node.get(key)
+        if isinstance(value, (str, int)) and not isinstance(value, bool):
+            text = str(value).strip()
+            if text and key not in _PROTOCOL_ID_FIELDS:
+                return text
+    return None
+
+
+def _source_type_for_object(path: tuple[str, ...], node: Any) -> str:
+    leaf = path[-1] if path else ""
+    if isinstance(node, Mapping):
+        if node.get("source_type"):
+            return _source_type(node.get("source_type"), "MODEL_INFERENCE")
+        if node.get("document_role"):
+            return _source_type(node.get("document_role"), "HISTORICAL_DOCUMENT")
+        object_type = str(node.get("object_type") or "")
+        if object_type.startswith("SOURCE_DOCUMENT:"):
+            return _source_type(object_type.split(":", 1)[1], "HISTORICAL_DOCUMENT")
+        if {"resolution_id", "gate_id", "answer"}.issubset(node):
+            return "USER_CONFIRMATION"
+        if any(key in node for key in ("url", "archive_hash", "retrieved_at", "publisher")):
+            return "PUBLIC_SOURCE"
+    if leaf in {"human_resolutions", "user_confirmation", "user_confirmations"}:
+        return "USER_CONFIRMATION"
+    if leaf in {"security_policy", "security_constraints", "security_context"}:
+        return "CONTRACT"
+    if leaf in {"deterministic_scan", "source_summary", "validation_report", "quality_report"}:
+        return "EVIDENCE_MATERIAL"
+    if "public" in leaf or "retrieved" in leaf:
+        return "PUBLIC_SOURCE"
+    return "MODEL_INFERENCE"
+
+
+def _synthetic_input_source_id(envelope: Mapping[str, Any], path: tuple[str, ...]) -> str:
+    prompt_id = str(envelope.get("prompt_id") or "prompt")
+    scope = envelope.get("scope") if isinstance(envelope.get("scope"), Mapping) else {}
+    project_id = str(scope.get("project_id") or "project")
+    dotted = ".".join(path)
+    digest = _stable_hash({"project_id": project_id, "prompt_id": prompt_id, "object_path": dotted})[:12]
+    prefix = f"input-{_slug(prompt_id, limit=34)}-{_slug(path[-1] if path else 'root', limit=34)}"
+    return f"{prefix[:114]}-{digest}"[:128]
+
+
+def _catalog_entry_for_object(
+    envelope: Mapping[str, Any],
+    path: tuple[str, ...],
+    node: Any,
+    *,
+    force_synthetic: bool = False,
+) -> dict[str, Any]:
+    source_id = None if force_synthetic else _preferred_source_id(node)
+    source_id = source_id or _synthetic_input_source_id(envelope, path)
+    source_type = _source_type_for_object(path, node)
+    document_version_id = node.get("document_version_id") if isinstance(node, Mapping) else None
+    section_id = node.get("section_id") if isinstance(node, Mapping) else None
+    known_hash = None
+    if isinstance(node, Mapping):
+        for key in ("source_hash", "document_hash", "profile_hash", "object_hash", "text_hash", "manifest_hash"):
+            known_hash = _hash(node.get(key))
+            if known_hash:
+                break
+    source_hash = known_hash or _stable_hash(node)
+    security_level = None
+    authority_rank = None
+    if isinstance(node, Mapping):
+        security_level = node.get("security_level") or node.get("default_security_level")
+        if isinstance(node.get("authority_rank"), int) and not isinstance(node.get("authority_rank"), bool):
+            authority_rank = int(node["authority_rank"])
+    if not security_level:
+        security_context = envelope.get("security_context") if isinstance(envelope.get("security_context"), Mapping) else {}
+        security_level = security_context.get("input_max_security_level") or "INTERNAL"
+    return {
+        "source_id": source_id,
+        "object_path": ".".join(path),
+        "source_type": source_type,
+        "document_version_id": document_version_id.strip() if isinstance(document_version_id, str) and document_version_id.strip() else None,
+        "section_id": section_id.strip() if isinstance(section_id, str) and section_id.strip() else None,
+        "source_hash": source_hash,
+        "authority_rank": authority_rank or _AUTHORITY.get(source_type, 60),
+        "security_level": _security(security_level),
+    }
+
+
+def build_trusted_source_catalog(
+    envelope: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Build a deterministic identity catalog for model-referenceable inputs.
+
+    Every root protocol object and every top-level payload object receives one
+    stable source identity.  Nested objects with their own semantic IDs are also
+    registered.  The catalog contains no copied prose; it only exposes IDs,
+    paths, hashes and security metadata already derivable from the input.
+    """
+    if not isinstance(envelope, Mapping):
+        return []
+    clean = copy.deepcopy(dict(envelope))
+    clean.pop("trusted_source_catalog", None)
+    entries: dict[str, tuple[int, dict[str, Any]]] = {}
+
+    def add(path: tuple[str, ...], node: Any, priority: int, *, force_synthetic: bool = False) -> None:
+        if not path or not isinstance(node, (Mapping, list)):
+            return
+        entry = _catalog_entry_for_object(clean, path, node, force_synthetic=force_synthetic)
+        source_id = str(entry["source_id"])
+        previous = entries.get(source_id)
+        if previous is None or priority >= previous[0]:
+            entries[source_id] = (priority, entry)
+
+    for key in _REFERENCEABLE_ENVELOPE_PATHS:
+        value = clean.get(key)
+        if isinstance(value, (Mapping, list)):
+            add((key,), value, 100, force_synthetic=True)
+
+    payload = clean.get("payload") if isinstance(clean.get("payload"), Mapping) else {}
+    top_level_natural_counts: dict[str, int] = defaultdict(int)
+    for value in payload.values():
+        if isinstance(value, (Mapping, list)):
+            natural_id = _preferred_source_id(value)
+            if natural_id:
+                top_level_natural_counts[natural_id] += 1
+    for key, value in payload.items():
+        if isinstance(value, (Mapping, list)):
+            natural_id = _preferred_source_id(value)
+            add(
+                ("payload", str(key)),
+                value,
+                120,
+                force_synthetic=bool(natural_id and top_level_natural_counts[natural_id] > 1),
+            )
+
+    def visit(node: Any, path: tuple[str, ...]) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, (*path, str(index)))
+            return
+        if not isinstance(node, Mapping):
+            return
+        already_registered_top_level = (
+            (len(path) == 1 and path[0] in _REFERENCEABLE_ENVELOPE_PATHS)
+            or (len(path) == 2 and path[0] == "payload")
+        )
+        if path and not already_registered_top_level and _preferred_source_id(node):
+            add(path, node, 80)
+        for key, item in node.items():
+            if key == "trusted_source_catalog":
+                continue
+            visit(item, (*path, str(key)))
+
+    visit(clean, ())
+    return [entry for _, entry in sorted(entries.values(), key=lambda item: item[1]["object_path"])]
+
+
+def attach_trusted_source_catalog(envelope: Mapping[str, Any] | None) -> dict[str, Any]:
+    prepared = copy.deepcopy(dict(envelope or {}))
+    prepared.pop("trusted_source_catalog", None)
+    prepared["trusted_source_catalog"] = build_trusted_source_catalog(prepared)
+    return prepared
+
+
+def _catalog_alias_index(envelope: Mapping[str, Any] | None) -> dict[str, set[str]]:
+    effective = attach_trusted_source_catalog(envelope)
+    aliases: dict[str, set[str]] = defaultdict(set)
+    for entry in effective.get("trusted_source_catalog") or []:
+        if not isinstance(entry, Mapping):
+            continue
+        source_id = str(entry.get("source_id") or "").strip()
+        object_path = str(entry.get("object_path") or "").strip()
+        if not source_id or not object_path:
+            continue
+        aliases[object_path].add(source_id)
+        leaf = object_path.rsplit(".", 1)[-1]
+        if leaf and not leaf.isdigit():
+            aliases[leaf].add(source_id)
+    return aliases
+
+
+def _resolve_catalog_source_id(
+    raw_source_id: str,
+    known_ids: Iterable[str],
+    alias_index: Mapping[str, set[str]],
+) -> tuple[str | None, str | None]:
+    source_id, alias_kind = _resolve_source_id_alias(raw_source_id, known_ids)
+    if source_id is not None:
+        return source_id, alias_kind
+    raw = str(raw_source_id or "").strip()
+    candidates = set(alias_index.get(raw) or set())
+    if len(candidates) == 1:
+        return next(iter(candidates)), "OBJECT_PATH_ALIAS"
+    for prefix in _SOURCE_ID_ALIAS_PREFIXES:
+        if not raw.startswith(prefix):
+            continue
+        candidate_alias = raw[len(prefix):].strip()
+        candidates = set(alias_index.get(candidate_alias) or set())
+        if len(candidates) == 1:
+            return next(iter(candidates)), "PREFIXED_OBJECT_PATH_ALIAS"
+    return None, None
+
+
+def trusted_source_prompt_contract(envelope: Mapping[str, Any] | None) -> str:
+    catalog = (envelope or {}).get("trusted_source_catalog") if isinstance(envelope, Mapping) else None
+    if not isinstance(catalog, list):
+        return ""
+    return (
+        "\n\n# 可信来源ID契约\n"
+        "输入根级 trusted_source_catalog 是本次调用唯一允许用于 source_refs.source_id 的来源目录。"
+        "必须逐字复制其中的 source_id；object_path 仅用于理解对象位置，不能作为 source_id。"
+        "不得使用字段名、路径名、显示前缀或自行构造的编号代替 source_id。"
+        "若实质结论没有目录中的可用来源，应返回 Finding、unresolved_items 或 NEED_USER_INPUT/BLOCK，"
+        "不得虚构来源。"
+    )
+
+
 def _catalog_from_envelope(envelope: Mapping[str, Any] | None, db: Any = None) -> dict[str, list[dict[str, Any]]]:
-    envelope = envelope or {}
+    envelope = attach_trusted_source_catalog(envelope)
     default_security = _security(
         ((envelope.get("security_context") or {}).get("input_max_security_level"))
         if isinstance(envelope.get("security_context"), Mapping)
@@ -378,6 +631,14 @@ def _catalog_from_envelope(envelope: Mapping[str, Any] | None, db: Any = None) -
             # present in this exact document context; preserve that identifier
             # while binding all document metadata from the trusted section.
             add({**section_ref, "source_id": str(section.get("section_id"))}, priority + 4)
+
+    # The generated catalog contributes identities for otherwise anonymous
+    # input objects.  Give these entries lower priority than explicit trusted
+    # SourceRef/document/user-confirmation records so catalog generation can
+    # never erase richer persisted metadata.
+    for entry in envelope.get("trusted_source_catalog") or []:
+        if isinstance(entry, Mapping):
+            add(entry, 50)
 
     def visit(node: Any) -> None:
         if isinstance(node, list):
@@ -446,6 +707,8 @@ def _catalog_from_envelope(envelope: Mapping[str, Any] | None, db: Any = None) -
                     75,
                 )
         for key, item in node.items():
+            if key == "trusted_source_catalog":
+                continue
             if (
                 key.endswith("_id")
                 and key not in _PROTOCOL_ID_FIELDS
@@ -578,7 +841,9 @@ def bind_trusted_source_refs(
     ranks, spans and quotes are never accepted as authority.
     """
     normalized = copy.deepcopy(output)
-    catalog = _catalog_from_envelope(envelope, db=db)
+    effective_envelope = attach_trusted_source_catalog(envelope)
+    catalog = _catalog_from_envelope(effective_envelope, db=db)
+    alias_index = _catalog_alias_index(effective_envelope)
     changes: list[dict[str, Any]] = []
     errors: list[str] = []
 
@@ -616,7 +881,11 @@ def bind_trusted_source_refs(
                         errors.append(f"{_pointer(ref_path)}/source_id: missing source identifier")
                         rebuilt.append(dict(ref))
                         continue
-                    source_id, alias_kind = _resolve_source_id_alias(raw_source_id, catalog.keys())
+                    source_id, alias_kind = _resolve_catalog_source_id(
+                        raw_source_id,
+                        catalog.keys(),
+                        alias_index,
+                    )
                     if source_id is None:
                         errors.append(
                             f"{_pointer(ref_path)}/source_id: {raw_source_id!r} is not present in the trusted input envelope"
@@ -767,9 +1036,15 @@ def normalize_staged_source_ref_aliases(
 ) -> tuple[Any, dict[str, Any]]:
     """Canonicalize conservative presentation prefixes in staged source IDs."""
     normalized = copy.deepcopy(output)
+    effective_context = (
+        attach_trusted_source_catalog(trusted_context)
+        if isinstance(trusted_context, Mapping)
+        else trusted_context
+    )
     known_sources = _collect_source_ids(normalized)
-    if trusted_context is not None:
-        known_sources |= _collect_source_ids(trusted_context)
+    if effective_context is not None:
+        known_sources |= _collect_source_ids(effective_context)
+    alias_index = _catalog_alias_index(effective_context) if isinstance(effective_context, Mapping) else {}
     changes: list[dict[str, Any]] = []
 
     def visit(node: Any, path: tuple[Any, ...]) -> None:
@@ -785,7 +1060,11 @@ def normalize_staged_source_ref_aliases(
                 rebuilt: list[str] = []
                 for index, raw in enumerate(value):
                     source_id = raw.strip()
-                    resolved, alias_kind = _resolve_source_id_alias(source_id, known_sources)
+                    resolved, alias_kind = _resolve_catalog_source_id(
+                        source_id,
+                        known_sources,
+                        alias_index,
+                    )
                     if resolved is not None and alias_kind:
                         rebuilt.append(resolved)
                         changes.append({
@@ -823,12 +1102,17 @@ def validate_staged_reference_integrity(
     remain authoritative and only locally resolvable source references are
     checked.
     """
+    effective_context = (
+        attach_trusted_source_catalog(trusted_context)
+        if isinstance(trusted_context, Mapping)
+        else trusted_context
+    )
     known = _collect_defined_ids(output)
     known_sources = _collect_source_ids(output)
-    has_trusted_context = trusted_context is not None
+    has_trusted_context = effective_context is not None
     if has_trusted_context:
-        known |= _collect_defined_ids(trusted_context)
-        known_sources |= _collect_source_ids(trusted_context)
+        known |= _collect_defined_ids(effective_context)
+        known_sources |= _collect_source_ids(effective_context)
 
     errors: list[str] = []
 
@@ -873,6 +1157,10 @@ def validate_staged_reference_integrity(
 
 
 __all__ = [
+    "TRUSTED_SOURCE_CATALOG_VERSION",
+    "attach_trusted_source_catalog",
+    "build_trusted_source_catalog",
+    "trusted_source_prompt_contract",
     "bind_trusted_source_refs",
     "normalize_reference_id_aliases",
     "validate_reference_ids",

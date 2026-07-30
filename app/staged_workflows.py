@@ -25,11 +25,46 @@ class StagedWorkflowCoordinator:
     entry point, status model and audit trail.
     """
 
-    def __init__(self, db, settings):
+    def __init__(self, db, settings, dependency_preflight=None):
         self.db = db
         self.settings = settings
+        self.dependency_preflight = dependency_preflight
         self.root = Path(settings.data_dir) / "staged_workflows"
         self.root.mkdir(parents=True, exist_ok=True)
+
+    def _pause_for_configuration(
+        self,
+        row: dict[str, Any],
+        state: dict[str, Any],
+        report,
+        *,
+        source: str,
+    ) -> dict[str, Any]:
+        payload = report.as_dict()
+        payload.update(
+            {
+                "workflow_id": row["id"],
+                "workflow_type": STAGED_WORKFLOW_TYPE,
+                "resume_step": int(row["current_step"]),
+                "resume_stage": state.get("current_stage", "stage1"),
+                "source": source,
+                "first_detected_at": (state.get("configuration_wait") or {}).get(
+                    "first_detected_at",
+                    utc_now(),
+                ),
+                "last_checked_at": utc_now(),
+            }
+        )
+        state["configuration_wait"] = payload
+        state["last_error"] = report.summary()
+        self._save(row, status="WAITING_CONFIGURATION", state=state)
+        self.db.audit(
+            "STAGED_WORKFLOW_WAITING_CONFIGURATION",
+            project_id=row["project_id"],
+            object_id=row["id"],
+            metadata=payload,
+        )
+        return self.get(row["id"])
 
     def _project(self, project_id: str) -> dict[str, Any]:
         row = self.db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
@@ -42,9 +77,7 @@ class StagedWorkflowCoordinator:
         options = dict(options or {})
         workflow_id = new_id("wf")
         run_root = Path(options.get("run_root") or self.root / workflow_id).resolve()
-        if run_root.exists() and any(run_root.iterdir()):
-            raise ValueError(f"staged run root must be empty: {run_root}")
-        run_root.mkdir(parents=True, exist_ok=True)
+        options["run_root"] = str(run_root)
         now = utc_now()
         state = {
             "workflow_type": STAGED_WORKFLOW_TYPE,
@@ -55,12 +88,42 @@ class StagedWorkflowCoordinator:
             "stage_runs": {},
             "step_results": {},
         }
+        status = "RUNNING"
+        report = None
+        if self.dependency_preflight is not None:
+            report = self.dependency_preflight.workflow_report(
+                project_id,
+                STAGED_WORKFLOW_TYPE,
+                options,
+            )
+            if report.blocking_issues:
+                status = "WAITING_CONFIGURATION"
+                state["configuration_wait"] = {
+                    **report.as_dict(),
+                    "workflow_id": workflow_id,
+                    "workflow_type": STAGED_WORKFLOW_TYPE,
+                    "resume_step": 0,
+                    "resume_stage": "stage1",
+                    "source": "WORKFLOW_START_PREFLIGHT",
+                    "first_detected_at": now,
+                    "last_checked_at": now,
+                }
+                state["last_error"] = report.summary()
         self.db.execute(
             "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-            (workflow_id, project_id, STAGED_WORKFLOW_TYPE, "RUNNING", 0, json.dumps(state, ensure_ascii=False), now, now),
+            (workflow_id, project_id, STAGED_WORKFLOW_TYPE, status, 0, json.dumps(state, ensure_ascii=False), now, now),
         )
-        title = str(options.get("project_title") or project["name"])
-        self._initialize_stage(workflow_id, state, "stage1", project_title=title)
+        if status == "RUNNING":
+            run_root.mkdir(parents=True, exist_ok=True)
+            title = str(options.get("project_title") or project["name"])
+            self._initialize_stage(workflow_id, state, "stage1", project_title=title)
+        else:
+            self.db.audit(
+                "STAGED_WORKFLOW_WAITING_CONFIGURATION",
+                project_id=project_id,
+                object_id=workflow_id,
+                metadata=state["configuration_wait"],
+            )
         self.db.audit("STAGED_WORKFLOW_STARTED", project_id=project_id, object_id=workflow_id, metadata={"run_root": str(run_root)})
         return self.get(workflow_id)
 
@@ -160,13 +223,19 @@ class StagedWorkflowCoordinator:
         self._save(row, status="RUNNING", current_step=STAGED_STEPS.index(stage), state=state)
 
     def _sync(self, row: dict[str, Any]) -> dict[str, Any]:
+        # A staged tool may still have a completed LATEST_STATE.json from the
+        # previous stage while the outer workflow is intentionally paused for
+        # a missing runtime dependency.  Do not let that stale stage status
+        # overwrite the explicit configuration wait state.
+        if row.get("status") == "WAITING_CONFIGURATION":
+            return row
         state = row["state"]
         stage = state["current_stage"]
         latest = self._run_dir(state, stage) / "LATEST_STATE.json"
         if latest.exists():
             staged_state = self._read_json(latest)
             state["current_stage_state"] = staged_state
-            status_map = {"WAITING_MODEL": "WAITING_MODEL", "WAITING_HUMAN": "WAITING_GATE", "WAITING_GATE": "WAITING_GATE", "BLOCKED": "BLOCKED", "COMPLETED": "RUNNING"}
+            status_map = {"WAITING_MODEL": "WAITING_MODEL", "WAITING_HUMAN": "WAITING_GATE", "WAITING_GATE": "WAITING_GATE", "WAITING_CONFIGURATION": "WAITING_CONFIGURATION", "BLOCKED": "BLOCKED", "COMPLETED": "RUNNING"}
             status = status_map.get(str(staged_state.get("status")), "RUNNING")
             if stage == "stage8" and staged_state.get("status") == "COMPLETED":
                 status = "COMPLETED"
@@ -178,9 +247,61 @@ class StagedWorkflowCoordinator:
         row["steps"] = [{"type": "STAGED", "stage": item} for item in STAGED_STEPS]
         return row
 
+    @staticmethod
+    def _next_stage_for_state(state: dict[str, Any]) -> str | None:
+        stage = str(state.get("current_stage") or "stage1")
+        if stage == "stage8":
+            return None
+        staged_state = state.get("current_stage_state") or {}
+        next_stage = STAGED_STEPS[STAGED_STEPS.index(stage) + 1]
+        if stage == "stage4" and "STAGE_5" in str(staged_state.get("next_stage")):
+            next_stage = "stage5"
+        return next_stage
+
     async def advance(self, workflow_id: str) -> dict[str, Any]:
         row = self._sync(self._row(workflow_id))
         state = row["state"]
+        if row["status"] == "WAITING_CONFIGURATION" and self.dependency_preflight is not None:
+            # A running staged workflow necessarily has a non-empty run_root.
+            # Rechecking the start-only constraint would make transition waits
+            # impossible to resume.  Recheck the exact pending transition once
+            # Stage 1 has been initialized; otherwise use the start preflight.
+            if state.get("stage_runs"):
+                next_stage = self._next_stage_for_state(state)
+                report = (
+                    self.dependency_preflight.staged_transition_report(next_stage, state)
+                    if next_stage
+                    else self.dependency_preflight.application_report(require_export=True)
+                )
+            else:
+                report = self.dependency_preflight.workflow_report(
+                    row["project_id"],
+                    STAGED_WORKFLOW_TYPE,
+                    state.get("options") or {},
+                )
+            if report.blocking_issues:
+                return self._pause_for_configuration(
+                    row,
+                    state,
+                    report,
+                    source="WAITING_CONFIGURATION_RECHECK",
+                )
+            previous = state.pop("configuration_wait", None)
+            state.pop("last_error", None)
+            if previous:
+                state["configuration_recovered"] = {
+                    "recovered_at": utc_now(),
+                    "previous": previous,
+                }
+            self._save(row, status="RUNNING", state=state)
+            row = self._row(workflow_id)
+            state = row["state"]
+            if not state.get("stage_runs"):
+                Path(state["run_root"]).mkdir(parents=True, exist_ok=True)
+                project = self._project(row["project_id"])
+                title = str((state.get("options") or {}).get("project_title") or project["name"])
+                self._initialize_stage(workflow_id, state, "stage1", project_title=title)
+                return self.get(workflow_id)
         stage = state["current_stage"]
         staged_state = state.get("current_stage_state") or {}
         if staged_state.get("status") != "COMPLETED":
@@ -188,12 +309,34 @@ class StagedWorkflowCoordinator:
         if stage == "stage8":
             self._save(row, status="COMPLETED", state=state)
             return self.get(workflow_id)
-        next_stage = STAGED_STEPS[STAGED_STEPS.index(stage) + 1]
-        if stage == "stage4" and "STAGE_5" in str(staged_state.get("next_stage")):
-            next_stage = "stage5"
+        next_stage = self._next_stage_for_state(state)
+        if next_stage is None:
+            self._save(row, status="COMPLETED", state=state)
+            return self.get(workflow_id)
+        if self.dependency_preflight is not None:
+            report = self.dependency_preflight.staged_transition_report(next_stage, state)
+            if report.blocking_issues:
+                return self._pause_for_configuration(
+                    row,
+                    state,
+                    report,
+                    source=f"STAGED_TRANSITION:{stage}->{next_stage}",
+                )
         try:
             self._initialize_stage(workflow_id, state, next_stage)
         except Exception as exc:
+            if self.dependency_preflight is not None:
+                report = self.dependency_preflight.report_from_runtime_error(
+                    exc,
+                    scope=f"STAGED_TRANSITION_RUNTIME:{stage}->{next_stage}",
+                )
+                if report is not None:
+                    return self._pause_for_configuration(
+                        row,
+                        state,
+                        report,
+                        source=f"STAGED_TRANSITION_RUNTIME:{stage}->{next_stage}",
+                    )
             state["last_error"] = str(exc)
             state["blocked_transition"] = {"from": stage, "to": next_stage}
             self._save(row, status="BLOCKED", state=state)

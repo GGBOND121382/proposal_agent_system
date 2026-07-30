@@ -36,6 +36,7 @@ diagram_enrichment = runtime.diagram_enrichment
 workflows = runtime.workflows
 exporter = runtime.exporter
 post_export_acceptance = runtime.post_export_acceptance
+dependency_preflight = runtime.dependency_preflight
 
 app = FastAPI(title="项目申请书智能体系统", version=__version__)
 app.mount("/static", StaticFiles(directory=settings.root_dir / "app" / "static"), name="static")
@@ -57,7 +58,39 @@ def config_status() -> dict[str, Any]:
     endpoints = []
     for item in pack.endpoints["endpoints"]:
         endpoints.append({"endpoint_id": item["endpoint_id"], "environment": item["environment"], "enabled": item.get("enabled", False), "base_url_configured": bool(item.get("base_url")), "internet_access": item.get("network_policy", {}).get("internet_access", False)})
-    return {"runtime_mode": settings.runtime_mode, "public_search_provider": settings.public_search_provider, "endpoints": endpoints}
+    report = dependency_preflight.application_report(require_export=False)
+    return {
+        "runtime_mode": settings.runtime_mode,
+        "public_search_provider": settings.public_search_provider,
+        "endpoints": endpoints,
+        "preflight": report.as_dict(),
+    }
+
+
+@app.post("/api/config/probe")
+def probe_config(timeout_seconds: int = Query(10, ge=1, le=60)) -> dict[str, Any]:
+    """Explicitly probe configured model and search services.
+
+    Network probes are never performed implicitly while rendering the status page;
+    an operator must request them through this endpoint or ``scripts/check_config.py``.
+    """
+    return dependency_preflight.probe(timeout_seconds=timeout_seconds).as_dict()
+
+
+@app.get("/api/projects/{project_id}/dependency-preflight")
+def project_dependency_preflight(
+    project_id: str,
+    workflow_type: str = Query(...),
+) -> dict[str, Any]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    if workflow_type not in ALL_WORKFLOWS:
+        raise HTTPException(404, f"Unknown workflow: {workflow_type}")
+    return dependency_preflight.workflow_report(
+        project_id,
+        workflow_type,
+        {},
+    ).as_dict()
 
 
 @app.get("/api/prompts")
@@ -162,6 +195,9 @@ def list_documents(project_id: str) -> list[dict[str, Any]]:
 @app.post("/api/prompts/{prompt_id}/execute")
 async def execute_prompt(prompt_id: str, req: PromptExecuteRequest) -> dict[str, Any]:
     try:
+        dependency_report = dependency_preflight.prompt_report(req.project_id, prompt_id)
+        if dependency_report.blocking_issues:
+            raise HTTPException(409, dependency_report.as_dict())
         envelope = req.input_data or context_builder.build(prompt_id, req.project_id, workflow_id=req.workflow_id, overrides=req.overrides)
         return await executor.execute(prompt_id, envelope, project_id=req.project_id, workflow_id=req.workflow_id)
     except KeyError as exc:
@@ -357,6 +393,9 @@ def ingest_delivery_findings(project_id: str, payload: dict[str, Any]) -> dict[s
 @app.post("/api/projects/{project_id}/export")
 def export_project(project_id: str) -> FileResponse:
     try:
+        dependency_report = dependency_preflight.application_report(require_export=False)
+        if dependency_report.blocking_issues:
+            raise HTTPException(409, dependency_report.as_dict())
         path = exporter.export(project_id)
         return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=path.name)
     except KeyError as exc:
@@ -368,6 +407,9 @@ def export_project(project_id: str) -> FileResponse:
 @app.post("/api/projects/{project_id}/export-package")
 def export_project_package(project_id: str) -> FileResponse:
     try:
+        dependency_report = dependency_preflight.application_report(require_export=False)
+        if dependency_report.blocking_issues:
+            raise HTTPException(409, dependency_report.as_dict())
         path = exporter.export_package(project_id)
         return FileResponse(path, media_type="application/zip", filename=path.name)
     except KeyError as exc:
@@ -380,6 +422,9 @@ def export_project_package(project_id: str) -> FileResponse:
 def run_post_export_acceptance(project_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     values = payload or {}
     try:
+        dependency_report = dependency_preflight.application_report(require_export=True)
+        if dependency_report.blocking_issues:
+            raise HTTPException(409, dependency_report.as_dict())
         return post_export_acceptance.run(
             project_id,
             workflow_id=values.get("workflow_id"),
