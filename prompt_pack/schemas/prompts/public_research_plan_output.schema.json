@@ -10,7 +10,7 @@
       "const": "P-PUBLIC-RESEARCH-PLAN"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "2.1.0"
     },
     "status": {
       "type": "string",
@@ -43,15 +43,42 @@
             "type": "string",
             "minLength": 1
           },
-          "minItems": 1
+          "minItems": 1,
+          "uniqueItems": true
         },
         "queries": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "type": "object",
+            "properties": {
+              "query_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "query": {
+                "type": "string",
+                "minLength": 1
+              },
+              "linked_question_indexes": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "query_id",
+              "query",
+              "linked_question_indexes"
+            ]
           },
-          "minItems": 1
+          "minItems": 1,
+          "uniqueItems": true
         },
         "source_priorities": {
           "type": "array",
@@ -85,6 +112,9 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "binding_contract_version": {
+          "const": "1.0"
         }
       },
       "additionalProperties": false,
@@ -92,6 +122,7 @@
         "plan_id",
         "task_type",
         "research_questions",
+        "binding_contract_version",
         "queries",
         "source_priorities",
         "time_scope",

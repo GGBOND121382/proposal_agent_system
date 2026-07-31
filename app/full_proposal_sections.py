@@ -16,8 +16,8 @@ class FullProposalSectionsMixin:
         """Run an isolated, recoverable producer/critic/repair chain for each section.
 
         The chain is:
-        Blueprint -> Blueprint Critic -> at most one Targeted Repair -> re-review
-        -> Content -> Content Critic -> at most one Targeted Repair -> re-review
+        Blueprint -> Blueprint Critic -> bounded Targeted Repair -> re-review
+        -> Content -> Content Critic -> bounded Targeted Repair -> re-review
         -> Expression Polish -> Expression Critic.
 
         Progress is persisted after every model run.  A restart re-enters the same
@@ -132,6 +132,26 @@ class FullProposalSectionsMixin:
                         _review_envelope, reviewed = await self._execute_section_prompt(
                             wf, state, section, progress, prompt_id, role="INDEPENDENT_REVIEW",
                         )
+                        while (
+                            reviewed["status"] == "REVISE"
+                            and self._can_auto_repair(prompt_id, state)
+                        ):
+                            repaired = await self._auto_repair(
+                                wf, prompt_id, _review_envelope,
+                                reviewed["output"], state,
+                            )
+                            if not repaired:
+                                break
+                            self._append_section_run(
+                                progress, repaired,
+                                prompt_id="P-TARGETED-REPAIR",
+                                role="TARGETED_REPAIR",
+                            )
+                            self._update(wf, state=state)
+                            _review_envelope, reviewed = await self._execute_section_prompt(
+                                wf, state, section, progress, prompt_id,
+                                role="INDEPENDENT_REVIEW",
+                            )
                     except (PromptExecutionError, ValueError, KeyError) as exc:
                         return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}", configuration_error=exc)
                     if reviewed["status"] != "PASS":

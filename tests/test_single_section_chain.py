@@ -257,6 +257,34 @@ def test_second_revise_after_targeted_repair_blocks_without_second_repair():
     assert "禁止二次自动修复" in harness.wf["state"]["last_error"]
 
 
+def test_explicit_bounded_repair_limit_can_converge_after_second_revise():
+    harness = ChainHarness(
+        [SECTION],
+        {"P-WRITE-BLUEPRINT-CRITIC": ["REVISE", "REVISE", "PASS"]},
+    )
+    harness.wf["state"]["options"]["targeted_repair_limit"] = 2
+
+    result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    assert result["status"] == "WAITING_GATE"
+    sequence = [item["prompt_id"] for item in harness.executor.calls]
+    assert sequence[:6] == [
+        "P-WRITE-BLUEPRINT",
+        "P-WRITE-BLUEPRINT-CRITIC",
+        "P-TARGETED-REPAIR",
+        "P-WRITE-BLUEPRINT-CRITIC",
+        "P-TARGETED-REPAIR",
+        "P-WRITE-BLUEPRINT-CRITIC",
+    ]
+    assert sequence.count("P-TARGETED-REPAIR") == 2
+    assert (
+        harness.wf["state"]["repair_attempts"][
+            "section:section-1:P-WRITE-BLUEPRINT-CRITIC"
+        ]
+        == 2
+    )
+
+
 def test_acceptance_run_regenerates_new_candidate_after_repair_recheck():
     harness = ChainHarness(
         [SECTION],

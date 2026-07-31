@@ -172,6 +172,42 @@ def add_artifact(
     return artifact_id
 
 
+def add_prompt_run(
+    db: Database,
+    project_id: str,
+    workflow_id: str,
+    prompt_id: str,
+    output: dict[str, Any],
+    *,
+    status: str,
+) -> str:
+    run_id = new_id("run")
+    now = utc_now()
+    db.execute(
+        """INSERT INTO prompt_runs(
+             id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+             input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            run_id,
+            project_id,
+            workflow_id,
+            prompt_id,
+            status,
+            "test-model",
+            "online-public-primary",
+            sha256_json({}),
+            sha256_json(output),
+            "{}",
+            json.dumps(output, ensure_ascii=False),
+            None,
+            1,
+            now,
+        ),
+    )
+    return run_id
+
+
 def wf3_state() -> dict[str, Any]:
     return {
         "workflow_type": "WF-3_HYBRID_ONLINE_ASSIST",
@@ -187,6 +223,67 @@ def wf3_state() -> dict[str, Any]:
         "repair_attempts": {},
         "repair_overrides": {},
     }
+
+
+def test_gate_accepted_revise_output_is_available_to_next_prompt(live_runtime):
+    _, pack, db, builder, _, engine = live_runtime
+    project_id = create_project(db)
+    state = wf3_state()
+    workflow_id = add_workflow(
+        db,
+        project_id,
+        "WF-3_HYBRID_ONLINE_ASSIST",
+        "RUNNING",
+        current_step=4,
+        state=state,
+    )
+    output = pack.replay_output("P-PUBLIC-RESEARCH-SYNTHESIS", "normal")
+    output["status"] = "REVISE"
+    output["result"]["limitations"] = ["explicitly accepted limitation"]
+    add_artifact(
+        db,
+        project_id,
+        "P-PUBLIC-RESEARCH-SYNTHESIS",
+        output,
+        workflow_id=workflow_id,
+        status="REVISE",
+    )
+    run_id = add_prompt_run(
+        db,
+        project_id,
+        workflow_id,
+        "P-PUBLIC-RESEARCH-SYNTHESIS",
+        output,
+        status="REVISE",
+    )
+    workflow = engine.get(workflow_id)
+    workflow["state"]["step_results"]["4"] = {
+        "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS",
+        "run_id": run_id,
+        "status": "REVISE",
+    }
+    engine._update(workflow, state=workflow["state"])
+    gate_id = engine._create_gate(
+        engine.get(workflow_id),
+        "PROJECT_GAP_RESOLUTION",
+        target_id=run_id,
+        questions=[],
+    )
+    engine.decide_gate(
+        gate_id,
+        action="CONFIRM",
+        decided_by="pytest",
+        decided_role="PROJECT_OWNER",
+    )
+
+    accepted = builder._latest_output(
+        project_id,
+        "P-PUBLIC-RESEARCH-SYNTHESIS",
+        workflow_id=workflow_id,
+    )
+
+    assert accepted == output
+    assert accepted["result"]["limitations"] == ["explicitly accepted limitation"]
 
 
 def test_wf3_downstream_live_inputs_are_complete_and_schema_valid(live_runtime):

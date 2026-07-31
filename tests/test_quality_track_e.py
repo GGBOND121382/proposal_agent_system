@@ -10,13 +10,110 @@ from app.db import Database
 from app.exporter import ExportDenied
 from app.runtime_api import DocxExporter
 from app.pack import PromptPack
-from app.proposal_quality import ProposalQualityGuard
+from app.proposal_quality import ProposalQualityGuard, QualityFinding
 from app.quality import QualityGateBlocked, QualityLifecycleManager
 from app.simulated_llm import SimulatedLLM
 from app.util import utc_now
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_quality_p0_preserves_actionable_human_gate_status():
+    output = {
+        "status": "PASS",
+        "result": {},
+        "findings": [],
+        "user_questions": [{
+            "question_id": "UQ-001",
+            "blocking": True,
+        }],
+    }
+    finding = QualityFinding(
+        "QG_FOUNDATION_UNKNOWN",
+        "P0",
+        "READINESS",
+        "PROJECT_DEFINITION",
+        "BASE-001",
+        "Project foundation requires owner-supplied evidence.",
+        None,
+        "USER",
+    )
+
+    ProposalQualityGuard._merge_findings(output, [finding])
+
+    assert output["status"] == "NEED_USER_INPUT"
+    assert output["findings"][0]["severity"] == "P0"
+
+
+def test_blueprint_quality_unifies_section_function_roles_and_bound_claims():
+    _, _, guard = _runtime_quality()
+    payload = {
+        "section_profile": {"profile_id": "ABSTRACT"},
+        "section_contract": {
+            "section_contract_id": "SC-001",
+            "required_argument_roles": [
+                "BACKGROUND_POSITIONING",
+                "PROBLEM_SUMMARY",
+                "METHOD_COMMITMENT",
+                "EXPECTED_CONTRIBUTION",
+            ],
+            "must_advance_claim_ids": [
+                "CP-001",
+                "RQ-001",
+                "INNO-001",
+            ],
+            "unique_information_keys": [
+                "abstract-context",
+                "abstract-problem",
+                "abstract-method",
+                "abstract-contribution",
+            ],
+        },
+        "prior_section_digest": [],
+    }
+    blueprint = {
+        "paragraphs": [
+            {
+                "argument_role": "CONTEXT",
+                "primary_claim_id": "CP-001",
+                "project_item_slots": [],
+                "technical_slots": [],
+                "fact_slots": ["fact-001"],
+                "novel_content_key": "abstract-context",
+            },
+            {
+                "argument_role": "PROBLEM",
+                "primary_claim_id": "CP-001",
+                "project_item_slots": ["RQ-001"],
+                "technical_slots": [],
+                "fact_slots": ["fact-002"],
+                "novel_content_key": "abstract-problem",
+            },
+            {
+                "argument_role": "METHOD",
+                "primary_claim_id": "CP-001",
+                "project_item_slots": ["INNO-001"],
+                "technical_slots": [],
+                "fact_slots": ["fact-003"],
+                "novel_content_key": "abstract-method",
+            },
+            {
+                "argument_role": "CONTRIBUTION",
+                "primary_claim_id": "CP-001",
+                "project_item_slots": ["INNO-001"],
+                "technical_slots": [],
+                "fact_slots": ["fact-004"],
+                "novel_content_key": "abstract-contribution",
+            },
+        ],
+    }
+
+    findings = guard._audit_blueprint(blueprint, payload)
+    codes = {finding.code for finding in findings}
+
+    assert "QG_BLUEPRINT_REQUIRED_ROLES_MISSING" not in codes
+    assert "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING" not in codes
 
 
 def _runtime_quality():

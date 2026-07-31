@@ -6,6 +6,7 @@ import ipaddress
 import json
 import mimetypes
 import socket
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -20,12 +21,50 @@ from ..util import new_id, safe_filename, sha256_bytes, sha256_text, utc_now, wr
 
 
 class PublicResearchArchiveError(RuntimeError):
-    pass
+    """Base class for auditable public-research failures.
+
+    ``category`` is intentionally machine-readable so the workflow can distinguish
+    configuration dependencies from plan-contract, retrieval, security and archive
+    integrity failures without classifying every error raised inside PUBLIC_SEARCH as
+    ``WAITING_CONFIGURATION``.
+    """
+
+    category = "RUNTIME"
+    error_code = "PUBLIC_RESEARCH_RUNTIME_ERROR"
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = dict(details or {})
+
+
+class PublicResearchConfigurationError(PublicResearchArchiveError):
+    category = "CONFIGURATION"
+    error_code = "PUBLIC_RESEARCH_CONFIGURATION_ERROR"
+
+
+class PublicResearchPlanContractError(PublicResearchArchiveError):
+    category = "PLAN_CONTRACT"
+    error_code = "PUBLIC_RESEARCH_PLAN_CONTRACT_ERROR"
+
+
+class PublicResearchRetrievalError(PublicResearchArchiveError):
+    category = "RETRIEVAL"
+    error_code = "PUBLIC_RESEARCH_RETRIEVAL_ERROR"
+
+
+class PublicResearchSecurityError(PublicResearchArchiveError):
+    category = "SECURITY"
+    error_code = "PUBLIC_RESEARCH_SECURITY_ERROR"
+
+
+class PublicResearchIntegrityError(PublicResearchArchiveError):
+    category = "INTEGRITY"
+    error_code = "PUBLIC_RESEARCH_INTEGRITY_ERROR"
 
 
 class PublicResearchArchiveSkill:
     skill_id = "public_research.archive"
-    version = "1.1.0"
+    version = "1.3.0"
     description = "Search public sources, fetch and extract them, and preserve verifiable snapshots with hashes."
 
     def __init__(self, settings):
@@ -46,6 +85,8 @@ class PublicResearchArchiveSkill:
             directory.mkdir(parents=True, exist_ok=True)
 
         connector_manifest: dict[str, Any] | None = None
+        retrieval_warnings: list[str] = []
+        retrieval_failures: list[dict[str, Any]] = []
         if provider == "recorded":
             candidates = self._load_recorded(payload.get("record_file") or self.settings.public_research_record_file)
             retrieval_mode = "RECORDED_VERIFIED_SOURCE_SET"
@@ -54,15 +95,20 @@ class PublicResearchArchiveSkill:
             candidates, connector_manifest = self._load_connector(connector_path, queries)
             retrieval_mode = "LIVE_CONNECTOR_ARCHIVE"
         elif provider == "searxng":
-            candidates = self._search_searxng(queries, max_results)
+            candidates, retrieval_failures = self._search_searxng(queries, max_results)
+            retrieval_warnings = [
+                f"query={item['query']}: {item['message']}"
+                for item in retrieval_failures
+            ]
             retrieval_mode = "LIVE_SEARXNG"
         else:
-            raise PublicResearchArchiveError(f"Unsupported PUBLIC_SEARCH_PROVIDER: {provider}")
+            raise PublicResearchConfigurationError(f"Unsupported PUBLIC_SEARCH_PROVIDER: {provider}")
 
         records: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         passages: list[dict[str, Any]] = []
-        warnings: list[str] = []
+        warnings: list[str] = list(retrieval_warnings)
+        candidate_failures: list[dict[str, Any]] = []
         seen_urls: set[str] = set()
         for candidate in candidates:
             if len(records) >= max_results:
@@ -73,8 +119,27 @@ class PublicResearchArchiveSkill:
             seen_urls.add(url)
             try:
                 record = self._archive_candidate(candidate, raw_dir, text_dir, meta_dir, provider)
+            except PublicResearchArchiveError as exc:
+                warning = f"{url}: {exc}"
+                warnings.append(warning)
+                candidate_failures.append({
+                    "url": url,
+                    "category": str(getattr(exc, "category", "RUNTIME") or "RUNTIME"),
+                    "error_code": str(getattr(exc, "error_code", "PUBLIC_RESEARCH_RUNTIME_ERROR") or "PUBLIC_RESEARCH_RUNTIME_ERROR"),
+                    "message": str(exc),
+                    "details": dict(getattr(exc, "details", {}) or {}),
+                })
+                continue
             except Exception as exc:
-                warnings.append(f"{url}: {exc}")
+                warning = f"{url}: {exc}"
+                warnings.append(warning)
+                candidate_failures.append({
+                    "url": url,
+                    "category": "RETRIEVAL",
+                    "error_code": "PUBLIC_RESEARCH_SOURCE_RETRIEVAL_ERROR",
+                    "message": str(exc),
+                    "details": {"exception_type": type(exc).__name__},
+                })
                 continue
             records.append(record)
             source_ref = {
@@ -100,7 +165,30 @@ class PublicResearchArchiveSkill:
             )
 
         if not records:
-            raise PublicResearchArchiveError("No public source could be archived")
+            failure_categories = {
+                str(item.get("category") or "RUNTIME").upper()
+                for item in candidate_failures
+            }
+            details = {
+                "warnings": warnings,
+                "query_failures": retrieval_failures,
+                "candidate_failures": candidate_failures,
+                "candidate_count": len(candidates),
+            }
+            if failure_categories and failure_categories <= {"SECURITY"}:
+                raise PublicResearchSecurityError(
+                    "All candidate sources were rejected by the public-source security policy",
+                    details=details,
+                )
+            if failure_categories and failure_categories <= {"INTEGRITY"}:
+                raise PublicResearchIntegrityError(
+                    "All candidate sources failed archive integrity validation",
+                    details=details,
+                )
+            raise PublicResearchRetrievalError(
+                "No public source could be archived",
+                details=details,
+            )
 
         if connector_manifest is not None:
             write_json(connector_dir / "connector_response.json", connector_manifest)
@@ -117,6 +205,7 @@ class PublicResearchArchiveSkill:
             "source_count": len(records),
             "warning_count": len(warnings),
             "warnings": warnings,
+            "query_failures": retrieval_failures,
             "records": records,
             "connector_response": str(connector_dir / "connector_response.json") if connector_manifest is not None else None,
         }
@@ -157,24 +246,34 @@ class PublicResearchArchiveSkill:
     def _load_recorded(self, record_file: str | Path) -> list[dict[str, Any]]:
         path = Path(record_file)
         if not path.exists():
-            raise PublicResearchArchiveError(f"Recorded research file not found: {path}")
-        payload = json.loads(path.read_text(encoding="utf-8"))
+            raise PublicResearchConfigurationError(f"Recorded research file not found: {path}")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PublicResearchConfigurationError(
+                f"Recorded research file is not readable JSON: {path}: {exc}"
+            ) from exc
         sources = payload.get("sources") if isinstance(payload, dict) else payload
         if not isinstance(sources, list):
-            raise PublicResearchArchiveError("Recorded research file must contain a sources array")
+            raise PublicResearchConfigurationError("Recorded research file must contain a sources array")
         return [item for item in sources if isinstance(item, dict)]
 
 
     def _load_connector(self, connector_file: str | Path, planned_queries: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         path = Path(connector_file)
         if not path.exists():
-            raise PublicResearchArchiveError(f"Connector research file not found: {path}")
-        payload = json.loads(path.read_text(encoding="utf-8"))
+            raise PublicResearchConfigurationError(f"Connector research file not found: {path}")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PublicResearchConfigurationError(
+                f"Connector research file is not readable JSON: {path}: {exc}"
+            ) from exc
         if not isinstance(payload, dict):
-            raise PublicResearchArchiveError("Connector research file must be a JSON object")
+            raise PublicResearchConfigurationError("Connector research file must be a JSON object")
         responses = payload.get("responses")
         if not isinstance(responses, list):
-            raise PublicResearchArchiveError("Connector research file must contain a responses array")
+            raise PublicResearchConfigurationError("Connector research file must contain a responses array")
         connector_queries = []
         candidates: list[dict[str, Any]] = []
         for response in responses:
@@ -204,9 +303,9 @@ class PublicResearchArchiveSkill:
                 candidates.append(candidate)
         missing = [q for q in planned_queries if q not in connector_queries]
         if missing:
-            raise PublicResearchArchiveError(f"Connector responses do not cover planned queries: {missing}")
+            raise PublicResearchConfigurationError(f"Connector responses do not cover planned queries: {missing}", details={"missing_queries": missing})
         if not candidates:
-            raise PublicResearchArchiveError("Connector research file contains no result records")
+            raise PublicResearchConfigurationError("Connector research file contains no result records")
         manifest = {
             **payload,
             "ingested_at": utc_now(),
@@ -218,28 +317,161 @@ class PublicResearchArchiveSkill:
         }
         return candidates, manifest
 
-    def _search_searxng(self, queries: list[str], max_results: int) -> list[dict[str, Any]]:
+    def _search_searxng_sequential(
+        self,
+        queries: list[str],
+        max_results: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         if not self.settings.public_search_base_url:
-            raise PublicResearchArchiveError("PUBLIC_SEARCH_BASE_URL is empty")
-        candidates: list[dict[str, Any]] = []
-        with httpx.Client(timeout=self.settings.research_fetch_timeout_seconds, follow_redirects=True) as client:
+            raise PublicResearchConfigurationError("PUBLIC_SEARCH_BASE_URL is empty")
+        endpoint = f"{self.settings.public_search_base_url.rstrip('/')}/search"
+        engines = str(getattr(self.settings, "public_search_engines", "") or "").strip()
+        results_by_query: list[list[dict[str, Any]]] = []
+        query_failures: list[dict[str, Any]] = []
+        with httpx.Client(
+            timeout=self.settings.research_fetch_timeout_seconds,
+            follow_redirects=True,
+            # The SearXNG endpoint is commonly loopback/LAN.  Windows system
+            # proxy discovery can otherwise route 127.0.0.1 through a proxy.
+            trust_env=False,
+        ) as client:
             for query in queries:
-                response = client.get(
-                    f"{self.settings.public_search_base_url}/search",
-                    params={"q": query, "format": "json", "language": "zh-CN", "safesearch": 1},
-                )
-                response.raise_for_status()
-                payload = response.json()
-                for item in payload.get("results", [])[: min(10, max_results)]:
-                    candidates.append(
+                params = {
+                    "q": query,
+                    "format": "json",
+                    "language": "all",
+                    "safesearch": 1,
+                }
+                if engines:
+                    params["engines"] = engines
+                query_candidates: list[dict[str, Any]] = []
+                try:
+                    response = client.get(
+                        endpoint,
+                        params=params,
+                    )
+                    response.raise_for_status()
+                    try:
+                        payload = response.json()
+                    except ValueError as exc:
+                        raise PublicResearchConfigurationError(
+                            f"SearXNG JSON API returned invalid JSON: {endpoint}",
+                            details={"endpoint": endpoint, "query": query},
+                        ) from exc
+                    results = payload.get("results") if isinstance(payload, dict) else None
+                    if not isinstance(results, list):
+                        raise PublicResearchConfigurationError(
+                            f"SearXNG JSON API response has no results array: {endpoint}",
+                            details={"endpoint": endpoint, "query": query},
+                        )
+                    for item in results[: min(10, max_results)]:
+                        if not isinstance(item, dict):
+                            continue
+                        query_candidates.append(
+                            {
+                                "title": str(item.get("title") or "").strip(),
+                                "url": str(item.get("url") or "").strip(),
+                                "excerpt": str(item.get("content") or item.get("snippet") or "").strip(),
+                                "matched_query": query,
+                                "engine": item.get("engine"),
+                            }
+                        )
+                except PublicResearchConfigurationError:
+                    raise
+                except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError) as exc:
+                    query_failures.append(
                         {
-                            "title": str(item.get("title") or "").strip(),
-                            "url": str(item.get("url") or "").strip(),
-                            "excerpt": str(item.get("content") or item.get("snippet") or "").strip(),
-                            "matched_query": query,
-                            "engine": item.get("engine"),
+                            "query": query,
+                            "category": "RETRIEVAL",
+                            "error_code": "PUBLIC_RESEARCH_QUERY_RETRIEVAL_ERROR",
+                            "message": f"SearXNG query failed: {exc}",
+                            "details": {
+                                "endpoint": endpoint,
+                                "exception_type": type(exc).__name__,
+                            },
                         }
                     )
+                    query_candidates = []
+                results_by_query.append(query_candidates)
+
+        candidates = self._round_robin(results_by_query)
+        if not candidates and query_failures:
+            raise PublicResearchRetrievalError(
+                "All SearXNG queries failed",
+                details={
+                    "endpoint": endpoint,
+                    "query_failures": query_failures,
+                },
+            )
+        return candidates, query_failures
+
+    def _search_searxng(
+        self,
+        queries: list[str],
+        max_results: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Run independent SearXNG queries concurrently and preserve query order."""
+        if not queries:
+            return [], []
+        results_by_query: list[list[dict[str, Any]]] = [[] for _ in queries]
+        query_failures: list[dict[str, Any]] = []
+
+        def search_one(index: int, query: str):
+            try:
+                candidates, failures = self._search_searxng_sequential([query], max_results)
+                return index, candidates, failures
+            except PublicResearchRetrievalError as exc:
+                failures = list(exc.details.get("query_failures") or [])
+                if not failures:
+                    failures = [
+                        {
+                            "query": query,
+                            "category": "RETRIEVAL",
+                            "error_code": exc.error_code,
+                            "message": str(exc),
+                            "details": dict(exc.details),
+                        }
+                    ]
+                return index, [], failures
+
+        with ThreadPoolExecutor(
+            max_workers=min(4, len(queries)),
+            thread_name_prefix="searxng-query",
+        ) as pool:
+            futures = [
+                pool.submit(search_one, index, query)
+                for index, query in enumerate(queries)
+            ]
+            for future in as_completed(futures):
+                index, candidates, failures = future.result()
+                results_by_query[index] = candidates
+                query_failures.extend(failures)
+
+        query_order = {query: index for index, query in enumerate(queries)}
+        query_failures.sort(
+            key=lambda item: query_order.get(str(item.get("query") or ""), len(queries))
+        )
+        candidates = self._round_robin(results_by_query)
+        if not candidates and query_failures:
+            raise PublicResearchRetrievalError(
+                "All SearXNG queries failed",
+                details={
+                    "endpoint": f"{self.settings.public_search_base_url.rstrip('/')}/search",
+                    "query_failures": query_failures,
+                },
+            )
+        return candidates, query_failures
+
+    @staticmethod
+    def _round_robin(groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        """Interleave query results so max_results cannot starve later queries."""
+        if not groups:
+            return []
+        candidates: list[dict[str, Any]] = []
+        for index in range(max((len(group) for group in groups), default=0)):
+            for group in groups:
+                if index < len(group):
+                    candidates.append(group[index])
         return candidates
 
     def _archive_candidate(
@@ -291,7 +523,10 @@ class PublicResearchArchiveSkill:
         text_path = text_dir / f"{safe_filename(source_id)}.txt"
         meta_path = meta_dir / f"{safe_filename(source_id)}.json"
         raw_path.write_bytes(raw_bytes)
-        text_path.write_text(body_text, encoding="utf-8")
+        # Write the exact bytes that were hashed.  Path.write_text() performs
+        # platform newline translation on Windows, which changes LF to CRLF
+        # and makes immediate archive verification fail.
+        text_path.write_bytes(body_text.encode("utf-8"))
         snapshot_hash = sha256_bytes(raw_bytes)
         text_hash = sha256_text(body_text)
         parsed = urlparse(final_url)
@@ -340,7 +575,7 @@ class PublicResearchArchiveSkill:
                 for chunk in response.iter_bytes():
                     total += len(chunk)
                     if total > limit:
-                        raise PublicResearchArchiveError(f"Source exceeds {limit} bytes")
+                        raise PublicResearchRetrievalError(f"Source exceeds {limit} bytes")
                     chunks.append(chunk)
                 content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0].lower()
                 return b"".join(chunks), content_type, final_url, response.status_code
@@ -377,10 +612,10 @@ class PublicResearchArchiveSkill:
     def _validate_public_url(url: str, *, resolve_dns: bool) -> None:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise PublicResearchArchiveError("Only public HTTP(S) URLs are allowed")
+            raise PublicResearchSecurityError("Only public HTTP(S) URLs are allowed")
         host = parsed.hostname.lower()
         if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
-            raise PublicResearchArchiveError("Local addresses are prohibited")
+            raise PublicResearchSecurityError("Local addresses are prohibited")
         try:
             ip = ipaddress.ip_address(host)
             addresses = [ip]
@@ -390,10 +625,10 @@ class PublicResearchArchiveSkill:
                 try:
                     addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)]
                 except socket.gaierror as exc:
-                    raise PublicResearchArchiveError(f"DNS resolution failed for {host}") from exc
+                    raise PublicResearchRetrievalError(f"DNS resolution failed for {host}") from exc
         for ip in addresses:
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                raise PublicResearchArchiveError(f"Private/reserved address is prohibited: {ip}")
+                raise PublicResearchSecurityError(f"Private/reserved address is prohibited: {ip}")
 
     @staticmethod
     def _authority_rank(domain: str, candidate: dict[str, Any]) -> int:

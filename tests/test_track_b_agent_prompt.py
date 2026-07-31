@@ -68,6 +68,56 @@ def test_need_user_input_is_not_converted_to_block_by_model_p0_finding():
     assert checked["status"] == "NEED_USER_INPUT"
 
 
+def test_deterministic_p1_routes_repair_without_escalating_model_p0():
+    _, validator = _runtime()
+    output = {
+        "status": "NEED_USER_INPUT",
+        "result": {"verdict": "BLOCK"},
+        "findings": [
+            {
+                "code": "MODEL_MISSING_INPUT",
+                "severity": "P0",
+                "blocking": True,
+            },
+            {
+                "code": "QG_CRITIC_PARTIAL",
+                "severity": "P1",
+                "blocking": True,
+            },
+        ],
+    }
+
+    validator._recalculate_status(output, "NEED_USER_INPUT", "BLOCK")
+
+    assert output["status"] == "REVISE"
+    assert output["result"]["verdict"] == "REVISE"
+
+
+def test_repair_scope_accepts_generic_collection_wildcard():
+    _, validator = _runtime()
+    findings = validator._audit_repair_scope(
+        {
+            "allowed_paths": [
+                "content.research_design_matrix[*].method_ids",
+            ],
+            "protected_paths": [],
+            "findings_to_repair": [{"code": "MATRIX_REFERENCE_UNKNOWN"}],
+            "original_object": {"content": {"research_design_matrix": []}},
+        },
+        {
+            "changed_paths": [
+                "content.research_design_matrix[0].method_ids",
+                "content.research_design_matrix[3].method_ids",
+            ],
+            "resolved_finding_codes": ["MATRIX_REFERENCE_UNKNOWN"],
+        },
+    )
+
+    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in {
+        finding.code for finding in findings
+    }
+
+
 def test_b2_project_relation_direction_is_checked():
     pack, validator = _runtime()
     env = pack.replay_input("P-PROJECT-DEFINITION-EXTRACT")

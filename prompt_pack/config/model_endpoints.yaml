@@ -64,4 +64,4 @@ endpoints:
     total_timeout_seconds: 240
     max_concurrency: 4
     max_input_tokens: 32000
-    max_output_tokens: 8000
+    max_output_tokens: 24000

@@ -164,6 +164,18 @@ def test_generic_result_target_allows_whole_wrapped_collection() -> None:
     ) == "content.fact_candidates"
 
 
+def test_candidate_wrapper_is_removed_from_producer_repair_path() -> None:
+    content = {
+        "argument_architecture": {"nodes": []},
+        "research_design_matrix": [],
+    }
+    assert RepairHarness._canonical_repair_path(
+        "architecture_candidate.research_design_matrix[0].method_ids",
+        content=content,
+        collection_key=None,
+    ) == "content.research_design_matrix[0].method_ids"
+
+
 def test_collection_paths_accept_json_pointer_and_dotted_index_forms() -> None:
     content = {"fact_candidates": copy.deepcopy(FACTS)}
     assert RepairHarness._canonical_repair_path(

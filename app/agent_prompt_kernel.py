@@ -639,6 +639,34 @@ class AgentPromptKernelValidator:
                     "content.",
                     text,
                 )
+                generic_collection_match = re.match(
+                    r"^(content\.[A-Za-z_][A-Za-z0-9_]*)\[([^\]]+)\](.*)$",
+                    text,
+                )
+                if (
+                    generic_collection_match
+                    and generic_collection_match.group(1) != "content.paragraphs"
+                ):
+                    root = generic_collection_match.group(1)
+                    selector = generic_collection_match.group(2).strip()
+                    suffix = generic_collection_match.group(3)
+                    if selector == "*":
+                        parts = [root]
+                    else:
+                        range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", selector)
+                        if range_match:
+                            start, end = map(int, range_match.groups())
+                            step = 1 if end >= start else -1
+                            parts = [
+                                f"{root}.{index}{suffix}"
+                                for index in range(start, end + step, step)
+                            ]
+                        elif selector.isdigit():
+                            parts = [f"{root}.{selector}{suffix}"]
+                        else:
+                            parts = [text]
+                else:
+                    parts = []
                 bracket_match = re.match(
                     r"^content\.paragraphs\[([^\]]+)\](.*)$",
                     text,
@@ -662,7 +690,7 @@ class AgentPromptKernelValidator:
                         f"content.{semantic_id}{bracket_match.group(2)}"
                         for semantic_id in semantic_ids
                     ]
-                else:
+                elif not parts:
                     parts = text.split(",")
                 for index, part in enumerate(parts):
                     path = part.strip().replace("/", ".")
@@ -1015,13 +1043,27 @@ class AgentPromptKernelValidator:
         original_verdict: Any,
     ) -> None:
         findings = [item for item in output.get("findings") or [] if isinstance(item, dict)]
-        deterministic_blocking = any(
+        deterministic_p0 = any(
             str(item.get("code") or "").startswith("QG_")
-            and item.get("severity") in {"P0", "P1"}
+            and item.get("severity") == "P0"
             and item.get("blocking", True)
             for item in findings
         )
-        if original_status == "NEED_USER_INPUT" and not deterministic_blocking:
+        deterministic_p1 = any(
+            str(item.get("code") or "").startswith("QG_")
+            and item.get("severity") == "P1"
+            and item.get("blocking", True)
+            for item in findings
+        )
+        if deterministic_p0:
+            status = "BLOCK"
+        elif deterministic_p1:
+            # Deterministic P1 failures must return to the responsible
+            # producer for repair.  A model-authored P0 missing-input finding
+            # remains gateable and must not incorrectly escalate this repair
+            # state to an unrecoverable BLOCK.
+            status = "REVISE"
+        elif original_status == "NEED_USER_INPUT":
             status = "NEED_USER_INPUT"
         elif any(item.get("severity") == "P0" and item.get("blocking", True) for item in findings):
             status = "BLOCK"

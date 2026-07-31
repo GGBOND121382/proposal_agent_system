@@ -113,6 +113,13 @@ def deduplicate_candidates(candidates: list[dict[str, Any]]) -> tuple[list[dict[
 
 
 def _query_question_score(query: str, question: str) -> float:
+    """Return a same-script lexical signal, never a semantic hard gate.
+
+    Token overlap is useful when both strings are written in the same language, but
+    it cannot prove that an English search query is unrelated to a Chinese research
+    question.  Callers may use this score as a positive legacy migration signal;
+    absence of overlap must not be treated as evidence of no binding.
+    """
     query_tokens = tokens(query)
     question_tokens = tokens(question)
     if not query_tokens or not question_tokens:
@@ -120,38 +127,161 @@ def _query_question_score(query: str, question: str) -> float:
     return len(query_tokens & question_tokens) / max(1, min(len(query_tokens), len(question_tokens)))
 
 
+def _explicit_question_indexes(item: dict[str, Any], question_count: int) -> tuple[list[int], list[Any]]:
+    raw = item.get("linked_question_indexes")
+    if raw is None:
+        raw = item.get("linked_research_question_indexes")
+    if raw is None:
+        return [], []
+    values = raw if isinstance(raw, list) else [raw]
+    valid: list[int] = []
+    invalid: list[Any] = []
+    for value in values:
+        if isinstance(value, bool):
+            invalid.append(value)
+            continue
+        if isinstance(value, int):
+            index = value
+        elif isinstance(value, str) and re.fullmatch(r"[0-9]+", value.strip()):
+            index = int(value.strip())
+        else:
+            # Do not silently coerce 1.5 to 1 or arbitrary objects to strings.
+            # New plans are schema-validated as integers; digit strings are accepted
+            # only for deterministic migration of older persisted plans.
+            invalid.append(value)
+            continue
+        if index < 0 or index >= question_count:
+            invalid.append(value)
+            continue
+        if index not in valid:
+            valid.append(index)
+    return valid, invalid
+
+
+def _query_text(item: Any) -> str:
+    if isinstance(item, str):
+        return item.strip()
+    if isinstance(item, dict):
+        return str(item.get("query") or item.get("query_text") or item.get("text") or "").strip()
+    return ""
+
+
 def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(plan, dict):
         raise ValueError("Research plan must be a JSON object")
-    questions = unique_texts(plan.get("research_questions"))
+    questions = [
+        str(item or "").strip()
+        for item in plan.get("research_questions") or []
+        if str(item or "").strip()
+    ]
     priorities = unique_texts(plan.get("source_priorities"))
     evidence_requirements = unique_texts(plan.get("evidence_requirements"))
     prohibited_inferences = unique_texts(plan.get("prohibited_inferences"))
     time_scope = plan.get("time_scope")
-    queries: list[str] = []
-    query_items: list[dict[str, Any]] = []
-    for index, item in enumerate(plan.get("queries") or []):
-        query = item if isinstance(item, str) else (
-            item.get("query") or item.get("query_text") or item.get("text") or ""
-            if isinstance(item, dict) else ""
-        )
-        query = str(query).strip()
-        if not query or query in queries:
-            continue
-        queries.append(query)
-        linked = [
-            question_index for question_index, question in enumerate(questions)
-            if _query_question_score(query, question) >= 0.12
-        ][:3]
-        query_items.append({
-            "query_id": f"query-{index + 1}",
-            "query": query,
-            "linked_question_indexes": linked,
-            "token_count": len(tokens(query)),
-        })
+    binding_contract_version = str(plan.get("binding_contract_version") or "").strip() or None
+    explicit_contract = binding_contract_version == "1.0"
 
     findings: list[dict[str, Any]] = []
     warnings: list[str] = []
+    if len(set(questions)) != len(questions):
+        issue = {
+            "code": "RESEARCH_PLAN_DUPLICATE_QUESTION",
+            "severity": "P1",
+            "message": "Research questions must be unique so index bindings remain stable.",
+        }
+        findings.append(issue) if strict else warnings.append(
+            "RESEARCH_PLAN_DUPLICATE_QUESTION: duplicate questions make legacy bindings ambiguous."
+        )
+    queries: list[str] = []
+    query_items: list[dict[str, Any]] = []
+    query_index_by_text: dict[str, int] = {}
+    query_ids: set[str] = set()
+
+    for source_index, raw_item in enumerate(plan.get("queries") or []):
+        query = _query_text(raw_item)
+        if not query:
+            continue
+        explicit_links: list[int] = []
+        invalid_links: list[Any] = []
+        structured = isinstance(raw_item, dict)
+        if structured:
+            explicit_links, invalid_links = _explicit_question_indexes(raw_item, len(questions))
+        if invalid_links:
+            findings.append({
+                "code": "RESEARCH_PLAN_INVALID_QUERY_BINDING",
+                "severity": "P1",
+                "query": query,
+                "invalid_indexes": invalid_links,
+                "message": "Query binding contains an invalid research-question index.",
+            })
+
+        if query in query_index_by_text:
+            existing = query_items[query_index_by_text[query]]
+            for index in explicit_links:
+                if index not in existing["linked_question_indexes"]:
+                    existing["linked_question_indexes"].append(index)
+            continue
+
+        linked = list(explicit_links)
+        binding_basis = "EXPLICIT" if linked else ""
+        if not linked and questions and not explicit_contract:
+            if len(questions) == 1:
+                linked = [0]
+                binding_basis = "LEGACY_SINGLE_QUESTION"
+            else:
+                lexical = [
+                    question_index for question_index, question in enumerate(questions)
+                    if _query_question_score(query, question) >= 0.12
+                ][:3]
+                if lexical:
+                    linked = lexical
+                    binding_basis = "LEGACY_LEXICAL_SIGNAL"
+                else:
+                    # Legacy 2.0 plans exposed only strings.  Cross-language plans
+                    # cannot be deterministically assigned to one question from text
+                    # overlap alone.  Keep the plan within its already approved task
+                    # scope, report the missing fine-grained traceability as a warning,
+                    # and require explicit structural bindings for all new 2.1 plans.
+                    binding_basis = "LEGACY_PLAN_SCOPE"
+                    warnings.append(
+                        "RESEARCH_PLAN_LEGACY_BINDING_UNVERIFIED: "
+                        f"{query} is bound to the approved plan scope because the legacy plan "
+                        "contains no explicit query-to-question mapping."
+                    )
+
+        if explicit_contract and questions and not linked:
+            findings.append({
+                "code": "RESEARCH_PLAN_UNBOUND_QUERY",
+                "severity": "P1",
+                "query": query,
+                "message": "Query lacks an explicit linked_question_indexes binding.",
+            })
+
+        query_id = (
+            str(raw_item.get("query_id") or "").strip()
+            if isinstance(raw_item, dict)
+            else ""
+        ) or f"query-{len(query_items) + 1:03d}"
+        if query_id in query_ids:
+            findings.append({
+                "code": "RESEARCH_PLAN_DUPLICATE_QUERY_ID",
+                "severity": "P1",
+                "query_id": query_id,
+                "query": query,
+                "message": "Each query_id must identify exactly one query.",
+            })
+        query_ids.add(query_id)
+        query_index_by_text[query] = len(query_items)
+        queries.append(query)
+        query_items.append({
+            "query_id": query_id,
+            "query": query,
+            "linked_question_indexes": linked,
+            "binding_basis": binding_basis or "UNBOUND",
+            "token_count": len(tokens(query)),
+            "source_index": source_index,
+        })
+
     if not queries:
         findings.append({"code": "RESEARCH_PLAN_NO_QUERY", "severity": "P0", "message": "No executable query."})
     if not questions:
@@ -163,6 +293,13 @@ def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[
         findings.append({"code": "RESEARCH_PLAN_NO_SOURCE_PRIORITY", "severity": "P1", "message": "Source priorities are required."})
     if strict and not str(time_scope or "").strip():
         findings.append({"code": "RESEARCH_PLAN_NO_TIME_SCOPE", "severity": "P1", "message": "A time scope is required."})
+    if strict and binding_contract_version not in {None, "1.0"}:
+        findings.append({
+            "code": "RESEARCH_PLAN_BINDING_CONTRACT_UNSUPPORTED",
+            "severity": "P1",
+            "message": f"Unsupported binding_contract_version: {binding_contract_version}",
+        })
+
     for item in query_items:
         query = item["query"]
         words = {word for word in re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]{2,}", query.lower()) if word}
@@ -170,12 +307,11 @@ def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[
         if broad:
             issue = {"code": "RESEARCH_PLAN_BROAD_QUERY", "severity": "P1", "query": query, "message": "Query is too broad."}
             findings.append(issue) if strict else warnings.append(f"RESEARCH_PLAN_BROAD_QUERY: {query}")
-        if strict and questions and not item["linked_question_indexes"]:
-            findings.append({"code": "RESEARCH_PLAN_UNBOUND_QUERY", "severity": "P1", "query": query, "message": "Query is not linked to a research question."})
 
     normalized = {
         "plan_id": str(plan.get("plan_id") or ""),
         "task_type": str(plan.get("task_type") or "PUBLIC_RESEARCH"),
+        "binding_contract_version": binding_contract_version or "LEGACY-2.0",
         "research_questions": questions,
         "queries": queries,
         "query_items": query_items,
@@ -187,6 +323,7 @@ def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[
     return normalized, {
         "status": "BLOCK" if findings else ("WARN" if warnings else "PASS"),
         "strict": strict,
+        "binding_contract_version": normalized["binding_contract_version"],
         "findings": findings,
         "warnings": warnings,
     }

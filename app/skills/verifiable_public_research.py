@@ -4,7 +4,10 @@ from contextvars import ContextVar
 from typing import Any
 
 from .base import SkillContext, SkillResult
-from .public_research import PublicResearchArchiveError, PublicResearchArchiveSkill
+from .public_research import (
+    PublicResearchPlanContractError,
+    PublicResearchArchiveSkill,
+)
 from .research_audit import upgrade_archive_result
 from .research_plan import deduplicate_candidates, normalize_and_validate_plan
 
@@ -14,7 +17,7 @@ _DUPLICATE_ISSUES: ContextVar[tuple[dict[str, Any], ...]] = ContextVar("research
 class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
     """Track-C production wrapper around the existing retrieval/archive implementation."""
 
-    version = "2.0.0"
+    version = "2.2.0"
     description = "Plan-validated public search with canonical deduplication, hash verification, coverage evidence, and claim binding support."
 
     def run(self, payload: dict[str, Any], context: SkillContext) -> SkillResult:
@@ -22,10 +25,13 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         try:
             normalized_plan, validation = normalize_and_validate_plan(payload.get("plan") or {}, strict=strict)
         except ValueError as exc:
-            raise PublicResearchArchiveError(str(exc)) from exc
+            raise PublicResearchPlanContractError(str(exc)) from exc
         if validation["status"] == "BLOCK":
             codes = [str(item.get("code")) for item in validation["findings"]]
-            raise PublicResearchArchiveError("Research plan validation failed: " + ", ".join(codes))
+            raise PublicResearchPlanContractError(
+                "Research plan validation failed: " + ", ".join(codes),
+                details={"validation": validation, "normalized_plan": normalized_plan},
+            )
         token = _DUPLICATE_ISSUES.set(())
         try:
             effective = dict(payload)
@@ -49,4 +55,5 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         return self._deduplicate(candidates), manifest
 
     def _search_searxng(self, queries, max_results):
-        return self._deduplicate(super()._search_searxng(queries, max_results))
+        candidates, query_failures = super()._search_searxng(queries, max_results)
+        return self._deduplicate(candidates), query_failures

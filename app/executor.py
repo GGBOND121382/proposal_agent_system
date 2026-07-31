@@ -24,7 +24,7 @@ from .output_integrity import (
     trusted_source_prompt_contract,
     validate_reference_ids,
 )
-from .proposal_quality import ProposalQualityGuard
+from .proposal_quality import ProposalQualityGuard, SECTION_FUNCTION_ROLE_ALIASES
 from .security import RoutingDenied, SecurityRouter
 from .status_ontology import (
     implied_temporal_status_from_claim_alias,
@@ -52,7 +52,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-07-30.v10-trusted-input-object-identity"
+OUTPUT_NORMALIZER_VERSION = "2026-07-31.v43-colon-reference-path-aliases"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -1180,7 +1180,14 @@ class PromptExecutor:
         result = output.get("result") or {}
         filled_quality_actions = 0
         for dimension in result.get("quality_dimensions") or []:
-            if not isinstance(dimension, dict) or "required_action" in dimension:
+            if not isinstance(dimension, dict):
+                continue
+            if bool(dimension.get("passed")) and "required_action" in dimension:
+                continue
+            if (
+                not bool(dimension.get("passed"))
+                and str(dimension.get("required_action") or "").strip()
+            ):
                 continue
             if bool(dimension.get("passed")):
                 dimension["required_action"] = None
@@ -1240,6 +1247,68 @@ class PromptExecutor:
                     "SYSTEM_NORMALIZATION: "
                     f"recorded {len(inferred_checked_ids)} node check(s) explicitly evidenced by design-matrix reviews"
                 )
+
+            visible_ids: set[str] = set()
+
+            def collect_visible_ids(value: Any) -> None:
+                if isinstance(value, list):
+                    for child in value:
+                        collect_visible_ids(child)
+                    return
+                if not isinstance(value, dict):
+                    return
+                for key, child in value.items():
+                    if (
+                        key.endswith("_id")
+                        and key not in {"prompt_id", "workflow_id", "task_id"}
+                        and key != "source_id"
+                        and isinstance(child, (str, int))
+                        and not isinstance(child, bool)
+                        and str(child).strip()
+                    ):
+                        visible_ids.add(str(child).strip())
+                    if key == "source_refs" and isinstance(child, list):
+                        for ref in child:
+                            if isinstance(ref, dict) and str(ref.get("source_id") or "").strip():
+                                visible_ids.add(str(ref["source_id"]).strip())
+                    collect_visible_ids(child)
+
+            collect_visible_ids(envelope)
+            removed_unbound_critic_refs = 0
+            critic_reference_fields = {
+                "checked_node_ids",
+                "source_ids",
+                "target_ids",
+                "evidence_refs",
+            }
+
+            def filter_unbound_critic_refs(value: Any) -> None:
+                nonlocal removed_unbound_critic_refs
+                if isinstance(value, list):
+                    for child in value:
+                        filter_unbound_critic_refs(child)
+                    return
+                if not isinstance(value, dict):
+                    return
+                for key, child in list(value.items()):
+                    if key in critic_reference_fields and isinstance(child, list):
+                        filtered = [
+                            item
+                            for item in child
+                            if not isinstance(item, str) or item.strip() in visible_ids
+                        ]
+                        removed_unbound_critic_refs += len(child) - len(filtered)
+                        value[key] = filtered
+                    else:
+                        filter_unbound_critic_refs(child)
+
+            filter_unbound_critic_refs(output)
+            if removed_unbound_critic_refs:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_NORMALIZATION: removed "
+                    f"{removed_unbound_critic_refs} critic reference(s) that were "
+                    "not present in the reviewed input entity catalog"
+                )
         allowed_finding_categories = {
             "SECURITY", "SOURCE", "FACT", "SCHEME", "PROJECT_DEFINITION",
             "READINESS", "TEMPLATE", "PLAN", "BLUEPRINT", "CONTENT",
@@ -1261,6 +1330,7 @@ class PromptExecutor:
         normalized_categories = 0
         normalized_finding_descriptions = 0
         normalized_finding_routes = 0
+        filled_finding_target_types = 0
         allowed_finding_routes = {
             "ORIGINAL_PRODUCER",
             "PROJECT_KNOWLEDGE_AGENT",
@@ -1276,6 +1346,26 @@ class PromptExecutor:
         for finding in output.get("findings") or []:
             if not isinstance(finding, dict):
                 continue
+            if not str(finding.get("target_type") or "").strip():
+                target_path = str(finding.get("target_path_or_span") or "").upper()
+                finding["target_type"] = next(
+                    (
+                        candidate
+                        for candidate in (
+                            "METRIC",
+                            "METHOD",
+                            "WORK_PACKAGE",
+                            "INNOVATION",
+                            "OBJECTIVE",
+                            "RESEARCH_QUESTION",
+                            "ARGUMENT_GRAPH",
+                            "DOCUMENT",
+                        )
+                        if candidate in target_path
+                    ),
+                    "OBJECT",
+                )
+                filled_finding_target_types += 1
             if not finding.get("description") and isinstance(finding.get("reason"), str):
                 finding["description"] = finding.pop("reason")
                 normalized_finding_descriptions += 1
@@ -1315,10 +1405,16 @@ class PromptExecutor:
                 f"mapped {normalized_categories} finding category alias(es) and "
                 f"{normalized_finding_routes} finding route alias(es) to schema values"
             )
-        if normalized_finding_descriptions or normalized_answer_values or removed_answer_schema_fields:
+        if (
+            normalized_finding_descriptions
+            or filled_finding_target_types
+            or normalized_answer_values
+            or removed_answer_schema_fields
+        ):
             output.setdefault("warnings", []).append(
                 "SYSTEM_NORMALIZATION: "
                 f"mapped {normalized_finding_descriptions} finding reason field(s) to descriptions; "
+                f"filled {filled_finding_target_types} finding target type(s); "
                 f"replaced {normalized_answer_values} null allowed-value list(s) with empty lists; "
                 f"removed {removed_answer_schema_fields} unsupported answer-schema field(s)"
             )
@@ -1373,6 +1469,7 @@ class PromptExecutor:
             architecture = revision_plan.get("narrative_architecture") or {}
             contracts = architecture.get("section_contracts") or []
             argument_role_aliases = {
+                **SECTION_FUNCTION_ROLE_ALIASES,
                 "BACKGROUND_ANALYSIS": "CONTEXT",
                 "GAP_IDENTIFICATION": "GAP",
                 "MOTIVATION_ARGUMENT": "WARRANT",
@@ -1480,6 +1577,44 @@ class PromptExecutor:
                     "SYSTEM_NORMALIZATION: "
                     f"qualified {expanded_information_keys} short information key(s) with their section identity"
                 )
+            # Finding.evidence_refs is an identifier collection, not a JSON-path
+            # collection.  Some providers copy a target field path into both
+            # fields; retain it as target_path_or_span but do not let the same
+            # diagnostic path fail reference-integrity validation as fake
+            # evidence.
+            diagnostic_path_prefixes = (
+                "payload.",
+                "result.",
+                "proposal_contract.",
+                "argument_graph.",
+                "research_design_matrix.",
+                "revision_plan.",
+                "narrative_architecture.",
+            )
+            removed_diagnostic_evidence_refs = 0
+            for finding in output.get("findings") or []:
+                if not isinstance(finding, dict):
+                    continue
+                evidence_refs = finding.get("evidence_refs")
+                if not isinstance(evidence_refs, list):
+                    continue
+                retained_refs = [
+                    reference
+                    for reference in evidence_refs
+                    if not str(reference).lower().startswith(
+                        diagnostic_path_prefixes
+                    )
+                ]
+                removed_diagnostic_evidence_refs += (
+                    len(evidence_refs) - len(retained_refs)
+                )
+                finding["evidence_refs"] = retained_refs
+            if removed_diagnostic_evidence_refs:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_NORMALIZATION: removed "
+                    f"{removed_diagnostic_evidence_refs} diagnostic field path(s) "
+                    "misplaced in finding.evidence_refs"
+                )
         if prompt_id == "P-WRITE-BLUEPRINT":
             blueprint = (output.get("result") or {}).get("blueprint") or {}
             payload = (envelope or {}).get("payload") or {}
@@ -1495,6 +1630,7 @@ class PromptExecutor:
                 if value
             ]
             blueprint_role_aliases = {
+                **SECTION_FUNCTION_ROLE_ALIASES,
                 "BACKGROUND_ANALYSIS": "CONTEXT",
                 "GAP_IDENTIFICATION": "GAP",
                 "MOTIVATION_ARGUMENT": "WARRANT",
@@ -2602,6 +2738,60 @@ class PromptExecutor:
                     f"{restored_out_of_scope_fields} repaired field or collection change(s) "
                     "outside the critic-authorized path scope"
                 )
+
+            if (
+                str(repair_payload.get("original_producer") or "")
+                == "ARGUMENT_ARCHITECTURE_AGENT"
+                and isinstance(repaired_content, dict)
+            ):
+                repaired_architecture = (
+                    repaired_content.get("argument_architecture") or {}
+                )
+                repaired_nodes = repaired_architecture.get("nodes") or []
+                repaired_node_ids = {
+                    str(node.get("node_id"))
+                    for node in repaired_nodes
+                    if isinstance(node, dict) and node.get("node_id")
+                }
+                repair_reference_types = {
+                    "gap_ids": "RESEARCH_GAP",
+                    "objective_ids": "OBJECTIVE",
+                    "work_package_ids": "WORK_PACKAGE",
+                    "method_ids": "FORMAL_MODEL",
+                    "evaluation_ids": "EXPERIMENT_DESIGN",
+                    "innovation_ids": "NOVEL_MECHANISM",
+                    "closest_prior_work_ids": "CLOSEST_PRIOR_WORK",
+                    "foundation_evidence_ids": "TEAM_EVIDENCE",
+                }
+                materialized_repair_refs = 0
+                for row in repaired_content.get("research_design_matrix") or []:
+                    if not isinstance(row, dict):
+                        continue
+                    for field, node_type in repair_reference_types.items():
+                        for reference_id in row.get(field) or []:
+                            node_id = str(reference_id or "").strip()
+                            if not node_id or node_id in repaired_node_ids:
+                                continue
+                            repaired_nodes.append({
+                                "node_id": node_id,
+                                "node_type": node_type,
+                                "statement": (
+                                    f"定向修复提出、尚待项目方确认的{node_type}候选：{node_id}"
+                                ),
+                                "status": "UNKNOWN",
+                                "source_refs": [],
+                            })
+                            repaired_node_ids.add(node_id)
+                            materialized_repair_refs += 1
+                if materialized_repair_refs:
+                    repaired_architecture["nodes"] = repaired_nodes
+                    repaired_content["argument_architecture"] = repaired_architecture
+                    output.setdefault("warnings", []).append(
+                        "SYSTEM_NORMALIZATION: materialized "
+                        f"{materialized_repair_refs} targeted-repair matrix "
+                        "reference(s) as typed UNKNOWN argument nodes"
+                    )
+
             budget_limit = 0
             for finding in (envelope.get("payload") or {}).get("findings_to_repair") or []:
                 if not isinstance(finding, dict) or finding.get("code") != "WORD_BUDGET_EXCEED":
@@ -2714,18 +2904,19 @@ class PromptExecutor:
                 and item.get("item_type") == "WORK_PACKAGE"
                 and item.get("item_id")
             ]
+            method_ids = [
+                str(item.get("item_id"))
+                for item in project_items
+                if isinstance(item, dict)
+                and item.get("item_type") == "METHOD"
+                and item.get("item_id")
+            ]
             prior_work_ids = [
                 str(item.get("item_id"))
                 for item in project_items
                 if isinstance(item, dict)
                 and item.get("item_id")
-                and (
-                    item.get("item_type") == "EXISTING_APPROACH"
-                    or (
-                        item.get("item_type") == "INNOVATION"
-                        and str((item.get("content") or {}).get("existing_baseline") or "").strip()
-                    )
-                )
+                and item.get("item_type") == "EXISTING_APPROACH"
             ]
             result = output.get("result") or {}
             architecture = result.get("argument_architecture") or {}
@@ -2796,6 +2987,186 @@ class PromptExecutor:
                 existing_node_ids.add(item_id)
                 added_project_nodes += 1
 
+            # The current proposal may contain an authoritative, explicitly
+            # tagged closed-loop table even when project extraction collapsed
+            # multiple work packages/foundation slots into one aggregate item.
+            # Re-materialize only exact RC-n / BASE-n tags and exact RQ-n→RC-n
+            # mappings found in those source sections.
+            current_sections = [
+                section
+                for section in payload.get("current_sections") or []
+                if isinstance(section, dict)
+            ]
+            declared_question_work_packages: dict[str, str] = {}
+            tagged_section_nodes = 0
+            for section in current_sections:
+                text = str(section.get("text") or "")
+                for line in text.splitlines():
+                    rq_match = re.search(r"`?RQ-(\d+)`?", line, re.IGNORECASE)
+                    rc_match = re.search(r"`?RC-(\d+)`?", line, re.IGNORECASE)
+                    if rq_match and rc_match:
+                        declared_question_work_packages[
+                            f"RQ-{int(rq_match.group(1)):03d}"
+                        ] = f"RC-{int(rc_match.group(1)):03d}"
+                for match in re.finditer(
+                    r"`?(RC|BASE)-(\d+)`?\s*([^；;\n]{0,180})",
+                    text,
+                    re.IGNORECASE,
+                ):
+                    prefix = match.group(1).upper()
+                    node_id = f"{prefix}-{int(match.group(2)):03d}"
+                    if node_id in existing_node_ids:
+                        continue
+                    raw_statement = re.sub(
+                        r"^[\s*：:|`]+|[\s*|`]+$",
+                        "",
+                        match.group(3),
+                    ).strip()
+                    if not raw_statement:
+                        raw_statement = f"源材料显式定义的{prefix}条目 {node_id}"
+                    template_type = (
+                        "WORK_PACKAGE" if prefix == "RC" else "TEAM_EVIDENCE"
+                    )
+                    template_ref = next(
+                        (
+                            copy.deepcopy(node.get("source_refs") or [])
+                            for node in nodes
+                            if isinstance(node, dict)
+                            and node.get("node_type") == template_type
+                            and node.get("source_refs")
+                        ),
+                        [],
+                    )
+                    nodes.append({
+                        "node_id": node_id,
+                        "node_type": template_type,
+                        "statement": raw_statement,
+                        "status": "PLANNED" if prefix == "RC" else "UNKNOWN",
+                        "source_refs": template_ref,
+                    })
+                    existing_node_ids.add(node_id)
+                    added_project_nodes += 1
+                    tagged_section_nodes += 1
+
+            if declared_question_work_packages:
+                rebound_work_packages = 0
+                for row in result.get("research_design_matrix") or []:
+                    if not isinstance(row, dict):
+                        continue
+                    question_id = str(row.get("research_question_id") or "")
+                    if question_id not in declared_question_work_packages:
+                        question_id = next(
+                            (
+                                str(item)
+                                for item in row.get("rq_ids") or []
+                                if str(item) in declared_question_work_packages
+                            ),
+                            "",
+                        )
+                    work_package_id = declared_question_work_packages.get(question_id)
+                    if (
+                        work_package_id
+                        and work_package_id in existing_node_ids
+                        and row.get("work_package_ids") != [work_package_id]
+                    ):
+                        row["work_package_ids"] = [work_package_id]
+                        rebound_work_packages += 1
+
+                edges = architecture.get("edges") or []
+                existing_edge_pairs = {
+                    (str(edge.get("source_id")), str(edge.get("target_id")))
+                    for edge in edges
+                    if isinstance(edge, dict)
+                }
+                for question_id, work_package_id in declared_question_work_packages.items():
+                    objective_id = question_id.replace("RQ-", "OBJ-", 1)
+                    if (
+                        objective_id not in existing_node_ids
+                        or work_package_id not in existing_node_ids
+                        or (objective_id, work_package_id) in existing_edge_pairs
+                    ):
+                        continue
+                    edges.append({
+                        "edge_id": f"edge-system-{objective_id.lower()}-{work_package_id.lower()}",
+                        "source_id": objective_id,
+                        "relation": "DECOMPOSES_TO",
+                        "target_id": work_package_id,
+                        "rationale": "按源材料中的问题—目标—研究内容闭环表建立。",
+                    })
+                    existing_edge_pairs.add((objective_id, work_package_id))
+                architecture["edges"] = edges
+                if rebound_work_packages:
+                    output.setdefault("warnings", []).append(
+                        "SYSTEM_NORMALIZATION: rebound "
+                        f"{rebound_work_packages} design-matrix work-package link(s) "
+                        "from explicit source-section RQ-to-RC mappings"
+                    )
+            if tagged_section_nodes:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_NORMALIZATION: materialized "
+                    f"{tagged_section_nodes} explicitly tagged RC/BASE source-section node(s)"
+                )
+
+            # Human gate answers may provide test or real formal method
+            # descriptions keyed by RC-n. Preserve their original knowledge
+            # status as UNKNOWN while giving each work package a distinct
+            # typed method node and edge.
+            method_by_work_package: dict[str, str] = {}
+            for resolution in payload.get("human_resolutions") or []:
+                if not isinstance(resolution, dict):
+                    continue
+                answer = resolution.get("answer")
+                if not isinstance(answer, dict):
+                    continue
+                for key, statement in answer.items():
+                    key_match = re.fullmatch(r"RC-(\d+)", str(key), re.IGNORECASE)
+                    if not key_match or not str(statement or "").strip():
+                        continue
+                    work_package_id = f"RC-{int(key_match.group(1)):03d}"
+                    if work_package_id not in existing_node_ids:
+                        continue
+                    method_id = f"method-{work_package_id}"
+                    method_by_work_package[work_package_id] = method_id
+                    if method_id in existing_node_ids:
+                        continue
+                    resolution_id = str(resolution.get("resolution_id") or "").strip()
+                    nodes.append({
+                        "node_id": method_id,
+                        "node_type": "FORMAL_MODEL",
+                        "statement": str(statement).strip(),
+                        "status": "UNKNOWN",
+                        "source_refs": (
+                            [{"source_id": resolution_id}]
+                            if resolution_id
+                            else []
+                        ),
+                    })
+                    existing_node_ids.add(method_id)
+                    added_project_nodes += 1
+            if method_by_work_package:
+                edges = architecture.get("edges") or []
+                existing_edge_pairs = {
+                    (str(edge.get("source_id")), str(edge.get("target_id")))
+                    for edge in edges
+                    if isinstance(edge, dict)
+                }
+                for work_package_id, method_id in method_by_work_package.items():
+                    if (work_package_id, method_id) not in existing_edge_pairs:
+                        edges.append({
+                            "edge_id": f"edge-system-{work_package_id.lower()}-{method_id.lower()}",
+                            "source_id": work_package_id,
+                            "relation": "USES",
+                            "target_id": method_id,
+                            "rationale": "由项目方门禁回答提供的方法形式化测试说明。",
+                        })
+                    for row in result.get("research_design_matrix") or []:
+                        if (
+                            isinstance(row, dict)
+                            and row.get("work_package_ids") == [work_package_id]
+                        ):
+                            row["method_ids"] = [method_id]
+                architecture["edges"] = edges
+
             baseline_node_ids: list[str] = []
             for item in project_items:
                 if not isinstance(item, dict) or item.get("item_type") != "INNOVATION":
@@ -2817,6 +3188,67 @@ class PromptExecutor:
                     added_project_nodes += 1
             if baseline_node_ids:
                 prior_work_ids = list(dict.fromkeys([*prior_work_ids, *baseline_node_ids]))
+
+            # Knowledge-state sentinels are not entity IDs.  Rebind unresolved
+            # matrix slots to real project items where possible, or to explicit
+            # typed UNKNOWN nodes without upgrading missing knowledge.
+            reference_sentinels = {
+                "UNKNOWN",
+                "TO_BE_SELECTED",
+                "TO_BE_DETERMINED",
+                "TBD",
+                "MISSING",
+                "NOT_AVAILABLE",
+                "N/A",
+                "NONE",
+            }
+            removed_reference_sentinels = 0
+            for row in result.get("research_design_matrix") or []:
+                if not isinstance(row, dict):
+                    continue
+                for field, values in list(row.items()):
+                    if not field.endswith("_ids") or not isinstance(values, list):
+                        continue
+                    cleaned = [
+                        value
+                        for value in values
+                        if str(value or "").strip().upper() not in reference_sentinels
+                    ]
+                    removed_reference_sentinels += len(values) - len(cleaned)
+                    row[field] = cleaned
+
+            if not method_ids:
+                unknown_method_id = "method-unknown"
+                if unknown_method_id not in existing_node_ids:
+                    nodes.append({
+                        "node_id": unknown_method_id,
+                        "node_type": "FORMAL_MODEL",
+                        "statement": "研究方法尚待选择；该节点仅表示缺口，不代表已确定方法。",
+                        "status": "UNKNOWN",
+                        "source_refs": [],
+                    })
+                    existing_node_ids.add(unknown_method_id)
+                    added_project_nodes += 1
+                method_ids = [unknown_method_id]
+            if not prior_work_ids:
+                unknown_prior_work_id = "closest-prior-work-unknown"
+                if unknown_prior_work_id not in existing_node_ids:
+                    nodes.append({
+                        "node_id": unknown_prior_work_id,
+                        "node_type": "CLOSEST_PRIOR_WORK",
+                        "statement": "最近工作尚待定位；该节点仅表示证据缺口。",
+                        "status": "UNKNOWN",
+                        "source_refs": [],
+                    })
+                    existing_node_ids.add(unknown_prior_work_id)
+                    added_project_nodes += 1
+                prior_work_ids = [unknown_prior_work_id]
+            if removed_reference_sentinels:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_NORMALIZATION: removed "
+                    f"{removed_reference_sentinels} knowledge-state sentinel(s) "
+                    "from entity-reference lists before typed binding"
+                )
 
             # A bounded project-definition extraction may omit some test baseline
             # objects while the confirmed fact package still carries their sourced
@@ -2874,6 +3306,84 @@ class PromptExecutor:
                     f"materialized {fact_backed_prior_nodes} matrix-referenced prior-work node(s) from confirmed facts as UNKNOWN"
                 )
 
+            # Every design-matrix ID must resolve to an explicit typed
+            # argument node. A provider may propose a useful method,
+            # experiment or metric identifier without also emitting the graph
+            # node. Materialize that proposal as UNKNOWN: this preserves the
+            # reference topology without upgrading it to confirmed knowledge.
+            matrix_reference_types = {
+                "rq_ids": "RESEARCH_QUESTION",
+                "gap_ids": "RESEARCH_GAP",
+                "objective_ids": "OBJECTIVE",
+                "work_package_ids": "WORK_PACKAGE",
+                "method_ids": "FORMAL_MODEL",
+                "closest_prior_work_ids": "CLOSEST_PRIOR_WORK",
+                "evaluation_ids": "EXPERIMENT_DESIGN",
+                "innovation_ids": "NOVEL_MECHANISM",
+                "foundation_evidence_ids": "TEAM_EVIDENCE",
+            }
+            materialized_design_references = 0
+            for row in result.get("research_design_matrix") or []:
+                if not isinstance(row, dict):
+                    continue
+                for field, node_type in matrix_reference_types.items():
+                    for referenced_id in row.get(field) or []:
+                        node_id = str(referenced_id or "").strip()
+                        if not node_id or node_id in existing_node_ids:
+                            continue
+                        nodes.append({
+                            "node_id": node_id,
+                            "node_type": node_type,
+                            "statement": f"模型提出但尚待项目方确认的{node_type}候选：{node_id}",
+                            "status": "UNKNOWN",
+                            "source_refs": [],
+                        })
+                        existing_node_ids.add(node_id)
+                        added_project_nodes += 1
+                        materialized_design_references += 1
+
+            # Findings may cite proposed metrics/methods/experiments by their
+            # planned IDs. These are entity references, not documentary
+            # provenance. Other evidence IDs retain strict visibility checks.
+            evidence_prefix_types = {
+                "METRIC-": "METRIC",
+                "METHOD-": "FORMAL_MODEL",
+                "EXP-": "EXPERIMENT_DESIGN",
+            }
+            for finding in output.get("findings") or []:
+                if not isinstance(finding, dict):
+                    continue
+                for referenced_id in finding.get("evidence_refs") or []:
+                    node_id = str(referenced_id or "").strip()
+                    if not node_id or node_id in existing_node_ids:
+                        continue
+                    node_type = next(
+                        (
+                            candidate_type
+                            for prefix, candidate_type in evidence_prefix_types.items()
+                            if node_id.upper().startswith(prefix)
+                        ),
+                        None,
+                    )
+                    if node_type is None:
+                        continue
+                    nodes.append({
+                        "node_id": node_id,
+                        "node_type": node_type,
+                        "statement": f"模型提出但尚待项目方确认的{node_type}候选：{node_id}",
+                        "status": "UNKNOWN",
+                        "source_refs": [],
+                    })
+                    existing_node_ids.add(node_id)
+                    added_project_nodes += 1
+                    materialized_design_references += 1
+            if materialized_design_references:
+                output.setdefault("warnings", []).append(
+                    "SYSTEM_NORMALIZATION: materialized "
+                    f"{materialized_design_references} dangling design reference(s) "
+                    "as explicit typed UNKNOWN nodes"
+                )
+
             team_node_id = "team-evidence-unknown"
             if not any(
                 isinstance(node, dict) and node.get("node_type") == "TEAM_EVIDENCE"
@@ -2888,6 +3398,26 @@ class PromptExecutor:
                 })
                 existing_node_ids.add(team_node_id)
                 added_project_nodes += 1
+
+            # Readiness blockers are entity references too.  Providers
+            # sometimes return a concise blocker label that is not otherwise
+            # present in the argument graph.  Preserve the blocker (and its
+            # UNKNOWN semantics) by materializing an explicit typed node,
+            # instead of either dropping the warning or allowing a dangling
+            # reference to fail the whole workflow.
+            for blocking_node_id in (result.get("readiness") or {}).get("blocking_node_ids") or []:
+                node_id = str(blocking_node_id or "").strip()
+                if not node_id or node_id in existing_node_ids:
+                    continue
+                nodes.append({
+                    "node_id": node_id,
+                    "node_type": "TEAM_EVIDENCE",
+                    "statement": f"尚待补充或确认的就绪性阻断项：{node_id}",
+                    "status": "UNKNOWN",
+                    "source_refs": [],
+                })
+                existing_node_ids.add(node_id)
+                added_project_nodes += 1
             architecture["nodes"] = nodes
 
             filled_design_links = 0
@@ -2896,6 +3426,9 @@ class PromptExecutor:
                     continue
                 if not row.get("work_package_ids") and work_package_ids:
                     row["work_package_ids"] = list(work_package_ids)
+                    filled_design_links += 1
+                if not row.get("method_ids") and method_ids:
+                    row["method_ids"] = list(method_ids)
                     filled_design_links += 1
                 if not row.get("closest_prior_work_ids") and prior_work_ids:
                     row["closest_prior_work_ids"] = list(prior_work_ids)
@@ -2912,17 +3445,24 @@ class PromptExecutor:
                 )
         if (
             output.get("status") in {"REVISE", "BLOCK"}
-            and any(
-                isinstance(finding, dict)
-                and finding.get("severity") == "P0"
-                and finding.get("blocking", True)
-                and finding.get("suggested_route") in {"USER", "PROJECT_OWNER"}
-                for finding in output.get("findings") or []
+            and (
+                any(
+                    isinstance(finding, dict)
+                    and finding.get("severity") == "P0"
+                    and finding.get("blocking", True)
+                    and finding.get("suggested_route") in {"USER", "PROJECT_OWNER"}
+                    for finding in output.get("findings") or []
+                )
+                or any(
+                    isinstance(question, dict)
+                    and bool(question.get("blocking"))
+                    for question in output.get("user_questions") or []
+                )
             )
         ):
             output["status"] = "NEED_USER_INPUT"
             output.setdefault("warnings", []).append(
-                "SYSTEM_NORMALIZATION: blocking missing-input findings routed to a human gate"
+                "SYSTEM_NORMALIZATION: blocking missing-input findings/questions routed to a human gate"
             )
         if prompt_id == "P-SCHEME-EXTRACT":
             output = self._normalize_scheme_output(output, envelope)

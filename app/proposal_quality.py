@@ -48,6 +48,73 @@ SECTION_PROFILE_QUALITY_DIMENSIONS = {
     "RESEARCH_FOUNDATION": {"FEASIBILITY_FOUNDATION"},
 }
 
+SECTION_FUNCTION_ROLE_ALIASES = {
+    "BACKGROUND_POSITIONING": "CONTEXT",
+    "PROBLEM_SUMMARY": "PROBLEM",
+    "METHOD_COMMITMENT": "METHOD",
+    "EXPECTED_CONTRIBUTION": "CONTRIBUTION",
+    "CASE_ANALYSIS": "CONTEXT",
+    "PRIOR_WORK_SURVEY": "EVIDENCE",
+    "GAP_FORMATION": "WARRANT",
+    "CENTRAL_STATEMENT": "CENTRAL_CLAIM",
+    "GAP_TO_RQ_MAPPING": "RESEARCH_QUESTION",
+    "DIFFICULTY_EXPLANATION": "LIMITATION_MECHANISM",
+    "OBJECTIVE_MAPPING": "CENTRAL_CLAIM",
+    "SUCCESS_DEFINITION": "EVALUATION",
+    "PROPOSITION_CONNECTION": "WARRANT",
+    "RESEARCH_OBJECT_DEFINITION": "CONTEXT",
+    "MECHANISM_OUTLINE": "METHOD",
+    "INTERMEDIATE_OUTPUT": "CONTRIBUTION",
+    "TASK_DEPENDENCY": "WARRANT",
+    "TECHNICAL_ROUTE": "METHOD",
+    "ARCHITECTURE_LAYERS": "METHOD",
+    "VERIFICATION_EXECUTION": "EVALUATION",
+    "SYSTEM_CONSTRAINTS": "BOUNDARY",
+    "BASELINE_COMPARISON": "EVIDENCE",
+    "NOVEL_MECHANISM": "CENTRAL_CLAIM",
+    "EXPECTED_IMPROVEMENT": "CONTRIBUTION",
+    "APPLICABLE_CONDITIONS": "BOUNDARY",
+    "SCENARIO_DEFINITION": "CONTEXT",
+    "CONTROL_GROUPS": "EVALUATION",
+    "PERTURBATION_SET": "EVALUATION",
+    "BASELINE_PROCEDURE": "METHOD",
+    "METRIC_DIMENSIONS": "EVALUATION",
+    "UNKNOWN_DECLARATION": "BOUNDARY",
+    "UNKNOWN_INVENTORY": "EVIDENCE",
+    "IMPACT_ASSESSMENT": "LIMITATION_MECHANISM",
+    "MITIGATION_STRATEGY": "METHOD",
+    "REVISED_PLAN": "CONTRIBUTION",
+    "PHASE_PLAN": "METHOD",
+    "RISK_IDENTIFICATION": "COUNTERARGUMENT",
+    "RISK_CONTROL": "WARRANT",
+    "EXPECTED_DELIVERABLES": "CONTRIBUTION",
+    "DELIVERY_FORM": "CONTRIBUTION",
+    "CENTRAL_RECAP": "CENTRAL_CLAIM",
+    "RQ_COMMITMENT": "RESEARCH_QUESTION",
+    "CONTRIBUTION_STATEMENT": "CONTRIBUTION",
+}
+
+
+def _canonical_argument_role(value: Any) -> str:
+    role = str(value or "")
+    return SECTION_FUNCTION_ROLE_ALIASES.get(role, role)
+
+
+def _missing_required_argument_roles(
+    required_values: Iterable[Any],
+    actual_roles: set[str],
+) -> list[str]:
+    missing: list[str] = []
+    for value in required_values:
+        raw = str(value or "")
+        canonical = _canonical_argument_role(raw)
+        acceptable = {canonical}
+        if raw in {"PROBLEM_SUMMARY", "PROBLEM"}:
+            acceptable.add("RESEARCH_QUESTION")
+        if not (acceptable & actual_roles):
+            missing.append(canonical)
+    return sorted(set(missing))
+
 
 @dataclass(frozen=True)
 class QualityFinding:
@@ -564,6 +631,22 @@ class ProposalQualityGuard:
         if critic_output is not None:
             result = critic_output.get("result") or {}
             checked = {str(x) for x in result.get("checked_node_ids") or []}
+            referenced_node_ids = {
+                str(value)
+                for row in matrix
+                if isinstance(row, dict)
+                for field, values in row.items()
+                if field.endswith("_ids") and isinstance(values, list)
+                for value in values
+                if str(value or "").strip()
+            }
+            referenced_node_ids.update(
+                str(value)
+                for edge in graph.get("edges") or []
+                if isinstance(edge, dict)
+                for value in (edge.get("source_id"), edge.get("target_id"))
+                if str(value or "").strip()
+            )
             expected = {
                 str(node.get("node_id"))
                 for node in nodes
@@ -571,6 +654,10 @@ class ProposalQualityGuard:
                 and node.get("node_id")
                 and node.get("node_type") not in {"CENTRAL_PROPOSITION", "RESEARCH_QUESTION"}
                 and not str(node.get("node_id")).startswith("closest-")
+                and (
+                    not str(node.get("node_id")).startswith("item-system-")
+                    or str(node.get("node_id")) in referenced_node_ids
+                )
             }
             expected.add(str(proposition.get("node_id") or ""))
             expected.update(
@@ -817,10 +904,24 @@ class ProposalQualityGuard:
         contract = payload.get("section_contract") or {}
         contract_id = str(contract.get("section_contract_id") or "")
         contract_keys = [str(x) for x in contract.get("unique_information_keys") or []]
-        required_roles = {str(x) for x in contract.get("required_argument_roles") or []}
-        actual_roles = {str(p.get("argument_role") or "") for p in paragraphs if isinstance(p, dict)}
+        required_role_values = contract.get("required_argument_roles") or []
+        actual_roles = {
+            _canonical_argument_role(p.get("argument_role"))
+            for p in paragraphs
+            if isinstance(p, dict)
+        }
         paragraph_keys = [str(p.get("novel_content_key") or "") for p in paragraphs if isinstance(p, dict)]
-        paragraph_claims = {str(p.get("primary_claim_id") or "") for p in paragraphs if isinstance(p, dict)}
+        paragraph_claims = {
+            str(claim_id)
+            for paragraph in paragraphs
+            if isinstance(paragraph, dict)
+            for claim_id in [
+                paragraph.get("primary_claim_id"),
+                *(paragraph.get("project_item_slots") or []),
+                *(paragraph.get("technical_slots") or []),
+            ]
+            if claim_id
+        }
         required_claims = {str(x) for x in contract.get("must_advance_claim_ids") or []}
         prior_digests = payload.get("prior_section_digest") or []
         prior_keys = {
@@ -857,7 +958,10 @@ class ProposalQualityGuard:
                 "paragraphs.novel_content_key", f"蓝图复用了前文章节的{len(reused_prior)}个信息键。",
                 "更换为本章节独有信息键；共享背景只能通过allowed_shared_context_ids引用。", "WRITING_AGENT",
             ))
-        missing_roles = sorted(required_roles - actual_roles)
+        missing_roles = _missing_required_argument_roles(
+            required_role_values,
+            actual_roles,
+        )
         if missing_roles:
             findings.append(QualityFinding(
                 "QG_BLUEPRINT_REQUIRED_ROLES_MISSING", "P1", "BLUEPRINT", "BLUEPRINT",
@@ -952,11 +1056,16 @@ class ProposalQualityGuard:
         contract_id = str(section_contract.get("section_contract_id") or "")
         required_claims = {str(x) for x in section_contract.get("must_advance_claim_ids") or []}
         contract_keys = [str(x) for x in section_contract.get("unique_information_keys") or []]
-        required_roles = {str(x) for x in section_contract.get("required_argument_roles") or []}
+        required_role_values = (
+            section_contract.get("required_argument_roles") or []
+        )
         paragraph_contracts = {str(p.get("section_contract_id") or "") for p in paragraphs}
         paragraph_claims = {str(p.get("primary_claim_id") or "") for p in paragraphs}
         paragraph_keys = [str(p.get("novel_content_key") or "") for p in paragraphs]
-        paragraph_roles = {str(p.get("paragraph_role") or "") for p in paragraphs}
+        paragraph_roles = {
+            _canonical_argument_role(p.get("paragraph_role"))
+            for p in paragraphs
+        }
         prior_keys = {
             str(key)
             for digest in payload.get("prior_section_digest") or [] if isinstance(digest, dict)
@@ -965,6 +1074,7 @@ class ProposalQualityGuard:
         advancement = candidate.get("claim_advancement") or {}
         advancement_claims = {str(x) for x in advancement.get("advanced_claim_ids") or []}
         advancement_keys = {str(x) for x in advancement.get("new_information_keys") or []}
+        paragraph_claims.update(advancement_claims)
 
         if contract_id and paragraph_contracts != {contract_id}:
             findings.append(QualityFinding(
@@ -978,7 +1088,10 @@ class ProposalQualityGuard:
                 "paragraphs.primary_claim_id", "正文没有覆盖章节合同要求推进的全部命题。",
                 "按must_advance_claim_ids补齐论证段落。", "WRITING_AGENT",
             ))
-        if required_roles - paragraph_roles:
+        if _missing_required_argument_roles(
+            required_role_values,
+            paragraph_roles,
+        ):
             findings.append(QualityFinding(
                 "QG_CONTENT_REQUIRED_ROLES_MISSING", "P1", "CONTENT", "SECTION_CANDIDATE",
                 "paragraphs.paragraph_role", "正文缺少章节合同要求的论证角色。",
@@ -1321,8 +1434,22 @@ class ProposalQualityGuard:
             if finding.code not in existing_codes:
                 existing.append(finding.as_dict())
                 existing_codes.add(finding.code)
-        if any(f.severity == "P0" for f in findings):
+        has_blocking_user_question = any(
+            isinstance(question, dict) and bool(question.get("blocking"))
+            for question in output.get("user_questions") or []
+        )
+        human_gate_required = (
+            output.get("status") == "NEED_USER_INPUT"
+            or has_blocking_user_question
+        )
+        if any(f.severity == "P0" for f in findings) and not human_gate_required:
             output["status"] = "BLOCK"
+        elif human_gate_required:
+            # Missing project-owner information is recoverable through a human
+            # gate even when its proposal-quality severity is P0.  Preserve the
+            # P0 finding as the gate reason; do not turn an actionable gate into
+            # an unrecoverable workflow dead end.
+            output["status"] = "NEED_USER_INPUT"
         elif any(f.severity == "P1" and f.blocking for f in findings):
             output["status"] = "REVISE"
         result = output.get("result")

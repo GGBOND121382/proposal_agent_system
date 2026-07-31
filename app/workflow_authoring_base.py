@@ -237,7 +237,7 @@ class WorkflowAuthoringMixin:
         """Regenerate a producer object rejected by deterministic quality checks."""
         options = state.get("options") or {}
         producer_phase = self.SECTION_PRODUCER_PHASES.get(producer_prompt)
-        if not bool(options.get("acceptance_run")) or not producer_phase:
+        if not producer_phase:
             return False
         findings = [
             item
@@ -250,7 +250,14 @@ class WorkflowAuthoringMixin:
         section_id = str(state.get("active_section_id") or "")
         round_key = f"section:{section_id}:{producer_prompt}"
         rounds = state.setdefault("acceptance_regeneration_rounds", {})
-        limit = max(0, min(int(options.get("acceptance_regeneration_limit", 2)), 3))
+        default_limit = 2
+        limit = max(
+            0,
+            min(
+                int(options.get("acceptance_regeneration_limit", default_limit)),
+                3,
+            ),
+        )
         if int(rounds.get(round_key, 0)) >= limit:
             return False
         rounds[round_key] = int(rounds.get(round_key, 0)) + 1
@@ -271,8 +278,8 @@ class WorkflowAuthoringMixin:
         """Run an isolated, recoverable producer/critic/repair chain for each section.
 
         The chain is:
-        Blueprint -> Blueprint Critic -> at most one Targeted Repair -> re-review
-        -> Content -> Content Critic -> at most one Targeted Repair -> re-review
+        Blueprint -> Blueprint Critic -> bounded Targeted Repair -> re-review
+        -> Content -> Content Critic -> bounded Targeted Repair -> re-review
         -> Expression Polish -> Expression Critic.
 
         Progress is persisted after every model run.  A restart re-enters the same
@@ -334,6 +341,28 @@ class WorkflowAuthoringMixin:
                     self._update(wf, state=state)
                     continue
 
+                if result["status"] == "NEED_USER_INPUT":
+                    progress["status"] = "WAITING_GATE"
+                    state["section_input_gate"] = {
+                        "section_id": section_id,
+                        "section_title": section.get("title"),
+                        "phase": phase,
+                        "next_phase": next_phase,
+                        "prompt_id": prompt_id,
+                        "run_id": result["run_id"],
+                    }
+                    self._update(wf, status="RUNNING", state=state)
+                    refreshed = self.get(wf["id"])
+                    self._create_gate(
+                        refreshed,
+                        self.pack.entry(prompt_id).get("next_human_gate")
+                        or "PROJECT_GAP_RESOLUTION",
+                        target_id=result["run_id"],
+                        questions=result["output"].get("user_questions", []),
+                    )
+                    self._update(refreshed, status="WAITING_GATE", state=state)
+                    return self.get(wf["id"])
+
                 if (
                     result["status"] == "REVISE"
                     and self._schedule_acceptance_producer_regeneration(
@@ -387,6 +416,26 @@ class WorkflowAuthoringMixin:
                         _review_envelope, reviewed = await self._execute_section_prompt(
                             wf, state, section, progress, prompt_id, role="INDEPENDENT_REVIEW",
                         )
+                        while (
+                            reviewed["status"] == "REVISE"
+                            and self._can_auto_repair(prompt_id, state)
+                        ):
+                            repaired = await self._auto_repair(
+                                wf, prompt_id, _review_envelope,
+                                reviewed["output"], state,
+                            )
+                            if not repaired:
+                                break
+                            self._append_section_run(
+                                progress, repaired,
+                                prompt_id="P-TARGETED-REPAIR",
+                                role="TARGETED_REPAIR",
+                            )
+                            self._update(wf, state=state)
+                            _review_envelope, reviewed = await self._execute_section_prompt(
+                                wf, state, section, progress, prompt_id,
+                                role="INDEPENDENT_REVIEW",
+                            )
                     except (PromptExecutionError, ValueError, KeyError) as exc:
                         return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}", configuration_error=exc)
                     if reviewed["status"] != "PASS":

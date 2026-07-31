@@ -336,6 +336,131 @@ def test_normalizer_maps_confirmed_fact_source_aliases(runtime):
     assert pack.validate("P-WRITE-CONTENT", "output", normalized) == []
 
 
+def test_argument_repair_context_reconciles_explicit_rq_rc_source_mapping():
+    repaired = {
+        "argument_architecture": {
+            "graph_id": "AG-001",
+            "nodes": [
+                {
+                    "node_id": f"OBJ-{index:03d}",
+                    "node_type": "OBJECTIVE",
+                    "statement": f"Objective {index}",
+                    "status": "PLANNED",
+                    "source_refs": [],
+                }
+                for index in range(1, 5)
+            ] + [{
+                "node_id": "RC-001",
+                "node_type": "WORK_PACKAGE",
+                "statement": "Work package 1",
+                "status": "PLANNED",
+                "source_refs": [],
+            }],
+            "edges": [],
+        },
+        "research_design_matrix": [
+            {
+                "research_question_id": f"RQ-{index:03d}",
+                "work_package_ids": ["RC-001"],
+            }
+            for index in range(1, 5)
+        ],
+    }
+    sections = [{
+        "section_id": "sec-closed-loop",
+        "text": "\n".join(
+            f"| `RQ-{index}` | `OBJ-{index}` | `RC-{index}` |"
+            for index in range(1, 5)
+        ) + "\n" + "\n".join(
+            f"**`RC-{index}` Work package {index}**: definition {index}"
+            for index in range(1, 5)
+        ) + "\n- `BASE-2` Existing software: `UNKNOWN`",
+    }]
+
+    canonical = ContextBuilder._canonicalize_argument_result_from_sections(
+        repaired,
+        sections,
+    )
+
+    graph = canonical["argument_architecture"]
+    node_ids = {node["node_id"] for node in graph["nodes"]}
+    assert {"RC-001", "RC-002", "RC-003", "RC-004", "BASE-002"} <= node_ids
+    assert [
+        row["work_package_ids"]
+        for row in canonical["research_design_matrix"]
+    ] == [["RC-001"], ["RC-002"], ["RC-003"], ["RC-004"]]
+    assert {
+        (edge["source_id"], edge["target_id"])
+        for edge in graph["edges"]
+    } >= {
+        ("OBJ-001", "RC-001"),
+        ("OBJ-002", "RC-002"),
+        ("OBJ-003", "RC-003"),
+        ("OBJ-004", "RC-004"),
+    }
+
+
+def test_argument_context_binds_exact_approved_fact_evidence():
+    argument_result = {
+        "argument_architecture": {
+            "nodes": [{
+                "node_id": "claim-001",
+                "node_type": "CLOSEST_PRIOR_WORK",
+                "statement": "Prior work",
+                "status": "UNKNOWN",
+                "source_refs": [],
+            }],
+        },
+    }
+    source_ref = {
+        "source_id": "public-source-001",
+        "source_type": "PUBLIC_SOURCE",
+        "authority_rank": 85,
+        "security_level": "PUBLIC",
+    }
+    facts = [{
+        "claim_id": "claim-001",
+        "knowledge_status": "DOCUMENT_EXTRACTED",
+        "source_refs": [source_ref],
+    }]
+
+    bound = ContextBuilder._bind_argument_result_evidence(argument_result, facts)
+
+    node = bound["argument_architecture"]["nodes"][0]
+    assert node["status"] == "SUPPORTED"
+    assert node["source_refs"] == [source_ref]
+
+
+def test_revision_plan_normalizer_drops_diagnostic_paths_from_evidence_refs(runtime):
+    _, pack, _, _, _, executor, _, _ = runtime
+    output = pack.replay_output("P-REVISION-PLAN", "normal")
+    output["findings"] = [{
+        "code": "PLAN_TEST_FINDING",
+        "severity": "P2",
+        "category": "PLAN",
+        "target_type": "PROPOSAL_CONTRACT",
+        "target_path_or_span": "proposal_contract.mandatory_sections",
+        "description": "A required section needs revision.",
+        "evidence_refs": [
+            "proposal_contract.mandatory_sections",
+            "section-001",
+        ],
+        "repairable": True,
+        "repair_instruction": "Revise the section plan.",
+        "suggested_route": "PLANNING_AGENT",
+        "blocking": False,
+    }]
+
+    normalized = executor._normalize_output("P-REVISION-PLAN", output)
+
+    assert normalized["findings"][0]["evidence_refs"] == ["section-001"]
+    assert any(
+        "diagnostic field path" in warning
+        for warning in normalized["warnings"]
+    )
+    assert pack.validate("P-REVISION-PLAN", "output", normalized) == []
+
+
 def test_content_normalizer_accepts_only_explicit_nonblocking_test_deferrals(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-WRITE-CONTENT", "normal")
@@ -785,6 +910,173 @@ def test_argument_normalizer_materializes_prior_work_and_team_evidence(runtime):
     assert by_id["EA-009"]["node_type"] == "CLOSEST_PRIOR_WORK"
     assert by_id["EA-009"]["status"] == "UNKNOWN"
     assert "测试基线B9" in by_id["EA-009"]["statement"]
+
+
+def test_argument_normalizer_rebinds_status_sentinels_as_typed_references(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
+    output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
+    envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE")
+    envelope["payload"]["project_definition"] = {
+        "items": [
+            {
+                "item_id": "method-project-1",
+                "item_type": "METHOD",
+                "content": {"name": "structured collaboration method"},
+                "knowledge_status": "USER_ASSERTED",
+                "source_refs": [],
+            },
+            {
+                "item_id": "innovation-project-1",
+                "item_type": "INNOVATION",
+                "content": {"existing_baseline": "fixed serial workflow"},
+                "knowledge_status": "USER_ASSERTED",
+                "source_refs": [],
+            },
+        ]
+    }
+    for row in output["result"]["research_design_matrix"]:
+        row["method_ids"] = ["TO_BE_SELECTED"]
+        row["closest_prior_work_ids"] = ["UNKNOWN"]
+
+    normalized = executor._normalize_output(
+        "P-ARGUMENT-ARCHITECTURE",
+        output,
+        envelope,
+    )
+
+    matrix = normalized["result"]["research_design_matrix"]
+    assert all(row["method_ids"] == ["method-project-1"] for row in matrix)
+    assert all(
+        "closest-innovation-project-1" in row["closest_prior_work_ids"]
+        for row in matrix
+    )
+    assert all("TO_BE_SELECTED" not in row["method_ids"] for row in matrix)
+    assert all("UNKNOWN" not in row["closest_prior_work_ids"] for row in matrix)
+
+
+def test_argument_normalizer_materializes_dangling_design_candidates(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
+    output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
+    envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE")
+    row = output["result"]["research_design_matrix"][0]
+    row["method_ids"] = ["METHOD-PROPOSED"]
+    row["evaluation_ids"] = ["EXP-PROPOSED"]
+
+    normalized = executor._normalize_output(
+        "P-ARGUMENT-ARCHITECTURE",
+        output,
+        envelope,
+    )
+    nodes = {
+        node["node_id"]: node
+        for node in normalized["result"]["argument_architecture"]["nodes"]
+    }
+
+    assert nodes["METHOD-PROPOSED"]["node_type"] == "FORMAL_MODEL"
+    assert nodes["METHOD-PROPOSED"]["status"] == "UNKNOWN"
+    assert nodes["EXP-PROPOSED"]["node_type"] == "EXPERIMENT_DESIGN"
+    assert nodes["EXP-PROPOSED"]["status"] == "UNKNOWN"
+
+
+def test_argument_normalizer_restores_tagged_section_entities(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
+    output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
+    envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE")
+    output["result"]["research_design_matrix"][0]["research_question_id"] = "RQ-002"
+    output["result"]["research_design_matrix"][0]["rq_ids"] = ["RQ-002"]
+    envelope["payload"]["current_sections"] = [{
+        "section_id": "section-loop-test",
+        "text": (
+            "`RC-2` dynamic teaming package\n"
+            "`BASE-2` available software remains UNKNOWN\n"
+            "| `RQ-2` | `OBJ-2` | `RC-2` |"
+        ),
+    }]
+    envelope["payload"]["human_resolutions"] = [{
+        "resolution_id": "human-method-test",
+        "gate_id": "gate-method-test",
+        "answer": {"RC-2": "finite-state dynamic teaming test method"},
+        "decided_by": "pytest",
+        "decided_role": "PROJECT_OWNER",
+    }]
+
+    normalized = executor._normalize_output(
+        "P-ARGUMENT-ARCHITECTURE",
+        output,
+        envelope,
+    )
+    nodes = {
+        node["node_id"]: node
+        for node in normalized["result"]["argument_architecture"]["nodes"]
+    }
+    row = normalized["result"]["research_design_matrix"][0]
+
+    assert nodes["RC-002"]["node_type"] == "WORK_PACKAGE"
+    assert nodes["BASE-002"]["node_type"] == "TEAM_EVIDENCE"
+    assert nodes["BASE-002"]["status"] == "UNKNOWN"
+    assert nodes["method-RC-002"]["node_type"] == "FORMAL_MODEL"
+    assert nodes["method-RC-002"]["status"] == "UNKNOWN"
+    assert row["work_package_ids"] == ["RC-002"]
+    assert row["method_ids"] == ["method-RC-002"]
+
+
+def test_argument_critic_drops_refs_outside_reviewed_entity_catalog(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
+    output = pack.replay_output("P-ARGUMENT-ARCHITECTURE-CRITIC", "normal")
+    envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
+    output["result"]["checked_node_ids"].append("RC-NOT-VISIBLE")
+    output["result"]["chain_checks"][0]["source_ids"].append("RC-NOT-VISIBLE")
+
+    normalized = executor._normalize_output(
+        "P-ARGUMENT-ARCHITECTURE-CRITIC",
+        output,
+        envelope,
+    )
+
+    assert "RC-NOT-VISIBLE" not in normalized["result"]["checked_node_ids"]
+    assert "RC-NOT-VISIBLE" not in normalized["result"]["chain_checks"][0]["source_ids"]
+
+
+def test_argument_critic_fills_action_for_failed_quality_dimension(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
+    output = pack.replay_output("P-ARGUMENT-ARCHITECTURE-CRITIC", "normal")
+    envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
+    dimension = output["result"]["quality_dimensions"][0]
+    dimension["passed"] = False
+    dimension["score"] = 2
+    dimension["required_action"] = None
+
+    normalized = executor._normalize_output(
+        "P-ARGUMENT-ARCHITECTURE-CRITIC",
+        output,
+        envelope,
+    )
+
+    assert normalized["result"]["quality_dimensions"][0]["required_action"]
+
+
+def test_argument_block_with_blocking_questions_routes_to_human_gate(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
+    output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
+    output["status"] = "BLOCK"
+    output["user_questions"] = [{
+        "question_id": "UQ-TEST",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充测试占位输入。",
+        "reason": "缺少继续运行所需的测试信息。",
+        "target_paths": ["$.payload.project_subgraph"],
+        "answer_schema": {"type": "OBJECT", "allowed_values": []},
+        "blocking": True,
+        "priority": "P0",
+    }]
+
+    normalized = executor._normalize_output(
+        "P-ARGUMENT-ARCHITECTURE",
+        output,
+        pack.replay_input("P-ARGUMENT-ARCHITECTURE"),
+    )
+
+    assert normalized["status"] == "NEED_USER_INPUT"
 
 
 def test_project_definition_normalizes_deterministic_model_fields(runtime):

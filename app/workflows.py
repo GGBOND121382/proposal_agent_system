@@ -121,6 +121,25 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 bindings[required_type] = str(row["id"])
             else:
                 missing.append(required_type)
+        # WF-3 is optional for authoring, but an existing completed and approved
+        # research workflow is still a valid evidence source. Freeze it into the
+        # WF-4 lineage even when the caller did not make public research mandatory.
+        if (
+            workflow_type == "WF-4_PROPOSAL_AUTHORING"
+            and "WF-3_HYBRID_ONLINE_ASSIST" not in bindings
+        ):
+            optional_public_research = self.db.fetchone(
+                """SELECT id FROM workflows
+                    WHERE project_id=?
+                      AND workflow_type='WF-3_HYBRID_ONLINE_ASSIST'
+                      AND status='COMPLETED'
+                    ORDER BY updated_at DESC LIMIT 1""",
+                (project_id,),
+            )
+            if optional_public_research:
+                bindings["WF-3_HYBRID_ONLINE_ASSIST"] = str(
+                    optional_public_research["id"]
+                )
         return bindings, missing
 
     @staticmethod
@@ -491,13 +510,111 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             state = wf["state"]
             step_key = str(wf["current_step"])
             steps = WORKFLOWS[wf["workflow_type"]]
+            normalizer_version = str(
+                getattr(self.executor, "output_normalizer_version", "") or ""
+            )
+            current_step_result = (state.get("step_results") or {}).get(step_key)
+            if (
+                wf["current_step"] < len(steps)
+                and isinstance(current_step_result, dict)
+                and current_step_result.get("status") == "BLOCK"
+                and normalizer_version
+            ):
+                migration_versions = state.setdefault(
+                    "business_block_migration_versions",
+                    {},
+                )
+                run = self.db.fetchone(
+                    "SELECT output_json FROM prompt_runs WHERE id=?",
+                    (current_step_result.get("run_id"),),
+                )
+                try:
+                    blocked_output = json.loads((run or {}).get("output_json") or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    blocked_output = {}
+                blocking_questions = [
+                    question
+                    for question in blocked_output.get("user_questions") or []
+                    if isinstance(question, dict) and bool(question.get("blocking"))
+                ]
+                if (
+                    blocking_questions
+                    and str(migration_versions.get(step_key) or "")
+                    != normalizer_version
+                ):
+                    # A BLOCK that already contains an actionable, blocking
+                    # project-owner question is a human gate, not an
+                    # unrecoverable runtime dead end.  Reclassify workflow
+                    # control state without mutating the immutable historical
+                    # model run or calling the provider again.
+                    current_step_result["status"] = "NEED_USER_INPUT"
+                    migration_versions[step_key] = normalizer_version
+                    state["business_block_migration"] = {
+                        "step": int(step_key),
+                        "prompt_id": current_step_result.get("prompt_id"),
+                        "run_id": current_step_result.get("run_id"),
+                        "from_status": "BLOCK",
+                        "to_status": "NEED_USER_INPUT",
+                        "output_normalizer_version": normalizer_version,
+                        "reason": "blocking user questions require an actionable human gate",
+                        "migrated_at": utc_now(),
+                    }
+                    state.pop("last_error", None)
+                    self._update(wf, status="RUNNING", state=state)
+                    refreshed = self.get(workflow_id)
+                    prompt_id = str(current_step_result.get("prompt_id") or "")
+                    gate_type = (
+                        self.pack.entry(prompt_id).get("next_human_gate")
+                        if prompt_id
+                        else None
+                    ) or "PROJECT_GAP_RESOLUTION"
+                    self._create_gate(
+                        refreshed,
+                        gate_type,
+                        target_id=str(current_step_result.get("run_id") or workflow_id),
+                        questions=blocked_output.get("user_questions", []),
+                    )
+                    self._update(refreshed, status="WAITING_GATE", state=state)
+                    self.db.audit(
+                        "BUSINESS_BLOCK_MIGRATED_TO_HUMAN_GATE",
+                        project_id=wf["project_id"],
+                        object_id=workflow_id,
+                        metadata=state["business_block_migration"],
+                    )
+                    return self.get(workflow_id)
             retries = state.setdefault("technical_retry_attempts", {})
             retry_limit = 6 if state.get("options", {}).get("acceptance_run") else 2
+            retry_key = step_key
             current_prompt_id = (
                 str(steps[wf["current_step"]].get("prompt_id") or "")
                 if wf["current_step"] < len(steps)
                 else ""
             )
+            if (
+                not current_prompt_id
+                and wf["current_step"] < len(steps)
+                and steps[wf["current_step"]].get("type") == "WRITE_SECTIONS"
+            ):
+                active_section_id = str(state.get("active_section_id") or "")
+                active_progress = (
+                    (state.get("section_progress") or {}).get(active_section_id)
+                    if active_section_id
+                    else None
+                )
+                active_phase = (
+                    str(active_progress.get("phase") or "")
+                    if isinstance(active_progress, dict)
+                    else ""
+                )
+                phase_prompt = getattr(self, "SECTION_PHASES", {}).get(
+                    active_phase
+                )
+                if phase_prompt:
+                    current_prompt_id = str(phase_prompt[0] or "")
+                if active_section_id and active_phase:
+                    retry_key = (
+                        f"{step_key}:{active_section_id}:{active_phase}"
+                    )
             current_scope = f"stage:{current_prompt_id}" if current_prompt_id else ""
             has_current_deterministic_blocker = any(
                 str((record.get("finding") or {}).get("code") or "").startswith("QG_")
@@ -514,10 +631,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     "确定性质量校验" in str(state.get("last_error") or "")
                     or has_current_deterministic_blocker
                 )
-                and int(retries.get(step_key, 0)) < retry_limit
-            )
-            normalizer_version = str(
-                getattr(self.executor, "output_normalizer_version", "") or ""
+                and int(retries.get(retry_key, 0)) < retry_limit
             )
             migration_versions = state.setdefault(
                 "contract_migration_retry_versions",
@@ -540,7 +654,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 )
             contract_migration_retryable = (
                 failed_provider_output_exists
-                and str(migration_versions.get(step_key) or "") != normalizer_version
+                and str(migration_versions.get(retry_key) or "") != normalizer_version
             )
             technical_retryable = (
                 wf["current_step"] < len(steps)
@@ -549,7 +663,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     or deterministic_recheck
                 )
                 and (
-                    int(retries.get(step_key, 0)) < retry_limit
+                    int(retries.get(retry_key, 0)) < retry_limit
                     or contract_migration_retryable
                 )
             )
@@ -561,15 +675,16 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 return wf
             if technical_retryable:
                 if contract_migration_retryable:
-                    migration_versions[step_key] = normalizer_version
+                    migration_versions[retry_key] = normalizer_version
                     state["contract_migration_recovery"] = {
                         "step": int(step_key),
+                        "retry_key": retry_key,
                         "prompt_id": current_prompt_id,
                         "output_normalizer_version": normalizer_version,
                         "reason": "revalidate persisted provider output under the upgraded contract layer",
                     }
                 else:
-                    retries[step_key] = int(retries.get(step_key, 0)) + 1
+                    retries[retry_key] = int(retries.get(retry_key, 0)) + 1
                 if deterministic_recheck:
                     previous = state.get("step_results", {}).pop(step_key)
                     state.setdefault("superseded_step_results", {}).setdefault(
@@ -629,8 +744,18 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                             source="PUBLIC_SEARCH_RUNTIME",
                         )
                     state["last_error"] = str(exc)
+                    state["public_research_failure"] = {
+                        "category": str(getattr(exc, "category", "RUNTIME") or "RUNTIME"),
+                        "error_code": str(getattr(exc, "error_code", "PUBLIC_RESEARCH_RUNTIME_ERROR") or "PUBLIC_RESEARCH_RUNTIME_ERROR"),
+                        "message": str(exc),
+                        "details": dict(getattr(exc, "details", {}) or {}),
+                        "step": int(wf["current_step"]),
+                        "recorded_at": utc_now(),
+                    }
                     self._update(wf, status="BLOCKED", state=state)
                     return self.get(workflow_id)
+                state.pop("public_research_failure", None)
+                state.pop("last_error", None)
                 wf["current_step"] += 1
                 self._update(wf, current_step=wf["current_step"], state=state)
                 continue

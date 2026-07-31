@@ -2,7 +2,7 @@
 
 ## 元数据
 
-- 版本：`2.0.0`
+- 版本：`2.1.0`
 - 执行角色：`Public Research Agent`
 - 执行环境：`ONLINE_PUBLIC`
 - 模型配置：`public_research`
@@ -38,8 +38,8 @@
 ## 执行步骤
 
 1. 读取并严格继承 `safe_online_package_content` 中批准的任务描述、查询边界和禁止推断项。
-2. 在批准范围内分解研究问题；查询应覆盖任务包中的全部核心主题。
-3. 生成不含项目实体的查询；任务包已经给出的查询可原样保留或仅做不扩域的细化。
+2. 在批准范围内分解研究问题；保持 `research_questions` 的稳定顺序。
+3. 生成不含项目实体的查询；任务包已经给出的查询可原样保留或仅做不扩域的细化。每条查询必须输出为对象，包含稳定 `query_id`、查询文本 `query` 和 `linked_question_indexes`。`linked_question_indexes` 使用从 0 开始的研究问题数组下标，必须至少绑定一个真实存在的研究问题。查询可以与研究问题使用不同语言，绑定关系必须依靠该结构字段表达，禁止依靠关键词重合度或语言相同与否推断。
 4. 规定优先官方和一手来源。
 5. 定义时间范围和冲突处理。
 6. 明确不得推断内部项目。
@@ -58,6 +58,10 @@
 
 - `PUBLIC_PLAN_SCOPE_EXCESS`
 - `PUBLIC_PLAN_WEAK_SOURCE_STRATEGY`
+- `RESEARCH_PLAN_INVALID_QUERY_BINDING`
+- `RESEARCH_PLAN_UNBOUND_QUERY`
+- `RESEARCH_PLAN_DUPLICATE_QUESTION`
+- `RESEARCH_PLAN_DUPLICATE_QUERY_ID`
 
 Finding必须包含严重级别、类别、目标路径、证据引用、是否可修复、修复指令和路由。不得仅给笼统评价。
 
@@ -97,6 +101,8 @@ Finding必须包含严重级别、类别、目标路径、证据引用、是否�
 ## 输出字段语义
 
 - `result`只保存本Prompt职责范围内的候选或审查结论。
+- `result.binding_contract_version` 固定为 `1.0`。
+- `result.queries` 中每项必须是 `{query_id, query, linked_question_indexes}` 对象；不得退化为字符串数组。跨语言查询必须通过 `linked_question_indexes` 显式关联研究问题。
 - `findings`保存可定位、可分级的问题；P0/P1必须影响status。
 - `unresolved_items`保存当前无法由本Prompt解决的缺口或冲突。
 - `user_questions`必须是用户可以直接回答的具体问题。
@@ -105,4 +111,4 @@ Finding必须包含严重级别、类别、目标路径、证据引用、是否�
 
 ## 输出要求
 
-只返回符合 `schemas/prompts/public_research_plan_output.schema.json` 的 JSON 对象。`prompt_id` 必须为 `P-PUBLIC-RESEARCH-PLAN`，`prompt_version` 必须为 `2.0.0`。不得使用Markdown代码块，不得在JSON前后添加说明。
+只返回符合 `schemas/prompts/public_research_plan_output.schema.json` 的 JSON 对象。`prompt_id` 必须为 `P-PUBLIC-RESEARCH-PLAN`，`prompt_version` 必须为 `2.1.0`。不得使用Markdown代码块，不得在JSON前后添加说明。

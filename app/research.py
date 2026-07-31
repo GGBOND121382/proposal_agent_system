@@ -12,7 +12,80 @@ from .transport_optimization_application_content import REF_CATALOG as TRANSPORT
 
 
 class PublicResearchError(RuntimeError):
-    pass
+    category = "RUNTIME"
+    error_code = "PUBLIC_RESEARCH_RUNTIME_ERROR"
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = dict(details or {})
+
+
+class PublicResearchConfigurationError(PublicResearchError):
+    category = "CONFIGURATION"
+    error_code = "PUBLIC_RESEARCH_CONFIGURATION_ERROR"
+
+
+class PublicResearchPlanError(PublicResearchError):
+    category = "PLAN_CONTRACT"
+    error_code = "PUBLIC_RESEARCH_PLAN_CONTRACT_ERROR"
+
+
+class PublicResearchRetrievalError(PublicResearchError):
+    category = "RETRIEVAL"
+    error_code = "PUBLIC_RESEARCH_RETRIEVAL_ERROR"
+
+
+class PublicResearchSecurityError(PublicResearchError):
+    category = "SECURITY"
+    error_code = "PUBLIC_RESEARCH_SECURITY_ERROR"
+
+
+class PublicResearchIntegrityError(PublicResearchError):
+    category = "INTEGRITY"
+    error_code = "PUBLIC_RESEARCH_INTEGRITY_ERROR"
+
+
+def _classified_cause(exc: BaseException) -> BaseException:
+    """Return the nearest machine-classified cause, not merely the deepest one.
+
+    Archive errors are often raised ``from`` low-level JSON, HTTP or parsing
+    exceptions.  Walking blindly to the deepest exception discards the typed
+    CONFIGURATION / PLAN_CONTRACT / SECURITY category and recreates the same
+    WAITING_CONFIGURATION misclassification through string matching.
+    """
+    current: BaseException = exc
+    visited: set[int] = set()
+    generic_classified: BaseException | None = None
+    deepest: BaseException = exc
+    while id(current) not in visited:
+        visited.add(id(current))
+        deepest = current
+        category = str(getattr(current, "category", "") or "").upper()
+        if category and category != "RUNTIME":
+            return current
+        if category and generic_classified is None:
+            generic_classified = current
+        next_exc = current.__cause__ or current.__context__
+        if next_exc is None:
+            break
+        current = next_exc
+    return generic_classified or deepest
+
+
+def _facade_error(exc: BaseException) -> PublicResearchError:
+    root = _classified_cause(exc)
+    category = str(getattr(root, "category", "") or "").upper()
+    details = dict(getattr(root, "details", {}) or {})
+    message = str(root or exc)
+    error_types = {
+        "CONFIGURATION": PublicResearchConfigurationError,
+        "PLAN_CONTRACT": PublicResearchPlanError,
+        "RETRIEVAL": PublicResearchRetrievalError,
+        "SECURITY": PublicResearchSecurityError,
+        "INTEGRITY": PublicResearchIntegrityError,
+    }
+    error_type = error_types.get(category, PublicResearchError)
+    return error_type(message, details=details)
 
 
 class PublicResearchService:
@@ -112,9 +185,9 @@ class PublicResearchService:
         security_level: str = "PUBLIC",
     ) -> dict[str, Any]:
         if self.settings.public_search_provider == "disabled":
-            raise PublicResearchError("PUBLIC_SEARCH_PROVIDER is disabled")
+            raise PublicResearchConfigurationError("PUBLIC_SEARCH_PROVIDER is disabled")
         if self.skill_executor is None:
-            raise PublicResearchError("Public research skill executor is not configured")
+            raise PublicResearchConfigurationError("Public research skill executor is not configured")
         try:
             result = self.skill_executor.execute(
                 "public_research.archive",
@@ -134,11 +207,12 @@ class PublicResearchService:
                 security_level=security_level,
             )
         except SkillExecutionError as exc:
-            raise PublicResearchError(str(exc)) from exc
+            mapped = _facade_error(exc)
+            raise mapped from exc
         output = result.output
         verification = output.get("archive_verification") or verify_research_archive(output.get("archive_manifest", ""))
         if verification.get("status") != "PASS":
-            raise PublicResearchError("Public research archive failed hash verification")
+            raise PublicResearchIntegrityError("Public research archive failed hash verification", details={"verification": verification})
         return output
 
     def validate_synthesis(self, synthesis: dict[str, Any], research_output: dict[str, Any]) -> dict[str, Any]:

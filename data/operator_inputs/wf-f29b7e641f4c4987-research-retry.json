@@ -1,0 +1,148 @@
+{
+  "schema_version": "1.0",
+  "connector": "codex-test-operator-verified-public-sources",
+  "run_id": "connector-wf-f29b7e641f4c4987-retry-1",
+  "created_at": "2026-07-31T02:30:00Z",
+  "responses": [
+    {
+      "query": "human-AI collaboration evaluation framework metrics",
+      "retrieved_at": "2026-07-31T02:30:00Z",
+      "results": [
+        {
+          "source_id": "public-src-haic-framework-2024",
+          "title": "Evaluating Human-AI Collaboration: A Review and Methodological Framework",
+          "url": "https://arxiv.org/abs/2407.19098",
+          "published_at": "2024-07-09",
+          "publisher": "arXiv",
+          "authors": ["George Fragiadakis", "Christos Diou", "George Kousiouris", "Mara Nikolaidou"],
+          "content_text": "A review of human-AI collaboration evaluation approaches that proposes a decision-tree framework for selecting quantitative and qualitative metrics across AI-centric, human-centric, and symbiotic collaboration modes. It emphasizes that evaluation must cover the reciprocal human-system interaction and must be adapted to the application domain.",
+          "authority_rank": 82,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        },
+        {
+          "source_id": "public-src-hai-survey-2021",
+          "title": "Towards a Science of Human-AI Decision Making: A Survey of Empirical Studies",
+          "url": "https://arxiv.org/abs/2112.11471",
+          "published_at": "2021-12-21",
+          "publisher": "arXiv",
+          "authors": ["Vivian Lai", "Chacha Chen", "Q. Vera Liao", "Alison Smith-Renner", "Chenhao Tan"],
+          "content_text": "A survey of more than one hundred empirical human-subject studies of AI-assisted decision making. It organizes study designs by decision task, AI model and assistance element, and evaluation metric, and identifies gaps that limit comparability and generalization across experiments.",
+          "authority_rank": 85,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        }
+      ]
+    },
+    {
+      "query": "human-AI decision making appropriate reliance measurement",
+      "retrieved_at": "2026-07-31T02:30:00Z",
+      "results": [
+        {
+          "source_id": "public-src-appropriate-reliance-2022",
+          "title": "Should I Follow AI-based Advice? Measuring Appropriate Reliance in Human-AI Decision-Making",
+          "url": "https://arxiv.org/abs/2204.06916",
+          "published_at": "2022-04-14",
+          "publisher": "arXiv",
+          "authors": ["Max Schemmer", "Patrick Hemmer", "Niklas Kühl", "Carina Benz", "Gerhard Satzger"],
+          "content_text": "The paper defines appropriate reliance as correctly relying on accurate AI advice while self-relying when advice is incorrect. It proposes a two-dimensional measurement concept that separates discrimination of advice quality from the corresponding reliance behavior.",
+          "authority_rank": 85,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        },
+        {
+          "source_id": "public-src-human-calibration-2023",
+          "title": "Human-Aligned Calibration for AI-Assisted Decision Making",
+          "url": "https://arxiv.org/abs/2306.00074",
+          "published_at": "2023-05-31",
+          "publisher": "arXiv",
+          "authors": ["Nina L. Corvelo Benz", "Manuel Gomez Rodriguez"],
+          "content_text": "The paper studies confidence calibration for AI decision support and argues that confidence values should align with a decision maker's own confidence. Experiments across four AI-assisted decision tasks indicate that human-aligned confidence can make useful reliance policies easier to discover and improve decisions.",
+          "authority_rank": 85,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        }
+      ]
+    },
+    {
+      "query": "human-AI team complementarity and comparison baselines",
+      "retrieved_at": "2026-07-31T02:30:00Z",
+      "results": [
+        {
+          "source_id": "public-src-complementarity-2024",
+          "title": "Complementarity in Human-AI Collaboration: Concept, Sources, and Evidence",
+          "url": "https://arxiv.org/abs/2404.00029",
+          "published_at": "2024-03-21",
+          "publisher": "arXiv",
+          "authors": ["Patrick Hemmer", "Max Schemmer", "Niklas Kühl", "Michael Vössing", "Gerhard Satzger"],
+          "content_text": "The work formalizes complementary team performance as performance that neither the human nor AI can attain individually. It identifies information and capability asymmetry as sources of complementarity and reports two empirical studies, giving an explicit basis for human-only, AI-only, and human-AI comparison conditions.",
+          "authority_rank": 88,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        },
+        {
+          "source_id": "public-src-ai-delegation-2023",
+          "title": "Human-AI Collaboration: The Effect of AI Delegation on Human Task Performance and Task Satisfaction",
+          "url": "https://arxiv.org/abs/2303.09224",
+          "published_at": "2023-03-16",
+          "publisher": "arXiv",
+          "authors": ["Patrick Hemmer", "Monika Westphal", "Max Schemmer", "Sebastian Vetter", "Michael Vössing", "Gerhard Satzger"],
+          "content_text": "An experimental study with 196 participants compares delegated human-AI work with alternative task-allocation conditions. It reports task-performance and task-satisfaction outcomes and examines self-efficacy as a mechanism, providing an empirical baseline design for collaboration advantages.",
+          "authority_rank": 86,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        }
+      ]
+    },
+    {
+      "query": "human-AI teaming surveys and experimental study design",
+      "retrieved_at": "2026-07-31T02:30:00Z",
+      "results": [
+        {
+          "source_id": "public-src-hai-lptm-survey-2024",
+          "title": "A Survey on Human-AI Teaming with Large Pre-Trained Models",
+          "url": "https://arxiv.org/abs/2403.04931",
+          "published_at": "2024-03-07",
+          "publisher": "arXiv",
+          "authors": ["Vanshika Vats", "Marzia Binta Nizam", "Minghao Liu", "Ziyuan Wang"],
+          "content_text": "A broad survey of human-AI teaming with large pre-trained models. It reviews teaming mechanisms, model improvement, effective collaboration, ethical concerns, and application domains, and is useful for defining scope and limitations rather than for claiming a single validated metric.",
+          "authority_rank": 80,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        },
+        {
+          "source_id": "public-src-crew-benchmark-2024",
+          "title": "CREW: Facilitating Human-AI Teaming Research",
+          "url": "https://arxiv.org/abs/2408.00170",
+          "published_at": "2024-07-31",
+          "publisher": "arXiv",
+          "authors": ["Lingyu Zhang", "Zhengran Ji", "Boyuan Chen"],
+          "content_text": "CREW is a modular platform for real-time human-AI teaming research with cognitive tasks, physiological signal recording, and human-guided reinforcement-learning baselines. The authors report fifty human-subject studies used to check the benchmark, making it relevant to repeatable experimental evaluation.",
+          "authority_rank": 84,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        }
+      ]
+    },
+    {
+      "query": "human-AI team trust alignment and real-time benchmark",
+      "retrieved_at": "2026-07-31T02:30:00Z",
+      "results": [
+        {
+          "source_id": "public-src-information-asymmetry-2022",
+          "title": "On the Effect of Information Asymmetry in Human-AI Teams",
+          "url": "https://arxiv.org/abs/2205.01467",
+          "published_at": "2022-05-03",
+          "publisher": "arXiv",
+          "authors": ["Patrick Hemmer", "Max Schemmer", "Niklas Kühl", "Michael Vössing", "Gerhard Satzger"],
+          "content_text": "The study analyzes how asymmetric information and capabilities affect human-AI team performance. It is relevant to complementary performance, task allocation, and the conditions under which a team may outperform either member working alone.",
+          "authority_rank": 86,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        },
+        {
+          "source_id": "public-src-agent-alignment-2024",
+          "title": "Designing for Human-Agent Alignment: Understanding what humans want from their agents",
+          "url": "https://arxiv.org/abs/2404.04289",
+          "published_at": "2024-04-04",
+          "publisher": "arXiv",
+          "authors": ["Nitesh Goyal", "Minsuk Chang", "Michael Terry"],
+          "content_text": "An empirical study of expectations for autonomous agents that identifies dimensions of human-agent alignment. It supports evaluation of preference alignment and interaction quality but should be combined with objective performance measures rather than treated as a complete decision-advantage metric.",
+          "authority_rank": 84,
+          "verification": {"status": "PRIMARY_SOURCE_METADATA_VERIFIED", "verified_by": "codex-test-operator"}
+        }
+      ]
+    }
+  ]
+}

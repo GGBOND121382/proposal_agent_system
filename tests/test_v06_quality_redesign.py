@@ -104,6 +104,11 @@ def test_argument_critic_allows_checked_node_superset():
         "question-1",
         *(node["node_id"] for node in nodes),
     }
+    architecture["argument_architecture"]["nodes"].append({
+        "node_id": "item-system-redundant",
+        "node_type": "DELIVERABLE",
+        "status": "UNKNOWN",
+    })
     required_dimensions = [
         "CENTRAL_THESIS",
         "ARGUMENT_CHAIN",

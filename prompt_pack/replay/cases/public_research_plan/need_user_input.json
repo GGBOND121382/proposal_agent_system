@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-PUBLIC-RESEARCH-PLAN",
-    "prompt_version": "2.0.0",
+    "prompt_version": "2.1.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "HYBRID_ONLINE_ASSIST",
@@ -72,7 +72,7 @@
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-PUBLIC-RESEARCH-PLAN",
-    "prompt_version": "2.0.0",
+    "prompt_version": "2.1.0",
     "status": "NEED_USER_INPUT",
     "result": {
       "plan_id": "rplan-001",
@@ -81,7 +81,13 @@
         "公开评价方法有哪些？"
       ],
       "queries": [
-        "公开评价方法"
+        {
+          "query_id": "query-001",
+          "query": "公开评价方法",
+          "linked_question_indexes": [
+            0
+          ]
+        }
       ],
       "source_priorities": [
         "官方标准"
@@ -92,7 +98,8 @@
       ],
       "prohibited_inferences": [
         "不得推断内部项目"
-      ]
+      ],
+      "binding_contract_version": "1.0"
     },
     "findings": [],
     "unresolved_items": [

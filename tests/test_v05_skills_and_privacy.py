@@ -102,7 +102,9 @@ def test_public_research_plan_inherits_transport_safe_package():
     }
     assert pack.validate("P-PUBLIC-RESEARCH-PLAN", "input", envelope) == []
     output = SimulatedLLM(pack).invoke("P-PUBLIC-RESEARCH-PLAN", envelope)
-    assert output["result"]["queries"] == approved_queries
+    assert [item["query"] for item in output["result"]["queries"]] == approved_queries
+    assert output["result"]["binding_contract_version"] == "1.0"
+    assert all(item["linked_question_indexes"] for item in output["result"]["queries"])
     assert "车辆路径、时间窗、取送和多仓问题有哪些精确与启发式方法？" in output["result"]["research_questions"]
 
 

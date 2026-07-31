@@ -36,4 +36,4 @@ models:
   defaults:
     temperature: 0.1
     top_p: 0.9
-    max_output_tokens: 8000
+    max_output_tokens: 24000

@@ -119,6 +119,28 @@ def build_engine(settings: Settings, pack: PromptPack, db: Database, executor) -
     )
 
 
+def test_wf4_freezes_completed_wf3_as_optional_evidence(live_env) -> None:
+    settings, pack, db = live_env
+    project_id = create_project(db)
+    wf1_id = add_completed_workflow(db, project_id, "WF-1_PROJECT_INTAKE")
+    wf2_id = add_completed_workflow(db, project_id, "WF-2_TEMPLATE_EXTRACTION")
+    wf3_id = add_completed_workflow(db, project_id, "WF-3_HYBRID_ONLINE_ASSIST")
+    engine = build_engine(settings, pack, db, NeverExecutor())
+
+    bindings, missing = engine._resolve_prerequisite_workflows(
+        project_id,
+        "WF-4_PROPOSAL_AUTHORING",
+        {},
+    )
+
+    assert missing == []
+    assert bindings == {
+        "WF-1_PROJECT_INTAKE": wf1_id,
+        "WF-2_TEMPLATE_EXTRACTION": wf2_id,
+        "WF-3_HYBRID_ONLINE_ASSIST": wf3_id,
+    }
+
+
 def test_wf3_disabled_search_starts_waiting_configuration_without_model_call(live_env) -> None:
     settings, pack, db = live_env
     project_id = create_project(db)
@@ -182,6 +204,36 @@ def test_prompt_endpoint_error_becomes_waiting_configuration(live_env) -> None:
     assert executor.calls == 1
     assert result["state"]["configuration_wait"]["issues"][0]["code"] == "MODEL_ENDPOINT_RUNTIME_UNAVAILABLE"
     assert not result["state"].get("technical_retry_attempts")
+
+
+def test_llm_stream_timeout_is_not_misclassified_as_public_search(live_env) -> None:
+    settings, pack, db = live_env
+    preflight = RuntimeDependencyPreflight(settings, pack, db)
+
+    report = preflight.report_from_runtime_error(
+        "LLM stream exceeded the total timeout of 600 seconds",
+        dependency_hint="OFFLINE_LOCAL",
+        scope="PROMPT_RUNTIME:P-ARGUMENT-ARCHITECTURE",
+    )
+
+    assert report is not None
+    assert report.blocking_issues[0].code == "MODEL_ENDPOINT_RUNTIME_UNAVAILABLE"
+    assert report.blocking_issues[0].dependency == "MODEL_ENDPOINT"
+
+
+def test_online_public_prompt_preflight_uses_sanitized_execution_level(live_env) -> None:
+    settings, pack, db = live_env
+    project_id = create_project(db)
+    preflight = RuntimeDependencyPreflight(settings, pack, db)
+
+    report = preflight._prompt_route_report(
+        project_id,
+        "P-PUBLIC-RESEARCH-SYNTHESIS",
+    )
+
+    assert report.status == "PASS"
+    assert not report.blocking_issues
+    assert report.checks[0]["endpoint_id"] == "online-public-primary"
 
 
 def test_fault_injection_is_reported_before_live_workflow_runs(live_env, monkeypatch) -> None:
@@ -322,3 +374,138 @@ def test_missing_mermaid_runtime_is_reported_without_breaking_skill_registration
                 data_dir=str(tmp_path / "data"),
             ),
         )
+
+
+def test_public_search_plan_contract_error_is_not_configuration(live_env) -> None:
+    from app.research import PublicResearchPlanError
+
+    settings, pack, db = live_env
+    preflight = RuntimeDependencyPreflight(settings, pack, db)
+    error = PublicResearchPlanError(
+        "Research plan validation failed: RESEARCH_PLAN_UNBOUND_QUERY",
+        details={"validation": {"findings": [{"code": "RESEARCH_PLAN_UNBOUND_QUERY"}]}},
+    )
+
+    assert preflight.report_from_runtime_error(
+        error,
+        dependency_hint="PUBLIC_SEARCH",
+        scope="PUBLIC_SEARCH_RUNTIME",
+    ) is None
+
+
+def test_public_search_retrieval_and_integrity_errors_are_not_configuration(live_env) -> None:
+    from app.research import PublicResearchIntegrityError, PublicResearchRetrievalError
+
+    settings, pack, db = live_env
+    preflight = RuntimeDependencyPreflight(settings, pack, db)
+
+    for error in (
+        PublicResearchRetrievalError("No public source could be archived"),
+        PublicResearchIntegrityError("Public research archive failed hash verification"),
+    ):
+        assert preflight.report_from_runtime_error(
+            error,
+            dependency_hint="PUBLIC_SEARCH",
+            scope="PUBLIC_SEARCH_RUNTIME",
+        ) is None
+
+
+def test_typed_public_search_configuration_error_waits_for_configuration(live_env) -> None:
+    from app.research import PublicResearchConfigurationError
+
+    settings, pack, db = live_env
+    preflight = RuntimeDependencyPreflight(settings, pack, db)
+    report = preflight.report_from_runtime_error(
+        PublicResearchConfigurationError("PUBLIC_SEARCH_BASE_URL is empty"),
+        dependency_hint="PUBLIC_SEARCH",
+        scope="PUBLIC_SEARCH_RUNTIME",
+    )
+
+    assert report is not None
+    assert report.blocking_issues[0].dependency == "PUBLIC_SEARCH"
+    assert report.blocking_issues[0].code == "PUBLIC_RESEARCH_CONFIGURATION_ERROR"
+
+
+def test_legacy_plan_contract_wait_resumes_public_search_without_replanning(
+    live_env,
+    monkeypatch,
+) -> None:
+    """An old misclassified plan error must resume at PUBLIC_SEARCH locally.
+
+    The saved research plan is already a completed step.  Once the real search
+    dependency is healthy, resuming the workflow must neither regenerate the plan nor
+    remain in WAITING_CONFIGURATION merely because the old error happened inside the
+    PUBLIC_SEARCH step.
+    """
+    from app.workflow_defs import WORKFLOWS
+
+    old_settings, pack, db = live_env
+    monkeypatch.setenv("PUBLIC_SEARCH_PROVIDER", "searxng")
+    monkeypatch.setenv("PUBLIC_SEARCH_BASE_URL", "http://127.0.0.1:8888")
+    settings = Settings.load()
+    assert settings.db_path == old_settings.db_path
+
+    project_id = create_project(db)
+    prerequisite = add_completed_workflow(db, project_id, "WF-1_PROJECT_INTAKE")
+    workflow_id = new_id("wf")
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-3_HYBRID_ONLINE_ASSIST",
+        "options": {},
+        "step_results": {
+            "0": {"prompt_id": "P-SAFE-ONLINE-PACKAGE", "status": "PASS"},
+            "1": {"prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC", "status": "PASS"},
+            "2": {"prompt_id": "P-PUBLIC-RESEARCH-PLAN", "status": "PASS"},
+        },
+        "repair_attempts": {},
+        "repair_overrides": {},
+        "prerequisite_workflow_ids": {"WF-1_PROJECT_INTAKE": prerequisite},
+        "configuration_wait": {
+            "source": "PUBLIC_SEARCH_RUNTIME",
+            "resume_step": 3,
+            "issues": [{
+                "code": "PUBLIC_SEARCH_RUNTIME_UNAVAILABLE",
+                "dependency": "PUBLIC_SEARCH",
+                "message": "Research plan validation failed: RESEARCH_PLAN_UNBOUND_QUERY",
+            }],
+        },
+        "last_error": "运行依赖未满足：PUBLIC_SEARCH_RUNTIME_UNAVAILABLE",
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            workflow_id,
+            project_id,
+            "WF-3_HYBRID_ONLINE_ASSIST",
+            "WAITING_CONFIGURATION",
+            3,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+
+    executor = NeverExecutor()
+    engine = build_engine(settings, pack, db, executor)
+    engine.context_builder._result = lambda *args, **kwargs: {}
+    calls: list[str] = []
+
+    async def fake_public_search(wf: dict[str, Any], workflow_state: dict[str, Any]) -> None:
+        calls.append(wf["id"])
+        workflow_state["public_research"] = {"mode": "TEST", "sources": []}
+
+    monkeypatch.setattr(engine, "_run_public_search", fake_public_search)
+    monkeypatch.setitem(
+        WORKFLOWS,
+        "WF-3_HYBRID_ONLINE_ASSIST",
+        WORKFLOWS["WF-3_HYBRID_ONLINE_ASSIST"][:4],
+    )
+
+    resumed = asyncio.run(engine.advance(workflow_id))
+
+    assert resumed["status"] == "COMPLETED"
+    assert resumed["current_step"] == 4
+    assert calls == [workflow_id]
+    assert executor.calls == 0
+    assert "configuration_wait" not in resumed["state"]
+    assert resumed["state"]["recovered_from"] == "WAITING_CONFIGURATION"

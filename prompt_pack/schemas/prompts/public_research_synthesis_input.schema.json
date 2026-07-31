@@ -141,8 +141,41 @@
             "queries": {
               "type": "array",
               "items": {
-                "type": "string",
-                "minLength": 1
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "query_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "query": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "linked_question_indexes": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 1,
+                        "uniqueItems": true
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "query_id",
+                      "query",
+                      "linked_question_indexes"
+                    ]
+                  }
+                ]
               },
               "minItems": 1
             },
@@ -177,6 +210,16 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "binding_contract_version": {
+              "anyOf": [
+                {
+                  "const": "1.0"
+                },
+                {
+                  "const": "LEGACY-2.0"
+                }
+              ]
             }
           },
           "additionalProperties": false,

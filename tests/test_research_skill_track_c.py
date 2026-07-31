@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.skills.base import SkillContext
-from app.skills.public_research import PublicResearchArchiveError
+from app.skills.public_research import PublicResearchArchiveError, PublicResearchSecurityError
 from app.skills.research_audit import verify_research_archive
 from app.skills.research_claims import validate_public_claims
 from app.skills.verifiable_public_research import VerifiablePublicResearchArchiveSkill
@@ -33,9 +33,18 @@ def _plan() -> dict:
             "2021—2026年动态运输优化的最近工作、基线方法和局限机制是什么？",
             "官方标准如何规定可核验评价过程？",
         ],
+        "binding_contract_version": "1.0",
         "queries": [
-            "dynamic transportation optimization benchmark review limitations 2021 2026",
-            "official evaluation standard reproducible evidence 2021 2026",
+            {
+                "query_id": "query-001",
+                "query": "dynamic transportation optimization benchmark review limitations 2021 2026",
+                "linked_question_indexes": [0],
+            },
+            {
+                "query_id": "query-002",
+                "query": "official evaluation standard reproducible evidence 2021 2026",
+                "linked_question_indexes": [1],
+            },
         ],
         "source_priorities": ["官方标准", "同行评议论文", "官方项目页面"],
         "time_scope": "2021-01-01/2026-12-31",
@@ -44,16 +53,21 @@ def _plan() -> dict:
     }
 
 
+def _query_texts(plan: dict) -> list[str]:
+    return [item["query"] if isinstance(item, dict) else str(item) for item in plan["queries"]]
+
+
 def _connector_file(tmp_path: Path) -> Path:
     plan = _plan()
+    queries = _query_texts(plan)
     payload = {
         "run_id": "connector-run-c-001",
         "connector": "approved-test-connector",
         "created_at": "2026-07-15T00:00:00Z",
-        "agent_generated_queries": plan["queries"],
+        "agent_generated_queries": queries,
         "responses": [
             {
-                "query": plan["queries"][0],
+                "query": queries[0],
                 "retrieved_at": "2026-07-15T00:00:00Z",
                 "results": [
                     {
@@ -82,7 +96,7 @@ def _connector_file(tmp_path: Path) -> Path:
                 ],
             },
             {
-                "query": plan["queries"][1],
+                "query": queries[1],
                 "retrieved_at": "2026-07-15T00:00:00Z",
                 "results": [
                     {
@@ -316,3 +330,228 @@ def test_c5_innovation_claim_requires_recent_baseline_and_limitation_evidence(tm
     report = validate_public_claims(synthesis, result.output)
     assert report["status"] == "BLOCK"
     assert "PUBLIC_INNOVATION_EVIDENCE_GAP" in {item["code"] for item in report["findings"]}
+
+
+def test_cross_language_legacy_queries_are_not_rejected_by_token_overlap():
+    from app.skills.research_plan import normalize_and_validate_plan
+
+    plan = {
+        "plan_id": "legacy-cross-language",
+        "task_type": "PUBLIC_RESEARCH",
+        "research_questions": [
+            "公开研究中常用的评价方法、基线与局限是什么？",
+            "如何建立可复核的公开证据链？",
+        ],
+        "queries": [
+            "evaluation methods benchmark limitations systematic review",
+            "verifiable public evidence provenance audit trail",
+        ],
+        "source_priorities": ["官方来源", "同行评议论文"],
+        "time_scope": "2021-2026",
+        "evidence_requirements": ["可核验来源"],
+        "prohibited_inferences": ["不得推断内部项目"],
+    }
+
+    normalized, validation = normalize_and_validate_plan(plan, strict=True)
+
+    assert validation["status"] == "WARN"
+    assert "RESEARCH_PLAN_UNBOUND_QUERY" not in {
+        item["code"] for item in validation["findings"]
+    }
+    assert all(item["binding_basis"] == "LEGACY_PLAN_SCOPE" for item in normalized["query_items"])
+
+
+def test_explicit_cross_language_query_bindings_are_language_independent():
+    from app.skills.research_plan import normalize_and_validate_plan
+
+    plan = {
+        "plan_id": "explicit-cross-language",
+        "task_type": "PUBLIC_RESEARCH",
+        "binding_contract_version": "1.0",
+        "research_questions": ["公开评价方法有哪些？", "如何保留证据链？"],
+        "queries": [
+            {
+                "query_id": "query-001",
+                "query": "public evaluation methods benchmark review",
+                "linked_question_indexes": [0],
+            },
+            {
+                "query_id": "query-002",
+                "query": "provenance evidence retention audit trail",
+                "linked_question_indexes": [1],
+            },
+        ],
+        "source_priorities": ["官方来源"],
+        "time_scope": "2021-2026",
+        "evidence_requirements": ["可核验来源"],
+        "prohibited_inferences": ["不得推断内部项目"],
+    }
+
+    normalized, validation = normalize_and_validate_plan(plan, strict=True)
+
+    assert validation["status"] == "PASS"
+    assert [item["linked_question_indexes"] for item in normalized["query_items"]] == [[0], [1]]
+    assert {item["binding_basis"] for item in normalized["query_items"]} == {"EXPLICIT"}
+
+
+def test_new_binding_contract_rejects_missing_or_invalid_indexes():
+    from app.skills.research_plan import normalize_and_validate_plan
+
+    plan = {
+        "plan_id": "bad-binding",
+        "task_type": "PUBLIC_RESEARCH",
+        "binding_contract_version": "1.0",
+        "research_questions": ["公开评价方法有哪些？"],
+        "queries": [
+            {"query_id": "query-001", "query": "public evaluation benchmark", "linked_question_indexes": []},
+            {"query_id": "query-002", "query": "evidence audit trail", "linked_question_indexes": [9]},
+        ],
+        "source_priorities": ["官方来源"],
+        "time_scope": "2021-2026",
+        "evidence_requirements": ["可核验来源"],
+        "prohibited_inferences": ["不得推断内部项目"],
+    }
+
+    _, validation = normalize_and_validate_plan(plan, strict=True)
+    codes = {item["code"] for item in validation["findings"]}
+
+    assert validation["status"] == "BLOCK"
+    assert "RESEARCH_PLAN_UNBOUND_QUERY" in codes
+    assert "RESEARCH_PLAN_INVALID_QUERY_BINDING" in codes
+
+
+def test_legacy_cross_language_plan_reaches_retrieval_without_model_regeneration(tmp_path):
+    connector = _connector_file(tmp_path)
+    legacy = _plan()
+    legacy.pop("binding_contract_version", None)
+    legacy["queries"] = _query_texts(legacy)
+
+    result = VerifiablePublicResearchArchiveSkill(_settings(tmp_path, connector)).run(
+        {
+            "provider": "connector",
+            "connector_file": str(connector),
+            "require_structured_plan": True,
+            "plan": legacy,
+            "max_results": 20,
+        },
+        SkillContext(
+            project_id="project-legacy-cross-language",
+            workflow_id="wf-legacy-cross-language",
+            security_level="PUBLIC",
+            data_dir=str(tmp_path),
+        ),
+    )
+
+    assert result.status == "PASS"
+    assert result.output["plan_validation"]["status"] in {"PASS", "WARN"}
+    assert "RESEARCH_PLAN_UNBOUND_QUERY" not in {
+        item["code"] for item in result.output["plan_validation"]["findings"]
+    }
+    assert result.output["queries"] == legacy["queries"]
+
+
+def test_explicit_binding_contract_rejects_unstable_ids_and_indexes():
+    from app.skills.research_plan import normalize_and_validate_plan
+
+    plan = {
+        "plan_id": "unstable-binding",
+        "task_type": "PUBLIC_RESEARCH",
+        "binding_contract_version": "1.0",
+        "research_questions": ["公开评价方法有哪些？", "公开评价方法有哪些？"],
+        "queries": [
+            {
+                "query_id": "query-001",
+                "query": "public evaluation benchmark review",
+                "linked_question_indexes": [0],
+            },
+            {
+                "query_id": "query-001",
+                "query": "evidence provenance audit trail",
+                "linked_question_indexes": [1.5],
+            },
+        ],
+        "source_priorities": ["官方来源"],
+        "time_scope": "2021-2026",
+        "evidence_requirements": ["可核验来源"],
+        "prohibited_inferences": ["不得推断内部项目"],
+    }
+
+    _, validation = normalize_and_validate_plan(plan, strict=True)
+    codes = {item["code"] for item in validation["findings"]}
+
+    assert validation["status"] == "BLOCK"
+    assert "RESEARCH_PLAN_DUPLICATE_QUESTION" in codes
+    assert "RESEARCH_PLAN_DUPLICATE_QUERY_ID" in codes
+    assert "RESEARCH_PLAN_INVALID_QUERY_BINDING" in codes
+
+
+def test_public_research_facade_preserves_typed_category_across_nested_causes() -> None:
+    from app.research import (
+        PublicResearchConfigurationError as FacadeConfigurationError,
+        _facade_error,
+    )
+    from app.skills.executor import SkillExecutionError
+    from app.skills.public_research import PublicResearchConfigurationError
+
+    try:
+        try:
+            raise ValueError("invalid JSON")
+        except ValueError as low_level:
+            raise PublicResearchConfigurationError(
+                "Connector research file is not readable JSON",
+                details={"path": "connector.json"},
+            ) from low_level
+    except PublicResearchConfigurationError as typed:
+        try:
+            raise SkillExecutionError("public_research.archive failed") from typed
+        except SkillExecutionError as boundary:
+            mapped = _facade_error(boundary)
+
+    assert isinstance(mapped, FacadeConfigurationError)
+    assert mapped.category == "CONFIGURATION"
+    assert mapped.details == {"path": "connector.json"}
+
+
+def test_all_security_rejected_candidates_remain_security_failures(tmp_path: Path) -> None:
+    query = "public benchmark"
+    connector = tmp_path / "private-only-connector.json"
+    connector.write_text(
+        json.dumps(
+            {
+                "run_id": "connector-private-only",
+                "connector": "approved-test-connector",
+                "responses": [
+                    {
+                        "query": query,
+                        "results": [
+                            {
+                                "title": "Local-only source",
+                                "url": "http://127.0.0.1/private",
+                                "content_text": "This must never enter the public archive.",
+                            }
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublicResearchSecurityError) as caught:
+        VerifiablePublicResearchArchiveSkill(_settings(tmp_path, connector)).run(
+            {
+                "provider": "connector",
+                "connector_file": str(connector),
+                "plan": {"queries": [query]},
+            },
+            SkillContext(
+                project_id="project-private-only",
+                workflow_id="wf-private-only",
+                security_level="PUBLIC",
+                data_dir=str(tmp_path),
+            ),
+        )
+
+    assert caught.value.category == "SECURITY"
+    assert caught.value.details["candidate_failures"][0]["category"] == "SECURITY"

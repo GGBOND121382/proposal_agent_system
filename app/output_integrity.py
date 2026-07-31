@@ -89,7 +89,8 @@ _REFERENCE_ARRAY_FIELDS = {
     "checked_relation_ids",
     "invalid_relation_ids",
     "status_upgrade_item_ids",
-    "missing_item_ids",
+    # missing_item_ids names items/fields/types that are absent by definition;
+    # requiring them to resolve to existing entities is self-contradictory.
     "blocking_conflict_ids",
     "claim_ids",
     "conflict_ids",
@@ -108,8 +109,10 @@ _REFERENCE_ARRAY_FIELDS = {
     "required_evidence_ids",
     "unresolved_slot_ids",
     "uncovered_revision_task_ids",
-    "invalid_slot_refs",
-    "critical_unresolved_slot_ids",
+    # invalid_slot_refs and critical_unresolved_slot_ids describe invalid or
+    # unresolved slots and commonly carry diagnostic paths such as
+    # ``paragraph.fact_slots.object-id``. Requiring those descriptors to
+    # resolve as existing entities is self-contradictory.
     "trace_link_ids",
     "advanced_claim_ids",
     "distinguished_from_section_ids",
@@ -225,6 +228,72 @@ def _resolve_source_id_alias(raw_source_id: str, known_ids: Iterable[str]) -> tu
     return None, None
 
 
+def _resolve_reference_id_alias(
+    raw_reference_id: str,
+    known_ids: Iterable[str],
+    *,
+    allow_unresolved_descriptor_suffix: bool = False,
+    allow_entity_field_path: bool = False,
+) -> tuple[str | None, str | None]:
+    resolved, alias_kind = _resolve_source_id_alias(
+        raw_reference_id,
+        known_ids,
+    )
+    if resolved is not None:
+        return resolved, alias_kind
+    raw = str(raw_reference_id or "").strip()
+    if allow_entity_field_path:
+        field_path_candidates = {
+            str(candidate)
+            for candidate in known_ids
+            if any(
+                raw.startswith(str(candidate) + separator)
+                for separator in (".", ":")
+            )
+        }
+        if field_path_candidates:
+            longest = max(len(candidate) for candidate in field_path_candidates)
+            longest_candidates = {
+                candidate
+                for candidate in field_path_candidates
+                if len(candidate) == longest
+            }
+            if len(longest_candidates) == 1:
+                return next(iter(longest_candidates)), "ENTITY_FIELD_PATH"
+    if allow_unresolved_descriptor_suffix:
+        for suffix in (
+            "-ABSENT-FACT",
+            "-UNKNOWN",
+            "-UNRESOLVED",
+            "-MISSING",
+        ):
+            if not raw.upper().endswith(suffix):
+                continue
+            candidate = raw[:-len(suffix)]
+            if candidate in set(known_ids):
+                return candidate, "UNRESOLVED_DESCRIPTOR_SUFFIX"
+    match = re.fullmatch(r"(.+)-PROJ-(\d+)", raw, flags=re.IGNORECASE)
+    if not match:
+        return None, None
+    stem = match.group(1)
+    number = int(match.group(2))
+    candidates = {
+        str(candidate)
+        for candidate in known_ids
+        if (
+            (candidate_match := re.fullmatch(
+                rf"{re.escape(stem)}-(\d+)",
+                str(candidate),
+                flags=re.IGNORECASE,
+            ))
+            and int(candidate_match.group(1)) == number
+        )
+    }
+    if len(candidates) == 1:
+        return next(iter(candidates)), "PROJECT_NAMESPACE_ALIAS"
+    return None, None
+
+
 def _source_type(value: Any, default: str = "MODEL_INFERENCE") -> str:
     normalized = _SOURCE_TYPE_ALIASES.get(str(value or "").strip(), str(value or "").strip())
     return normalized if normalized in _ALLOWED_SOURCE_TYPES else default
@@ -287,6 +356,25 @@ def _pointer(path: tuple[Any, ...]) -> str:
 def _collect_defined_ids(value: Any) -> set[str]:
     found: set[str] = set()
 
+    # A prompt exposes named, structured payload/result objects as entities in
+    # their own right even when the object schema has no dedicated ``*_id``
+    # field.  Providers therefore reasonably use names such as
+    # ``proposal_contract`` or ``argument_graph`` in required_input_ids and
+    # evidence_refs.  Register only first-level structured containers; scalar
+    # field names and arbitrary nested JSON paths remain invalid references.
+    if isinstance(value, Mapping):
+        for namespace in ("payload", "result"):
+            container = value.get(namespace)
+            if not isinstance(container, Mapping):
+                continue
+            for key, item in container.items():
+                if (
+                    isinstance(key, str)
+                    and key.strip()
+                    and isinstance(item, (Mapping, list))
+                ):
+                    found.add(key.strip())
+
     def visit(node: Any) -> None:
         if isinstance(node, list):
             for item in node:
@@ -304,10 +392,47 @@ def _collect_defined_ids(value: Any) -> set[str]:
                 and str(item).strip()
             ):
                 found.add(str(item).strip())
+            if (
+                key == "code"
+                and isinstance(item, str)
+                and item.strip()
+            ):
+                # issue_ids and similar diagnostic-reference arrays use the
+                # stable Finding code as their referenced identity.
+                found.add(item.strip())
             if key == "source_refs" and isinstance(item, list):
                 for ref in item:
                     if isinstance(ref, Mapping) and str(ref.get("source_id") or "").strip():
                         found.add(str(ref["source_id"]).strip())
+            visit(item)
+
+    visit(value)
+    return found
+
+
+def _collect_visible_reference_ids(value: Any) -> set[str]:
+    """Collect references already admitted by the trusted input envelope.
+
+    This is intentionally used only on input/trusted context, never on the
+    output being validated.  It lets a repair preserve upstream references
+    without allowing a newly generated output reference to authorize itself.
+    """
+    found: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        for key, item in node.items():
+            if _is_reference_array_field(str(key)) and isinstance(item, list):
+                found.update(
+                    str(value).strip()
+                    for value in item
+                    if isinstance(value, str) and value.strip()
+                )
             visit(item)
 
     visit(value)
@@ -844,6 +969,12 @@ def bind_trusted_source_refs(
     effective_envelope = attach_trusted_source_catalog(envelope)
     catalog = _catalog_from_envelope(effective_envelope, db=db)
     alias_index = _catalog_alias_index(effective_envelope)
+    hash_index: dict[str, set[str]] = defaultdict(set)
+    for trusted_source_id, candidates in catalog.items():
+        for candidate in candidates:
+            trusted_hash = _hash(candidate.get("source_hash"))
+            if trusted_hash:
+                hash_index[trusted_hash].add(trusted_source_id)
     changes: list[dict[str, Any]] = []
     errors: list[str] = []
 
@@ -881,18 +1012,72 @@ def bind_trusted_source_refs(
                         errors.append(f"{_pointer(ref_path)}/source_id: missing source identifier")
                         rebuilt.append(dict(ref))
                         continue
+                    requested_section = (
+                        ref.get("section_id")
+                        if isinstance(ref.get("section_id"), str)
+                        and ref.get("section_id").strip()
+                        else None
+                    )
                     source_id, alias_kind = _resolve_catalog_source_id(
                         raw_source_id,
                         catalog.keys(),
                         alias_index,
                     )
                     if source_id is None:
+                        # A provider may truncate a long opaque ID while still
+                        # copying the exact 64-character source hash.  Rebind
+                        # only when that hash identifies one trusted source;
+                        # duplicate or unknown hashes remain blocking.
+                        provider_hash = _hash(ref.get("source_hash"))
+                        hash_targets = set(hash_index.get(provider_hash) or set())
+                        if len(hash_targets) == 1:
+                            source_id = next(iter(hash_targets))
+                            alias_kind = "UNIQUE_SOURCE_HASH"
+                        elif (
+                            requested_section
+                            and requested_section in hash_targets
+                        ):
+                            # A document section is deliberately catalogued
+                            # both under its document ID and under the exact
+                            # section ID.  That makes a section hash non-unique
+                            # by source ID even though the provenance itself is
+                            # unambiguous.  Prefer the exact requested section
+                            # only when it carries the same trusted hash.
+                            source_id = requested_section
+                            alias_kind = "EXACT_SECTION_HASH"
+                        elif len(hash_targets) > 1:
+                            section_ids = {
+                                str(candidate.get("section_id"))
+                                for target in hash_targets
+                                for candidate in catalog.get(target) or []
+                                if candidate.get("section_id")
+                                and _hash(candidate.get("source_hash")) == provider_hash
+                            }
+                            if (
+                                len(section_ids) == 1
+                                and next(iter(section_ids)) in hash_targets
+                            ):
+                                source_id = next(iter(section_ids))
+                                alias_kind = "UNIQUE_SECTION_FOR_HASH"
+                    if (
+                        source_id is None
+                        and requested_section
+                        and requested_section in catalog
+                    ):
+                        # The provider may put an entity label in source_id
+                        # while still copying the exact opaque section ID from
+                        # the trusted catalog. The section identifier is itself
+                        # a first-class trusted source alias, so bind to it and
+                        # discard the untrusted label. Prefer the stronger hash
+                        # match above whenever one was supplied.
+                        source_id = requested_section
+                        alias_kind = "EXACT_SECTION_ID"
+                    if source_id is None:
                         errors.append(
                             f"{_pointer(ref_path)}/source_id: {raw_source_id!r} is not present in the trusted input envelope"
                         )
                         rebuilt.append(dict(ref))
                         continue
-                    requested_section = ref.get("section_id") if isinstance(ref.get("section_id"), str) and ref.get("section_id").strip() else None
                     trusted = select(source_id, requested_section)
                     if trusted is None:
                         errors.append(
@@ -948,6 +1133,7 @@ def normalize_reference_id_aliases(
     normalized = copy.deepcopy(output)
     known = (
         _collect_defined_ids(envelope or {})
+        | _collect_visible_reference_ids(envelope or {})
         | _collect_defined_ids(normalized)
         | _REGISTERED_DIAGNOSTIC_REFS
     )
@@ -969,7 +1155,14 @@ def normalize_reference_id_aliases(
                         rebuilt.append(raw)
                         continue
                     identifier = raw.strip()
-                    resolved, alias_kind = _resolve_source_id_alias(identifier, known)
+                    resolved, alias_kind = _resolve_reference_id_alias(
+                        identifier,
+                        known,
+                        allow_unresolved_descriptor_suffix=(
+                            key == "unresolved_slot_ids"
+                        ),
+                        allow_entity_field_path=(key == "evidence_refs"),
+                    )
                     if resolved is not None and alias_kind:
                         rebuilt.append(resolved)
                         changes.append({
@@ -997,7 +1190,12 @@ def validate_reference_ids(
     envelope: Mapping[str, Any] | None,
 ) -> list[str]:
     """Validate reference-only ID arrays against visible/defined entities."""
-    known = _collect_defined_ids(envelope or {}) | _collect_defined_ids(output) | _REGISTERED_DIAGNOSTIC_REFS
+    known = (
+        _collect_defined_ids(envelope or {})
+        | _collect_visible_reference_ids(envelope or {})
+        | _collect_defined_ids(output)
+        | _REGISTERED_DIAGNOSTIC_REFS
+    )
     errors: list[str] = []
     root_status = output.get("status") if isinstance(output, Mapping) else None
 
@@ -1111,7 +1309,10 @@ def validate_staged_reference_integrity(
     known_sources = _collect_source_ids(output)
     has_trusted_context = effective_context is not None
     if has_trusted_context:
-        known |= _collect_defined_ids(effective_context)
+        known |= (
+            _collect_defined_ids(effective_context)
+            | _collect_visible_reference_ids(effective_context)
+        )
         known_sources |= _collect_source_ids(effective_context)
 
     errors: list[str] = []

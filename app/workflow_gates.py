@@ -57,10 +57,16 @@ class WorkflowGateMixin:
         state = wf["state"]
         questions = json.loads(gate["questions_json"])
         pending_input = state.get("workflow_input_required") if isinstance(state.get("workflow_input_required"), dict) else {}
+        section_input_gate = (
+            state.get("section_input_gate")
+            if isinstance(state.get("section_input_gate"), dict)
+            else {}
+        )
         current_result = state.get("step_results", {}).get(str(wf["current_step"])) or {}
         target_prompt_id = str(
             current_result.get("prompt_id")
             or pending_input.get("prompt_id")
+            or section_input_gate.get("prompt_id")
             or ""
         )
         if approved and gate["gate_type"] == WF3_INPUT_GATE_TYPE:
@@ -103,6 +109,45 @@ class WorkflowGateMixin:
         decision = {"action": action, "comment": comment, "answers": answers or [], "decided_by": decided_by, "decided_role": decided_role, "decided_at": utc_now(), "context_hash": gate["context_hash"]}
         self.db.execute("UPDATE gates SET status=?,decision_json=?,updated_at=? WHERE id=?", (status, json.dumps(decision, ensure_ascii=False), utc_now(), gate_id))
         if approved:
+            section_gate_matches = (
+                bool(section_input_gate)
+                and str(gate.get("target_id") or "")
+                == str(section_input_gate.get("run_id") or "")
+            )
+            if section_gate_matches:
+                section_id = str(section_input_gate.get("section_id") or "")
+                progress = (
+                    (state.get("section_progress") or {}).get(section_id)
+                    if section_id
+                    else None
+                )
+                if isinstance(progress, dict):
+                    if resolutions and action in {
+                        "PROVIDE_INFORMATION",
+                        "RESOLVE",
+                    }:
+                        progress["phase"] = section_input_gate.get("phase")
+                        state["rerun_from_human_input"] = {
+                            "gate_id": gate_id,
+                            "prompt_id": target_prompt_id,
+                            "resolution_ids": [
+                                item["resolution_id"] for item in resolutions
+                            ],
+                            "section_id": section_id,
+                        }
+                    else:
+                        progress["phase"] = section_input_gate.get("next_phase")
+                        state.setdefault("accepted_section_runs", []).append({
+                            "section_id": section_id,
+                            "prompt_id": target_prompt_id,
+                            "run_id": section_input_gate.get("run_id"),
+                            "gate_id": gate_id,
+                            "action": action,
+                        })
+                    progress["status"] = "RUNNING"
+                    progress.pop("last_error", None)
+                state.pop("section_input_gate", None)
+                state.pop("last_error", None)
             if (
                 gate.get("target_id") == current_result.get("run_id")
                 and current_result.get("status") in {"REVISE", "NEED_USER_INPUT"}

@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from ..util import new_id, sha256_bytes, sha256_text, utc_now, write_json
 from .research_plan import canonical_url, normalize_doi, parse_year
+from .public_research import PublicResearchIntegrityError
 
 _BASELINE_TERMS = {"baseline", "benchmark", "comparison", "comparative", "survey", "review", "基线", "对比", "比较", "综述", "评测", "现有方法"}
 _LIMITATION_TERMS = {"limitation", "limitations", "challenge", "challenges", "gap", "open problem", "drawback", "局限", "不足", "挑战", "差距", "瓶颈"}
@@ -239,7 +240,10 @@ def upgrade_archive_result(result, normalized_plan: dict[str, Any], plan_validat
         })
     verification = verify_research_archive(manifest_path)
     if verification["status"] != "PASS":
-        raise RuntimeError("Archive verification failed immediately after creation")
+        raise PublicResearchIntegrityError(
+            "Archive verification failed immediately after creation",
+            details={"verification": verification},
+        )
     result.output.update({
         "sources": sources, "passages": passages, "queries": normalized_plan["queries"],
         "normalized_plan": normalized_plan, "plan_validation": plan_validation,

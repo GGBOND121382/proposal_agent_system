@@ -17,7 +17,10 @@ PRODUCER_RESULT_KEY = {
     "P-PROJECT-DEFINITION-EXTRACT": "project_definition",
     "P-FACT-EXTRACT": "fact_candidates",
     "P-TEMPLATE-EXTRACT": "template",
-    "P-ARGUMENT-ARCHITECTURE": "argument_architecture",
+    # The critic evaluates both the graph and the research-design matrix, so a
+    # targeted repair must receive the full producer result rather than only
+    # the nested argument_architecture graph.
+    "P-ARGUMENT-ARCHITECTURE": None,
     "P-REVISION-PLAN": "revision_plan",
     "P-WRITE-BLUEPRINT": "blueprint",
     "P-WRITE-CONTENT": None,
@@ -109,7 +112,19 @@ class WorkflowRepairMixin:
         if prompt_id not in CRITIC_PRODUCER:
             return False
         key = self._repair_state_key(prompt_id, state)
-        return int(state.setdefault("repair_attempts", {}).get(key, 0)) < 1
+        options = state.get("options") or {}
+        try:
+            configured_limit = int(options.get("targeted_repair_limit", 1))
+        except (TypeError, ValueError):
+            configured_limit = 1
+        # One pass remains the production-safe default. Acceptance/test runs may
+        # explicitly permit bounded convergence when an independent re-review
+        # exposes a second set of repairable findings.
+        repair_limit = max(1, min(configured_limit, 3))
+        return (
+            int(state.setdefault("repair_attempts", {}).get(key, 0))
+            < repair_limit
+        )
 
     _REPAIR_ID_FIELDS = (
         "claim_id",
@@ -194,6 +209,9 @@ class WorkflowRepairMixin:
         path = re.sub(r"^(?:result|payload)\.", "", path)
         if path.startswith("content."):
             path = path[len("content.") :]
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*_candidate", path):
+            path = ""
+        path = re.sub(r"^[A-Za-z_][A-Za-z0-9_]*_candidate\.", "", path)
         if not path or path in {"result", "payload", "content"}:
             return f"content.{collection_key}" if collection_key else "content"
         if not collection_key:
@@ -268,11 +286,32 @@ class WorkflowRepairMixin:
 
     async def _auto_repair(self, wf: dict[str, Any], critic_prompt: str, critic_input: dict[str, Any], critic_output: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
         producer = CRITIC_PRODUCER[critic_prompt]
-        findings = [item for item in critic_output.get("findings", []) if item.get("repairable", False)]
+        findings = [
+            item
+            for item in critic_output.get("findings", [])
+            if item.get("repairable", False)
+            and not (
+                str(item.get("code") or "").startswith("QG_")
+                and str(item.get("target_type") or "").endswith("CRITIC")
+            )
+        ]
         if not findings:
             return None
         result_key = PRODUCER_RESULT_KEY.get(producer)
-        if hasattr(self.context_builder, "_section_prompt_result"):
+        repair_override_reader = getattr(
+            self.context_builder,
+            "_repair_override",
+            None,
+        )
+        if callable(repair_override_reader):
+            repair_override = repair_override_reader(state, producer)
+        else:
+            repair_override = (state.get("repair_overrides") or {}).get(
+                self._repair_override_key(producer, state)
+            )
+        if repair_override is not None:
+            original = repair_override
+        elif hasattr(self.context_builder, "_section_prompt_result"):
             original = self.context_builder._section_prompt_result(
                 wf["project_id"],
                 producer,
@@ -299,9 +338,10 @@ class WorkflowRepairMixin:
             return None
 
         attempt_key = self._repair_state_key(critic_prompt, state)
-        state.setdefault("repair_attempts", {})[attempt_key] = int(
+        previous_attempts = int(
             state.setdefault("repair_attempts", {}).get(attempt_key, 0)
-        ) + 1
+        )
+        state.setdefault("repair_attempts", {})[attempt_key] = previous_attempts + 1
         object_id = self._repair_object_id(repair_content, producer)
         original_object = {
             "object_type": producer.removeprefix("P-").replace("-", "_"),
@@ -404,12 +444,21 @@ class WorkflowRepairMixin:
                 str(finding.get(field) or "")
                 for field in ("description", "repair_instruction", "target_path_or_span")
             )
-            if producer == "P-WRITE-BLUEPRINT" and finding_code == "WORD_BUDGET_EXCEED":
+            if (
+                producer == "P-WRITE-BLUEPRINT"
+                and "WORD_BUDGET" in finding_code
+            ):
                 allowed_paths.extend(
                     f"content.{paragraph_id}.word_budget"
                     for paragraph_id in original_paragraph_ids
                 )
-            if producer == "P-WRITE-BLUEPRINT" and "CONTENT_KEY" in finding_code:
+            if (
+                producer == "P-WRITE-BLUEPRINT"
+                and (
+                    "CONTENT_KEY" in finding_code
+                    or "novel_content_key" in finding_text
+                )
+            ):
                 allowed_paths.extend(
                     f"content.{paragraph_id}.novel_content_key"
                     for paragraph_id in original_paragraph_ids
@@ -461,6 +510,9 @@ class WorkflowRepairMixin:
                 original_environment=state.get("original_environment", "OFFLINE_LOCAL"),
             )
         except (PromptExecutionError, ValueError, KeyError):
+            # Contract construction and technical execution failures did not
+            # produce a repair candidate and must not consume semantic budget.
+            state.setdefault("repair_attempts", {})[attempt_key] = previous_attempts
             return None
         if repaired["status"] != "PASS":
             return None

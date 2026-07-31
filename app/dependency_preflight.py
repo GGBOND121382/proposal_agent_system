@@ -128,8 +128,6 @@ class RuntimeDependencyPreflight:
         "recorded research file must",
         "connector responses do not cover planned queries",
         "public research skill executor is not configured",
-        "no public source could be archived",
-        "source exceeds",
         "searxng",
         "connecterror",
         "connection refused",
@@ -554,7 +552,14 @@ class RuntimeDependencyPreflight:
         allowed_endpoints = {
             str(item) for item in config.get("allowed_model_endpoint_ids") or []
         }
-        security_level = str((project or {}).get("security_level") or "INTERNAL")
+        project_security_level = str((project or {}).get("security_level") or "INTERNAL")
+        # ONLINE_PUBLIC prompts receive a sanitized PUBLIC envelope.  This must
+        # match ContextBuilder and SecurityRouter; checking the project's
+        # original classification here produces a false-negative preflight
+        # after the safe-online package has already been approved.
+        execution_security_level = (
+            "PUBLIC" if required == "ONLINE_PUBLIC" else project_security_level
+        )
         endpoint_by_id = {
             str(item.get("endpoint_id")): item
             for item in self.pack.endpoints.get("endpoints", [])
@@ -587,8 +592,8 @@ class RuntimeDependencyPreflight:
             if allowed_endpoints and endpoint_id not in allowed_endpoints:
                 reasons.append(f"{model_id}: endpoint not allowed by project")
                 continue
-            if security_level not in set(endpoint.get("allowed_security_levels") or []):
-                reasons.append(f"{model_id}: project security level denied")
+            if execution_security_level not in set(endpoint.get("allowed_security_levels") or []):
+                reasons.append(f"{model_id}: execution security level denied")
                 continue
             report.checks.append(
                 {
@@ -907,15 +912,29 @@ class RuntimeDependencyPreflight:
         message = str(exc)
         text = message.lower()
         hint = str(dependency_hint or "").upper()
-        if hint == "PUBLIC_SEARCH" or any(
-            marker in text for marker in self.SEARCH_CONFIGURATION_MARKERS
-        ):
+        category = str(getattr(exc, "category", "") or "").upper()
+        error_code = str(getattr(exc, "error_code", "") or "")
+        details = dict(getattr(exc, "details", {}) or {})
+
+        # Typed public-research failures take precedence over broad string hints.
+        # A plan-contract or archive-integrity failure happens *inside* the
+        # PUBLIC_SEARCH step, but it is not repaired by editing .env.  Only the
+        # CONFIGURATION category is allowed to produce WAITING_CONFIGURATION.
+        if category == "CONFIGURATION":
             return DependencyIssue(
-                code="PUBLIC_SEARCH_RUNTIME_UNAVAILABLE",
+                code=error_code or "PUBLIC_SEARCH_RUNTIME_UNAVAILABLE",
                 dependency="PUBLIC_SEARCH",
                 message=message,
                 required_settings=("PUBLIC_SEARCH_PROVIDER", "PUBLIC_SEARCH_BASE_URL", "PUBLIC_RESEARCH_CONNECTOR_FILE", "PUBLIC_RESEARCH_RECORD_FILE"),
+                details=details,
             )
+        if category in {"PLAN_CONTRACT", "RETRIEVAL", "SECURITY", "INTEGRITY"}:
+            return None
+
+        # Model-specific transport/stream markers must win over generic words
+        # such as "timeout", which also occur in search failures.  The prompt
+        # execution path supplies the required model environment as the hint;
+        # typed public-search errors were already handled above.
         if any(marker in text for marker in self.MODEL_CONFIGURATION_MARKERS):
             settings = (
                 ("ONLINE_LLM_ENABLED", "ONLINE_LLM_BASE_URL", "ONLINE_LLM_API_KEY", "ONLINE_PUBLIC_MODEL")
@@ -927,6 +946,13 @@ class RuntimeDependencyPreflight:
                 dependency="MODEL_ENDPOINT",
                 message=message,
                 required_settings=settings,
+            )
+        if any(marker in text for marker in self.SEARCH_CONFIGURATION_MARKERS):
+            return DependencyIssue(
+                code="PUBLIC_SEARCH_RUNTIME_UNAVAILABLE",
+                dependency="PUBLIC_SEARCH",
+                message=message,
+                required_settings=("PUBLIC_SEARCH_PROVIDER", "PUBLIC_SEARCH_BASE_URL", "PUBLIC_RESEARCH_CONNECTOR_FILE", "PUBLIC_RESEARCH_RECORD_FILE"),
             )
         if any(marker in text for marker in self.STORAGE_CONFIGURATION_MARKERS):
             return DependencyIssue(
@@ -992,11 +1018,20 @@ class RuntimeDependencyPreflight:
         report.extend(search)
         if self.settings.public_search_provider == "searxng" and not search.blocking_issues:
             try:
-                response = httpx.get(
-                    f"{self.settings.public_search_base_url}/search",
-                    params={"q": "proposal agent preflight", "format": "json", "language": "zh-CN", "safesearch": 1},
-                    timeout=timeout,
-                )
+                params = {
+                    "q": "proposal agent preflight",
+                    "format": "json",
+                    "language": "all",
+                    "safesearch": 1,
+                }
+                engines = str(getattr(self.settings, "public_search_engines", "") or "").strip()
+                if engines:
+                    params["engines"] = engines
+                with httpx.Client(timeout=timeout, trust_env=False) as client:
+                    response = client.get(
+                        f"{self.settings.public_search_base_url}/search",
+                        params=params,
+                    )
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload.get("results"), list):

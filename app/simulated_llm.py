@@ -580,7 +580,21 @@ class SimulatedLLM:
                 "组合优化、车辆路径、排程和动态重规划可采用哪些代表性方法？",
                 "Agent评测、安全治理、人机协同和工程可观测性有哪些公开依据？",
             ]
-        result["queries"] = self._research_queries(envelope)
+        raw_queries = self._research_queries(envelope)
+        question_count = max(1, len(result["research_questions"]))
+        query_count = max(1, len(raw_queries))
+        result["binding_contract_version"] = "1.0"
+        result["queries"] = [
+            {
+                "query_id": f"query-{index + 1:03d}",
+                "query": query,
+                # Spread the deterministic simulated queries across the ordered
+                # research questions.  Real LIVE outputs must provide the same
+                # explicit structural binding instead of relying on word overlap.
+                "linked_question_indexes": [min(question_count - 1, (index * question_count) // query_count)],
+            }
+            for index, query in enumerate(raw_queries)
+        ]
         result["source_priorities"] = ["国际标准与官方规范", "政府/标准机构页面", "协议设计文档", "同行评议论文", "官方开源项目文档"]
         result["evidence_requirements"] = ["覆盖不少于30个可核验公开来源", "保存来源URL、获取时间、摘录与SHA-256", "正文引用与参考文献编号一一对应", "只使用归档来源形成PUBLIC_CLAIM"]
         result["prohibited_inferences"] = ["不得从公开资料反推内部组织、人员或部署信息", "不得将外部性能数字直接作为本项目实测结果"]

@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from .privacy import find_sensitive_values
+from .proposal_quality import SECTION_FUNCTION_ROLE_ALIASES
 from .util import new_id, sha256_json, sha256_text
 from .wf3_input import (
     WF3_INPUT_GATE_TYPE,
@@ -453,6 +454,88 @@ class ContextBuilder:
                 seen.add(candidate)
         return source_ids
 
+    def _accepted_output(
+        self,
+        project_id: str,
+        prompt_id: str,
+        workflow_ids: list[str],
+    ) -> dict[str, Any] | None:
+        """Return an explicitly gate-accepted non-PASS output.
+
+        A REVISE/NEED_USER_INPUT result can be accepted as the documented output
+        of an intake stage.  The gate engine records that decision in
+        ``accepted_step_results`` without rewriting the model's original status.
+        Consumers must therefore resolve the accepted run explicitly instead of
+        treating every REVISE artifact as usable or silently falling back to a
+        replay scaffold.
+        """
+        for workflow_id in workflow_ids:
+            workflow = self.db.fetchone(
+                "SELECT project_id,state_json FROM workflows WHERE id=?",
+                (workflow_id,),
+            )
+            if not workflow or str(workflow["project_id"]) != str(project_id):
+                continue
+            state = json.loads(workflow.get("state_json") or "{}")
+            accepted = state.get("accepted_step_results") or {}
+            if not isinstance(accepted, dict):
+                continue
+            ordered = sorted(
+                (
+                    (int(step) if str(step).isdigit() else -1, item)
+                    for step, item in accepted.items()
+                    if isinstance(item, dict)
+                ),
+                reverse=True,
+            )
+            for _, item in ordered:
+                run_id = str(item.get("run_id") or "").strip()
+                gate_id = str(item.get("gate_id") or "").strip()
+                if not run_id or not gate_id:
+                    continue
+                row = self.db.fetchone(
+                    """SELECT r.output_json,r.status
+                         FROM prompt_runs r
+                         JOIN gates g
+                           ON g.id=? AND g.workflow_id=r.workflow_id
+                          AND g.target_id=r.id AND g.status='APPROVED'
+                        WHERE r.id=? AND r.project_id=? AND r.workflow_id=?
+                          AND r.prompt_id=? AND r.output_json IS NOT NULL
+                          AND EXISTS (
+                              SELECT 1 FROM artifacts a
+                               WHERE a.project_id=r.project_id
+                                 AND a.workflow_id=r.workflow_id
+                                 AND a.prompt_id=r.prompt_id
+                                 AND a.content_json=r.output_json
+                                 AND a.artifact_type IN (
+                                     'PROMPT_OUTPUT',
+                                     'SKILL_ENRICHED_PROMPT_OUTPUT'
+                                 )
+                          )""",
+                    (gate_id, run_id, project_id, workflow_id, prompt_id),
+                )
+                if not row:
+                    continue
+                row_status = str(row.get("status") or "")
+                accepted_status = str(item.get("status") or "")
+                migration = state.get("business_block_migration") or {}
+                status_migrated_with_audit = (
+                    isinstance(migration, dict)
+                    and str(migration.get("run_id") or "") == run_id
+                    and str(migration.get("from_status") or "") == row_status
+                    and str(migration.get("to_status") or "") == accepted_status
+                    and row_status == "BLOCK"
+                    and accepted_status == "NEED_USER_INPUT"
+                    and bool(migration.get("output_normalizer_version"))
+                    and bool(migration.get("migrated_at"))
+                )
+                if row_status != accepted_status and not status_migrated_with_audit:
+                    continue
+                output = json.loads(row["output_json"])
+                if isinstance(output, dict):
+                    return output
+        return None
+
     def _latest_output(
         self,
         project_id: str,
@@ -470,6 +553,19 @@ class ContextBuilder:
         confirmed PASS result.
         """
         active_workflow_id = workflow_id or _CURRENT_WORKFLOW_ID.get()
+        if active_workflow_id:
+            accepted_source_ids = (
+                [active_workflow_id]
+                if exact_workflow
+                else self._workflow_artifact_source_ids(active_workflow_id)
+            )
+            accepted_output = self._accepted_output(
+                project_id,
+                prompt_id,
+                accepted_source_ids,
+            )
+            if accepted_output is not None:
+                return accepted_output
         params: list[Any] = [project_id, prompt_id]
         scope_sql = ""
         ordering = "a.version DESC,a.created_at DESC"
@@ -579,6 +675,243 @@ class ContextBuilder:
             if scoped in overrides:
                 return unwrap(overrides[scoped])
         return unwrap(overrides.get(producer_prompt))
+
+    @staticmethod
+    def _canonicalize_argument_result_from_sections(
+        value: Any,
+        sections: list[dict[str, Any]],
+    ) -> Any:
+        """Reconcile an argument result with explicit RC/BASE tags in source text.
+
+        Targeted repairs can legitimately replace a producer result, but an older
+        repair may have been created before all explicitly numbered work packages
+        were materialized.  Consumers must not then see a graph that contradicts
+        the authoritative RQ-to-RC table in CURRENT_PROPOSAL material.
+
+        Only exact, source-authored ``RC-n``/``BASE-n`` identifiers and exact
+        same-line ``RQ-n`` -> ``RC-n`` mappings are used.  No untagged prose is
+        interpreted as a new project entity.
+        """
+        if not isinstance(value, dict):
+            return value
+        canonical = copy.deepcopy(value)
+        is_full_result = isinstance(canonical.get("argument_architecture"), dict)
+        architecture = (
+            canonical.get("argument_architecture")
+            if is_full_result
+            else canonical
+        )
+        if not isinstance(architecture, dict):
+            return canonical
+        nodes = architecture.get("nodes")
+        if not isinstance(nodes, list):
+            return canonical
+
+        tag_pattern = re.compile(
+            r"(?<![A-Za-z0-9])`?(RC|BASE)-0*(\d+)`?(?![A-Za-z0-9])",
+            re.IGNORECASE,
+        )
+        rq_pattern = re.compile(
+            r"(?<![A-Za-z0-9])`?RQ-0*(\d+)`?(?![A-Za-z0-9])",
+            re.IGNORECASE,
+        )
+        rc_pattern = re.compile(
+            r"(?<![A-Za-z0-9])`?RC-0*(\d+)`?(?![A-Za-z0-9])",
+            re.IGNORECASE,
+        )
+        declarations: dict[str, tuple[str, dict[str, Any] | None]] = {}
+        declared_question_work_packages: dict[str, str] = {}
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_offset = 0
+            for raw_line in str(section.get("text") or "").splitlines(keepends=True):
+                line = raw_line.rstrip("\r\n")
+                rq_numbers = rq_pattern.findall(line)
+                rc_numbers = rc_pattern.findall(line)
+                if rq_numbers and rc_numbers:
+                    pairs = (
+                        zip(rq_numbers, rc_numbers)
+                        if len(rq_numbers) == len(rc_numbers)
+                        else [(rq_numbers[0], rc_numbers[0])]
+                    )
+                    for rq_number, rc_number in pairs:
+                        declared_question_work_packages[
+                            f"RQ-{int(rq_number):03d}"
+                        ] = f"RC-{int(rc_number):03d}"
+                matches = list(tag_pattern.finditer(line))
+                for index, match in enumerate(matches):
+                    prefix = match.group(1).upper()
+                    node_id = f"{prefix}-{int(match.group(2)):03d}"
+                    end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
+                    statement = line[match.end():end]
+                    statement = re.sub(
+                        r"^[\s*：:;；、|`—\-]+|[\s*|`]+$",
+                        "",
+                        statement,
+                    ).strip()
+                    if not statement:
+                        statement = f"源材料显式定义的{prefix}条目 {node_id}"
+                    statement = statement[:360]
+                    current_statement = declarations.get(node_id, ("", None))[0]
+                    if len(statement) > len(current_statement):
+                        source_ref = section.get("_source_ref")
+                        if isinstance(source_ref, dict):
+                            source_ref = copy.deepcopy(source_ref)
+                            source_ref["span_start"] = section_offset
+                            source_ref["span_end"] = section_offset + len(line)
+                            source_ref["quoted_text"] = line
+                        else:
+                            source_ref = None
+                        declarations[node_id] = (statement, source_ref)
+                section_offset += len(raw_line)
+
+        existing_node_ids = {
+            str(node.get("node_id"))
+            for node in nodes
+            if isinstance(node, dict) and node.get("node_id")
+        }
+        for node_id, (statement, source_ref) in declarations.items():
+            if node_id in existing_node_ids:
+                continue
+            prefix = node_id.split("-", 1)[0]
+            nodes.append({
+                "node_id": node_id,
+                "node_type": (
+                    "WORK_PACKAGE" if prefix == "RC" else "TEAM_EVIDENCE"
+                ),
+                "statement": statement,
+                "status": "PLANNED" if prefix == "RC" else "UNKNOWN",
+                "source_refs": [source_ref] if source_ref else [],
+            })
+            existing_node_ids.add(node_id)
+        architecture["nodes"] = nodes
+
+        matrix = (
+            canonical.get("research_design_matrix")
+            if is_full_result
+            else None
+        )
+        if isinstance(matrix, list):
+            for row in matrix:
+                if not isinstance(row, dict):
+                    continue
+                question_id = str(row.get("research_question_id") or "")
+                work_package_id = declared_question_work_packages.get(question_id)
+                if work_package_id and work_package_id in existing_node_ids:
+                    row["work_package_ids"] = [work_package_id]
+
+        edges = architecture.get("edges")
+        if not isinstance(edges, list):
+            edges = []
+        existing_edge_pairs = {
+            (str(edge.get("source_id")), str(edge.get("target_id")))
+            for edge in edges
+            if isinstance(edge, dict)
+        }
+        for question_id, work_package_id in declared_question_work_packages.items():
+            objective_id = question_id.replace("RQ-", "OBJ-", 1)
+            if (
+                objective_id not in existing_node_ids
+                or work_package_id not in existing_node_ids
+                or (objective_id, work_package_id) in existing_edge_pairs
+            ):
+                continue
+            edges.append({
+                "edge_id": (
+                    f"edge-system-{objective_id.lower()}-{work_package_id.lower()}"
+                ),
+                "source_id": objective_id,
+                "relation": "DECOMPOSES_TO",
+                "target_id": work_package_id,
+                "rationale": "按源材料中的研究问题—目标—研究内容闭环映射建立。",
+            })
+            existing_edge_pairs.add((objective_id, work_package_id))
+        architecture["edges"] = edges
+        if is_full_result:
+            canonical["argument_architecture"] = architecture
+        return canonical
+
+    @staticmethod
+    def _bind_argument_result_evidence(
+        value: Any,
+        facts: list[dict[str, Any]],
+    ) -> Any:
+        """Bind exact same-ID graph nodes to already approved fact evidence."""
+        if not isinstance(value, dict):
+            return value
+        canonical = copy.deepcopy(value)
+        architecture = (
+            canonical.get("argument_architecture")
+            if isinstance(canonical.get("argument_architecture"), dict)
+            else canonical
+        )
+        if not isinstance(architecture, dict):
+            return canonical
+        nodes = architecture.get("nodes")
+        if not isinstance(nodes, list):
+            return canonical
+        fact_by_id: dict[str, dict[str, Any]] = {}
+        for fact in facts:
+            if not isinstance(fact, dict):
+                continue
+            fact_id = next(
+                (
+                    str(fact.get(key))
+                    for key in ("claim_id", "fact_id", "item_id")
+                    if fact.get(key)
+                ),
+                "",
+            )
+            if fact_id and isinstance(fact.get("source_refs"), list):
+                fact_by_id[fact_id] = fact
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            fact = fact_by_id.get(str(node.get("node_id") or ""))
+            if not fact or not fact.get("source_refs"):
+                continue
+            if not node.get("source_refs"):
+                node["source_refs"] = copy.deepcopy(fact["source_refs"])
+            if (
+                node.get("status") == "UNKNOWN"
+                and fact.get("knowledge_status")
+                in {"CONFIRMED", "DOCUMENT_EXTRACTED"}
+            ):
+                node["status"] = "SUPPORTED"
+        architecture["nodes"] = nodes
+        if isinstance(canonical.get("argument_architecture"), dict):
+            canonical["argument_architecture"] = architecture
+        return canonical
+
+    @staticmethod
+    def _canonicalize_revision_plan_roles(value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        canonical = copy.deepcopy(value)
+        plan = (
+            canonical.get("revision_plan")
+            if isinstance(canonical.get("revision_plan"), dict)
+            else canonical
+        )
+        architecture = plan.get("narrative_architecture")
+        if not isinstance(architecture, dict):
+            return canonical
+        for contract in architecture.get("section_contracts") or []:
+            if not isinstance(contract, dict):
+                continue
+            roles: list[str] = []
+            for role_value in contract.get("required_argument_roles") or []:
+                role = SECTION_FUNCTION_ROLE_ALIASES.get(
+                    str(role_value),
+                    str(role_value),
+                )
+                if role not in roles:
+                    roles.append(role)
+            contract["required_argument_roles"] = roles
+        if isinstance(canonical.get("revision_plan"), dict):
+            canonical["revision_plan"] = plan
+        return canonical
 
     def _replace_seed_values(self, value: Any, project_id: str, context_hash: str) -> Any:
         if isinstance(value, dict):
@@ -1294,6 +1627,55 @@ class ContextBuilder:
                 "allowed_relations": copy.deepcopy(self.pack.relation_matrix["allowed_relations"]),
             }))
 
+        current_proposal_sections: list[dict[str, Any]] = []
+        for document in docs:
+            if document.get("document_role") != "CURRENT_PROPOSAL":
+                continue
+            for section in document.get("sections", []):
+                if not isinstance(section, dict):
+                    continue
+                enriched_section = copy.deepcopy(section)
+                enriched_section["_source_ref"] = {
+                    "source_id": document.get("document_id"),
+                    "source_type": "CURRENT_PROPOSAL",
+                    "document_version_id": document.get("document_version_id"),
+                    "section_id": section.get("section_id"),
+                    "span_start": 0,
+                    "span_end": len(str(section.get("text") or "")),
+                    "quoted_text": str(section.get("text") or ""),
+                    "source_hash": (
+                        section.get("text_hash")
+                        or document.get("document_hash")
+                    ),
+                    "authority_rank": int(document.get("authority_rank") or 85),
+                    "security_level": (
+                        section.get("security_level")
+                        or document.get("security_level")
+                        or "INTERNAL"
+                    ),
+                }
+                current_proposal_sections.append(enriched_section)
+        internal_facts_for_argument = (
+            self._result(project["id"], "P-FACT-EXTRACT", "fact_candidates")
+            or []
+        )
+        public_claims_for_argument = self._approved_public_claims(project["id"])
+        raw_argument_result = (
+            self._repair_override(state, "P-ARGUMENT-ARCHITECTURE")
+            or self._result(project["id"], "P-ARGUMENT-ARCHITECTURE")
+        )
+        canonical_argument_result = self._canonicalize_argument_result_from_sections(
+            raw_argument_result,
+            current_proposal_sections,
+        )
+        canonical_argument_result = self._bind_argument_result_evidence(
+            canonical_argument_result,
+            [
+                *internal_facts_for_argument,
+                *public_claims_for_argument,
+            ],
+        )
+
         # Producer -> consumer mappings.
         result_map = {
             "classification_candidate": ("P-SECURITY-CLASSIFY", None),
@@ -1321,23 +1703,56 @@ class ContextBuilder:
         }
         for field, (producer, key) in result_map.items():
             if field in payload:
-                value = self._result(project["id"], producer, key)
-                repair_override = self._repair_override(state, producer)
-                if repair_override is not None:
-                    value = repair_override
+                if (
+                    producer == "P-ARGUMENT-ARCHITECTURE"
+                    and canonical_argument_result is not None
+                ):
+                    value = canonical_argument_result
+                    if key and isinstance(value, dict):
+                        value = value.get(key)
+                else:
+                    value = self._result(project["id"], producer, key)
+                    repair_override = self._repair_override(state, producer)
+                    if repair_override is not None:
+                        value = repair_override
+                    if (
+                        producer == "P-REVISION-PLAN"
+                        and value is not None
+                    ):
+                        value = self._canonicalize_revision_plan_roles(value)
                 if value is not None:
                     replacements.append((f"payload.{field}", value))
 
         project_definition = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "project_definition")
         proposal_contract = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "proposal_contract")
         argument_graph_seed = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed")
-        argument_graph = self._result(project["id"], "P-ARGUMENT-ARCHITECTURE", "argument_architecture") or argument_graph_seed
-        internal_facts = self._result(project["id"], "P-FACT-EXTRACT", "fact_candidates") or []
-        public_claims = self._approved_public_claims(project["id"])
+        argument_override = canonical_argument_result
+        if isinstance(argument_override, dict):
+            argument_graph = (
+                argument_override.get("argument_architecture")
+                or argument_override
+            )
+        else:
+            argument_graph = (
+                self._result(
+                    project["id"],
+                    "P-ARGUMENT-ARCHITECTURE",
+                    "argument_architecture",
+                )
+                or argument_graph_seed
+            )
+        internal_facts = internal_facts_for_argument
+        public_claims = public_claims_for_argument
         facts = [*internal_facts, *public_claims]
         scheme = self._result(project["id"], "P-SCHEME-EXTRACT", "scheme_profile")
         template = self._result(project["id"], "P-TEMPLATE-EXTRACT", "template")
-        plan = self._result(project["id"], "P-REVISION-PLAN", "revision_plan")
+        plan = self._canonicalize_revision_plan_roles(
+            self._result(
+                project["id"],
+                "P-REVISION-PLAN",
+                "revision_plan",
+            )
+        )
         narrative_architecture = (plan or {}).get("narrative_architecture") if isinstance(plan, dict) else None
         section_contract = None
         if narrative_architecture and current_section:

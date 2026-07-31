@@ -554,6 +554,163 @@ def test_reference_integrity_rejects_unknown_claim_ids(pack: PromptPack) -> None
         executor._normalize_output("P-ONLINE-RESULT-IMPORT-CRITIC", output, envelope)
 
 
+def test_reference_integrity_accepts_named_structured_input_container(
+    pack: PromptPack,
+) -> None:
+    envelope = pack.replay_input("P-REVISION-PLAN")
+    output = {
+        "status": "PASS",
+        "result": {
+            "tasks": [{
+                "task_id": "task-001",
+                "required_input_ids": ["proposal_contract"],
+            }],
+        },
+        "findings": [{
+            "code": "PLAN_TEST_FINDING",
+            "evidence_refs": ["proposal_contract"],
+        }],
+    }
+
+    assert validate_reference_ids(output, envelope) == []
+
+
+def test_reference_integrity_does_not_treat_nested_field_path_as_container_id(
+    pack: PromptPack,
+) -> None:
+    envelope = pack.replay_input("P-REVISION-PLAN")
+    output = {
+        "status": "PASS",
+        "findings": [{
+            "code": "PLAN_TEST_FINDING",
+            "evidence_refs": ["proposal_contract.mandatory_sections"],
+        }],
+    }
+
+    errors = validate_reference_ids(output, envelope)
+
+    assert len(errors) == 1
+    assert "proposal_contract.mandatory_sections" in errors[0]
+
+
+def test_reference_alias_normalizer_binds_unresolved_descriptor_suffix_only():
+    envelope = {
+        "payload": {
+            "argument_graph": {
+                "nodes": [
+                    {"node_id": "BASE-001"},
+                    {"node_id": "INNO-004"},
+                ],
+            },
+        },
+    }
+    output = {
+        "result": {
+            "blueprint": {
+                "unresolved_slot_ids": [
+                    "BASE-001-UNKNOWN",
+                    "INNO-004-ABSENT-FACT",
+                ],
+                "required_evidence_ids": ["BASE-001-UNKNOWN"],
+            },
+        },
+    }
+
+    normalized, report = normalize_reference_id_aliases(output, envelope)
+
+    blueprint = normalized["result"]["blueprint"]
+    assert blueprint["unresolved_slot_ids"] == ["BASE-001", "INNO-004"]
+    assert blueprint["required_evidence_ids"] == ["BASE-001-UNKNOWN"]
+    assert report["normalized_count"] == 2
+
+
+def test_reference_alias_normalizer_binds_evidence_field_path_to_entity_only():
+    envelope = {
+        "payload": {
+            "section_contract": {
+                "section_contract_id": "SC-001",
+                "unique_information_keys": ["key-001"],
+            },
+        },
+    }
+    output = {
+        "findings": [{
+            "code": "BLUEPRINT_TEST",
+            "evidence_refs": ["SC-001.unique_information_keys.0"],
+        }],
+        "result": {
+            "required_input_ids": ["SC-001.unique_information_keys.0"],
+        },
+    }
+
+    normalized, report = normalize_reference_id_aliases(output, envelope)
+
+    assert normalized["findings"][0]["evidence_refs"] == ["SC-001"]
+    assert normalized["result"]["required_input_ids"] == [
+        "SC-001.unique_information_keys.0"
+    ]
+    assert report["normalized_count"] == 1
+
+
+def test_reference_alias_normalizer_binds_colon_evidence_path_to_entity_only():
+    envelope = {
+        "payload": {
+            "section_contract": {
+                "section_contract_id": "SC-001",
+                "required_argument_roles": ["CONTEXT", "METHOD"],
+            },
+            "blueprint_candidate": {
+                "paragraphs": [{"paragraph_id": "P-ABS-002"}],
+            },
+        },
+    }
+    output = {
+        "findings": [{
+            "code": "BLUEPRINT_TEST",
+            "evidence_refs": [
+                "SC-001:required_argument_roles.CONTEXT.METHOD",
+                "P-ABS-002:argument_role.RESEARCH_QUESTION",
+            ],
+        }],
+    }
+
+    normalized, report = normalize_reference_id_aliases(output, envelope)
+
+    assert normalized["findings"][0]["evidence_refs"] == [
+        "SC-001",
+        "P-ABS-002",
+    ]
+    assert report["normalized_count"] == 2
+    assert validate_reference_ids(normalized, envelope) == []
+
+
+def test_reference_integrity_allows_propagating_input_reference_not_new_output():
+    envelope = {
+        "payload": {
+            "original_object": {
+                "required_evidence_ids": ["FACT-UPSTREAM-001"],
+            },
+        },
+    }
+    preserved = {
+        "status": "PASS",
+        "result": {
+            "required_evidence_ids": ["FACT-UPSTREAM-001"],
+        },
+    }
+    invented = {
+        "status": "PASS",
+        "result": {
+            "required_evidence_ids": ["FACT-NEW-999"],
+        },
+    }
+
+    assert validate_reference_ids(preserved, envelope) == []
+    errors = validate_reference_ids(invented, envelope)
+    assert len(errors) == 1
+    assert "FACT-NEW-999" in errors[0]
+
+
 def _stage_reference_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -938,6 +1095,199 @@ def test_source_alias_resolution_is_exact_first_and_never_fuzzy() -> None:
     )
     assert unknown["source_refs"][0]["source_id"] == "source-need-002"
     assert unknown_report["unresolved_count"] == 1
+
+
+def test_unknown_source_id_rebinds_only_by_unique_trusted_hash() -> None:
+    trusted_hash = "a" * 64
+    envelope = {
+        "security_context": {"input_max_security_level": "PUBLIC"},
+        "payload": {
+            "sources": [
+                {
+                    "source_id": "public-src-06192d512e864ed2",
+                    "source_type": "PUBLIC_SOURCE",
+                    "source_hash": trusted_hash,
+                    "authority_rank": 78,
+                    "security_level": "PUBLIC",
+                }
+            ]
+        },
+    }
+    output = {
+        "source_refs": [
+            {
+                "source_id": "public-src-06192d512e8642",
+                "source_hash": trusted_hash,
+            }
+        ]
+    }
+
+    normalized, report = bind_trusted_source_refs(output, envelope)
+
+    assert report["errors"] == []
+    assert normalized["source_refs"][0]["source_id"] == "public-src-06192d512e864ed2"
+    assert report["changes"][0]["alias_kind"] == "UNIQUE_SOURCE_HASH"
+
+
+def test_duplicate_trusted_hash_does_not_resolve_unknown_source_id() -> None:
+    trusted_hash = "b" * 64
+    envelope = {
+        "security_context": {"input_max_security_level": "PUBLIC"},
+        "payload": {
+            "sources": [
+                {
+                    "source_id": source_id,
+                    "source_type": "PUBLIC_SOURCE",
+                    "source_hash": trusted_hash,
+                    "authority_rank": 78,
+                    "security_level": "PUBLIC",
+                }
+                for source_id in ("public-src-one", "public-src-two")
+            ]
+        },
+    }
+
+    normalized, report = bind_trusted_source_refs(
+        {
+            "source_refs": [
+                {
+                    "source_id": "public-src-truncated",
+                    "source_hash": trusted_hash,
+                }
+            ]
+        },
+        envelope,
+    )
+
+    assert normalized["source_refs"][0]["source_id"] == "public-src-truncated"
+    assert report["unresolved_count"] == 1
+
+
+def test_duplicate_document_hash_rebinds_to_exact_trusted_section() -> None:
+    trusted_hash = "c" * 64
+    section_id = "section-exact-001"
+    shared = {
+        "source_type": "CURRENT_PROPOSAL",
+        "document_version_id": "document-version-001",
+        "section_id": section_id,
+        "source_hash": trusted_hash,
+        "authority_rank": 85,
+        "security_level": "INTERNAL",
+    }
+    envelope = {
+        "security_context": {"input_max_security_level": "INTERNAL"},
+        "payload": {
+            "sources": [
+                {"source_id": "document-001", **shared},
+                {"source_id": section_id, **shared},
+            ]
+        },
+    }
+
+    normalized, report = bind_trusted_source_refs(
+        {
+            "source_refs": [
+                {
+                    "source_id": "provider-invented-label",
+                    "section_id": section_id,
+                    "source_hash": trusted_hash,
+                }
+            ]
+        },
+        envelope,
+    )
+
+    assert report["errors"] == []
+    assert normalized["source_refs"][0]["source_id"] == section_id
+    assert report["changes"][0]["alias_kind"] == "EXACT_SECTION_HASH"
+
+
+def test_duplicate_document_hash_without_requested_section_uses_unique_section() -> None:
+    trusted_hash = "e" * 64
+    section_id = "section-exact-003"
+    shared = {
+        "source_type": "CURRENT_PROPOSAL",
+        "document_version_id": "document-version-003",
+        "section_id": section_id,
+        "source_hash": trusted_hash,
+        "authority_rank": 85,
+        "security_level": "INTERNAL",
+    }
+    envelope = {
+        "security_context": {"input_max_security_level": "INTERNAL"},
+        "payload": {
+            "sources": [
+                {"source_id": "document-003", **shared},
+                {"source_id": section_id, **shared},
+            ]
+        },
+    }
+
+    normalized, report = bind_trusted_source_refs(
+        {
+            "source_refs": [{
+                "source_id": "RC-002",
+                "source_hash": trusted_hash,
+            }]
+        },
+        envelope,
+    )
+
+    assert report["errors"] == []
+    assert normalized["source_refs"][0]["source_id"] == section_id
+    assert report["changes"][0]["alias_kind"] == "UNIQUE_SECTION_FOR_HASH"
+
+
+def test_unknown_source_label_rebinds_to_exact_trusted_section_id() -> None:
+    section_id = "section-exact-002"
+    envelope = {
+        "security_context": {"input_max_security_level": "INTERNAL"},
+        "payload": {
+            "sources": [{
+                "source_id": section_id,
+                "source_type": "CURRENT_PROPOSAL",
+                "document_version_id": "document-version-002",
+                "section_id": section_id,
+                "source_hash": "d" * 64,
+                "authority_rank": 85,
+                "security_level": "INTERNAL",
+            }]
+        },
+    }
+
+    normalized, report = bind_trusted_source_refs(
+        {
+            "source_refs": [{
+                "source_id": "RC-002",
+                "source_type": "CURRENT_PROPOSAL",
+                "section_id": section_id,
+            }]
+        },
+        envelope,
+    )
+
+    assert report["errors"] == []
+    assert normalized["source_refs"][0]["source_id"] == section_id
+    assert report["changes"][0]["alias_kind"] == "EXACT_SECTION_ID"
+
+
+def test_missing_item_descriptors_do_not_require_existing_entities() -> None:
+    from app.output_integrity import validate_reference_ids
+
+    assert validate_reference_ids(
+        {
+            "result": {
+                "chapter_readiness": [{
+                    "missing_item_ids": [
+                        "RC-001.methods",
+                        "TEAM_MEMBER",
+                        "BASE-006",
+                    ]
+                }]
+            }
+        },
+        {},
+    ) == []
 
 
 def test_cross_reference_presentation_prefix_is_normalized_only_to_visible_id() -> None:
