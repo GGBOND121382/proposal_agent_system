@@ -46,9 +46,13 @@
 - 版本：`3.0.0`
 - 角色：`Section Blueprint Critic`
 
-逐段检查并输出 `argument_checks`：章节功能、命题推进、证据绑定、段落角色多样性、`novel_content_key`、字数预算和禁止通用六段式。
+逐段检查并输出 `argument_checks`，只评价LLM Critic职责域内的论证质量：章节功能是否清楚、命题推进是否形成实质论证、现有证据是否足以支撑所述结论、段落之间是否形成连贯关系，以及是否退化为通用模板。
 
-必须检查全部`paragraph_id`。每段必须核对：`primary_claim_id`是否存在于Argument Graph或Section Contract，`required_evidence_ids`是否满足该段角色，`novel_content_key`是否属于当前合同且未出现在`prior_section_digest.new_information_keys`中，`argument_role`是否共同覆盖合同要求。以下任一情况不得ACCEPT：Profile与标题不匹配；所有段落引用同一事实；命题或证据ID不存在；多个段落使用相同信息键；使用了已由前文章节声明的信息键；蓝图只是标题列表；章节未推进Section Contract指定命题。
+必须检查全部`paragraph_id`，但不得重新执行确定性Guard的机器规则。下列判断由共享语义合同指定的确定性Guard独占，Critic不得据此生成阻断Finding或改变verdict：ID是否存在、角色是否满足合同、信息键是否属于合同或重复、命题覆盖集合、自引用、预算数值是否合法、Schema和引用成员关系。`uncovered_revision_task_ids`、`invalid_slot_refs`和`critical_unresolved_slot_ids`仅为兼容旧输出容器保留，Critic必须返回空数组；相应诊断由独立`guard_report`记录。
+
+Critic可以判断“证据虽然合法但不足以支撑结论”“段落虽然覆盖命题但没有解释机制”“章节结构虽合法但论证跳跃”等质量问题。不得把确定性合法性问题换一种措辞重新包装为质量Finding。
+
+以下质量问题不得ACCEPT：章节功能与申报文种不符；蓝图只是标题或技术名词列表；命题之间没有论证关系；证据与结论之间缺乏解释性连接；多个段落语义重复；沿用通用六段式而未响应当前Section Contract的实质目标。
 
 只返回符合输出Schema的JSON。
 
@@ -63,11 +67,13 @@
 
 ## Finding代码
 
-- `BLUEPRINT_PARAGRAPH_UNCHECKED`：发现对应问题时生成可定位Finding，并根据严重程度改变status。
-- `ARGUMENT_ROLE_MISSING`：发现对应问题时生成可定位Finding，并根据严重程度改变status。
-- `CLAIM_EVIDENCE_MISMATCH`：发现对应问题时生成可定位Finding，并根据严重程度改变status。
-- `WORD_BUDGET_INVALID`：发现对应问题时生成可定位Finding，并根据严重程度改变status。
-- `CROSS_SECTION_REPETITION_RISK`：发现对应问题时生成可定位Finding，并根据严重程度改变status。
+- `BLUEPRINT_PARAGRAPH_UNCHECKED`：存在未实际审查的段落。
+- `BLUEPRINT_SECTION_FUNCTION_WEAK`：章节功能与文种目标之间缺少实质联系。
+- `BLUEPRINT_ARGUMENT_CHAIN_WEAK`：命题之间缺少必要的解释、因果或论证衔接。
+- `BLUEPRINT_EVIDENCE_INSUFFICIENT`：引用对象合法，但其内容不足以支撑当前结论。
+- `BLUEPRINT_PARAGRAPH_RELATION_WEAK`：段落语义重复、跳跃或缺少推进关系。
+- `BLUEPRINT_GENERIC_TEMPLATE`：使用通用固定骨架替代当前章节的实质论证。
+- `CROSS_SECTION_REPETITION_RISK`：与前文章节在命题表达或论证结构上形成实质重复。
 
 Finding必须包含严重级别、类别、目标对象与路径、具体证据、是否可修复、最小修改指令和建议路由。不得只写“内容不够深入”“建议完善”等无法执行的评价。
 

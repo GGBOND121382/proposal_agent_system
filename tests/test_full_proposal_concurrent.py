@@ -8,8 +8,12 @@ from datetime import datetime
 
 import pytest
 
+from app.full_proposal_workers import FullProposalWorkersMixin
 from app.quality import QualityLifecycleManager
+from app.repair_ledger import RepairLedger
 from app.runtime_api import WorkflowEngine
+from app.workflow_repair import WorkflowRepairMixin
+from app.workflow_status import is_recoverable_block
 from tests.test_runtime import add_standard_materials, create_project, finish_workflow, runtime
 from tests.test_single_section_chain import ChainHarness, SECTION
 
@@ -67,7 +71,7 @@ async def _run_parent(engine: WorkflowEngine, workflow: dict, max_steps: int = 5
         if current["status"] == "WAITING_GATE":
             _approve_open_gate(engine, current["id"])
             continue
-        if current["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+        if current["status"] in {"COMPLETED", "CANCELLED"} or is_recoverable_block(current["status"]):
             return current
     return current
 
@@ -127,6 +131,127 @@ def _inject_one_full_document_conflict(executor):
     simulator._handle_integration_critic = injected
     return calls
 
+
+
+
+class _ChildResetHarness(FullProposalWorkersMixin, WorkflowRepairMixin):
+    @staticmethod
+    def _update(wf: dict, **updates) -> None:
+        for key, value in updates.items():
+            wf[key] = value
+
+
+class _ChildResetDB:
+    def __init__(self) -> None:
+        self.inserts: list[tuple] = []
+        self.audits: list[tuple[str, dict]] = []
+
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        assert sql.startswith("INSERT INTO workflows")
+        self.inserts.append(params)
+
+    def audit(self, event_type: str, **kwargs) -> None:
+        self.audits.append((event_type, kwargs))
+
+
+def test_concurrent_section_rewrite_resets_only_the_superseded_repair_subject() -> None:
+    harness = _ChildResetHarness()
+    state = {
+        "options": {"target_section_ids": ["s1", "s2"]},
+        "section_results": [
+            {"section_id": "s1", "status": "COMPLETED"},
+            {"section_id": "s2", "status": "COMPLETED"},
+        ],
+        "section_progress": {"s1": {"phase": "DONE"}, "s2": {"phase": "DONE"}},
+        "repair_attempts": {
+            "section:s1:P-WRITE-CRITIC": 1,
+            "section:s2:P-WRITE-CRITIC": 1,
+        },
+        "repair_application_artifact_ids": {
+            "section:s1:P-WRITE-CONTENT": ["artifact-s1"],
+            "section:s2:P-WRITE-CONTENT": ["artifact-s2"],
+        },
+        "pending_repair_rereviews": {
+            "P-WRITE-CRITIC": {
+                "repair_attempt_key": "section:s1:P-WRITE-CRITIC",
+            }
+        },
+    }
+    for section_id in ("s1", "s2"):
+        key = f"section:{section_id}:P-WRITE-CRITIC"
+        RepairLedger.applied(
+            state,
+            key,
+            repair_id=f"repair-{section_id}",
+            application_artifact_id=f"artifact-{section_id}",
+        )
+        RepairLedger.rereview_started(
+            state,
+            key,
+            repair_id=f"repair-{section_id}",
+            application_artifact_id=f"artifact-{section_id}",
+        )
+
+    child = {"id": "wf-child", "state": state, "status": "BLOCKED_CONTENT", "current_step": 9}
+    child = harness._reset_full_proposal_child_for_repair(
+        child,
+        {"integration_repair_findings": [{"code": "REWRITE_S1"}]},
+        "wf-parent",
+        {"s1"},
+    )
+
+    assert [item["section_id"] for item in state["section_results"]] == ["s2"]
+    assert "s1" not in state["section_progress"]
+    assert state["section_progress"]["s2"]["phase"] == "DONE"
+    assert "section:s1:P-WRITE-CRITIC" not in state["repair_attempts"]
+    assert state["repair_attempts"]["section:s2:P-WRITE-CRITIC"] == 1
+    assert "section:s1:P-WRITE-CONTENT" not in state["repair_application_artifact_ids"]
+    assert state["repair_application_artifact_ids"]["section:s2:P-WRITE-CONTENT"] == ["artifact-s2"]
+    assert "pending_repair_rereviews" not in state
+    assert RepairLedger.count(state, "semantic_repairs", "section:s1:P-WRITE-CRITIC") == 0
+    assert RepairLedger.count(state, "semantic_repairs", "section:s2:P-WRITE-CRITIC") == 1
+    assert child["status"] == "RUNNING"
+    assert child["current_step"] == 5
+
+
+
+def test_completed_concurrent_child_rewrite_creates_replacement_record() -> None:
+    harness = _ChildResetHarness()
+    harness.db = _ChildResetDB()
+    state = {
+        "options": {"target_section_ids": ["s1"]},
+        "section_results": [{"section_id": "s1", "status": "COMPLETED"}],
+        "section_progress": {"s1": {"phase": "DONE"}},
+        "repair_attempts": {},
+    }
+    child = {
+        "id": "wf-child-completed",
+        "project_id": "project-1",
+        "workflow_type": "WF-4_PROPOSAL_AUTHORING",
+        "state": state,
+        "status": "COMPLETED",
+        "current_step": 9,
+    }
+    record = {"group_id": "GROUP_1", "workflow_id": child["id"], "status": "COMPLETED"}
+
+    replacement = harness._reset_full_proposal_child_for_repair(
+        child,
+        {"integration_repair_findings": [{"code": "REWRITE_S1"}]},
+        "wf-parent",
+        {"s1"},
+        record=record,
+    )
+
+    assert child["status"] == "COMPLETED"
+    assert child["state"] == state
+    assert replacement["id"] != child["id"]
+    assert replacement["status"] == "RUNNING"
+    assert replacement["state"]["supersedes_workflow_id"] == child["id"]
+    assert replacement["state"]["section_results"] == []
+    assert record["workflow_id"] == replacement["id"]
+    assert record["superseded_workflow_ids"] == [child["id"]]
+    assert len(harness.db.inserts) == 1
+    assert harness.db.audits[0][0] == "FULL_PROPOSAL_GROUP_REPLACEMENT_STARTED"
 
 def test_concurrent_child_targeted_repair_is_recorded_on_parent_quality_lifecycle():
     harness = ChainHarness(
@@ -313,7 +438,15 @@ def test_full_document_finding_rewrites_only_responsible_section(runtime):
     assert completed["status"] == "COMPLETED", completed["state"].get("last_error")
     state = completed["state"]
     assert [item["status"] for item in state["full_proposal_review_history"]] == ["REVISE", "PASS"]
-    child_ids = state["authoring_child_workflow_ids"]
+    child_ids = sorted({
+        workflow_id
+        for record in state["full_proposal_children"].values()
+        for workflow_id in [
+            str(record.get("workflow_id") or ""),
+            *(str(item) for item in record.get("superseded_workflow_ids") or []),
+        ]
+        if workflow_id
+    })
     counts = _prompt_counts_by_section(db, project_id, child_ids, "P-WRITE-CONTENT")
     assert counts["技术路线"] == 2
     assert all(counts[title] == 1 for title in FULL_PROPOSAL_TITLES if title != "技术路线")

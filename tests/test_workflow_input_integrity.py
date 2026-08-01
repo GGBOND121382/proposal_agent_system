@@ -286,6 +286,53 @@ def test_gate_accepted_revise_output_is_available_to_next_prompt(live_runtime):
     assert accepted["result"]["limitations"] == ["explicitly accepted limitation"]
 
 
+def test_unapproved_revise_output_is_not_available_to_next_prompt(live_runtime):
+    _, pack, db, builder, _, engine = live_runtime
+    project_id = create_project(db)
+    workflow_id = add_workflow(
+        db,
+        project_id,
+        "WF-3_HYBRID_ONLINE_ASSIST",
+        "RUNNING",
+        current_step=4,
+        state=wf3_state(),
+    )
+    output = pack.replay_output("P-PUBLIC-RESEARCH-SYNTHESIS", "normal")
+    output["status"] = "REVISE"
+    add_artifact(
+        db,
+        project_id,
+        "P-PUBLIC-RESEARCH-SYNTHESIS",
+        output,
+        workflow_id=workflow_id,
+        status="REVISE",
+    )
+    run_id = add_prompt_run(
+        db,
+        project_id,
+        workflow_id,
+        "P-PUBLIC-RESEARCH-SYNTHESIS",
+        output,
+        status="REVISE",
+    )
+    workflow = engine.get(workflow_id)
+    workflow["state"]["accepted_step_results"] = {
+        "4": {
+            "run_id": run_id,
+            "status": "REVISE",
+            "gate_id": "gate-not-approved",
+            "action": "CONFIRM",
+        }
+    }
+    engine._update(workflow, state=workflow["state"])
+
+    assert builder._latest_output(
+        project_id,
+        "P-PUBLIC-RESEARCH-SYNTHESIS",
+        workflow_id=workflow_id,
+    ) is None
+
+
 def test_wf3_downstream_live_inputs_are_complete_and_schema_valid(live_runtime):
     _, pack, db, builder, _, _ = live_runtime
     project_id = create_project(db)

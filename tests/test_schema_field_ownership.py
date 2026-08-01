@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from app.contract_registry import (
     _collect_runtime_objects,
     augment_prompt_with_field_ownership_contract,
+    normalize_registered_enum_aliases_against_schema,
     repair_field_ownership_against_schema,
 )
 from app.executor import PromptExecutor
@@ -64,6 +65,32 @@ def test_schema_generated_prompt_contract_names_direct_parent_paths(pack: Prompt
     assert "`$.result.template` 的直接字段仅允许" in prompt
     assert "source_fact_exclusions*" in prompt
     assert prompt.count("FIELD_OWNERSHIP_CONTRACT:START") == 1
+
+
+def test_schema_bound_enum_alias_normalizer_is_narrow(pack: PromptPack) -> None:
+    schema = pack.inlined_schema("P-PROJECT-READINESS-CRITIC", "output")
+    output = pack.replay_output("P-PROJECT-READINESS-CRITIC")
+    output["result"]["domain_scores"][0]["missing_item_types"] = [
+        "CLOSEST_PRIOR_WORK"
+    ]
+    output["result"]["critical_readiness_checks"][0]["dimension"] = (
+        "TEAM_AND_IMPLEMENTATION"
+    )
+
+    normalized, report = normalize_registered_enum_aliases_against_schema(
+        output,
+        schema,
+        contract_id="test-schema-bound-enum-aliases",
+    )
+
+    assert normalized["result"]["domain_scores"][0]["missing_item_types"] == [
+        "EXISTING_APPROACH"
+    ]
+    assert normalized["result"]["critical_readiness_checks"][0]["dimension"] == (
+        "TEAM_AND_IMPLEMENTATION"
+    )
+    assert report["normalized_count"] == 1
+    assert report["changes"][0]["rule"] == "REGISTERED_ALIAS"
 
 
 def test_all_normal_replays_remain_schema_valid_after_full_normalization(
@@ -201,19 +228,19 @@ def test_sibling_field_move_is_not_guessed() -> None:
     assert report["normalized_count"] == 0
 
 
-def test_targeted_repair_open_object_wrapper_fields_are_lifted_safely(pack: PromptPack) -> None:
+def test_targeted_repair_open_object_wrapper_fields_are_not_guessed(pack: PromptPack) -> None:
     output = pack.replay_output("P-TARGETED-REPAIR")
     envelope = pack.replay_input("P-TARGETED-REPAIR")
     envelope["payload"]["original_object"]["content"] = {"text": "old"}
-    envelope["payload"]["allowed_paths"] = ["content.text"]
+    envelope["payload"]["allowed_paths"] = ["/content/text"]
     envelope["payload"]["findings_to_repair"] = [{
         "code": "TEXT_FIX",
-        "target_path_or_span": "content.text",
+        "target_path_or_span": "/content/text",
     }]
     output["status"] = "REVISE"
     output["result"]["repaired_object"] = {
         "content": {"text": "new"},
-        "changed_paths": ["content.text"],
+        "changed_paths": ["/content/text"],
     }
     output["result"].pop("changed_paths")
     output["result"]["resolved_finding_codes"] = ["TEXT_FIX"]
@@ -226,9 +253,10 @@ def test_targeted_repair_open_object_wrapper_fields_are_lifted_safely(pack: Prom
         envelope,
     )
 
-    assert normalized["result"]["changed_paths"] == ["content.text"]
-    assert "changed_paths" not in normalized["result"]["repaired_object"]
-    assert pack.validate("P-TARGETED-REPAIR", "output", normalized) == []
+    assert "changed_paths" not in normalized["result"]
+    assert normalized["result"]["repaired_object"]["changed_paths"] == ["/content/text"]
+    errors = pack.validate("P-TARGETED-REPAIR", "output", normalized)
+    assert any("changed_paths" in error for error in errors)
 
 
 @pytest.mark.parametrize("prompt_id", ["P-WRITE-CONTENT", "P-EXPRESSION-POLISH"])
@@ -244,7 +272,7 @@ def test_mirrored_unresolved_items_are_losslessly_synchronized(
         "item_id": "unresolved-root-1",
         "type": "MISSING",
         "description": "root item",
-        "target_paths": ["result.candidate_text"],
+        "target_paths": ["/result/candidate_text"],
         "required_action": "provide source",
         "blocking": False,
     }
@@ -252,7 +280,7 @@ def test_mirrored_unresolved_items_are_losslessly_synchronized(
         "item_id": "unresolved-result-1",
         "type": "UNCERTAIN",
         "description": "result item",
-        "target_paths": ["result.paragraphs"],
+        "target_paths": ["/result/paragraphs"],
         "required_action": "verify content",
         "blocking": False,
     }
@@ -267,6 +295,44 @@ def test_mirrored_unresolved_items_are_losslessly_synchronized(
         "unresolved-result-1",
     }
     assert pack.validate(prompt_id, "output", normalized) == []
+
+
+def test_required_array_owner_merges_misplaced_values_when_target_exists() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "warnings": {"type": "array", "items": {"type": "string"}},
+            "result": {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["warnings", "result"],
+        "additionalProperties": False,
+    }
+    malformed = {
+        "warnings": ["top-level warning"],
+        "result": {
+            "value": "ok",
+            "warnings": ["nested warning", "top-level warning"],
+        },
+    }
+
+    repaired, report = repair_field_ownership_against_schema(
+        malformed,
+        schema,
+        contract_id="required-array-owner",
+    )
+
+    assert repaired == {
+        "warnings": ["top-level warning", "nested warning"],
+        "result": {"value": "ok"},
+    }
+    assert report["normalized_count"] == 1
+    assert report["changes"][0]["rule"] == "SCHEMA_FIELD_OWNERSHIP_ARRAY_MERGE"
+    assert Draft202012Validator(schema).is_valid(repaired)
 
 
 def test_optional_same_named_ancestor_field_is_not_moved() -> None:
@@ -407,3 +473,40 @@ def test_required_object_flattening_is_repaired_across_prompt_pack(pack: PromptP
 
     assert exercised == len(pack.prompt_ids())
     assert not failures, "\n".join(failures[:20])
+
+
+def test_wrong_typed_uniquely_owned_required_field_is_reported_without_mutation() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "warnings": {"type": "array", "items": {"type": "string"}},
+            "result": {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["warnings", "result"],
+        "additionalProperties": False,
+    }
+    malformed = {
+        "result": {
+            "value": "ok",
+            "warnings": {"message": "wrong shape"},
+        }
+    }
+
+    repaired, report = repair_field_ownership_against_schema(
+        malformed,
+        schema,
+        contract_id="wrong-typed-required-owner",
+    )
+
+    assert repaired == malformed
+    assert report["normalized_count"] == 0
+    assert report["invalid_misplacement_count"] == 1
+    invalid = report["invalid_misplacements"][0]
+    assert invalid["source_path"] == "/result/warnings"
+    assert invalid["target_path"] == "/warnings"
+    assert invalid["validation_errors"]

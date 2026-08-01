@@ -122,7 +122,7 @@ def write_material_manifest(destination: Path) -> dict[str, Any]:
 
 def write_restore_guide(destination: Path, source_commit: str, product_version: str) -> None:
     destination.write_text(
-        f"""# G0 恢复说明
+        fr"""# G0 恢复说明
 
 本恢复包由提交 `{source_commit}` 生成，对应产品版本 `{product_version}`。
 

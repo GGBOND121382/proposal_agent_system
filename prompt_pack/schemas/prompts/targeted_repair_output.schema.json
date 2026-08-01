@@ -31,9 +31,11 @@
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$"
           },
-          "minItems": 1
+          "minItems": 1,
+          "x-reference-semantic": "JSON_POINTER"
         },
         "unchanged_protected_hashes": {
           "type": "array",
@@ -42,7 +44,9 @@
             "properties": {
               "path": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$",
+                "x-reference-semantic": "JSON_POINTER"
               },
               "hash": {
                 "type": "string",
@@ -104,7 +108,8 @@
       "type": "array",
       "items": {
         "$ref": "../common/source_ref.schema.json"
-      }
+      },
+      "x-reference-semantic": "SOURCE_REF"
     },
     "warnings": {
       "type": "array",

@@ -57,10 +57,22 @@ class ContextBuilder(BaseContextBuilder):
         self,
         project_id: str,
         workflow_id: str | None = None,
+        *,
+        section_results: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
+        if section_results:
+            return super()._content_candidates(
+                project_id,
+                workflow_id,
+                section_results=section_results,
+            )
         child_ids = list(getattr(self, "_active_authoring_child_ids", None) or [])
         if getattr(self, "_active_prompt_id", None) != "P-INTEGRATION-CRITIC" or not child_ids:
-            return super()._content_candidates(project_id, workflow_id)
+            return super()._content_candidates(
+                project_id,
+                workflow_id,
+                section_results=section_results,
+            )
         sql = "SELECT id,prompt_id,input_json,output_json,created_at FROM prompt_runs WHERE project_id=? AND prompt_id IN ('P-WRITE-CONTENT','P-EXPRESSION-POLISH') AND status='PASS'"
         sql += " AND workflow_id IN (" + ",".join("?" for _ in child_ids) + ")"
         sql += " ORDER BY created_at,id"

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 from typing import Any
 
-from app.util import sha256_json
+from app.db import Database
+from app.util import sha256_json, utc_now
 from app.workflow_repair import WorkflowRepairMixin
 
 
@@ -73,29 +75,37 @@ class RecordingQualityManager:
 
 
 class RepairHarness(WorkflowRepairMixin):
-    def __init__(self) -> None:
+    def __init__(self, tmp_path) -> None:
         self.context_builder = ListResultContext()
         self.executor = ListRepairExecutor()
         self.quality_manager = RecordingQualityManager()
-        self.updated_state: dict[str, Any] | None = None
+        self.db = Database(tmp_path / "runtime.sqlite3")
+        now = utc_now()
+        self.db.execute(
+            "INSERT INTO projects(id,name,description,security_level,config_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            ("project-1", "test", "test", "INTERNAL", "{}", now, now),
+        )
+        self.db.execute(
+            "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            ("wf-1", "project-1", "WF-TEST", "RUNNING", 0, "{}", now, now),
+        )
+
+    def workflow(self) -> dict[str, Any]:
+        row = self.db.fetchone("SELECT * FROM workflows WHERE id='wf-1'")
+        row["state"] = json.loads(row.pop("state_json"))
+        return row
 
     @staticmethod
     def _project_level(project_id: str) -> str:
         assert project_id == "project-1"
         return "INTERNAL"
 
-    def _update(self, wf: dict[str, Any], **updates: Any) -> None:
-        if "state" in updates:
-            self.updated_state = copy.deepcopy(updates["state"])
-            wf["state"] = updates["state"]
 
-
-def test_fact_critic_revise_auto_repairs_list_shaped_fact_candidates() -> None:
-    harness = RepairHarness()
-    wf = {"id": "wf-1", "project_id": "project-1", "state": {}}
+def test_repair_application_artifact_replaces_list_shaped_state_override(tmp_path) -> None:
+    harness = RepairHarness(tmp_path)
+    wf = harness.workflow()
     state = {
         "repair_attempts": {},
-        "repair_overrides": {},
         "original_environment": "OFFLINE_LOCAL",
     }
     critic_output = {
@@ -126,15 +136,40 @@ def test_fact_critic_revise_auto_repairs_list_shaped_fact_candidates() -> None:
     assert original_object["content"] == {"fact_candidates": FACTS}
     assert original_object["object_hash"] == sha256_json({"fact_candidates": FACTS})
     assert envelope["overrides"]["payload.allowed_paths"] == [
-        "content.fact_candidates[claim_id=METRIC-PROJ-001].claim_type"
+        "/content/fact_candidates/0/claim_type"
     ]
-    override = state["repair_overrides"]["P-FACT-EXTRACT"]
+    artifact_id = repaired["repair_application_artifact_id"]
+    assert state["repair_application_artifact_ids"]["P-FACT-EXTRACT"] == [artifact_id]
+    assert "repair_overrides" not in state
+    artifact = harness.db.fetchone(
+        "SELECT version,status,content_json FROM artifacts WHERE id=?", (artifact_id,)
+    )
+    assert artifact["version"] == 1
+    assert artifact["status"] == "PASS"
+    payload = json.loads(artifact["content_json"])
+    override = payload["repaired_value"]
     assert isinstance(override, list)
     assert override[0]["claim_type"] == "EXPECTED_RESULT"
     assert override[1] == FACTS[1]
-    assert state["repair_attempts"]["P-FACT-CRITIC"] == 1
+    assert payload["application_status"] == "APPLIED"
+    assert payload["target_key"] == "P-FACT-EXTRACT"
+    assert state.get("repair_attempts", {}).get("P-FACT-CRITIC", 0) == 0
+    assert [
+        item["event"]
+        for item in state["repair_ledger_v1"]["events"]
+    ][-5:] == [
+        "CREATED",
+        "MODEL_RETURNED",
+        "SCHEMA_VALIDATED",
+        "DIFF_VALIDATED",
+        "APPLIED",
+    ]
     assert state["repair_shape_adaptations"][0]["collection_key"] == "fact_candidates"
     assert len(harness.quality_manager.calls) == 1
+    assert harness.db.fetchone(
+        "SELECT id FROM audit_events WHERE event_type='REPAIR_APPLICATION_APPLIED' AND object_id=?",
+        (artifact_id,),
+    ) is not None
 
 
 def test_list_repair_rejects_missing_collection_wrapper() -> None:
@@ -161,7 +196,7 @@ def test_generic_result_target_allows_whole_wrapped_collection() -> None:
         "result",
         content=content,
         collection_key="fact_candidates",
-    ) == "content.fact_candidates"
+    ) == "/content/fact_candidates"
 
 
 def test_candidate_wrapper_is_removed_from_producer_repair_path() -> None:
@@ -173,21 +208,21 @@ def test_candidate_wrapper_is_removed_from_producer_repair_path() -> None:
         "architecture_candidate.research_design_matrix[0].method_ids",
         content=content,
         collection_key=None,
-    ) == "content.research_design_matrix[0].method_ids"
+    ) == "/content/research_design_matrix/0/method_ids"
 
 
-def test_collection_paths_accept_json_pointer_and_dotted_index_forms() -> None:
+def test_collection_locators_resolve_to_concrete_json_pointer_indexes() -> None:
     content = {"fact_candidates": copy.deepcopy(FACTS)}
     assert RepairHarness._canonical_repair_path(
         "/fact_candidates/0/claim_type",
         content=content,
         collection_key="fact_candidates",
-    ) == "content.fact_candidates[0].claim_type"
+    ) == "/content/fact_candidates/0/claim_type"
     assert RepairHarness._canonical_repair_path(
         "result.fact_candidates.METRIC-PROJ-001.claim_type",
         content=content,
         collection_key="fact_candidates",
-    ) == "content.fact_candidates[claim_id=METRIC-PROJ-001].claim_type"
+    ) == "/content/fact_candidates/0/claim_type"
 
 
 def test_targeted_repair_schema_accepts_every_registered_producer_role() -> None:

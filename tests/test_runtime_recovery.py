@@ -317,7 +317,17 @@ def test_executor_reuses_atomic_commit_after_fault(monkeypatch, tmp_path):
     assert db.fetchone("SELECT COUNT(*) AS n FROM artifacts WHERE artifact_type='PROMPT_OUTPUT'")["n"] == 1
 
 
-def test_recoverable_block_resumes_same_step(tmp_path):
+@pytest.mark.parametrize(
+    "blocked_status",
+    [
+        "BLOCKED",
+        "BLOCKED_PROVIDER",
+        "BLOCKED_CONTRACT",
+        "BLOCKED_TECHNICAL",
+        "BLOCKED_CONTENT",
+    ],
+)
+def test_recoverable_block_resumes_same_step(tmp_path, blocked_status):
     db = make_executor_db(tmp_path)
     now = utc_now()
     state = {
@@ -325,7 +335,6 @@ def test_recoverable_block_resumes_same_step(tmp_path):
         "options": {},
         "step_results": {},
         "repair_attempts": {},
-        "repair_overrides": {},
         "public_search_results": None,
         "runtime_recoverable": True,
         "runtime_failure_point": "after_db_transaction",
@@ -333,13 +342,36 @@ def test_recoverable_block_resumes_same_step(tmp_path):
     }
     db.execute(
         "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-        ("wf-1", "project-1", "WF-1_PROJECT_INTAKE", "BLOCKED", 3, json.dumps(state), now, now),
+        ("wf-1", "project-1", "WF-1_PROJECT_INTAKE", blocked_status, 3, json.dumps(state), now, now),
     )
     engine = RecoverableWorkflowEngine(db, SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
     recovered = engine._recover_status(engine.get("wf-1"))
     assert recovered["status"] == "RUNNING"
     assert recovered["current_step"] == 3
     assert recovered["state"]["recovered_from"] == "after_db_transaction"
+
+
+@pytest.mark.parametrize("existing_status", ["WAITING_PROVIDER", "BLOCKED_CONTRACT"])
+def test_duplicate_start_is_rejected_for_every_nonterminal_status(tmp_path, existing_status):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-1_PROJECT_INTAKE",
+        "options": {},
+        "step_results": {},
+        "repair_attempts": {},
+        "public_search_results": None,
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        ("wf-existing", "project-1", "WF-1_PROJECT_INTAKE", existing_status, 0, json.dumps(state), now, now),
+    )
+    engine = RecoverableWorkflowEngine(
+        db, SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), SimpleNamespace()
+    )
+
+    with pytest.raises(ValueError, match="已有未结束"):
+        engine.start("project-1", "WF-1_PROJECT_INTAKE")
 
 
 def test_duplicate_in_process_advance_returns_without_reexecution(tmp_path):
@@ -350,7 +382,6 @@ def test_duplicate_in_process_advance_returns_without_reexecution(tmp_path):
         "options": {},
         "step_results": {},
         "repair_attempts": {},
-        "repair_overrides": {},
         "public_search_results": None,
     }
     db.execute(
@@ -366,3 +397,298 @@ def test_duplicate_in_process_advance_returns_without_reexecution(tmp_path):
 
     assert result["status"] == "RUNNING"
     assert result["current_step"] == 3
+
+
+class SequencePromptExecutor:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    async def execute(self, *args, **kwargs):
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+def _wrapped_provider_failure(kind, *, http_status=None, retry_after=None):
+    from app.executor import PromptExecutionError
+    from app.llm import ProviderError
+
+    provider = ProviderError(
+        "provider failed",
+        kind=kind,
+        http_status=http_status,
+        retry_after_seconds=retry_after,
+        retryable_hint=True,
+    )
+    try:
+        raise PromptExecutionError("prompt execution failed") from provider
+    except PromptExecutionError as exc:
+        return exc
+
+
+def _workflow_for_retry_test(db, state):
+    now = utc_now()
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-retry",
+            "project-1",
+            "WF-1_PROJECT_INTAKE",
+            "RUNNING",
+            2,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    return {
+        "id": "wf-retry",
+        "project_id": "project-1",
+        "workflow_type": "WF-1_PROJECT_INTAKE",
+        "status": "RUNNING",
+        "current_step": 2,
+        "state": state,
+    }
+
+
+def test_same_node_empty_stream_retries_then_recovers_without_semantic_budget(tmp_path):
+    from app.repair_ledger import RepairLedger
+    from app.runtime_failures import ProviderFailureKind
+    from app.workflows import WorkflowEngine
+
+    db = make_executor_db(tmp_path)
+    state = {
+        "workflow_type": "WF-1_PROJECT_INTAKE",
+        "options": {
+            "provider_retry_limit": 2,
+            "provider_retry_base_delay_seconds": 0,
+        },
+        "step_results": {},
+    }
+    wf = _workflow_for_retry_test(db, state)
+    success = {"run_id": "run-ok", "status": "PASS", "output": {"status": "PASS"}}
+    executor = SequencePromptExecutor(
+        [
+            _wrapped_provider_failure(ProviderFailureKind.EMPTY_STREAM),
+            _wrapped_provider_failure(ProviderFailureKind.EMPTY_STREAM),
+            success,
+        ]
+    )
+    engine = WorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        executor,
+        SimpleNamespace(),
+    )
+
+    result = asyncio.run(
+        engine._execute_prompt_with_provider_retry(
+            wf,
+            state,
+            prompt_id="P-TEST",
+            envelope={"payload": {}},
+        )
+    )
+
+    assert result is success
+    assert executor.calls == 3
+    retry_key = "2:P-TEST"
+    assert RepairLedger.count(state, "provider_retries", retry_key) == 2
+    assert RepairLedger.count(state, "semantic_repairs", retry_key) == 0
+    assert [
+        item["event"] for item in RepairLedger.events(state, key=retry_key)
+    ] == ["PROVIDER_RETRY", "PROVIDER_RETRY", "PROVIDER_RECOVERED"]
+    assert "provider_wait" not in state
+    assert db.fetchone(
+        "SELECT COUNT(*) AS n FROM artifacts WHERE artifact_type='RUNTIME_FAILURE'"
+    )["n"] == 2
+
+
+def test_same_node_retry_exhaustion_reports_total_attempts(tmp_path):
+    from app.retry_policy import ProviderRetriesExhausted
+    from app.runtime_failures import ProviderFailureKind
+    from app.workflows import WorkflowEngine
+
+    db = make_executor_db(tmp_path)
+    state = {
+        "workflow_type": "WF-1_PROJECT_INTAKE",
+        "options": {
+            "provider_retry_limit": 1,
+            "provider_retry_base_delay_seconds": 0,
+        },
+        "step_results": {},
+    }
+    wf = _workflow_for_retry_test(db, state)
+    executor = SequencePromptExecutor(
+        [
+            _wrapped_provider_failure(ProviderFailureKind.TRANSPORT),
+            _wrapped_provider_failure(ProviderFailureKind.TRANSPORT),
+        ]
+    )
+    engine = WorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        executor,
+        SimpleNamespace(),
+    )
+
+    with pytest.raises(ProviderRetriesExhausted) as captured:
+        asyncio.run(
+            engine._execute_prompt_with_provider_retry(
+                wf,
+                state,
+                prompt_id="P-TEST",
+                envelope={"payload": {}},
+            )
+        )
+
+    assert executor.calls == 2
+    assert captured.value.decision.completed_attempts == 2
+    assert captured.value.decision.max_retries == 1
+    assert captured.value.decision.exhausted_status == "BLOCKED_PROVIDER"
+    assert state["provider_wait"]["completed_attempts"] == 2
+    assert state["provider_wait"]["decision"]["should_retry"] is False
+
+
+def _insert_wf4_failure(db, *, status, classification, legacy_state=None):
+    state = {
+        "workflow_type": "WF-4_PROPOSAL_AUTHORING",
+        "options": {
+            "provider_retry_limit": 2,
+            "provider_retry_base_delay_seconds": 0,
+        },
+        "step_results": {"5": {"prompt_id": "P-WRITE-BLUEPRINT-CRITIC"}},
+        "last_error": "provider failure",
+        **(legacy_state or {}),
+    }
+    now = utc_now()
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-wf4",
+            "project-1",
+            "WF-4_PROPOSAL_AUTHORING",
+            status,
+            5,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    db.execute(
+        """INSERT INTO artifacts(
+               id,project_id,workflow_id,artifact_type,prompt_id,version,status,
+               security_level,context_hash,content_json,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "artifact-runtime-failure",
+            "project-1",
+            "wf-wf4",
+            "RUNTIME_FAILURE",
+            "P-WRITE-BLUEPRINT-CRITIC",
+            1,
+            str(classification.get("category") or "ERROR"),
+            "INTERNAL",
+            "hash",
+            json.dumps(classification),
+            now,
+        ),
+    )
+    return state
+
+
+def test_wf4_recovery_uses_persisted_formal_classification(tmp_path):
+    from scripts.recover_wf4_runtime_v1 import recover
+
+    db = make_executor_db(tmp_path)
+    _insert_wf4_failure(
+        db,
+        status="BLOCKED_PROVIDER",
+        classification={
+            "category": "PROVIDER_TRANSIENT_ERROR",
+            "retryable": True,
+            "failure_kind": "EMPTY_STREAM",
+            "workflow_status": "WAITING_PROVIDER",
+        },
+    )
+
+    result = recover(db.path, "wf-wf4", apply=False)
+
+    assert result["eligible"] is True
+    assert result["to_status"] == "WAITING_PROVIDER"
+    assert result["classification_source"] == "RUNTIME_FAILURE_ARTIFACT"
+    assert result["retry_policy"]["max_attempts"] == 3
+    assert result["applied"] is False
+
+
+def test_wf4_recovery_refuses_incomplete_runtime_semantics_migration(tmp_path):
+    from scripts.recover_wf4_runtime_v1 import recover
+
+    db = make_executor_db(tmp_path)
+    _insert_wf4_failure(
+        db,
+        status="BLOCKED_PROVIDER",
+        classification={
+            "category": "PROVIDER_TRANSIENT_ERROR",
+            "retryable": True,
+        },
+        legacy_state={"repair_overrides": {"section": {"status": "PASS"}}},
+    )
+
+    dry_run = recover(db.path, "wf-wf4", apply=False)
+    assert dry_run["eligible"] is False
+    assert any("legacy state keys remain" in item for item in dry_run["refusals"])
+    with pytest.raises(ValueError, match="migration is incomplete"):
+        recover(db.path, "wf-wf4", apply=True)
+
+
+def test_wf4_recovery_refuses_nonprovider_failure(tmp_path):
+    from scripts.recover_wf4_runtime_v1 import recover
+
+    db = make_executor_db(tmp_path)
+    _insert_wf4_failure(
+        db,
+        status="BLOCKED_CONTRACT",
+        classification={
+            "category": "OUTPUT_CONTRACT_ERROR",
+            "retryable": False,
+        },
+    )
+
+    result = recover(db.path, "wf-wf4", apply=False)
+    assert result["eligible"] is False
+    assert result["to_status"] == "BLOCKED_CONTRACT"
+    assert any("not a retryable provider failure" in item for item in result["refusals"])
+
+
+def test_wf4_recovery_apply_uses_status_cas_and_preserves_step(tmp_path):
+    from scripts.recover_wf4_runtime_v1 import recover
+
+    db = make_executor_db(tmp_path)
+    _insert_wf4_failure(
+        db,
+        status="BLOCKED_PROVIDER",
+        classification={
+            "category": "PROVIDER_TRANSIENT_ERROR",
+            "retryable": True,
+            "failure_kind": "TRANSPORT",
+        },
+    )
+
+    result = recover(db.path, "wf-wf4", apply=True)
+    row = db.fetchone(
+        "SELECT status,current_step,state_json FROM workflows WHERE id=?",
+        ("wf-wf4",),
+    )
+    state = json.loads(row["state_json"])
+
+    assert result["applied"] is True
+    assert row["status"] == "WAITING_PROVIDER"
+    assert row["current_step"] == 5
+    assert state["provider_wait"]["new_retry_cycle"] is True
+    assert state["provider_wait"]["max_attempts"] == 3

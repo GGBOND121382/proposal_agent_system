@@ -19,6 +19,7 @@ from .proposal_quality import (
     _template_skeleton,
 )
 from .full_integration_quality import FullProposalQualityGuard
+from .json_pointer import JsonPointerError, is_ancestor_or_same, parse_pointer, paths_overlap
 
 
 CRITIC_PROMPTS = {
@@ -629,138 +630,61 @@ class AgentPromptKernelValidator:
 
     @staticmethod
     def _audit_repair_scope(payload: dict[str, Any], result: dict[str, Any]) -> list[TrackBFinding]:
+        """Enforce the Targeted Repair allowlist with strict RFC 6901 paths.
+
+        ``allowed_paths`` is the sole authority.  The validator must not infer
+        broader permissions from prose repair instructions, finding codes, or
+        semantic paragraph identifiers.  Such hidden expansion previously made
+        the effective contract differ from the schema and prompt.
+        """
+
         findings: list[TrackBFinding] = []
-        def canonical_paths(values: list[Any]) -> list[str]:
-            canonical: list[str] = []
+
+        def validated_paths(field_name: str, values: list[Any]) -> tuple[list[str], list[str]]:
+            valid: list[str] = []
+            invalid: list[str] = []
             for value in values:
-                text = str(value).strip().replace("/", ".")
-                text = re.sub(
-                    r"^content\.(?:blueprint_candidate|candidate)\.",
-                    "content.",
-                    text,
-                )
-                generic_collection_match = re.match(
-                    r"^(content\.[A-Za-z_][A-Za-z0-9_]*)\[([^\]]+)\](.*)$",
-                    text,
-                )
-                if (
-                    generic_collection_match
-                    and generic_collection_match.group(1) != "content.paragraphs"
-                ):
-                    root = generic_collection_match.group(1)
-                    selector = generic_collection_match.group(2).strip()
-                    suffix = generic_collection_match.group(3)
-                    if selector == "*":
-                        parts = [root]
-                    else:
-                        range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", selector)
-                        if range_match:
-                            start, end = map(int, range_match.groups())
-                            step = 1 if end >= start else -1
-                            parts = [
-                                f"{root}.{index}{suffix}"
-                                for index in range(start, end + step, step)
-                            ]
-                        elif selector.isdigit():
-                            parts = [f"{root}.{selector}{suffix}"]
-                        else:
-                            parts = [text]
-                else:
-                    parts = []
-                bracket_match = re.match(
-                    r"^content\.paragraphs\[([^\]]+)\](.*)$",
-                    text,
-                )
-                if bracket_match:
-                    semantic_ids: list[str] = []
-                    for item in bracket_match.group(1).split(","):
-                        identity = re.sub(r"^paragraph_id=", "", item.strip())
-                        range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", identity)
-                        if not range_match:
-                            if identity:
-                                semantic_ids.append(identity)
-                            continue
-                        start, end = map(int, range_match.groups())
-                        step = 1 if end >= start else -1
-                        semantic_ids.extend(
-                            str(index)
-                            for index in range(start, end + step, step)
-                        )
-                    parts = [
-                        f"content.{semantic_id}{bracket_match.group(2)}"
-                        for semantic_id in semantic_ids
-                    ]
-                elif not parts:
-                    parts = text.split(",")
-                for index, part in enumerate(parts):
-                    path = part.strip().replace("/", ".")
-                    if not path:
-                        continue
-                    if index > 0 and not path.startswith("content."):
-                        path = "content." + path
-                    path = re.sub(
-                        r"^content\.paragraphs\[paragraph_id=([^\]]+)\]",
-                        r"content.\1",
-                        path,
-                    )
-                    path = re.sub(r"\[(\d+)\]", r".\1", path)
-                    canonical.append(path)
-            return canonical
+                pointer = str(value or "").strip()
+                try:
+                    parse_pointer(pointer)
+                except JsonPointerError:
+                    invalid.append(pointer)
+                    continue
+                valid.append(pointer)
+            return valid, invalid
 
-        allowed = canonical_paths(list(payload.get("allowed_paths") or []))
-        protected = canonical_paths(list(payload.get("protected_paths") or []))
-        changed = canonical_paths(list(result.get("changed_paths") or []))
-        for finding in payload.get("findings_to_repair") or []:
-            if not isinstance(finding, dict):
-                continue
-            instruction = str(finding.get("repair_instruction") or "")
-            for paragraph_id in re.findall(
-                r"(?<![A-Za-z0-9-])((?:P|para)-[A-Za-z0-9-]+)(?![A-Za-z0-9-])",
-                instruction,
-                flags=re.I,
-            ):
-                allowed.append(f"content.{paragraph_id}")
-        original_content = (payload.get("original_object") or {}).get("content") or {}
-        paragraph_indexes = {
-            str(paragraph.get("paragraph_id")): index
-            for index, paragraph in enumerate(original_content.get("paragraphs") or [])
-            if isinstance(paragraph, dict) and paragraph.get("paragraph_id")
-        }
-        requested_codes = {
-            str(item.get("code") or "")
-            for item in payload.get("findings_to_repair") or []
-            if isinstance(item, dict)
-        }
-        if "WORD_BUDGET_EXCEED" in requested_codes:
-            allowed.extend(
-                f"content.{paragraph_id}.word_budget"
-                for paragraph_id in paragraph_indexes
-            )
-        if any("CONTENT_KEY" in code for code in requested_codes):
-            allowed.extend(
-                f"content.{paragraph_id}.novel_content_key"
-                for paragraph_id in paragraph_indexes
-            )
-        for paragraph_id, index in paragraph_indexes.items():
-            semantic_root = f"content.{paragraph_id}"
-            if any(
-                path == semantic_root
-                or path.startswith(semantic_root + ".")
-                or path.startswith(semantic_root + "[")
-                for path in allowed
-            ):
-                # Numeric bracket paths canonicalize to ``content.<index>`` in
-                # canonical_paths(), while semantic paragraph-ID roots remain
-                # ``content.<paragraph_id>``. Bridge both representations so a
-                # critic-authorized paragraph ID also permits the model's
-                # equivalent zero-based changed path.
-                allowed.append(f"content.{index}")
+        allowed, invalid_allowed = validated_paths(
+            "payload.allowed_paths", list(payload.get("allowed_paths") or [])
+        )
+        protected, invalid_protected = validated_paths(
+            "payload.protected_paths", list(payload.get("protected_paths") or [])
+        )
+        changed, invalid_changed = validated_paths(
+            "result.changed_paths", list(result.get("changed_paths") or [])
+        )
+        invalid_paths = [*invalid_allowed, *invalid_protected, *invalid_changed]
+        if invalid_paths:
+            findings.append(_finding(
+                "QG_REPAIR_PATH_INVALID",
+                "CONTENT",
+                "REPAIRED_OBJECT",
+                "result.changed_paths",
+                f"定向修复包含{len(invalid_paths)}个非RFC 6901 JSON Pointer路径。",
+                "使用以/开头的RFC 6901 JSON Pointer；不得使用点号、方括号或语义ID路径。",
+                "ORIGINAL_PRODUCER",
+                evidence_refs=invalid_paths,
+            ))
 
-        def under(path: str, roots: list[str]) -> bool:
-            return any(path == root or path.startswith(root + ".") or path.startswith(root + "[") for root in roots)
-
-        outside = [path for path in changed if not under(path, allowed)]
-        protected_hits = [path for path in changed if under(path, protected)]
+        outside = [
+            path
+            for path in changed
+            if not any(is_ancestor_or_same(root, path) for root in allowed)
+        ]
+        protected_hits = [
+            path
+            for path in changed
+            if any(paths_overlap(path, root) for root in protected)
+        ]
         if outside or protected_hits:
             findings.append(_finding(
                 "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST",
@@ -768,7 +692,7 @@ class AgentPromptKernelValidator:
                 "REPAIRED_OBJECT",
                 "result.changed_paths",
                 f"定向修复修改了{len(outside)}个未授权路径和{len(protected_hits)}个受保护路径。",
-                "只修改allowed_paths的子路径；恢复protected_paths及其Hash。",
+                "只修改allowed_paths的自身或子路径；不得修改protected_paths的自身、祖先或子路径。",
                 "ORIGINAL_PRODUCER",
                 evidence_refs=[*outside, *protected_hits],
             ))

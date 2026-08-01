@@ -17,6 +17,8 @@ from typing import Any, Iterable, Mapping
 
 from jsonschema import Draft202012Validator
 
+from .contracts.semantic_contract import annotate_schema_reference_semantics
+
 from .status_ontology import (
     CANONICAL_CLAIM_TYPES,
     CANONICAL_KNOWLEDGE_STATUSES,
@@ -27,6 +29,12 @@ from .status_ontology import (
 )
 
 CONTRACT_REGISTRY_VERSION = "5.1.0"
+
+
+def prepare_schema_contract(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """Apply the central reference-field registry before schema use."""
+
+    return annotate_schema_reference_semantics(schema)
 
 # Cross-workflow vocabularies live here rather than in prompt-specific
 # normalizers.  JSON Schemas remain the strict authority for a concrete path;
@@ -526,7 +534,7 @@ def required_null_container_errors(
     prompt-specific normalizer can dereference or mask them.
     """
 
-    root_schema = copy.deepcopy(dict(schema))
+    root_schema = prepare_schema_contract(schema)
     errors: list[str] = []
 
     def pointer(path: tuple[Any, ...]) -> str:
@@ -715,6 +723,124 @@ def normalize_against_schema(
     return normalized, report
 
 
+def normalize_registered_enum_aliases_against_schema(
+    value: Any,
+    schema: Mapping[str, Any],
+    *,
+    contract_id: str,
+    protected_paths: Iterable[str] = (),
+) -> tuple[Any, dict[str, Any]]:
+    """Normalize only schema-bound enum representation aliases.
+
+    Unlike :func:`normalize_against_schema`, this consumption-boundary helper
+    does not default null containers, swap sibling fields, reverse relation
+    endpoints, or synthesize any missing content.  It is deliberately limited
+    to canonical case/spacing and unambiguous aliases registered for the
+    semantic domain of the current field.  Unknown values remain untouched so
+    strict schema validation can reject them.
+    """
+
+    normalized = copy.deepcopy(value)
+    root_schema = copy.deepcopy(dict(schema))
+    protected = {str(item).rstrip("/") for item in protected_paths if str(item).strip()}
+    changes: list[ContractChange] = []
+    unresolved: list[ContractUnresolved] = []
+
+    def record(path: str, field: str, before: Any, after: Any, rule: str, reason: str) -> None:
+        changes.append(ContractChange(path, field, before, after, rule, reason))
+
+    immutable_decision_fields = frozenset({"status", "verdict", "findings"})
+
+    def visit(
+        node: Any,
+        node_schema: Mapping[str, Any],
+        path: str,
+        parent: Mapping[str, Any] | None = None,
+        field: str = "",
+    ) -> Any:
+        if any(path == root or path.startswith(root + "/") for root in protected):
+            return node
+        effective = _effective_schema(node_schema, node, root_schema)
+        if isinstance(node, dict):
+            props = _property_schemas(effective, node, root_schema)
+            for key in list(node.keys()):
+                if key in immutable_decision_fields:
+                    continue
+                child_schema = props.get(key)
+                if child_schema is None:
+                    additional = effective.get("additionalProperties")
+                    child_schema = additional if isinstance(additional, Mapping) else {}
+                node[key] = visit(node[key], child_schema, f"{path}/{key}", node, key)
+            return node
+        if isinstance(node, list):
+            item_schema = effective.get("items") if isinstance(effective.get("items"), Mapping) else {}
+            for index, item in enumerate(node):
+                node[index] = visit(item, item_schema, f"{path}/{index}", parent, field)
+            return node
+
+        allowed = _enum_values(effective)
+        if not allowed:
+            return node
+        canonical = _canonical_match(node, allowed)
+        if canonical is not None:
+            if canonical != node:
+                record(
+                    path,
+                    field,
+                    node,
+                    canonical,
+                    "CANONICAL_FORMAT",
+                    "case/spacing/hyphen canonicalization",
+                )
+            return canonical
+
+        alias, reason = _choose_alias(field, node, allowed, parent or {})
+        if alias is not None:
+            token = _token(node)
+            if field in {"relation", "relation_type"} and (token, alias) in {
+                ("IMPLEMENTS", "REALIZED_BY"),
+                ("REALIZED_BY", "IMPLEMENTS"),
+            }:
+                unresolved.append(
+                    ContractUnresolved(
+                        path=path,
+                        field=field,
+                        value=node,
+                        allowed_values=allowed,
+                        reason=(
+                            "registered relation alias requires endpoint reversal and is "
+                            "not safe at the representation-only consumption boundary"
+                        ),
+                    )
+                )
+                return node
+            record(path, field, node, alias, "REGISTERED_ALIAS", reason or "registered alias")
+            return alias
+
+        unresolved.append(
+            ContractUnresolved(
+                path=path,
+                field=field,
+                value=node,
+                allowed_values=allowed,
+                reason="unregistered enum drift; strict schema validation must decide",
+            )
+        )
+        return node
+
+    normalized = visit(normalized, root_schema, "$")
+    return normalized, {
+        "schema_version": "1.0",
+        "normalizer_version": CONTRACT_REGISTRY_VERSION,
+        "contract_id": contract_id,
+        "normalization_policy": "SCHEMA_BOUND_REGISTERED_ENUMS_ONLY",
+        "normalized_count": len(changes),
+        "changes": [asdict(item) for item in changes],
+        "unresolved_count": len(unresolved),
+        "unresolved": [asdict(item) for item in unresolved],
+    }
+
+
 def _json_pointer(path: tuple[Any, ...]) -> str:
     if not path:
         return "/"
@@ -782,10 +908,30 @@ def _collect_runtime_objects(
 
 def _schema_error_count(value: Any, schema: Mapping[str, Any]) -> int:
     validator = Draft202012Validator(
-        dict(schema),
+        prepare_schema_contract(schema),
         format_checker=Draft202012Validator.FORMAT_CHECKER,
     )
     return sum(1 for _ in validator.iter_errors(value))
+
+
+def _stable_json_union(*collections: list[Any]) -> list[Any]:
+    """Merge JSON-compatible arrays without inventing or rewriting items."""
+
+    merged: list[Any] = []
+    seen: set[str] = set()
+    for collection in collections:
+        for item in collection:
+            marker = json.dumps(
+                item,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            if marker in seen:
+                continue
+            seen.add(marker)
+            merged.append(copy.deepcopy(item))
+    return merged
 
 
 def _schema_declares_object(schema: Mapping[str, Any]) -> bool:
@@ -912,6 +1058,139 @@ def _missing_required_child_move_candidates(
     return candidates
 
 
+def _invalid_misplaced_field_candidates(
+    value: Any,
+    root_schema: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Report uniquely owned misplaced fields whose value has the wrong shape.
+
+    Ownership repair may move a value only after the value independently
+    validates against its unique target schema.  When a forbidden field has one
+    deterministic required owner on the same ancestor chain but the value does
+    not validate there, silently leaving it for a generic schema error obscures
+    the actual protocol fault.  This analyzer reports that condition without
+    mutating the provider output.
+    """
+
+    runtime_objects = _collect_runtime_objects(value, root_schema, root_schema)
+    invalid: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for source_path, source_object, source_schema in runtime_objects:
+        source_properties = source_schema.get("properties") or {}
+        if source_schema.get("additionalProperties") is not False:
+            continue
+        for field, field_value in source_object.items():
+            if field in source_properties:
+                continue
+            targets: list[tuple[tuple[Any, ...], Mapping[str, Any], list[str]]] = []
+            for target_path, target_object, target_schema in runtime_objects:
+                if target_path == source_path or not _path_related(source_path, target_path):
+                    continue
+                target_field_schema = (target_schema.get("properties") or {}).get(field)
+                if not isinstance(target_field_schema, Mapping):
+                    continue
+                if field in target_object or not _field_target_is_safe(field, target_path, target_schema):
+                    continue
+                validator = Draft202012Validator(
+                    dict(target_field_schema),
+                    format_checker=Draft202012Validator.FORMAT_CHECKER,
+                )
+                field_errors = sorted(
+                    (error.message for error in validator.iter_errors(field_value)),
+                )
+                if field_errors:
+                    targets.append((target_path, target_field_schema, field_errors))
+            unique_paths = {target_path for target_path, _, _ in targets}
+            if len(unique_paths) != 1:
+                continue
+            target_path, _, field_errors = targets[0]
+            key = (_json_pointer(source_path), field, _json_pointer(target_path))
+            if key in seen:
+                continue
+            seen.add(key)
+            invalid.append({
+                "field": field,
+                "source_path": _json_pointer((*source_path, field)),
+                "target_path": _json_pointer((*target_path, field)),
+                "reason": "field has one required schema owner but its value is invalid for that owner",
+                "validation_errors": field_errors,
+            })
+    return invalid
+
+
+def synchronize_required_mirrored_arrays(
+    value: Any,
+    schema: Mapping[str, Any],
+    *,
+    contract_id: str,
+) -> tuple[Any, dict[str, Any]]:
+    """Losslessly synchronize direct root/result array mirrors declared by schema.
+
+    A mirror is derived from the schema rather than from a prompt ID: the same
+    field must be required at both the root and ``result`` objects, both field
+    schemas must be identical arrays, and both runtime values must already be
+    arrays.  The adapter only unions existing items in stable order; it never
+    creates or rewrites an item.
+    """
+
+    # The caller owns an isolated response object.  Avoid a second full-tree
+    # copy here; large proposal envelopes otherwise incur quadratic copying
+    # before any mirror is even detected.
+    normalized = value
+    report = {
+        "schema_version": "1.0",
+        "contract_id": contract_id,
+        "synchronized_count": 0,
+        "changes": [],
+    }
+    if not isinstance(normalized, dict):
+        return normalized, report
+
+    root_schema = prepare_schema_contract(schema)
+    root_properties = root_schema.get("properties") or {}
+    result_schema = root_properties.get("result")
+    if not isinstance(result_schema, Mapping):
+        return normalized, report
+    result_schema = prepare_schema_contract(result_schema)
+    result_properties = result_schema.get("properties") or {}
+    result_value = normalized.get("result")
+    if not isinstance(result_value, dict):
+        return normalized, report
+
+    root_required = set(root_schema.get("required") or [])
+    result_required = set(result_schema.get("required") or [])
+    candidates = sorted(root_required & result_required & set(root_properties) & set(result_properties))
+
+    for field in candidates:
+        root_field_schema = prepare_schema_contract(root_properties[field])
+        result_field_schema = prepare_schema_contract(result_properties[field])
+        if root_field_schema != result_field_schema:
+            continue
+        if root_field_schema.get("type") != "array":
+            continue
+        root_items = normalized.get(field)
+        nested_items = result_value.get(field)
+        if not isinstance(root_items, list) or not isinstance(nested_items, list):
+            continue
+
+        merged = _stable_json_union(root_items, nested_items)
+        if root_items == merged and nested_items == merged:
+            continue
+        normalized[field] = copy.deepcopy(merged)
+        result_value[field] = copy.deepcopy(merged)
+        report["changes"].append({
+            "field": field,
+            "root_path": f"/{field}",
+            "result_path": f"/result/{field}",
+            "root_count": len(root_items),
+            "result_count": len(nested_items),
+            "merged_count": len(merged),
+        })
+
+    report["synchronized_count"] = len(report["changes"])
+    return normalized, report
+
+
 def repair_field_ownership_against_schema(
     value: Any,
     schema: Mapping[str, Any],
@@ -938,21 +1217,27 @@ def repair_field_ownership_against_schema(
     block.
     """
 
-    normalized = copy.deepcopy(value)
-    root_schema = copy.deepcopy(dict(schema))
+    # Ownership analysis is non-mutating until a candidate move is selected,
+    # and every selected move is applied to its own trial copy.  Re-copying the
+    # complete response and the inlined schema on every prompt makes concurrent
+    # full-proposal runs scale quadratically without adding isolation.
+    normalized = value
+    root_schema = schema
     changes: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     unresolved_keys: set[tuple[str, str, tuple[str, ...]]] = set()
 
     if not isinstance(normalized, dict):
         return normalized, {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "normalizer_version": CONTRACT_REGISTRY_VERSION,
             "contract_id": contract_id,
             "normalized_count": 0,
             "changes": [],
             "unresolved_count": 0,
             "unresolved": [],
+            "invalid_misplacement_count": 0,
+            "invalid_misplacements": [],
         }
 
     for _ in range(max_moves):
@@ -981,15 +1266,29 @@ def repair_field_ownership_against_schema(
                     target_field_schema = target_properties.get(field)
                     if not isinstance(target_field_schema, Mapping):
                         continue
-                    if field in target_object:
-                        continue
                     if not _field_target_is_safe(field, target_path, target_schema):
                         continue
                     field_validator = Draft202012Validator(
                         dict(target_field_schema),
                         format_checker=Draft202012Validator.FORMAT_CHECKER,
                     )
-                    if any(field_validator.iter_errors(source_value)):
+
+                    target_has_field = field in target_object
+                    if target_has_field:
+                        target_value = target_object[field]
+                        if isinstance(source_value, list) and isinstance(target_value, list):
+                            replacement_value = _stable_json_union(target_value, source_value)
+                            rule = "SCHEMA_FIELD_OWNERSHIP_ARRAY_MERGE"
+                        elif source_value == target_value:
+                            replacement_value = copy.deepcopy(target_value)
+                            rule = "SCHEMA_FIELD_OWNERSHIP_DUPLICATE_REMOVAL"
+                        else:
+                            continue
+                    else:
+                        replacement_value = copy.deepcopy(source_value)
+                        rule = "SCHEMA_FIELD_OWNERSHIP_MOVE"
+
+                    if any(field_validator.iter_errors(replacement_value)):
                         continue
 
                     trial = copy.deepcopy(normalized)
@@ -999,8 +1298,8 @@ def repair_field_ownership_against_schema(
                     target_cursor: Any = trial
                     for token in target_path:
                         target_cursor = target_cursor[token]
-                    moved_value = source_cursor.pop(field)
-                    target_cursor[field] = moved_value
+                    source_cursor.pop(field)
+                    target_cursor[field] = replacement_value
                     trial_errors = _schema_error_count(trial, root_schema)
                     if trial_errors >= baseline_errors:
                         continue
@@ -1013,7 +1312,7 @@ def repair_field_ownership_against_schema(
                             "before_errors": baseline_errors,
                             "after_errors": trial_errors,
                             "distance": abs(len(source_path) - len(target_path)),
-                            "rule": "SCHEMA_FIELD_OWNERSHIP_MOVE",
+                            "rule": rule,
                             "moved_fields": [field],
                         }
                     )
@@ -1079,14 +1378,17 @@ def repair_field_ownership_against_schema(
             }
         )
 
+    invalid_misplacements = _invalid_misplaced_field_candidates(normalized, root_schema)
     return normalized, {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "normalizer_version": CONTRACT_REGISTRY_VERSION,
         "contract_id": contract_id,
         "normalized_count": len(changes),
         "changes": changes,
         "unresolved_count": len(unresolved),
         "unresolved": unresolved,
+        "invalid_misplacement_count": len(invalid_misplacements),
+        "invalid_misplacements": invalid_misplacements,
     }
 
 

@@ -8,6 +8,15 @@ from typing import Any
 from .dependency_preflight import DependencyIssue, DependencyReport
 from .full_proposal_contract import FULL_PROPOSAL_GROUP_ORDER
 from .util import new_id, sha256_json, utc_now
+from .workflow_status import (
+    WorkflowStatus,
+    WorkflowStatusClass,
+    aggregate_workflow_statuses,
+    is_recoverable_block,
+    is_terminal,
+    is_waiting,
+    status_class,
+)
 
 
 class FullProposalWorkersMixin:
@@ -83,13 +92,11 @@ class FullProposalWorkersMixin:
                 None,
             )
             if critic_prompt:
-                state.setdefault("repair_attempts", {}).pop(
-                    self._repair_state_key(critic_prompt, state),
-                    None,
-                )
-                state.setdefault("repair_overrides", {}).pop(
-                    self._repair_override_key(prompt_id, state),
-                    None,
+                self._supersede_repair_subject(
+                    state,
+                    critic_prompt=critic_prompt,
+                    producer_prompt=prompt_id,
+                    reason="FRESH_PRODUCER_PASS",
                 )
         self._observe_quality_result(wf, state, prompt_id, result)
         self._update(wf, state=state)
@@ -123,7 +130,6 @@ class FullProposalWorkersMixin:
             "options": parent_options,
             "step_results": {},
             "repair_attempts": {},
-            "repair_overrides": {},
             "section_results": [],
             "section_progress": {},
             "public_search_results": state.get("public_search_results"),
@@ -140,7 +146,7 @@ class FullProposalWorkersMixin:
                 child_id,
                 wf["project_id"],
                 "WF-4_PROPOSAL_AUTHORING",
-                "RUNNING",
+                WorkflowStatus.RUNNING.value,
                 5,
                 json.dumps(child_state, ensure_ascii=False),
                 now,
@@ -152,7 +158,7 @@ class FullProposalWorkersMixin:
             "title": group.get("title"),
             "workflow_id": child_id,
             "section_ids": list(group.get("section_ids") or []),
-            "status": "RUNNING",
+            "status": WorkflowStatus.RUNNING.value,
             "created_at": now,
         }
         children[group_id] = record
@@ -165,35 +171,105 @@ class FullProposalWorkersMixin:
         self._update(wf, state=state)
         return record
 
+    def _spawn_full_proposal_repair_child(
+        self,
+        child: dict[str, Any],
+        child_state: dict[str, Any],
+        parent_workflow_id: str,
+        record: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Create a replacement execution record instead of reopening a terminal child."""
+
+        replacement_id = new_id("wf")
+        now = utc_now()
+        child_state["supersedes_workflow_id"] = child["id"]
+        child_state["replacement_reason"] = "FULL_PROPOSAL_INTEGRATION_REPAIR"
+        self.db.execute(
+            "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                replacement_id,
+                child["project_id"],
+                child["workflow_type"],
+                WorkflowStatus.RUNNING.value,
+                5,
+                json.dumps(child_state, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+        record.setdefault("superseded_workflow_ids", []).append(child["id"])
+        record["workflow_id"] = replacement_id
+        record["status"] = WorkflowStatus.RUNNING.value
+        self.db.audit(
+            "FULL_PROPOSAL_GROUP_REPLACEMENT_STARTED",
+            project_id=child["project_id"],
+            object_id=replacement_id,
+            metadata={
+                "parent_workflow_id": parent_workflow_id,
+                "supersedes_workflow_id": child["id"],
+                "group_id": record.get("group_id"),
+            },
+        )
+        return {
+            **child,
+            "id": replacement_id,
+            "status": WorkflowStatus.RUNNING.value,
+            "current_step": 5,
+            "state": child_state,
+            "created_at": now,
+            "updated_at": now,
+        }
+
     def _reset_full_proposal_child_for_repair(
         self,
         child: dict[str, Any],
         parent_state: dict[str, Any],
         parent_workflow_id: str,
         affected: set[str],
-    ) -> None:
-        child_state = child["state"]
+        *,
+        record: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        child_state = copy.deepcopy(child["state"]) if is_terminal(child["status"]) else child["state"]
         group_ids = {str(x) for x in (child_state.get("options") or {}).get("target_section_ids", [])}
         responsible = sorted(group_ids & affected)
         if not responsible:
-            return
+            return child
         child_state["section_results"] = [
             item for item in child_state.get("section_results", [])
             if str(item.get("section_id")) not in set(responsible)
         ]
         progress = child_state.setdefault("section_progress", {})
-        overrides = child_state.setdefault("repair_overrides", {})
         for section_id in responsible:
             progress.pop(section_id, None)
-            for key in list(overrides):
-                if key.startswith(f"section:{section_id}:"):
-                    overrides.pop(key, None)
+            self._reset_section_repair_state(
+                child_state,
+                section_id,
+                reason="FULL_PROPOSAL_SECTION_REWRITE",
+            )
         child_state["integration_repair_section_ids"] = responsible
         child_state["integration_repair_findings"] = copy.deepcopy(parent_state.get("integration_repair_findings") or [])
         child_state["quality_parent_workflow_id"] = parent_workflow_id
+        if child["status"] == WorkflowStatus.COMPLETED.value:
+            if record is None:
+                raise ValueError("completed child rewrite requires its parent group record")
+            return self._spawn_full_proposal_repair_child(
+                child,
+                child_state,
+                parent_workflow_id,
+                record,
+            )
+        if child["status"] == WorkflowStatus.CANCELLED.value:
+            raise ValueError("cancelled full-proposal child cannot be rewritten")
         child["current_step"] = 5
-        child["status"] = "RUNNING"
-        self._update(child, status="RUNNING", current_step=5, state=child_state)
+        child["status"] = WorkflowStatus.RUNNING.value
+        self._update(
+            child,
+            status=WorkflowStatus.RUNNING.value,
+            current_step=5,
+            state=child_state,
+        )
+        child["state"] = child_state
+        return child
 
     async def _run_full_proposal_group(
         self,
@@ -204,18 +280,21 @@ class FullProposalWorkersMixin:
     ) -> dict[str, Any]:
         child = self.get(str(record["workflow_id"]))
         if repair_ids:
-            self._reset_full_proposal_child_for_repair(
-                child, parent_state, parent_wf["id"], repair_ids,
+            child = self._reset_full_proposal_child_for_repair(
+                child,
+                parent_state,
+                parent_wf["id"],
+                repair_ids,
+                record=record,
             )
-            child = self.get(str(record["workflow_id"]))
         expected = {str(x) for x in record.get("section_ids") or []}
         completed = {str(item.get("section_id")) for item in child["state"].get("section_results", [])}
-        if child["status"] == "COMPLETED" and expected <= completed:
+        if child["status"] == WorkflowStatus.COMPLETED.value and expected <= completed:
             return child
         record["started_at"] = utc_now()
-        record["status"] = "RUNNING"
+        record["status"] = child["status"]
         self._update(parent_wf, state=parent_state)
-        if child["status"] == "WAITING_CONFIGURATION":
+        if child["status"] == WorkflowStatus.WAITING_CONFIGURATION.value:
             report = self._configuration_recheck_report(child, child["state"])
             if report is not None and report.blocking_issues:
                 self._pause_for_configuration(
@@ -226,23 +305,29 @@ class FullProposalWorkersMixin:
                 )
                 return self.get(child["id"])
             self._clear_configuration_wait(child["state"])
-        child["status"] = "RUNNING"
-        self._update(child, status="RUNNING", state=child["state"])
+            self._update(
+                child,
+                status=WorkflowStatus.RUNNING.value,
+                state=child["state"],
+            )
+            child = self.get(child["id"])
+        elif is_waiting(child["status"]) or is_recoverable_block(child["status"]):
+            return child
         result = await self._write_sections_serial(child, child["state"])
         child = self.get(child["id"])
-        if result is not None or child["status"] in {"BLOCKED", "WAITING_CONFIGURATION"}:
+        if result is not None or status_class(child["status"]) is not WorkflowStatusClass.ACTIVE:
             return child
         completed = {str(item.get("section_id")) for item in child["state"].get("section_results", [])}
         if not expected <= completed:
             child["state"]["last_error"] = (
                 f"并发组 {record['group_id']} 未完成全部章节：expected={sorted(expected)}, completed={sorted(completed)}"
             )
-            self._update(child, status="BLOCKED", state=child["state"])
+            self._update(child, status=WorkflowStatus.BLOCKED_TECHNICAL.value, state=child["state"])
             return self.get(child["id"])
         child["state"]["group_status"] = "COMPLETED"
         child["state"]["completed_at"] = utc_now()
-        self._update(child, status="COMPLETED", state=child["state"])
-        record["status"] = "COMPLETED"
+        self._update(child, status=WorkflowStatus.COMPLETED.value, state=child["state"])
+        record["status"] = WorkflowStatus.COMPLETED.value
         record["finished_at"] = child["state"]["completed_at"]
         self._update(parent_wf, state=parent_state)
         self.db.audit(
@@ -286,13 +371,14 @@ class FullProposalWorkersMixin:
         results = await asyncio.gather(
             *(self._run_full_proposal_group(wf, state, record, repair_ids) for record in records),
         )
-        failures: list[str] = []
+        interruptions: list[str] = []
         configuration_issues: list[DependencyIssue] = []
         children: list[dict[str, Any]] = []
         for record, result in zip(records, results):
             children.append(result)
             record["status"] = result["status"]
-            if result["status"] == "WAITING_CONFIGURATION":
+            if result["status"] == WorkflowStatus.WAITING_CONFIGURATION.value:
+                before_count = len(configuration_issues)
                 for raw in (result["state"].get("configuration_wait") or {}).get("issues") or []:
                     if not isinstance(raw, dict):
                         continue
@@ -307,7 +393,7 @@ class FullProposalWorkersMixin:
                             details={**(raw.get("details") or {}), "child_workflow_id": result["id"], "group_id": record["group_id"]},
                         )
                     )
-                if not configuration_issues:
+                if len(configuration_issues) == before_count:
                     configuration_issues.append(
                         DependencyIssue(
                             code="FULL_PROPOSAL_CHILD_WAITING_CONFIGURATION",
@@ -316,10 +402,22 @@ class FullProposalWorkersMixin:
                             details={"child_workflow_id": result["id"], "group_id": record["group_id"]},
                         )
                     )
-            elif result["status"] != "COMPLETED":
-                failures.append(f"{record['group_id']}: {result['state'].get('last_error') or result['status']}")
+            if result["status"] != WorkflowStatus.COMPLETED.value:
+                interruptions.append(
+                    f"{record['group_id']}: {result['state'].get('last_error') or result['status']}"
+                )
         state["full_proposal_parallel_finished_at"] = utc_now()
-        if configuration_issues:
+        state["full_proposal_child_statuses"] = {
+            str(record["group_id"]): str(result["status"])
+            for record, result in zip(records, results)
+        }
+        parent_status = aggregate_workflow_statuses(
+            result["status"] for result in results
+        )
+        if (
+            parent_status is WorkflowStatus.WAITING_CONFIGURATION
+            and configuration_issues
+        ):
             return self._pause_for_configuration(
                 wf,
                 state,
@@ -329,11 +427,17 @@ class FullProposalWorkersMixin:
                 ),
                 source="FULL_PROPOSAL_CHILDREN",
             )
-        if failures:
-            state["last_error"] = "完整申请书并发组失败：" + "；".join(failures)
-            self._update(wf, status="BLOCKED", state=state)
+        if parent_status is not WorkflowStatus.COMPLETED:
+            state["waiting_on_child_workflow_ids"] = [
+                result["id"]
+                for result in results
+                if result["status"] != WorkflowStatus.COMPLETED.value
+            ]
+            state["last_error"] = "完整申请书并发组未完成：" + "；".join(interruptions)
+            self._update(wf, status=parent_status.value, state=state)
             return self.get(wf["id"])
 
+        state.pop("waiting_on_child_workflow_ids", None)
         section_records: dict[str, dict[str, Any]] = {}
         merged_progress: dict[str, Any] = {}
         child_ids: list[str] = []
@@ -347,7 +451,7 @@ class FullProposalWorkersMixin:
         missing = [section_id for section_id in ordered_ids if section_id not in section_records]
         if missing:
             state["last_error"] = "并发组完成后缺少章节结果：" + "、".join(missing)
-            self._update(wf, status="BLOCKED", state=state)
+            self._update(wf, status=WorkflowStatus.BLOCKED_TECHNICAL.value, state=state)
             return self.get(wf["id"])
         state["section_results"] = [section_records[section_id] for section_id in ordered_ids]
         state["section_progress"] = merged_progress
@@ -373,5 +477,5 @@ class FullProposalWorkersMixin:
             return None
         refreshed = self.get(wf["id"])
         self._create_gate(refreshed, "CANDIDATE_REVIEW", target_id=wf["id"], questions=[])
-        self._update(refreshed, status="WAITING_GATE", state=state)
+        self._update(refreshed, status=WorkflowStatus.WAITING_GATE.value, state=state)
         return self.get(wf["id"])

@@ -12,6 +12,7 @@ from app.workflow_repair import WorkflowRepairMixin
 class FakeContextBuilder:
     def __init__(self):
         self.results: dict[str, Any] = {}
+        self.repair_applications: dict[str, Any] = {}
         self.envelopes: list[dict[str, Any]] = []
 
     def _result(self, project_id: str, prompt_id: str, key: str | None = None):
@@ -31,7 +32,7 @@ class FakeContextBuilder:
     ) -> dict[str, Any]:
         state = workflow_state or {}
         section_id = str(state.get("active_section_id") or "")
-        repair_overrides = state.get("repair_overrides") or {}
+        repair_index = state.get("repair_application_artifact_ids") or {}
         producer_for_critic = {
             "P-WRITE-BLUEPRINT-CRITIC": "P-WRITE-BLUEPRINT",
             "P-WRITE-CRITIC": "P-WRITE-CONTENT",
@@ -40,7 +41,10 @@ class FakeContextBuilder:
         candidate = None
         producer = producer_for_critic.get(prompt_id)
         if producer:
-            candidate = repair_overrides.get(f"section:{section_id}:{producer}")
+            target_key = f"section:{section_id}:{producer}" if section_id else producer
+            active_ids = [str(item) for item in repair_index.get(target_key) or []]
+            if active_ids:
+                candidate = self.repair_applications.get(active_ids[-1])
             if candidate is None:
                 candidate = self.results.get(producer)
                 if producer == "P-WRITE-BLUEPRINT" and isinstance(candidate, dict):
@@ -93,7 +97,7 @@ class ScriptedExecutor:
             repaired = {**original, "repaired": True}
             output["result"] = {
                 "repaired_object": repaired,
-                "changed_paths": ["content.candidate_text"],
+                "changed_paths": ["/content/candidate_text"],
                 "unchanged_protected_hashes": [],
                 "resolved_finding_codes": ["TEST_REPAIR"],
                 "unresolved_finding_codes": [],
@@ -151,7 +155,6 @@ class ChainHarness(WorkflowAuthoringMixin, WorkflowRepairMixin):
                 "options": {"single_section_complete_chain": True},
                 "section_results": [],
                 "repair_attempts": {},
-                "repair_overrides": {},
             },
         }
 
@@ -175,6 +178,23 @@ class ChainHarness(WorkflowAuthoringMixin, WorkflowRepairMixin):
 
     def _observe_quality_result(self, wf: dict[str, Any], state: dict[str, Any], prompt_id: str, result: dict[str, Any]) -> None:
         self.observed.append((prompt_id, result["run_id"]))
+
+    def _persist_repair_application(
+        self,
+        *,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        producer_prompt: str,
+        repaired_value: Any,
+        **_: Any,
+    ) -> str:
+        artifact_id = f"artifact-repair-{len(self.context_builder.repair_applications) + 1}"
+        target_key = self._repair_override_key(producer_prompt, state)
+        self.context_builder.repair_applications[artifact_id] = copy.deepcopy(repaired_value)
+        state.setdefault("repair_application_artifact_ids", {}).setdefault(
+            target_key, []
+        ).append(artifact_id)
+        return artifact_id
 
     def _project_level(self, project_id: str) -> str:
         return "INTERNAL"
@@ -227,6 +247,12 @@ def test_blueprint_and_content_revise_each_get_one_targeted_repair_and_rereview(
     attempts = harness.wf["state"]["repair_attempts"]
     assert attempts["section:section-1:P-WRITE-BLUEPRINT-CRITIC"] == 1
     assert attempts["section:section-1:P-WRITE-CRITIC"] == 1
+    lifecycle_events = [
+        item["event"]
+        for item in harness.wf["state"]["repair_ledger_v1"]["events"]
+    ]
+    assert lifecycle_events.count("REREVIEW_STARTED") == 2
+    assert lifecycle_events.count("REREVIEW_PASS") == 2
     assert len(harness.quality_manager.repairs) == 2
     critic_envelopes = [
         item for item in harness.context_builder.envelopes
@@ -254,6 +280,12 @@ def test_second_revise_after_targeted_repair_blocks_without_second_repair():
         "P-WRITE-BLUEPRINT-CRITIC",
     ]
     assert sequence.count("P-TARGETED-REPAIR") == 1
+    lifecycle_events = [
+        item["event"]
+        for item in harness.wf["state"]["repair_ledger_v1"]["events"]
+    ]
+    assert lifecycle_events.count("REREVIEW_STARTED") == 1
+    assert lifecycle_events.count("REREVIEW_REVISE") == 1
     assert "禁止二次自动修复" in harness.wf["state"]["last_error"]
 
 
@@ -309,7 +341,9 @@ def test_acceptance_run_regenerates_new_candidate_after_repair_recheck():
     assert harness.wf["state"]["acceptance_regeneration_rounds"][
         "section:section-1:P-WRITE-BLUEPRINT-CRITIC"
     ] == 1
-    assert "section:section-1:P-WRITE-BLUEPRINT" not in harness.wf["state"]["repair_overrides"]
+    assert "section:section-1:P-WRITE-BLUEPRINT" not in (
+        harness.wf["state"].get("repair_application_artifact_ids") or {}
+    )
     assert "integration_repair_section_ids" not in harness.wf["state"]
 
 

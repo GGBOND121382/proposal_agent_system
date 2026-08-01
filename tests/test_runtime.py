@@ -19,8 +19,10 @@ from app.runtime_api import ModelGateway
 from app.pack import PromptPack
 from app.research import PublicResearchService
 from app.security import RoutingDenied, SecurityRouter
+from app.simulated_llm import SimulatedLLM
 from app.util import new_id, sha256_json, utc_now
 from app.runtime_api import WorkflowEngine
+from app.workflow_status import is_recoverable_block
 from app.agent_prompt_kernel import _substantive_numeric_tokens
 from app.workflow_input import APPLICATION_GUIDE_INPUT, WorkflowInputRequired
 
@@ -94,7 +96,9 @@ async def finish_workflow(engine: WorkflowEngine, project_id: str, workflow_type
             action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
             engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
             continue
-        if wf["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+        if wf["status"] in {"COMPLETED", "CANCELLED"} or is_recoverable_block(
+            wf["status"]
+        ):
             break
     return wf
 
@@ -120,7 +124,7 @@ def test_scheme_profile_allows_unknown_year_and_duration(runtime):
 
 
 def test_scheme_output_enriches_compact_source_refs_from_input(runtime):
-    _, pack, *_ = runtime
+    _, pack, _, _, _, executor, *_ = runtime
     envelope = pack.replay_input("P-SCHEME-EXTRACT")
     output = pack.replay_output("P-SCHEME-EXTRACT", "normal")
     document = envelope["payload"]["guide_documents"][0]
@@ -135,7 +139,7 @@ def test_scheme_output_enriches_compact_source_refs_from_input(runtime):
     }]
     output["result"]["scheme_profile"]["profile_hash"] = "0" * 64
 
-    normalized = PromptExecutor._normalize_scheme_output(output, envelope)
+    normalized = executor._normalize_output("P-SCHEME-EXTRACT", output, envelope)
     source_ref = normalized["result"]["scheme_profile"]["rules"][0]["source_refs"][0]
 
     assert source_ref["document_version_id"] == document["document_version_id"]
@@ -143,8 +147,185 @@ def test_scheme_output_enriches_compact_source_refs_from_input(runtime):
     assert source_ref["source_hash"] == section["text_hash"]
     assert source_ref["span_start"] == 0
     assert source_ref["span_end"] == len(section["text"])
-    assert normalized["result"]["scheme_profile"]["profile_hash"] != "0" * 64
+    # Provenance enrichment is structural; it must not silently rewrite the
+    # provider-owned semantic profile hash.
+    assert normalized["result"]["scheme_profile"]["profile_hash"] == "0" * 64
     assert pack.validate("P-SCHEME-EXTRACT", "output", normalized) == []
+
+
+def test_simulated_scheme_output_binds_replay_sources_to_current_input(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
+    envelope = pack.replay_input("P-SCHEME-EXTRACT")
+    document = envelope["payload"]["guide_documents"][0]
+    document["document_id"] = "document-live"
+    document["document_version_id"] = "document-version-live"
+    document["sections"][0]["section_id"] = "section-live"
+
+    output = SimulatedLLM(pack).invoke("P-SCHEME-EXTRACT", envelope)
+    normalized = executor._normalize_output("P-SCHEME-EXTRACT", output, envelope)
+    source_ref = normalized["result"]["scheme_profile"]["rules"][0]["source_refs"][0]
+
+    assert source_ref["source_id"] == "section-live"
+    assert source_ref["document_version_id"] == "document-version-live"
+    assert source_ref["section_id"] == "section-live"
+
+
+def test_simulated_source_binding_does_not_rewrite_public_sources(runtime):
+    _, pack, *_ = runtime
+    envelope = pack.replay_input("P-SCHEME-EXTRACT")
+    output = {
+        "source_refs": [{
+            "source_id": "public-source-live",
+            "source_type": "PUBLIC_SOURCE",
+            "document_version_id": None,
+            "section_id": None,
+            "span_start": None,
+            "span_end": None,
+            "quoted_text": "公开检索结果",
+            "source_hash": "b" * 64,
+            "authority_rank": 50,
+            "security_level": "PUBLIC",
+        }]
+    }
+
+    bound = SimulatedLLM(pack)._bind_replay_source_refs(copy.deepcopy(output), envelope)
+
+    assert bound == output
+
+
+def test_revision_plan_receives_approved_argument_graph(runtime):
+    settings, pack, db, _, _, _, engine, _ = runtime
+    project_id = create_project(db, internet=False)
+    add_standard_materials(settings, db, project_id)
+
+    async def run_until_plan():
+        for workflow_type in ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION"]:
+            workflow = await finish_workflow(engine, project_id, workflow_type)
+            assert workflow["status"] == "COMPLETED", workflow["state"].get("last_error")
+        workflow = await finish_workflow(engine, project_id, "WF-4_PROPOSAL_AUTHORING")
+        return workflow
+
+    asyncio.run(run_until_plan())
+    row = db.fetchone(
+        "SELECT input_json FROM prompt_runs WHERE project_id=? AND prompt_id='P-REVISION-PLAN' ORDER BY created_at DESC LIMIT 1",
+        (project_id,),
+    )
+    assert row is not None
+    payload = json.loads(row["input_json"])["payload"]
+    graph = payload.get("argument_graph") or {}
+    assert graph.get("central_proposition", {}).get("node_id")
+    assert graph.get("research_questions")
+
+    graph_ids = {
+        str(graph["central_proposition"]["node_id"]),
+        *(str(item["node_id"]) for item in graph.get("research_questions") or []),
+        *(str(item["node_id"]) for item in graph.get("nodes") or []),
+    }
+    plan_output = SimulatedLLM(pack).invoke("P-REVISION-PLAN", json.loads(row["input_json"]))
+    referenced_ids = {
+        str(value)
+        for contract in plan_output["result"]["revision_plan"]["narrative_architecture"]["section_contracts"]
+        for field in ("must_advance_claim_ids", "must_use_evidence_ids")
+        for value in contract.get(field) or []
+    }
+    assert referenced_ids <= graph_ids
+
+
+def test_simulated_content_traces_primary_claim_without_self_evidence(runtime):
+    _, pack, *_ = runtime
+    envelope = pack.replay_input("P-WRITE-CONTENT")
+    blueprint_paragraph = envelope["payload"]["approved_blueprint"]["paragraphs"][0]
+    blueprint_paragraph["required_evidence_ids"] = []
+    blueprint_paragraph["fact_slots"] = []
+    primary_claim_id = blueprint_paragraph["primary_claim_id"]
+
+    output = SimulatedLLM(pack).invoke("P-WRITE-CONTENT", envelope)
+    paragraph = output["result"]["paragraphs"][0]
+    traces = {
+        trace["trace_id"]: trace
+        for trace in output["result"]["trace_links"]
+    }
+
+    assert primary_claim_id not in paragraph["evidence_ids"]
+    assert paragraph["trace_link_ids"]
+    assert any(
+        traces[trace_id]["source_id"] == primary_claim_id
+        for trace_id in paragraph["trace_link_ids"]
+    )
+
+
+def test_simulated_integration_critic_uses_approved_argument_ids(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
+    envelope = pack.replay_input("P-INTEGRATION-CRITIC")
+    replacements = {
+        "prop-001": "prop-live",
+        "rq-001": "question-live-a",
+        "rq-002": "question-live-b",
+        "gap-001": "gap-live",
+        "obj-001": "objective-live",
+        "wp-001": "work-live-a",
+        "wp-002": "work-live-b",
+        "method-001": "method-live",
+        "exp-001": "experiment-live",
+        "innov-001": "innovation-live",
+    }
+
+    def replace_ids(value):
+        if isinstance(value, list):
+            return [replace_ids(item) for item in value]
+        if isinstance(value, dict):
+            return {key: replace_ids(item) for key, item in value.items()}
+        return replacements.get(value, value)
+
+    payload = envelope["payload"]
+    payload["argument_graph"] = replace_ids(payload["argument_graph"])
+    payload["narrative_architecture"] = replace_ids(payload["narrative_architecture"])
+    payload["candidate_sections"] = replace_ids(payload["candidate_sections"])
+
+    output = SimulatedLLM(pack).invoke("P-INTEGRATION-CRITIC", envelope)
+    normalized = executor._normalize_output("P-INTEGRATION-CRITIC", output, envelope)
+    graph = payload["argument_graph"]
+    trusted_graph_ids = {
+        str(graph["central_proposition"]["node_id"]),
+        *(str(item["node_id"]) for item in graph.get("research_questions") or []),
+        *(str(item["node_id"]) for item in graph.get("nodes") or []),
+    }
+    chain_ids = {
+        str(value)
+        for chain in normalized["result"]["argument_chain_checks"]
+        for field in ("source_ids", "target_ids")
+        for value in chain[field]
+    }
+
+    assert len(normalized["result"]["argument_chain_checks"]) >= 4
+    assert chain_ids <= trusted_graph_ids
+    assert not ({"rq-001", "rq-002", "prop-001"} & chain_ids)
+    assert normalized["result"]["central_proposition_coverage"]["central_proposition_id"] == "prop-live"
+    assert pack.validate("P-INTEGRATION-CRITIC", "output", normalized) == []
+
+
+def test_simulated_project_definition_entity_references_are_closed(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
+    envelope = pack.replay_input("P-PROJECT-DEFINITION-EXTRACT")
+
+    output = SimulatedLLM(pack).invoke("P-PROJECT-DEFINITION-EXTRACT", envelope)
+    normalized = executor._normalize_output(
+        "P-PROJECT-DEFINITION-EXTRACT",
+        output,
+        envelope,
+    )
+
+    item_ids = {
+        item["item_id"]
+        for item in normalized["result"]["project_definition"]["items"]
+    }
+    referenced_method_ids = {
+        method_id
+        for item in normalized["result"]["project_definition"]["items"]
+        if item["item_type"] == "WORK_PACKAGE"
+        for method_id in item["content"]["methods"]
+    }
+    assert referenced_method_ids <= item_ids
 
 
 def test_scheme_output_maps_project_brief_source_type_alias(runtime):
@@ -175,22 +356,25 @@ def test_scheme_output_maps_project_brief_source_type_alias(runtime):
     assert pack.validate("P-SCHEME-EXTRACT", "output", normalized) == []
 
 
-def test_scheme_output_preserves_content_validation_constraint_when_rules_empty(runtime):
-    _, pack, *_ = runtime
+def test_scheme_output_does_not_fabricate_rule_when_model_reports_missing_rules(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
     envelope = pack.replay_input("P-SCHEME-EXTRACT")
     output = pack.replay_output("P-SCHEME-EXTRACT", "normal")
     output["status"] = "NEED_USER_INPUT"
     output["result"]["scheme_profile"]["rules"] = []
     output["result"]["extraction_coverage"] = []
 
-    normalized = PromptExecutor._normalize_scheme_output(output, envelope)
+    normalized = executor._normalize_output("P-SCHEME-EXTRACT", output, envelope)
 
-    rule = normalized["result"]["scheme_profile"]["rules"][0]
-    assert rule["rule_id"] == "rule-system-content-validation-only"
-    assert rule["mandatory"] is True
-    assert normalized["result"]["extraction_coverage"][0]["covered_rule_ids"] == [rule["rule_id"]]
-    assert rule["source_refs"][0]["quoted_text"]
-    assert pack.validate("P-SCHEME-EXTRACT", "output", normalized) == []
+    assert normalized["status"] == "NEED_USER_INPUT"
+    assert normalized["result"]["scheme_profile"]["rules"] == []
+    assert normalized["result"]["extraction_coverage"] == []
+    errors = pack.validate("P-SCHEME-EXTRACT", "output", normalized)
+    assert any(
+        error.startswith("/result/scheme_profile/rules:")
+        and "non-empty" in error
+        for error in errors
+    )
 
 
 def test_approved_need_user_input_gate_advances_accepted_step(runtime):
@@ -281,10 +465,12 @@ def test_normalizer_removes_schema_keyword_emitted_as_instance_data(runtime):
     normalized = executor._normalize_output("P-SCHEME-CRITIC", output)
 
     assert "additionalProperties" not in normalized["result"]
-    assert normalized["findings"][0]["evidence_refs"] == ["domain_readiness.10"]
-    assert normalized["findings"][0]["category"] == "SOURCE"
-    assert normalized["status"] == "NEED_USER_INPUT"
-    assert pack.validate("P-SCHEME-CRITIC", "output", normalized) == []
+    assert normalized["findings"][0]["evidence_refs"] == ["domain_readiness[10]"]
+    assert normalized["findings"][0]["category"] == "EVIDENCE"
+    assert normalized["status"] == "REVISE"
+    errors = pack.validate("P-SCHEME-CRITIC", "output", normalized)
+    assert any(error.startswith("/findings/0/category:") for error in errors)
+    assert any(error.startswith("/findings/0/evidence_refs/0:") for error in errors)
 
 
 def test_normalizer_merges_nested_response_warnings_when_top_level_exists(runtime):
@@ -300,15 +486,19 @@ def test_normalizer_merges_nested_response_warnings_when_top_level_exists(runtim
     assert pack.validate("P-WRITE-BLUEPRINT-CRITIC", "output", normalized) == []
 
 
-def test_normalizer_maps_source_preservation_action_alias(runtime):
+def test_normalizer_does_not_guess_unregistered_source_preservation_alias(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-WRITE-CONTENT", "normal")
     output["result"]["source_preservation_summary"][0]["action"] = "DISTRIBUTED"
 
     normalized = executor._normalize_output("P-WRITE-CONTENT", output)
 
-    assert normalized["result"]["source_preservation_summary"][0]["action"] == "REPHRASED"
-    assert pack.validate("P-WRITE-CONTENT", "output", normalized) == []
+    assert normalized["result"]["source_preservation_summary"][0]["action"] == "DISTRIBUTED"
+    errors = pack.validate("P-WRITE-CONTENT", "output", normalized)
+    assert any(
+        error.startswith("/result/source_preservation_summary/0/action:")
+        for error in errors
+    )
 
 
 def test_normalizer_maps_confirmed_fact_source_aliases(runtime):
@@ -332,8 +522,9 @@ def test_normalizer_maps_confirmed_fact_source_aliases(runtime):
 
     assert normalized["result"]["trace_links"][0]["source_kind"] == "FACT"
     assert normalized["source_refs"][0]["source_type"] == "EVIDENCE_MATERIAL"
-    assert normalized["source_refs"][0]["source_hash"] is None
-    assert pack.validate("P-WRITE-CONTENT", "output", normalized) == []
+    assert normalized["source_refs"][0]["source_hash"] == "a" * 63
+    errors = pack.validate("P-WRITE-CONTENT", "output", normalized)
+    assert any(error.startswith("/source_refs/0/source_hash:") for error in errors)
 
 
 def test_argument_repair_context_reconciles_explicit_rq_rc_source_mapping():
@@ -431,7 +622,7 @@ def test_argument_context_binds_exact_approved_fact_evidence():
     assert node["source_refs"] == [source_ref]
 
 
-def test_revision_plan_normalizer_drops_diagnostic_paths_from_evidence_refs(runtime):
+def test_revision_plan_normalizer_preserves_model_authored_evidence_refs(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-REVISION-PLAN", "normal")
     output["findings"] = [{
@@ -453,15 +644,14 @@ def test_revision_plan_normalizer_drops_diagnostic_paths_from_evidence_refs(runt
 
     normalized = executor._normalize_output("P-REVISION-PLAN", output)
 
-    assert normalized["findings"][0]["evidence_refs"] == ["section-001"]
-    assert any(
-        "diagnostic field path" in warning
-        for warning in normalized["warnings"]
-    )
+    assert normalized["findings"][0]["evidence_refs"] == [
+        "proposal_contract.mandatory_sections",
+        "section-001",
+    ]
     assert pack.validate("P-REVISION-PLAN", "output", normalized) == []
 
 
-def test_content_normalizer_accepts_only_explicit_nonblocking_test_deferrals(runtime):
+def test_content_normalizer_preserves_explicit_nonblocking_test_deferrals(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-WRITE-CONTENT", "normal")
     output["status"] = "REVISE"
@@ -474,7 +664,7 @@ def test_content_normalizer_accepts_only_explicit_nonblocking_test_deferrals(run
             "severity": "P2",
             "category": "CONTENT",
             "target_type": "PARAGRAPH",
-            "target_path_or_span": "paragraphs[0].text",
+            "target_path_or_span": "/result/paragraphs/0/text",
             "description": "测试占位符已正确标注，但正式申报前仍需替换。",
             "evidence_refs": ["F-077"],
             "repairable": True,
@@ -487,7 +677,7 @@ def test_content_normalizer_accepts_only_explicit_nonblocking_test_deferrals(run
             "severity": "P3",
             "category": "CONTENT",
             "target_type": "PARAGRAPH",
-            "target_path_or_span": "paragraphs[0].text",
+            "target_path_or_span": "/result/paragraphs/0/text",
             "description": "命题绑定已修复。",
             "evidence_refs": ["para-001"],
             "repairable": False,
@@ -501,7 +691,7 @@ def test_content_normalizer_accepts_only_explicit_nonblocking_test_deferrals(run
             "item_id": "URI-TEST-001",
             "type": "OUT_OF_SCOPE",
             "description": "正式申报前替换测试占位材料。",
-            "target_paths": ["paragraphs[0].text"],
+            "target_paths": ["/result/paragraphs/0/text"],
             "required_action": "替换为真实材料。",
             "blocking": False,
         }
@@ -509,17 +699,16 @@ def test_content_normalizer_accepts_only_explicit_nonblocking_test_deferrals(run
 
     normalized = executor._normalize_output("P-WRITE-CONTENT", output)
 
-    assert normalized["status"] == "PASS"
-    assert [finding["code"] for finding in normalized["findings"]] == [
-        "QUALITY_DIMENSION_FAILED",
-    ]
+    assert normalized["status"] == "REVISE"
+    assert normalized["findings"] == output["findings"]
     assert normalized["unresolved_items"] == output["unresolved_items"]
-    assert any("explicitly labelled test placeholders" in item for item in normalized["warnings"])
+    assert pack.validate("P-WRITE-CONTENT", "output", normalized) == []
 
 
-def test_blueprint_normalizer_drops_unbound_metric_labels_and_maps_known_aliases(runtime):
+def test_blueprint_normalizer_rejects_unbound_business_labels_without_rewriting(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-WRITE-BLUEPRINT", "normal")
+    original = copy.deepcopy(output)
     envelope = pack.replay_input("P-WRITE-BLUEPRINT")
     envelope["payload"]["metric_inputs"] = [{
         "metric_id": "METRIC-001",
@@ -538,21 +727,18 @@ def test_blueprint_normalizer_drops_unbound_metric_labels_and_maps_known_aliases
         "首次可行方案形成速度",
         "METRIC-EXISTING",
     ]
+    original = copy.deepcopy(output)
 
-    normalized = executor._normalize_output("P-WRITE-BLUEPRINT", output, envelope)
+    with pytest.raises(PromptExecutionError) as exc_info:
+        executor._normalize_output("P-WRITE-BLUEPRINT", output, envelope)
 
-    assert normalized["result"]["blueprint"]["paragraphs"][0]["metric_slots"] == [
-        "METRIC-001",
-        "METRIC-EXISTING",
-    ]
-    assert normalized["result"]["blueprint"]["paragraphs"][0]["technical_slots"] == [
-        "M-001",
-    ]
-    assert any("removed 1 metric label" in item for item in normalized["warnings"])
-    assert pack.validate("P-WRITE-BLUEPRINT", "output", normalized) == []
+    errors = exc_info.value.validation_errors
+    assert any("known metric label" in error for error in errors)
+    assert any("首次可行方案形成速度" in error for error in errors)
+    assert any("多链联合建模" in error for error in errors)
+    assert output == original
 
-
-def test_targeted_repair_normalizer_bounds_paragraph_budgets_to_contract_limit(runtime):
+def test_targeted_repair_normalizer_does_not_rewrite_business_budgets(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-TARGETED-REPAIR", "normal")
     envelope = pack.replay_input("P-TARGETED-REPAIR")
@@ -567,6 +753,10 @@ def test_targeted_repair_normalizer_bounds_paragraph_budgets_to_contract_limit(r
     envelope["payload"]["original_object"]["content"] = {
         "paragraphs": [dict(item) for item in paragraphs],
     }
+    envelope["payload"]["allowed_paths"] = [
+        f"/content/paragraphs/{index}/word_budget"
+        for index in range(len(paragraphs))
+    ]
     envelope["payload"]["findings_to_repair"] = [{
         "code": "WORD_BUDGET_EXCEED",
         "description": "合同规定总字数为1000字，但当前总计1500字。",
@@ -574,18 +764,19 @@ def test_targeted_repair_normalizer_bounds_paragraph_budgets_to_contract_limit(r
     output["result"]["repaired_object"]["content"] = {
         "paragraphs": [dict(item) for item in paragraphs],
     }
+    output["result"]["changed_paths"] = list(envelope["payload"]["allowed_paths"])
     output["result"]["resolved_finding_codes"] = ["WORD_BUDGET_EXCEED"]
     output["result"]["unresolved_finding_codes"] = []
 
     normalized = executor._normalize_output("P-TARGETED-REPAIR", output, envelope)
     repaired = normalized["result"]["repaired_object"]["content"]["paragraphs"]
 
-    assert sum(item["word_budget"] for item in repaired) == 1000
-    assert len(normalized["result"]["changed_paths"]) >= 3
-    assert any("1000-word section limit" in item for item in normalized["warnings"])
+    assert [item["word_budget"] for item in repaired] == [600, 500, 400]
+    assert normalized["result"]["changed_paths"] == envelope["payload"]["allowed_paths"]
+    assert not any("1000-word section limit" in item for item in normalized.get("warnings", []))
 
 
-def test_targeted_repair_normalizer_enforces_scope_and_maps_receipts(runtime):
+def test_targeted_repair_normalizer_preserves_model_scope_receipt_for_guard(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-TARGETED-REPAIR", "normal")
     envelope = pack.replay_input("P-TARGETED-REPAIR")
@@ -599,11 +790,12 @@ def test_targeted_repair_normalizer_enforces_scope_and_maps_receipts(runtime):
     }
     envelope["payload"]["original_object"]["content"] = original
     envelope["payload"]["allowed_paths"] = [
-        "content.paragraphs[1].text; paragraphs[2].text",
+        "/content/paragraphs/1/text",
+        "/content/paragraphs/2/text",
     ]
     envelope["payload"]["findings_to_repair"] = [{
         "code": "QUALITY_DIMENSION_FAILED",
-        "target_path_or_span": "paragraphs[1].text; paragraphs[2].text",
+        "target_path_or_span": "/content/paragraphs/1/text",
     }]
     repaired = copy.deepcopy(original)
     repaired["paragraphs"][0]["text"] = "unauthorized"
@@ -612,9 +804,9 @@ def test_targeted_repair_normalizer_enforces_scope_and_maps_receipts(runtime):
     output["status"] = "REVISE"
     output["result"]["repaired_object"]["content"] = repaired
     output["result"]["changed_paths"] = [
-        "content.paragraphs[0].text",
-        "content.paragraphs[1].text",
-        "content.paragraphs[2].text",
+        "/content/paragraphs/0/text",
+        "/content/paragraphs/1/text",
+        "/content/paragraphs/2/text",
     ]
     output["result"]["resolved_finding_codes"] = [
         "QUALITY_DIMENSION_FAILED-EXPERIMENT-DESIGN",
@@ -627,23 +819,17 @@ def test_targeted_repair_normalizer_enforces_scope_and_maps_receipts(runtime):
 
     normalized = executor._normalize_output("P-TARGETED-REPAIR", output, envelope)
 
-    paragraphs = normalized["result"]["repaired_object"]["content"]["paragraphs"]
-    assert paragraphs[0]["text"] == "one"
-    assert paragraphs[1]["text"] == "two-fixed"
-    assert paragraphs[2]["text"] == "three-fixed"
+    assert normalized["result"]["repaired_object"]["content"] == repaired
     assert normalized["result"]["resolved_finding_codes"] == [
-        "QUALITY_DIMENSION_FAILED",
+        "QUALITY_DIMENSION_FAILED-EXPERIMENT-DESIGN",
     ]
-    assert normalized["result"]["changed_paths"] == [
-        "content.paragraphs[1].text",
-        "content.paragraphs[2].text",
-    ]
-    assert normalized["findings"] == []
-    assert normalized["status"] == "PASS"
+    assert normalized["result"]["changed_paths"] == output["result"]["changed_paths"]
+    assert normalized["findings"] == output["findings"]
+    assert normalized["status"] == "REVISE"
 
 
-def test_normalizer_canonicalizes_common_critic_aliases(runtime):
-    _, _, _, _, _, executor, _, _ = runtime
+def test_normalizer_does_not_infer_critic_business_aliases(runtime):
+    _, pack, _, _, _, executor, _, _ = runtime
     output = {
         "status": "NEED_USER_INPUT",
         "findings": [
@@ -678,22 +864,18 @@ def test_normalizer_canonicalizes_common_critic_aliases(runtime):
 
     normalized = executor._normalize_output("P-PROJECT-READINESS-CRITIC", output)
 
-    assert normalized["findings"][0]["category"] == "SOURCE"
-    assert normalized["findings"][0]["description"] == "The supporting material is missing."
-    assert "reason" not in normalized["findings"][0]
-    assert normalized["user_questions"][0]["answer_schema"] == {
-        "type": "STRING",
-        "allowed_values": [],
-    }
-    assert normalized["unresolved_items"][0]["type"] == "UNCERTAIN"
-    assert normalized["result"]["domain_scores"][0]["missing_item_types"] == []
+    assert normalized["findings"][0] == output["findings"][0]
+    assert "description" not in normalized["findings"][0]
+    assert normalized["user_questions"][0]["answer_schema"] == output["user_questions"][0]["answer_schema"]
+    assert normalized["unresolved_items"][0]["type"] == "CHOICE"
+    assert "missing_item_types" not in normalized["result"]["domain_scores"][0]
     assert [
         item["dimension"]
         for item in normalized["result"]["critical_readiness_checks"]
-    ] == ["RESEARCH_FOUNDATION", "SCOPE_AND_PAGE_BUDGET"]
+    ] == ["TEAM_AND_IMPLEMENTATION", "RESOURCES_BUDGET_RISK_COMPLIANCE"]
+    assert pack.validate("P-PROJECT-READINESS-CRITIC", "output", normalized)
 
-
-def test_normalizer_fills_omitted_quality_dimension_required_actions(runtime):
+def test_normalizer_does_not_invent_quality_dimension_required_actions(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-WRITE-CRITIC", "normal")
     dimensions = output["result"]["quality_dimensions"]
@@ -703,13 +885,12 @@ def test_normalizer_fills_omitted_quality_dimension_required_actions(runtime):
 
     normalized = executor._normalize_output("P-WRITE-CRITIC", output)
 
-    assert normalized["result"]["quality_dimensions"][0]["required_action"] is None
-    assert normalized["result"]["quality_dimensions"][1]["required_action"]
-    assert pack.validate("P-WRITE-CRITIC", "output", normalized) == []
-    assert any("quality-dimension required action" in item for item in normalized["warnings"])
+    assert "required_action" not in normalized["result"]["quality_dimensions"][0]
+    assert "required_action" not in normalized["result"]["quality_dimensions"][1]
+    errors = pack.validate("P-WRITE-CRITIC", "output", normalized)
+    assert any("required_action" in error for error in errors)
 
-
-def test_write_critic_normalizer_aligns_passing_deferred_test_dimension(runtime):
+def test_write_critic_normalizer_preserves_deferred_test_decision(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-WRITE-CRITIC", "normal")
     envelope = pack.replay_input("P-WRITE-CRITIC")
@@ -728,9 +909,9 @@ def test_write_critic_normalizer_aligns_passing_deferred_test_dimension(runtime)
             "severity": "P3",
             "category": "CONTENT",
             "target_type": "PARAGRAPH",
-            "target_path_or_span": "paragraphs[0].text",
+            "target_path_or_span": "/result/candidate_text",
             "description": "测试占位材料正式申报前替换。",
-            "evidence_refs": ["F-077"],
+            "evidence_refs": ["gap-001"],
             "repairable": True,
             "repair_instruction": "当前阶段保持标注，正式申报前替换。",
             "suggested_route": "ORIGINAL_PRODUCER",
@@ -742,7 +923,7 @@ def test_write_critic_normalizer_aligns_passing_deferred_test_dimension(runtime)
             "item_id": "URI-TEST-DEFERRED",
             "type": "OUT_OF_SCOPE",
             "description": "正式申报前替换测试材料。",
-            "target_paths": ["paragraphs[0].text"],
+            "target_paths": ["/result/candidate_text"],
             "required_action": "替换测试材料。",
             "blocking": False,
         }
@@ -753,13 +934,14 @@ def test_write_critic_normalizer_aligns_passing_deferred_test_dimension(runtime)
 
     normalized = executor._normalize_output("P-WRITE-CRITIC", output, envelope)
 
-    assert normalized["result"]["quality_dimensions"][0]["passed"] is True
-    assert normalized["status"] == "PASS"
-    assert normalized["result"]["verdict"] == "ACCEPT"
+    assert normalized["result"]["quality_dimensions"][0]["passed"] is False
+    assert normalized["status"] == "REVISE"
+    assert normalized["result"]["verdict"] == "REVISE"
+    assert normalized["findings"] == output["findings"]
     assert normalized["unresolved_items"] == output["unresolved_items"]
+    assert pack.validate("P-WRITE-CRITIC", "output", normalized) == []
 
-
-def test_write_critic_normalizer_removes_stale_primary_claim_deviation(runtime):
+def test_write_critic_normalizer_preserves_model_blueprint_deviation(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-WRITE-CRITIC", "normal")
     envelope = pack.replay_input("P-WRITE-CRITIC")
@@ -775,7 +957,7 @@ def test_write_critic_normalizer_removes_stale_primary_claim_deviation(runtime):
             "severity": "P2",
             "category": "BLUEPRINT",
             "target_type": "PARAGRAPH",
-            "target_path_or_span": "paragraphs[0].primary_claim_id",
+            "target_path_or_span": "/payload/content_candidate/paragraphs/0/primary_claim_id",
             "description": "Primary claim differs from the blueprint.",
             "evidence_refs": [paragraph_id],
             "repairable": True,
@@ -788,10 +970,9 @@ def test_write_critic_normalizer_removes_stale_primary_claim_deviation(runtime):
 
     normalized = executor._normalize_output("P-WRITE-CRITIC", output, envelope)
 
-    assert normalized["findings"] == []
-    assert normalized["result"]["blueprint_deviation_paragraph_ids"] == []
-    assert any("stale blueprint-deviation" in item for item in normalized["warnings"])
-
+    assert normalized["findings"] == output["findings"]
+    assert normalized["result"]["blueprint_deviation_paragraph_ids"] == [paragraph_id]
+    assert pack.validate("P-WRITE-CRITIC", "output", normalized) == []
 
 def test_template_normalizer_moves_pattern_collections_into_template(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
@@ -823,21 +1004,19 @@ def test_planning_template_context_uses_revision_plan_shape(runtime):
     assert set(compact) == {"template_id", "component_ids", "rules"}
 
 
-def test_revision_plan_normalizer_qualifies_short_information_keys(runtime):
+def test_revision_plan_normalizer_does_not_invent_information_key_qualifiers(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-REVISION-PLAN", "normal")
     contract = output["result"]["revision_plan"]["narrative_architecture"]["section_contracts"][0]
     contract["unique_information_keys"] = ["短键"]
 
     normalized = executor._normalize_output("P-REVISION-PLAN", output)
-    normalized_key = normalized["result"]["revision_plan"]["narrative_architecture"]["section_contracts"][0]["unique_information_keys"][0]
 
-    assert normalized_key.startswith("短键:")
-    assert len(normalized_key) >= 8
-    assert pack.validate("P-REVISION-PLAN", "output", normalized) == []
+    assert normalized["result"]["revision_plan"]["narrative_architecture"]["section_contracts"][0]["unique_information_keys"] == ["短键"]
+    errors = pack.validate("P-REVISION-PLAN", "output", normalized)
+    assert any("unique_information_keys" in error for error in errors)
 
-
-def test_argument_normalizer_materializes_prior_work_and_team_evidence(runtime):
+def test_argument_normalizer_rejects_unresolved_prior_work_without_materializing_nodes(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
     envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE")
@@ -857,128 +1036,55 @@ def test_argument_normalizer_materializes_prior_work_and_team_evidence(runtime):
                 "knowledge_status": "DOCUMENT_EXTRACTED",
                 "source_refs": [],
             },
-            {
-                "item_id": "innovation-test-1",
-                "item_type": "INNOVATION",
-                "content": {"existing_baseline": "测试创新对应基线"},
-                "knowledge_status": "USER_ASSERTED",
-                "source_refs": [],
-            },
-            {
-                "item_id": "gap-test-1",
-                "item_type": "GAP",
-                "content": {"statement": "测试研究差距"},
-                "knowledge_status": "USER_ASSERTED",
-                "source_refs": [],
-            },
-            {
-                "item_id": "objective-test-1",
-                "item_type": "OBJECTIVE",
-                "content": {"statement": "测试研究目标"},
-                "knowledge_status": "USER_ASSERTED",
-                "source_refs": [],
-            },
         ]
     }
-    envelope["payload"]["confirmed_facts"] = [{
-        "claim_id": "fact-baseline-9",
-        "claim_text": "测试基线B9的有来源方法边界",
-        "subject_id": "B9",
-        "source_refs": [],
-    }]
-    output["result"]["research_design_matrix"][0]["closest_prior_work_ids"] = []
-    fact_backed_row = dict(output["result"]["research_design_matrix"][0])
-    fact_backed_row["closest_prior_work_ids"] = ["EA-009"]
-    output["result"]["research_design_matrix"].append(fact_backed_row)
+    output["result"]["research_design_matrix"][0]["closest_prior_work_ids"] = ["EA-009"]
     output["result"]["readiness"]["blocking_node_ids"] = ["TEST-TEAM-A成果"]
+    original = copy.deepcopy(output)
 
-    normalized = executor._normalize_output("P-ARGUMENT-ARCHITECTURE", output, envelope)
-    nodes = normalized["result"]["argument_architecture"]["nodes"]
-    by_id = {node["node_id"]: node for node in nodes}
-    prior_ids = normalized["result"]["research_design_matrix"][0]["closest_prior_work_ids"]
+    with pytest.raises(PromptExecutionError) as exc_info:
+        executor._normalize_output("P-ARGUMENT-ARCHITECTURE", output, envelope)
 
-    assert by_id["existing-test-1"]["node_type"] == "CLOSEST_PRIOR_WORK"
-    assert by_id["existing-test-1"]["status"] == "SUPPORTED"
-    assert by_id["capability-test-1"]["node_type"] == "TEAM_EVIDENCE"
-    assert by_id["capability-test-1"]["status"] == "SUPPORTED"
-    assert by_id["gap-test-1"]["node_type"] == "RESEARCH_GAP"
-    assert by_id["objective-test-1"]["node_type"] == "OBJECTIVE"
-    assert by_id["innovation-test-1"]["node_type"] == "NOVEL_MECHANISM"
-    assert "team-evidence-unknown" not in by_id
-    assert {"existing-test-1", "closest-innovation-test-1"} <= set(prior_ids)
-    assert normalized["result"]["readiness"]["blocking_node_ids"] == ["TEST-TEAM-A"]
-    assert by_id["EA-009"]["node_type"] == "CLOSEST_PRIOR_WORK"
-    assert by_id["EA-009"]["status"] == "UNKNOWN"
-    assert "测试基线B9" in by_id["EA-009"]["statement"]
+    errors = exc_info.value.validation_errors
+    assert any("EA-009" in error for error in errors)
+    assert any("TEST-TEAM-A成果" in error for error in errors)
+    assert output == original
 
-
-def test_argument_normalizer_rebinds_status_sentinels_as_typed_references(runtime):
+def test_argument_normalizer_rejects_status_sentinels_as_entity_references(runtime):
     _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
     envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE")
-    envelope["payload"]["project_definition"] = {
-        "items": [
-            {
-                "item_id": "method-project-1",
-                "item_type": "METHOD",
-                "content": {"name": "structured collaboration method"},
-                "knowledge_status": "USER_ASSERTED",
-                "source_refs": [],
-            },
-            {
-                "item_id": "innovation-project-1",
-                "item_type": "INNOVATION",
-                "content": {"existing_baseline": "fixed serial workflow"},
-                "knowledge_status": "USER_ASSERTED",
-                "source_refs": [],
-            },
-        ]
-    }
     for row in output["result"]["research_design_matrix"]:
         row["method_ids"] = ["TO_BE_SELECTED"]
         row["closest_prior_work_ids"] = ["UNKNOWN"]
+    original = copy.deepcopy(output)
 
-    normalized = executor._normalize_output(
-        "P-ARGUMENT-ARCHITECTURE",
-        output,
-        envelope,
-    )
+    with pytest.raises(PromptExecutionError) as exc_info:
+        executor._normalize_output("P-ARGUMENT-ARCHITECTURE", output, envelope)
 
-    matrix = normalized["result"]["research_design_matrix"]
-    assert all(row["method_ids"] == ["method-project-1"] for row in matrix)
-    assert all(
-        "closest-innovation-project-1" in row["closest_prior_work_ids"]
-        for row in matrix
-    )
-    assert all("TO_BE_SELECTED" not in row["method_ids"] for row in matrix)
-    assert all("UNKNOWN" not in row["closest_prior_work_ids"] for row in matrix)
+    errors = exc_info.value.validation_errors
+    assert any("TO_BE_SELECTED" in error for error in errors)
+    assert any("UNKNOWN" in error for error in errors)
+    assert output == original
 
-
-def test_argument_normalizer_materializes_dangling_design_candidates(runtime):
+def test_argument_normalizer_rejects_dangling_design_candidates(runtime):
     _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
     envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE")
     row = output["result"]["research_design_matrix"][0]
     row["method_ids"] = ["METHOD-PROPOSED"]
     row["evaluation_ids"] = ["EXP-PROPOSED"]
+    original = copy.deepcopy(output)
 
-    normalized = executor._normalize_output(
-        "P-ARGUMENT-ARCHITECTURE",
-        output,
-        envelope,
-    )
-    nodes = {
-        node["node_id"]: node
-        for node in normalized["result"]["argument_architecture"]["nodes"]
-    }
+    with pytest.raises(PromptExecutionError) as exc_info:
+        executor._normalize_output("P-ARGUMENT-ARCHITECTURE", output, envelope)
 
-    assert nodes["METHOD-PROPOSED"]["node_type"] == "FORMAL_MODEL"
-    assert nodes["METHOD-PROPOSED"]["status"] == "UNKNOWN"
-    assert nodes["EXP-PROPOSED"]["node_type"] == "EXPERIMENT_DESIGN"
-    assert nodes["EXP-PROPOSED"]["status"] == "UNKNOWN"
+    errors = exc_info.value.validation_errors
+    assert any("METHOD-PROPOSED" in error for error in errors)
+    assert any("EXP-PROPOSED" in error for error in errors)
+    assert output == original
 
-
-def test_argument_normalizer_restores_tagged_section_entities(runtime):
+def test_argument_normalizer_does_not_restore_entities_from_free_text(runtime):
     _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
     envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE")
@@ -986,11 +1092,7 @@ def test_argument_normalizer_restores_tagged_section_entities(runtime):
     output["result"]["research_design_matrix"][0]["rq_ids"] = ["RQ-002"]
     envelope["payload"]["current_sections"] = [{
         "section_id": "section-loop-test",
-        "text": (
-            "`RC-2` dynamic teaming package\n"
-            "`BASE-2` available software remains UNKNOWN\n"
-            "| `RQ-2` | `OBJ-2` | `RC-2` |"
-        ),
+        "text": "`RC-2` dynamic teaming package\n`BASE-2` available software remains UNKNOWN",
     }]
     envelope["payload"]["human_resolutions"] = [{
         "resolution_id": "human-method-test",
@@ -999,45 +1101,38 @@ def test_argument_normalizer_restores_tagged_section_entities(runtime):
         "decided_by": "pytest",
         "decided_role": "PROJECT_OWNER",
     }]
+    original_node_ids = {
+        node["node_id"]
+        for node in output["result"]["argument_architecture"]["nodes"]
+    }
 
-    normalized = executor._normalize_output(
-        "P-ARGUMENT-ARCHITECTURE",
-        output,
-        envelope,
-    )
-    nodes = {
-        node["node_id"]: node
+    normalized = executor._normalize_output("P-ARGUMENT-ARCHITECTURE", output, envelope)
+
+    normalized_node_ids = {
+        node["node_id"]
         for node in normalized["result"]["argument_architecture"]["nodes"]
     }
-    row = normalized["result"]["research_design_matrix"][0]
+    assert normalized_node_ids == original_node_ids
+    assert {"RC-002", "BASE-002", "method-RC-002"}.isdisjoint(normalized_node_ids)
+    assert normalized["result"]["research_design_matrix"][0]["rq_ids"] == ["RQ-002"]
+    errors = pack.validate("P-ARGUMENT-ARCHITECTURE", "output", normalized)
+    assert any("rq_ids" in error for error in errors)
 
-    assert nodes["RC-002"]["node_type"] == "WORK_PACKAGE"
-    assert nodes["BASE-002"]["node_type"] == "TEAM_EVIDENCE"
-    assert nodes["BASE-002"]["status"] == "UNKNOWN"
-    assert nodes["method-RC-002"]["node_type"] == "FORMAL_MODEL"
-    assert nodes["method-RC-002"]["status"] == "UNKNOWN"
-    assert row["work_package_ids"] == ["RC-002"]
-    assert row["method_ids"] == ["method-RC-002"]
-
-
-def test_argument_critic_drops_refs_outside_reviewed_entity_catalog(runtime):
+def test_argument_critic_rejects_refs_outside_reviewed_entity_catalog(runtime):
     _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-ARGUMENT-ARCHITECTURE-CRITIC", "normal")
     envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
     output["result"]["checked_node_ids"].append("RC-NOT-VISIBLE")
     output["result"]["chain_checks"][0]["source_ids"].append("RC-NOT-VISIBLE")
+    original = copy.deepcopy(output)
 
-    normalized = executor._normalize_output(
-        "P-ARGUMENT-ARCHITECTURE-CRITIC",
-        output,
-        envelope,
-    )
+    with pytest.raises(PromptExecutionError) as exc_info:
+        executor._normalize_output("P-ARGUMENT-ARCHITECTURE-CRITIC", output, envelope)
 
-    assert "RC-NOT-VISIBLE" not in normalized["result"]["checked_node_ids"]
-    assert "RC-NOT-VISIBLE" not in normalized["result"]["chain_checks"][0]["source_ids"]
+    assert any("RC-NOT-VISIBLE" in error for error in exc_info.value.validation_errors)
+    assert output == original
 
-
-def test_argument_critic_fills_action_for_failed_quality_dimension(runtime):
+def test_argument_critic_does_not_invent_action_for_failed_quality_dimension(runtime):
     _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-ARGUMENT-ARCHITECTURE-CRITIC", "normal")
     envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
@@ -1052,10 +1147,10 @@ def test_argument_critic_fills_action_for_failed_quality_dimension(runtime):
         envelope,
     )
 
-    assert normalized["result"]["quality_dimensions"][0]["required_action"]
+    assert normalized["result"]["quality_dimensions"][0]["required_action"] is None
+    assert pack.validate("P-ARGUMENT-ARCHITECTURE-CRITIC", "output", normalized) == []
 
-
-def test_argument_block_with_blocking_questions_routes_to_human_gate(runtime):
+def test_argument_block_with_questions_preserves_model_status(runtime):
     _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
     output["status"] = "BLOCK"
@@ -1064,7 +1159,7 @@ def test_argument_block_with_blocking_questions_routes_to_human_gate(runtime):
         "question_type": "MISSING_INFORMATION",
         "question": "请补充测试占位输入。",
         "reason": "缺少继续运行所需的测试信息。",
-        "target_paths": ["$.payload.project_subgraph"],
+        "target_paths": ["/payload/project_subgraph"],
         "answer_schema": {"type": "OBJECT", "allowed_values": []},
         "blocking": True,
         "priority": "P0",
@@ -1076,10 +1171,10 @@ def test_argument_block_with_blocking_questions_routes_to_human_gate(runtime):
         pack.replay_input("P-ARGUMENT-ARCHITECTURE"),
     )
 
-    assert normalized["status"] == "NEED_USER_INPUT"
+    assert normalized["status"] == "BLOCK"
+    assert normalized["user_questions"] == output["user_questions"]
 
-
-def test_project_definition_normalizes_deterministic_model_fields(runtime):
+def test_project_definition_normalizer_only_applies_registered_enum_aliases(runtime):
     _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-PROJECT-DEFINITION-EXTRACT", "normal")
     project_definition = output["result"]["project_definition"]
@@ -1100,18 +1195,18 @@ def test_project_definition_normalizes_deterministic_model_fields(runtime):
         {},
     )
 
-    assert len(normalized["result"]["argument_graph_seed"]["research_questions"]) == 4
+    assert len(normalized["result"]["argument_graph_seed"]["research_questions"]) == 6
     assert normalized["result"]["project_definition"]["domain_readiness"][0]["missing_item_types"] == [
         "OBJECTIVE",
         "EXISTING_APPROACH",
     ]
-    assert normalized["source_refs"][0]["section_id"] is None
-    assert normalized["result"]["project_definition"]["items"][0]["item_hash"] != "model-placeholder"
-    assert pack.validate("P-PROJECT-DEFINITION-EXTRACT", "output", normalized) == []
+    assert normalized["source_refs"][0]["section_id"] == "含非规范字符的章节"
+    assert normalized["result"]["project_definition"]["items"][0]["item_hash"] == "model-placeholder"
+    assert normalized["result"]["project_definition"]["package_hash"] == "model-placeholder"
+    assert pack.validate("P-PROJECT-DEFINITION-EXTRACT", "output", normalized)
 
-
-def test_fact_output_canonicalizes_subject_and_explicit_unknown_state(runtime):
-    _, pack, *_ = runtime
+def test_fact_output_normalizer_preserves_unregistered_business_values(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-FACT-EXTRACT", "normal")
     fact = output["result"]["fact_candidates"][0]
     fact["subject_id"] = "项目"
@@ -1119,17 +1214,17 @@ def test_fact_output_canonicalizes_subject_and_explicit_unknown_state(runtime):
     fact["knowledge_status"] = "UNKNOWN"
     fact["temporal_status"] = "UNKNOWN"
 
-    normalized = PromptExecutor._normalize_fact_output(output)
+    normalized = executor._normalize_output("P-FACT-EXTRACT", output)
     normalized_fact = normalized["result"]["fact_candidates"][0]
 
-    assert normalized_fact["subject_id"].startswith("subject-")
-    assert normalized_fact["temporal_status"] == "CURRENT"
+    assert normalized_fact["subject_id"] == "项目"
+    assert normalized_fact["claim_type"] == "FACT"
+    assert normalized_fact["temporal_status"] == "UNKNOWN"
     assert normalized_fact["knowledge_status"] == "UNKNOWN"
-    assert pack.validate("P-FACT-EXTRACT", "output", normalized) == []
+    assert pack.validate("P-FACT-EXTRACT", "output", normalized)
 
-
-def test_project_definition_recovers_null_truncated_graph_and_routes_missing_input(runtime):
-    _, pack, *_ = runtime
+def test_project_definition_normalizer_preserves_null_truncated_graph_for_schema_rejection(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-PROJECT-DEFINITION-EXTRACT", "normal")
     project_definition = output["result"]["project_definition"]
     project_definition["items"] = [project_definition["items"][0], None]
@@ -1140,7 +1235,7 @@ def test_project_definition_recovers_null_truncated_graph_and_routes_missing_inp
         "severity": "P0",
         "category": "SCHEME",
         "target_type": "DOCUMENT",
-        "target_path_or_span": "payload",
+        "target_path_or_span": "/payload",
         "description": "Formal guide is unavailable.",
         "evidence_refs": [],
         "repairable": True,
@@ -1148,20 +1243,18 @@ def test_project_definition_recovers_null_truncated_graph_and_routes_missing_inp
         "suggested_route": "USER",
         "blocking": True,
     }]
+    original = copy.deepcopy(output)
 
-    normalized = PromptExecutor._normalize_project_definition_output(output)
-    item_types = {
-        item["item_type"]
-        for item in normalized["result"]["project_definition"]["items"]
-    }
+    normalized = executor._normalize_output(
+        "P-PROJECT-DEFINITION-EXTRACT",
+        output,
+    )
 
-    assert normalized["status"] == "NEED_USER_INPUT"
-    assert {
-        "GAP", "PROBLEM", "OBJECTIVE", "WORK_PACKAGE", "METHOD",
-        "EXPERIMENT", "INNOVATION", "DELIVERABLE", "METRIC",
-    } <= item_types
-    assert None not in normalized["result"]["project_definition"]["items"]
-    assert pack.validate("P-PROJECT-DEFINITION-EXTRACT", "output", normalized) == []
+    assert normalized == original
+    assert normalized is not output
+    errors = pack.validate("P-PROJECT-DEFINITION-EXTRACT", "output", normalized)
+    assert any("/items/1" in error or "items" in error for error in errors)
+    assert any("/relations/0" in error or "relations" in error for error in errors)
 
 
 def test_unexpected_workflow_exception_is_recorded_as_recoverable_block(runtime, monkeypatch):
@@ -1175,7 +1268,7 @@ def test_unexpected_workflow_exception_is_recorded_as_recoverable_block(runtime,
     monkeypatch.setattr(engine.executor, "execute", fail_unexpectedly)
     result = asyncio.run(engine.advance(workflow["id"]))
 
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == "BLOCKED_TECHNICAL"
     assert result["state"]["runtime_recoverable"] is True
     assert "AttributeError" in result["state"]["last_error"]
 
@@ -1486,17 +1579,18 @@ def test_fact_model_input_uses_representative_evidence_compaction(runtime):
     assert pack.validate("P-FACT-EXTRACT", "input", compact) == []
 
 
-def test_fact_output_removes_coverage_refs_to_non_output_existing_facts(runtime):
-    _, pack, *_ = runtime
+def test_fact_output_rejects_coverage_refs_to_unknown_facts(runtime):
+    _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-FACT-EXTRACT", "normal")
+    envelope = pack.replay_input("P-FACT-EXTRACT")
     output["result"]["coverage"][0]["claim_ids"].append("existing-fact-not-emitted")
+    original = copy.deepcopy(output)
 
-    normalized = PromptExecutor._normalize_fact_output(output)
+    with pytest.raises(PromptExecutionError) as exc_info:
+        executor._normalize_output("P-FACT-EXTRACT", output, envelope)
 
-    assert normalized["result"]["coverage"][0]["claim_ids"] == ["fact-001"]
-    assert "removed 1 coverage reference" in normalized["warnings"][-1]
-    assert pack.validate("P-FACT-EXTRACT", "output", normalized) == []
-
+    assert any("existing-fact-not-emitted" in error for error in exc_info.value.validation_errors)
+    assert output == original
 
 def test_numeric_guard_ignores_slash_continuations_in_test_identifiers():
     from app import track_b as _track_b  # noqa: F401
@@ -1578,7 +1672,7 @@ def test_live_security_context_uses_uploaded_document_labels(tmp_path: Path, mon
             "PROMPT_OUTPUT",
             "P-SECURITY-CLASSIFY",
             1,
-            "CANDIDATE",
+            "PASS",
             "INTERNAL",
             "0" * 64,
             json.dumps(producer_output),
@@ -1730,7 +1824,7 @@ def test_all_workflows_and_docx_export(runtime):
     assert package.stat().st_size > 10_000
 
 
-def test_targeted_repair_normalizer_enforces_fact_collection_scope(runtime):
+def test_targeted_repair_normalizer_does_not_rewrite_fact_collection(runtime):
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-TARGETED-REPAIR", "normal")
     envelope = pack.replay_input("P-TARGETED-REPAIR")
@@ -1750,14 +1844,14 @@ def test_targeted_repair_normalizer_enforces_fact_collection_scope(runtime):
     }
     envelope["payload"]["original_object"]["content"] = copy.deepcopy(original)
     envelope["payload"]["allowed_paths"] = [
-        "content.fact_candidates[claim_id=METRIC-PROJ-001].claim_type",
+        "/content/fact_candidates/0/claim_type",
     ]
     envelope["payload"]["findings_to_repair"] = [{
         "code": "FACT_CRITIC_STATUS_UPGRADE",
         "severity": "P1",
         "category": "FACT",
         "target_type": "FACT_CANDIDATE",
-        "target_path_or_span": "fact_candidates[METRIC-PROJ-001].claim_type",
+        "target_path_or_span": "/content/fact_candidates/0/claim_type",
         "description": "项目预期指标被误标为既成事实。",
         "evidence_refs": [],
         "repairable": True,
@@ -1777,23 +1871,25 @@ def test_targeted_repair_normalizer_enforces_fact_collection_scope(runtime):
     })
     output["status"] = "REVISE"
     output["result"]["repaired_object"]["content"] = repaired
+    output["result"]["changed_paths"] = [
+        "/content/fact_candidates/0/claim_type",
+        "/content/fact_candidates/0/claim_text",
+        "/content/fact_candidates/1/claim_type",
+        "/content/fact_candidates/2",
+    ]
     output["result"]["resolved_finding_codes"] = ["FACT_CRITIC_STATUS_UPGRADE"]
     output["result"]["unresolved_finding_codes"] = []
     output["findings"] = []
 
     normalized = executor._normalize_output("P-TARGETED-REPAIR", output, envelope)
-    assert pack.validate("P-TARGETED-REPAIR", "output", normalized) == []
 
-    facts = normalized["result"]["repaired_object"]["content"]["fact_candidates"]
-    assert len(facts) == 2
-    assert facts[0]["claim_type"] == "EXPECTED_RESULT"
-    assert facts[0]["claim_text"] == original["fact_candidates"][0]["claim_text"]
-    assert facts[1] == original["fact_candidates"][1]
-    assert normalized["result"]["changed_paths"] == [
-        "content.fact_candidates[claim_id=METRIC-PROJ-001].claim_type",
-    ]
-    assert normalized["status"] == "PASS"
-    assert any("outside the critic-authorized path scope" in warning for warning in normalized["warnings"])
+    assert normalized["result"]["repaired_object"]["content"] == repaired
+    assert normalized["result"]["changed_paths"] == output["result"]["changed_paths"]
+    assert normalized["status"] == "REVISE"
+    assert not any(
+        "outside the critic-authorized path scope" in warning
+        for warning in normalized.get("warnings", [])
+    )
 
 
 def test_runtime_does_not_reuse_failed_output_from_changed_prompt_contract(runtime, monkeypatch):
@@ -2046,7 +2142,7 @@ def test_runtime_recovers_safe_package_source_prefix_alias_without_model_call(
         "prompt_id": prompt_id,
         "question_id": "wf3-research-question",
         "question": "需要联网检索并核验的公开问题是什么？",
-        "target_paths": ["research_need.question"],
+        "target_paths": ["/payload/research_need/question"],
         "answer": need["question"],
         "decided_by": "pytest",
         "decided_role": "PROJECT_OWNER",
@@ -2218,3 +2314,29 @@ def test_runtime_recovers_safe_package_critic_object_path_sources_without_model_
     assert refs[scan_ids[0]]["source_type"] == "EVIDENCE_MATERIAL"
     assert refs["security-001"]["source_type"] == "CONTRACT"
     assert pack.validate(prompt_id, "output", result["output"]) == []
+
+
+def test_context_replacement_validates_target_field_without_full_envelope(runtime, monkeypatch):
+    _, pack, _, _, builder, _, _, _ = runtime
+    prompt_id = "P-WRITE-BLUEPRINT"
+    envelope = pack.replay_input(prompt_id)
+    original_project_id = envelope["scope"]["project_id"]
+
+    def forbidden_full_validation(*_args, **_kwargs):
+        raise AssertionError("per-replacement full-envelope validation is forbidden")
+
+    monkeypatch.setattr(pack, "validate", forbidden_full_validation)
+
+    assert builder._set_path_if_valid(
+        prompt_id,
+        envelope,
+        "scope.project_id",
+        original_project_id,
+    )
+    assert not builder._set_path_if_valid(
+        prompt_id,
+        envelope,
+        "scope.project_id",
+        {"not": "an identifier"},
+    )
+    assert envelope["scope"]["project_id"] == original_project_id

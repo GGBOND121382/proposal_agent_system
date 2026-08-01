@@ -34,6 +34,8 @@
 - `protected_hashes`
 - `original_input_refs`
 
+`allowed_paths`、`protected_paths`、`protected_hashes[].path` 和输出中的 `changed_paths`、`unchanged_protected_hashes[].path` 必须统一使用 RFC 6901 JSON Pointer，例如 `/content/paragraphs/0/text`。不得使用 `content.paragraphs[0].text`、`metadata` 等点号或括号路径。JSON Pointer 中的 `~` 和 `/` 必须分别转义为 `~0` 和 `~1`。`original_input_refs` 是结构化对象引用，不是路径数组。
+
 任一必需字段缺失、对象版本不一致、Hash过期或安全环境不允许时，不得继续生成正常结果。应返回 `NEED_USER_INPUT` 或 `BLOCK`，并给出字段级问题或Finding。
 
 ## 执行步骤

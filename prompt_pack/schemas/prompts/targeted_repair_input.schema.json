@@ -18,7 +18,8 @@
         "task_id": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "x-reference-semantic": "NEW_ENTITY_ID"
         },
         "workflow_type": {
           "type": "string",
@@ -81,7 +82,8 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-          }
+          },
+          "x-reference-semantic": "ENTITY_REF"
         },
         "read_only_object_ids": {
           "type": "array",
@@ -89,7 +91,8 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-          }
+          },
+          "x-reference-semantic": "ENTITY_REF"
         },
         "protected_object_ids": {
           "type": "array",
@@ -97,7 +100,8 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-          }
+          },
+          "x-reference-semantic": "ENTITY_REF"
         }
       },
       "additionalProperties": false,
@@ -124,7 +128,8 @@
             "object_id": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "x-reference-semantic": "NEW_ENTITY_ID"
             },
             "object_hash": {
               "type": "string",
@@ -166,16 +171,20 @@
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$"
           },
-          "minItems": 1
+          "minItems": 1,
+          "x-reference-semantic": "JSON_POINTER"
         },
         "protected_paths": {
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
-          }
+            "minLength": 1,
+            "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$"
+          },
+          "x-reference-semantic": "JSON_POINTER"
         },
         "protected_hashes": {
           "type": "array",
@@ -184,7 +193,9 @@
             "properties": {
               "path": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$",
+                "x-reference-semantic": "JSON_POINTER"
               },
               "hash": {
                 "type": "string",
@@ -204,7 +215,8 @@
           "items": {
             "$ref": "../common/object_ref.schema.json"
           },
-          "minItems": 1
+          "minItems": 1,
+          "x-reference-semantic": "OBJECT_REF"
         },
         "human_resolutions": {
           "type": "array",

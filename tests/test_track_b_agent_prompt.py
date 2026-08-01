@@ -216,72 +216,64 @@ def test_b7_critic_findings_must_be_precise():
     assert "QG_CRITIC_FINDING_NOT_PRECISE" in _codes(checked)
 
 
-def test_b7_targeted_repair_cannot_modify_protected_or_unlisted_paths():
+def test_b7_targeted_repair_rejects_non_pointer_paths():
     pack, validator = _runtime()
     env = pack.replay_input("P-TARGETED-REPAIR")
     output = pack.replay_output("P-TARGETED-REPAIR")
-    output["result"]["changed_paths"] = ["forbidden.path"]
+    env["payload"]["allowed_paths"] = ["/content/text"]
+    env["payload"]["protected_paths"] = []
+    output["result"]["changed_paths"] = ["content.text"]
+
     checked = validator.apply("P-TARGETED-REPAIR", env, output)
+
     assert checked["status"] == "REVISE"
+    assert "QG_REPAIR_PATH_INVALID" in _codes(checked)
+
+
+def test_b7_targeted_repair_allows_only_pointer_descendants():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-TARGETED-REPAIR")
+    output = pack.replay_output("P-TARGETED-REPAIR")
+    env["payload"]["allowed_paths"] = ["/content/paragraphs/1"]
+    env["payload"]["protected_paths"] = []
+    output["result"]["changed_paths"] = [
+        "/content/paragraphs/1/novel_content_key",
+    ]
+
+    checked = validator.apply("P-TARGETED-REPAIR", env, output)
+
+    assert "QG_REPAIR_PATH_INVALID" not in _codes(checked)
+    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in _codes(checked)
+
+
+def test_b7_targeted_repair_pointer_ancestry_is_token_based():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-TARGETED-REPAIR")
+    output = pack.replay_output("P-TARGETED-REPAIR")
+    env["payload"]["allowed_paths"] = ["/content/paragraphs/1"]
+    env["payload"]["protected_paths"] = []
+    output["result"]["changed_paths"] = [
+        "/content/paragraphs/10/novel_content_key",
+    ]
+
+    checked = validator.apply("P-TARGETED-REPAIR", env, output)
+
     assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" in _codes(checked)
 
 
-def test_b7_targeted_repair_canonicalizes_para_id_paths_without_splitting_brackets():
+def test_b7_targeted_repair_cannot_replace_ancestor_of_protected_path():
     pack, validator = _runtime()
     env = pack.replay_input("P-TARGETED-REPAIR")
     output = pack.replay_output("P-TARGETED-REPAIR")
-    env["payload"]["allowed_paths"] = [
-        "content.blueprint_candidate.paragraphs[para-tr-007, para-tr-008].novel_content_key",
+    env["payload"]["allowed_paths"] = ["/content/paragraphs/0"]
+    env["payload"]["protected_paths"] = [
+        "/content/paragraphs/0/paragraph_id",
     ]
-    env["payload"]["original_object"]["content"] = {
-        "paragraphs": [
-            {"paragraph_id": "para-tr-007"},
-            {"paragraph_id": "para-tr-008"},
-        ],
-    }
-    output["result"]["changed_paths"] = [
-        "content.blueprint_candidate.paragraphs[para-tr-007].novel_content_key",
-        "content.blueprint_candidate.paragraphs[para-tr-008].novel_content_key",
-    ]
+    output["result"]["changed_paths"] = ["/content/paragraphs/0"]
 
     checked = validator.apply("P-TARGETED-REPAIR", env, output)
 
-    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in _codes(checked)
-
-
-def test_b7_targeted_repair_maps_semantic_paragraph_scope_to_numeric_index():
-    pack, validator = _runtime()
-    env = pack.replay_input("P-TARGETED-REPAIR")
-    output = pack.replay_output("P-TARGETED-REPAIR")
-    env["payload"]["allowed_paths"] = ["content.para-tr-001"]
-    env["payload"]["original_object"]["content"] = {
-        "paragraphs": [{"paragraph_id": "para-tr-001"}],
-    }
-    output["result"]["changed_paths"] = [
-        "content.paragraphs[0].primary_claim_id",
-    ]
-
-    checked = validator.apply("P-TARGETED-REPAIR", env, output)
-
-    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in _codes(checked)
-
-
-def test_b7_targeted_repair_expands_numeric_paragraph_ranges():
-    pack, validator = _runtime()
-    env = pack.replay_input("P-TARGETED-REPAIR")
-    output = pack.replay_output("P-TARGETED-REPAIR")
-    env["payload"]["allowed_paths"] = [
-        "content.paragraphs[0-2].novel_content_key",
-    ]
-    output["result"]["changed_paths"] = [
-        "content.paragraphs[0].novel_content_key",
-        "content.paragraphs[1].novel_content_key",
-        "content.paragraphs[2].novel_content_key",
-    ]
-
-    checked = validator.apply("P-TARGETED-REPAIR", env, output)
-
-    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in _codes(checked)
+    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" in _codes(checked)
 
 
 def test_b8_expression_polish_preserves_structural_blocks():

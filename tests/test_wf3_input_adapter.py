@@ -157,7 +157,10 @@ def test_wf3_derives_research_need_from_confirmed_argument_graph(wf3_runtime):
     need = envelope["payload"]["research_need"]
     assert "代表性方法" in need["question"]
     assert "如何把不完备业务语义" in need["question"]
-    assert state["wf3_input_resolution"]["origin"] == "ARGUMENT_GRAPH_RESEARCH_QUESTIONS"
+    # Context construction is pure with respect to caller-owned workflow state.
+    # Derived provenance is used inside the build but is not persisted as a
+    # hidden workflow-state side effect.
+    assert "wf3_input_resolution" not in state
     assert any(item["object_type"].startswith("PROMPT_ARTIFACT:") for item in envelope["payload"]["source_items"])
     assert pack.validate("P-SAFE-ONLINE-PACKAGE", "input", envelope) == []
 
@@ -194,8 +197,15 @@ def test_wf3_missing_question_creates_user_input_gate_without_model_run(wf3_runt
     assert updated["status"] == "RUNNING"
     assert updated["current_step"] == 0
     assert updated["state"]["options"]["research_need"]["question"].startswith("公开研究")
-    stored_resolutions = updated["state"]["human_resolutions"]["P-SAFE-ONLINE-PACKAGE"]
-    assert any(item["question_id"] == "wf3-research-question" for item in stored_resolutions)
+    artifact_ids = updated["state"]["human_resolution_artifact_ids"]["P-SAFE-ONLINE-PACKAGE"]
+    assert artifact_ids
+    stored_artifact = db.fetchone(
+        "SELECT content_json FROM artifacts WHERE id=?", (artifact_ids[0],)
+    )
+    stored_resolution = json.loads(stored_artifact["content_json"])["resolution"]
+    assert stored_resolution["question_id"] == "wf3-research-question"
+    assert stored_resolution["target_paths"] == ["/payload/research_need/question"]
+    assert "human_resolutions" not in updated["state"]
 
     envelope = builder.build(
         "P-SAFE-ONLINE-PACKAGE",
@@ -209,12 +219,9 @@ def test_wf3_missing_question_creates_user_input_gate_without_model_run(wf3_runt
         for item in envelope["payload"]["human_resolutions"]
     )
 
-    # Existing workflows created by the previous patch may have the approved
-    # gate in SQLite but no persisted human_resolutions entry in workflow state.
-    # Context construction must rebuild that evidence locally without reopening
-    # the gate or calling a model.
+    # Approved Gate evidence is reconstructed from immutable artifacts without
+    # reopening the Gate or repopulating hidden workflow-state overrides.
     legacy_state = json.loads(json.dumps(updated["state"], ensure_ascii=False))
-    legacy_state.pop("human_resolutions", None)
     legacy_envelope = builder.build(
         "P-SAFE-ONLINE-PACKAGE",
         project_id,

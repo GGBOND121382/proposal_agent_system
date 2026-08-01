@@ -16,6 +16,8 @@ import re
 from collections import defaultdict
 from typing import Any, Iterable, Mapping
 
+from .contracts.semantic_contract import ReferenceSemantic, get_semantic_contract
+
 _SOURCE_REF_FIELDS = (
     "source_id",
     "source_type",
@@ -149,8 +151,17 @@ _REFERENCE_ARRAY_FIELDS = {
     # Findings use ``evidence_refs`` rather than an ``*_ids`` name.
     "evidence_refs",
 }
+# Identifier-array ownership comes from the same semantic registry that
+# annotates prompt schemas.  The legacy literal set remains only for fields
+# predating the registry; registered entity/finding references are always
+# validated without prompt-specific exceptions.
+_REFERENCE_ARRAY_FIELDS.update(
+    field_name
+    for field_name, semantic in get_semantic_contract().reference_field_semantics.items()
+    if semantic in {ReferenceSemantic.ENTITY_REF, ReferenceSemantic.FINDING_REF}
+)
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-_REGISTERED_DIAGNOSTIC_REFS = {"F-001", "F-077"}
+_REGISTERED_DIAGNOSTIC_REFS: frozenset[str] = frozenset()
 _SOURCE_ID_ALIAS_PREFIXES = tuple(
     f"{stem}{separator}"
     for stem in ("source", "Source", "SOURCE", "src", "Src", "SRC", "ref", "Ref", "REF")

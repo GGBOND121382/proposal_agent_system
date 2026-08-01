@@ -38,35 +38,42 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-          }
+          },
+          "x-reference-semantic": "ENTITY_REF"
         },
         "uncovered_revision_task_ids": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-          }
+            "maxLength": 512
+          },
+          "x-reference-semantic": "UNRESOLVED_DESCRIPTOR",
+          "description": "兼容旧容器的只读占位；确定性诊断由独立guard_report产生，Critic必须返回空数组。"
         },
         "invalid_slot_refs": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-          }
+            "maxLength": 512
+          },
+          "x-reference-semantic": "UNRESOLVED_DESCRIPTOR",
+          "description": "兼容旧容器的只读占位；确定性诊断由独立guard_report产生，Critic必须返回空数组。"
         },
         "critical_unresolved_slot_ids": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-          }
+            "maxLength": 512
+          },
+          "x-reference-semantic": "UNRESOLVED_DESCRIPTOR",
+          "description": "兼容旧容器的只读占位；确定性诊断由独立guard_report产生，Critic必须返回空数组。"
         },
         "argument_checks": {
           "type": "array",
-          "minItems": 7,
+          "minItems": 5,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -75,11 +82,9 @@
                 "type": "string",
                 "enum": [
                   "SECTION_FUNCTION",
-                  "CLAIM_ADVANCEMENT",
-                  "EVIDENCE_BINDING",
-                  "PARAGRAPH_ROLE_DIVERSITY",
-                  "NOVEL_CONTENT_KEYS",
-                  "WORD_BUDGET",
+                  "CLAIM_ADVANCEMENT_QUALITY",
+                  "EVIDENCE_SUFFICIENCY",
+                  "PARAGRAPH_RELATIONSHIP",
                   "NO_GENERIC_SIX_PART_TEMPLATE"
                 ]
               },
@@ -96,7 +101,8 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                }
+                },
+                "x-reference-semantic": "FINDING_REF"
               }
             },
             "required": [
@@ -105,7 +111,8 @@
               "evidence",
               "blocking_ids"
             ]
-          }
+          },
+          "maxItems": 5
         }
       },
       "additionalProperties": false,
@@ -140,7 +147,8 @@
       "type": "array",
       "items": {
         "$ref": "../common/source_ref.schema.json"
-      }
+      },
+      "x-reference-semantic": "SOURCE_REF"
     },
     "warnings": {
       "type": "array",

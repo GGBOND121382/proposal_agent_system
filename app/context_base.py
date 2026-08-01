@@ -6,8 +6,11 @@ import re
 from contextvars import ContextVar
 from typing import Any
 
+from jsonschema import Draft202012Validator
+
 from .privacy import find_sensitive_values
 from .proposal_quality import SECTION_FUNCTION_ROLE_ALIASES
+from .workflow_repair import repair_override_key
 from .util import new_id, sha256_json, sha256_text
 from .wf3_input import (
     WF3_INPUT_GATE_TYPE,
@@ -22,13 +25,19 @@ from .workflow_input import (
     PROJECT_MATERIAL_INPUT,
     REFERENCE_TEMPLATE_INPUT,
     build_human_resolutions,
+    canonicalize_human_resolution,
     material_input_questions,
+    resolution_overrides,
 )
 
 HASH_PLACEHOLDER = "a" * 64
 
 _CURRENT_WORKFLOW_ID: ContextVar[str | None] = ContextVar(
     "proposal_context_workflow_id",
+    default=None,
+)
+_WORKFLOW_ARTIFACT_SOURCE_CACHE: ContextVar[dict[str, tuple[str, ...]] | None] = ContextVar(
+    "proposal_context_artifact_source_cache",
     default=None,
 )
 
@@ -59,6 +68,7 @@ class ContextBuilder:
     def __init__(self, db, pack):
         self.db = db
         self.pack = pack
+        self._input_schema_cache: dict[str, dict[str, Any]] = {}
 
     def build(self, prompt_id: str, project_id: str, *, workflow_id: str | None = None, workflow_state: dict[str, Any] | None = None, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         project = self.db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
@@ -66,15 +76,17 @@ class ContextBuilder:
             raise KeyError(f"Project not found: {project_id}")
         config = json.loads(project["config_json"])
         docs = self._documents(project_id)
-        context_hash = sha256_json({"project": project, "documents": [d["document_hash"] for d in docs], "workflow_state": workflow_state or {}})
+        state = copy.deepcopy(workflow_state or {})
+        requested_overrides = copy.deepcopy(overrides or {})
+        context_hash = sha256_json({"project": project, "documents": [d["document_hash"] for d in docs], "workflow_state": state})
         envelope = self.pack.replay_input(prompt_id)
         envelope = self._replace_seed_values(envelope, project_id, context_hash)
         envelope["task"]["task_id"] = new_id("task")
         envelope["task"]["current_step"] = prompt_id.removeprefix("P-").replace("-", "_")
-        if workflow_state and workflow_state.get("workflow_type"):
-            workflow_type = workflow_state["workflow_type"]
+        if state.get("workflow_type"):
+            workflow_type = state["workflow_type"]
             envelope["task"]["workflow_type"] = workflow_type.split("_", 1)[1] if workflow_type.startswith("WF-") and "_" in workflow_type else workflow_type
-        required_environment = self._required_environment(prompt_id, workflow_state)
+        required_environment = self._required_environment(prompt_id, state)
         execution_level = "PUBLIC" if required_environment == "ONLINE_PUBLIC" else project["security_level"]
         envelope["security_context"].update(
             {
@@ -89,6 +101,7 @@ class ContextBuilder:
         )
         envelope["scope"]["project_id"] = project_id
         workflow_token = _CURRENT_WORKFLOW_ID.set(workflow_id)
+        source_cache_token = _WORKFLOW_ARTIFACT_SOURCE_CACHE.set({})
         try:
             self._apply_common_payload(
                 envelope,
@@ -97,13 +110,14 @@ class ContextBuilder:
                 config,
                 docs,
                 context_hash,
-                workflow_state or {},
+                state,
                 workflow_id,
             )
         finally:
+            _WORKFLOW_ARTIFACT_SOURCE_CACHE.reset(source_cache_token)
             _CURRENT_WORKFLOW_ID.reset(workflow_token)
-        if overrides:
-            for path, value in overrides.items():
+        if requested_overrides:
+            for path, value in requested_overrides.items():
                 self._set_path_if_valid(prompt_id, envelope, path, value, strict=True)
         errors = self.pack.validate(prompt_id, "input", envelope)
         if errors:
@@ -133,7 +147,87 @@ class ContextBuilder:
             for section in document.get("sections", [])
         ]
 
-    def _content_candidates(self, project_id: str, workflow_id: str | None = None) -> list[dict[str, Any]]:
+    def _content_candidates(
+        self,
+        project_id: str,
+        workflow_id: str | None = None,
+        *,
+        section_results: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return final section candidates in the workflow contract order.
+
+        A full-proposal parent owns the frozen ``section_results`` index while
+        producer runs may belong to several child workflows.  Discovering runs
+        by project timestamps therefore loses both lineage and section order.
+        When the workflow index is available, it is the sole visibility source:
+        run IDs are resolved explicitly and each section selects the polished
+        candidate consumed by its final successful independent Expression Critic.
+        The legacy workflow query remains
+        only for contexts that do not yet carry a section-result index.
+        """
+
+        producer_prompts = {"P-WRITE-CONTENT", "P-EXPRESSION-POLISH"}
+        final_review_prompt = "P-EXPRESSION-CRITIC"
+        indexed_results = [item for item in (section_results or []) if isinstance(item, dict)]
+        if indexed_results:
+            run_ids = [
+                str(run.get("run_id") or "")
+                for item in indexed_results
+                for run in (item.get("runs") or [])
+                if isinstance(run, dict)
+                and run.get("status") == "PASS"
+                and run.get("prompt_id") in {*producer_prompts, final_review_prompt}
+                and str(run.get("run_id") or "")
+            ]
+            rows_by_id: dict[str, dict[str, Any]] = {}
+            if run_ids:
+                placeholders = ",".join("?" for _ in run_ids)
+                rows = self.db.fetchall(
+                    "SELECT id,prompt_id,input_json,output_json FROM prompt_runs "
+                    f"WHERE project_id=? AND status='PASS' AND id IN ({placeholders})",
+                    (project_id, *run_ids),
+                )
+                rows_by_id = {str(row.get("id") or ""): row for row in rows}
+
+            ordered: list[dict[str, Any]] = []
+            missing: list[str] = []
+            for item in indexed_results:
+                expected_section_id = str(item.get("section_id") or "")
+                selected: dict[str, Any] | None = None
+                for run in reversed(item.get("runs") or []):
+                    if not isinstance(run, dict):
+                        continue
+                    if run.get("status") != "PASS" or run.get("prompt_id") != final_review_prompt:
+                        continue
+                    row = rows_by_id.get(str(run.get("run_id") or ""))
+                    if not row or not row.get("input_json"):
+                        continue
+                    input_data = json.loads(row.get("input_json") or "{}")
+                    payload = input_data.get("payload") or {}
+                    section = payload.get("source_section") or {}
+                    if str(section.get("section_id") or "") != expected_section_id:
+                        continue
+                    candidate = payload.get("polished_candidate") or {}
+                    if not candidate.get("candidate_id"):
+                        continue
+                    selected = {
+                        "run_id": row["id"],
+                        "prompt_id": row.get("prompt_id"),
+                        "section": section,
+                        "candidate": candidate,
+                    }
+                    break
+                if selected is None:
+                    missing.append(expected_section_id or "<unknown-section>")
+                else:
+                    ordered.append(selected)
+            if missing:
+                raise ValueError(
+                    "Frozen section-result index has no successful final candidate for: "
+                    + ", ".join(missing)
+                )
+            return ordered
+
         sql = "SELECT id,prompt_id,input_json,output_json,created_at FROM prompt_runs WHERE project_id=? AND prompt_id IN ('P-WRITE-CONTENT','P-EXPRESSION-POLISH') AND status='PASS'"
         params: list[Any] = [project_id]
         if workflow_id:
@@ -419,7 +513,18 @@ class ContextBuilder:
         and prerequisite workflow ids captured when the workflow started (or was
         migrated).  Arbitrary completed workflows are deliberately excluded so a
         later rerun cannot silently change the context of an in-flight workflow.
+
+        A context build may request dozens of prior prompt results.  The workflow
+        lineage and prerequisite bindings are immutable for that build, so they
+        are resolved once and cached in a ContextVar scoped to the current async
+        task.  This avoids repeatedly parsing large workflow state documents and
+        is safe for concurrent section workers.
         """
+        cache = _WORKFLOW_ARTIFACT_SOURCE_CACHE.get()
+        cache_key = str(workflow_id or "")
+        if cache is not None and cache_key in cache:
+            return list(cache[cache_key])
+
         lineage = self._workflow_lineage_ids(workflow_id)
         source_ids: list[str] = list(lineage)
         seen = set(source_ids)
@@ -452,6 +557,8 @@ class ContextBuilder:
                     continue
                 source_ids.append(candidate)
                 seen.add(candidate)
+        if cache is not None:
+            cache[cache_key] = tuple(source_ids)
         return source_ids
 
     def _accepted_output(
@@ -634,47 +741,46 @@ class ContextBuilder:
         result = output.get("result")
         return result.get(key) if key and isinstance(result, dict) else result
 
-    @staticmethod
-    def _repair_override(state: dict[str, Any], producer_prompt: str) -> Any:
-        def unwrap(value: Any) -> Any:
-            if (
-                isinstance(value, dict)
-                and isinstance(value.get("content"), dict)
-                and any(key in value for key in ("object_id", "object_type", "object_hash"))
-            ):
-                value = copy.deepcopy(value["content"])
-            if isinstance(value, dict) and value.get("blueprint_id"):
-                unresolved = {
-                    str(item)
-                    for item in value.get("unresolved_slot_ids") or []
-                    if item
-                }
-                for paragraph in value.get("paragraphs") or []:
-                    if not isinstance(paragraph, dict):
-                        continue
-                    paragraph["project_item_slots"] = [
-                        item
-                        for item in paragraph.get("project_item_slots") or []
-                        if str(item) not in unresolved
-                    ]
-                    required_evidence = [
-                        item
-                        for item in paragraph.get("required_evidence_ids") or []
-                        if str(item) not in unresolved
-                    ]
-                    for fact_id in paragraph.get("fact_slots") or []:
-                        if fact_id and fact_id not in required_evidence:
-                            required_evidence.append(fact_id)
-                    paragraph["required_evidence_ids"] = required_evidence
-            return value
+    def _repair_override(
+        self,
+        state: dict[str, Any],
+        producer_prompt: str,
+    ) -> Any:
+        target_key = repair_override_key(producer_prompt, state)
+        workflow_id = _CURRENT_WORKFLOW_ID.get()
+        indexed_ids = (state.get("repair_application_artifact_ids") or {}).get(target_key)
+        indexed_ids = [str(item) for item in indexed_ids or [] if str(item).strip()]
+        if workflow_id and indexed_ids:
+            placeholders = ",".join("?" for _ in indexed_ids)
+            params: list[Any] = [workflow_id, producer_prompt, *indexed_ids]
+            rows = self.db.fetchall(
+                f"""SELECT id,version,content_json
+                    FROM artifacts
+                    WHERE workflow_id=?
+                      AND artifact_type='REPAIR_APPLICATION'
+                      AND prompt_id=?
+                      AND status='PASS'
+                      AND id IN ({placeholders})
+                    ORDER BY version DESC,created_at DESC,id DESC""",
+                tuple(params),
+            )
+            for row in rows:
+                try:
+                    payload = json.loads(row.get("content_json") or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if str(payload.get("workflow_id") or workflow_id) != str(workflow_id):
+                    continue
+                if str(payload.get("producer_prompt") or producer_prompt) != producer_prompt:
+                    continue
+                if str(payload.get("target_key") or "") != target_key:
+                    continue
+                if str(payload.get("application_status") or "APPLIED") != "APPLIED":
+                    continue
+                if "repaired_value" in payload:
+                    return copy.deepcopy(payload["repaired_value"])
 
-        overrides = state.get("repair_overrides") or {}
-        section_id = str(state.get("active_section_id") or "").strip()
-        if section_id:
-            scoped = f"section:{section_id}:{producer_prompt}"
-            if scoped in overrides:
-                return unwrap(overrides[scoped])
-        return unwrap(overrides.get(producer_prompt))
+        return None
 
     @staticmethod
     def _canonicalize_argument_result_from_sections(
@@ -1248,14 +1354,102 @@ class ContextBuilder:
             if isinstance(claim, dict) and str(claim.get("claim_id") or "") in accepted_ids
         ]
 
+    def _human_resolution_artifacts_for_prompt(
+        self,
+        *,
+        state: dict[str, Any],
+        prompt_id: str,
+        workflow_id: str | None,
+    ) -> list[dict[str, Any]]:
+        if not workflow_id:
+            return []
+
+        indexed_ids = (state.get("human_resolution_artifact_ids") or {}).get(prompt_id)
+        indexed_ids = [str(item) for item in indexed_ids or [] if str(item).strip()]
+        if not indexed_ids:
+            # The workflow-state index is the visibility boundary for immutable
+            # resolution artifacts.  Querying the project-wide artifact table
+            # without that index both weakens scope and creates avoidable SQLite
+            # contention in concurrent authoring workflows.
+            return []
+
+        params: list[Any] = [workflow_id, prompt_id]
+        id_filter = ""
+        if indexed_ids:
+            placeholders = ",".join("?" for _ in indexed_ids)
+            id_filter = f" AND id IN ({placeholders})"
+            params.extend(indexed_ids)
+        rows = self.db.fetchall(
+            f"""SELECT id,version,content_json
+                FROM artifacts
+                WHERE workflow_id=?
+                  AND artifact_type='HUMAN_RESOLUTION'
+                  AND prompt_id=?
+                  AND status='PASS'
+                  {id_filter}
+                ORDER BY version ASC,created_at ASC,id ASC""",
+            tuple(params),
+        )
+
+        latest_by_target: dict[tuple[str, ...], tuple[int, dict[str, Any]]] = {}
+        for row in rows:
+            try:
+                payload = json.loads(row.get("content_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if str(payload.get("workflow_id") or workflow_id) != str(workflow_id):
+                continue
+            if str(payload.get("prompt_id") or prompt_id) != prompt_id:
+                continue
+            resolution = payload.get("resolution")
+            if not isinstance(resolution, dict):
+                continue
+            try:
+                resolution = canonicalize_human_resolution(resolution)
+            except ValueError:
+                continue
+            targets = tuple(
+                sorted(
+                    str(item).strip()
+                    for item in resolution.get("target_paths") or []
+                    if str(item).strip()
+                )
+            )
+            scope_key = targets or (f"question:{resolution.get('question_id') or resolution.get('resolution_id')}",)
+            latest_by_target[scope_key] = (int(row.get("version") or 0), copy.deepcopy(resolution))
+
+        return [
+            resolution
+            for _, resolution in sorted(
+                latest_by_target.values(),
+                key=lambda item: (item[0], str(item[1].get("resolution_id") or "")),
+            )
+        ][-50:]
     def _human_resolutions_for_prompt(
         self,
         state: dict[str, Any],
         prompt_id: str,
         workflow_id: str | None,
     ) -> list[dict[str, Any]]:
+        artifact_resolutions = self._human_resolution_artifacts_for_prompt(
+            state=state,
+            prompt_id=prompt_id,
+            workflow_id=workflow_id,
+        )
+        if artifact_resolutions:
+            return artifact_resolutions
+
+        # Migration-only fallback. New Gate decisions are persisted as immutable
+        # HUMAN_RESOLUTION artifacts and must not repopulate workflow state.
         records = (state.get("human_resolutions") or {}).get(prompt_id) or []
-        resolved = [copy.deepcopy(item) for item in records[-50:] if isinstance(item, dict)]
+        resolved: list[dict[str, Any]] = []
+        for item in records[-50:]:
+            if not isinstance(item, dict):
+                continue
+            try:
+                resolved.append(canonicalize_human_resolution(item))
+            except ValueError:
+                continue
         if resolved or prompt_id != "P-SAFE-ONLINE-PACKAGE":
             return resolved
 
@@ -1477,8 +1671,14 @@ class ContextBuilder:
         human_resolutions = self._human_resolutions_for_prompt(state, prompt_id, workflow_id)
         if "human_resolutions" in payload or human_resolutions:
             replacements.append(("payload.human_resolutions", human_resolutions))
+        resolved_overrides = resolution_overrides(human_resolutions)
+        for path, value in resolved_overrides.items():
+            human_override_paths.add(path)
+            replacements.append((path, copy.deepcopy(value)))
+        # Legacy state is a migration-only fallback and never overrides a
+        # versioned HUMAN_RESOLUTION artifact for the same target path.
         for path, value in ((state.get("human_input_overrides") or {}).get(prompt_id) or {}).items():
-            if isinstance(path, str) and path:
+            if isinstance(path, str) and path and path not in resolved_overrides:
                 human_override_paths.add(path)
                 replacements.append((path, copy.deepcopy(value)))
         if prompt_id == "P-REVISION-PLAN" and requested_target_sections:
@@ -1763,7 +1963,13 @@ class ContextBuilder:
         blueprint = self._repair_override(state, "P-WRITE-BLUEPRINT")
         if blueprint is None:
             blueprint = self._result(project["id"], "P-WRITE-BLUEPRINT", "blueprint")
-        content_candidates = self._content_candidates(project["id"], workflow_id if prompt_id == "P-INTEGRATION-CRITIC" else None)
+        content_candidates = self._content_candidates(
+            project["id"],
+            workflow_id if prompt_id == "P-INTEGRATION-CRITIC" else None,
+            section_results=(state.get("section_results") or [])
+            if prompt_id == "P-INTEGRATION-CRITIC"
+            else None,
+        )
         content = content_candidates[-1]["candidate"] if content_candidates else (self._result(project["id"], "P-EXPRESSION-POLISH") or self._result(project["id"], "P-WRITE-CONTENT"))
         safe_package = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE")
         research_synthesis = self._result(project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS")
@@ -2235,22 +2441,96 @@ class ContextBuilder:
             "security_level": doc["security_level"],
         }
 
+    def _input_schema(self, prompt_id: str) -> dict[str, Any]:
+        schema = self._input_schema_cache.get(prompt_id)
+        if schema is None:
+            schema = self.pack.inlined_schema(prompt_id, "input")
+            self._input_schema_cache[prompt_id] = schema
+        return schema
+    @classmethod
+    def _property_schema(cls, schema: Any, property_name: str) -> dict[str, Any] | None:
+        """Return the value schema for one object property.
+
+        Prompt schemas occasionally distribute property constraints across
+        composition keywords.  ``allOf`` constraints must all hold, whereas
+        ``anyOf``/``oneOf`` alternatives describe admissible branches.  The
+        returned schema validates only the replacement value; the completed
+        envelope is still validated once at the end of ``build`` so
+        cross-field conditions remain authoritative.
+        """
+
+        if not isinstance(schema, dict):
+            return None
+
+        direct = None
+        properties = schema.get("properties")
+        if isinstance(properties, dict) and isinstance(properties.get(property_name), dict):
+            direct = properties[property_name]
+
+        all_of: list[dict[str, Any]] = []
+        for branch in schema.get("allOf") or []:
+            branch_schema = cls._property_schema(branch, property_name)
+            if branch_schema is not None:
+                all_of.append(branch_schema)
+
+        alternatives: list[dict[str, Any]] = []
+        for keyword in ("anyOf", "oneOf"):
+            for branch in schema.get(keyword) or []:
+                branch_schema = cls._property_schema(branch, property_name)
+                if branch_schema is not None:
+                    alternatives.append(branch_schema)
+
+        constraints: list[dict[str, Any]] = []
+        if direct is not None:
+            constraints.append(direct)
+        constraints.extend(all_of)
+        if alternatives:
+            constraints.append({"anyOf": alternatives})
+        if not constraints:
+            additional = schema.get("additionalProperties")
+            return additional if isinstance(additional, dict) else None
+        if len(constraints) == 1:
+            return constraints[0]
+        return {"allOf": constraints}
+    def _schema_for_path(self, prompt_id: str, dotted_path: str) -> dict[str, Any] | None:
+        schema: dict[str, Any] | None = self._input_schema(prompt_id)
+        for part in dotted_path.split("."):
+            schema = self._property_schema(schema, part)
+            if schema is None:
+                return None
+        return schema
+    @staticmethod
+    def _value_schema_errors(schema: dict[str, Any], value: Any) -> list[str]:
+        validator = Draft202012Validator(
+            schema,
+            format_checker=Draft202012Validator.FORMAT_CHECKER,
+        )
+        errors = sorted(validator.iter_errors(value), key=lambda error: list(error.absolute_path))
+        result: list[str] = []
+        for error in errors:
+            path = "/" + "/".join(str(item) for item in error.absolute_path)
+            result.append(f"{path or '/'}: {error.message}")
+        return result
     def _set_path_if_valid(self, prompt_id: str, envelope: dict[str, Any], dotted_path: str, value: Any, *, strict: bool = False) -> bool:
-        candidate = copy.deepcopy(envelope)
         parts = dotted_path.split(".")
-        node = candidate
+        node: dict[str, Any] = envelope
         for part in parts[:-1]:
             if part not in node or not isinstance(node[part], dict):
                 if strict:
                     raise ValueError(f"Critical context path does not exist for {prompt_id}: {dotted_path}")
                 return False
             node = node[part]
-        node[parts[-1]] = value
-        errors = self.pack.validate(prompt_id, "input", candidate)
+
+        value_schema = self._schema_for_path(prompt_id, dotted_path)
+        if value_schema is None:
+            if strict:
+                raise ValueError(f"Critical context schema path does not exist for {prompt_id}: {dotted_path}")
+            return False
+        errors = self._value_schema_errors(value_schema, value)
         if errors:
             if strict:
                 raise ValueError(f"Critical context replacement failed for {prompt_id} {dotted_path}: " + "; ".join(errors[:10]))
             return False
-        envelope.clear()
-        envelope.update(candidate)
+
+        node[parts[-1]] = copy.deepcopy(value)
         return True

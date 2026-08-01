@@ -1,18 +1,65 @@
 from __future__ import annotations
 
+import asyncio
+import copy
 import json
 from typing import Any
 
+from .contracts import get_semantic_contract
 from .dependency_preflight import DependencyIssue, DependencyReport
 from .executor import PromptExecutionError
+from .decision_arbiter import DecisionArbiter
+from .repair_ledger import RepairLedger
+from .retry_policy import ProviderRetriesExhausted, RetryPolicy
+from .runtime_failures import (
+    FailureCategory,
+    classify_runtime_failure,
+    semantic_revise_classification,
+)
 from .quality import QualityGateBlocked, QualityLifecycleManager
 from .research import PublicResearchError
 from .util import new_id, utc_now
 from .workflow_authoring import WorkflowAuthoringMixin
-from .workflow_defs import WORKFLOWS
+from .workflow_defs import CRITIC_PRODUCER, WORKFLOWS
 from .workflow_gates import WorkflowGateMixin
 from .workflow_repair import WorkflowRepairMixin
 from .wf3_input import WorkflowInputRequired
+from .workflow_status import (
+    WorkflowStatus,
+    is_terminal,
+    occupies_workflow_slot,
+)
+
+
+def technical_retry_key(
+    step_key: str,
+    state: dict[str, Any],
+    *,
+    is_section_step: bool,
+) -> str:
+    """Return the retry identity for one technical execution phase.
+
+    Section authoring retries are isolated by section and phase.  Other
+    workflow steps retain their ordinary step key even if a stale active
+    section remains in workflow state.
+    """
+
+    if not is_section_step:
+        return step_key
+    section_id = str(state.get("active_section_id") or "").strip()
+    progress = (
+        (state.get("section_progress") or {}).get(section_id)
+        if section_id
+        else None
+    )
+    phase = (
+        str(progress.get("phase") or "").strip()
+        if isinstance(progress, dict)
+        else ""
+    )
+    if section_id and phase:
+        return f"{step_key}:{section_id}:{phase}"
+    return step_key
 
 
 class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMixin):
@@ -25,6 +72,224 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         self.diagram_enrichment = diagram_enrichment
         self.quality_manager = quality_manager or QualityLifecycleManager(db)
         self.dependency_preflight = dependency_preflight
+        self.decision_arbiter = DecisionArbiter()
+
+    def _record_runtime_failure(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        *,
+        prompt_id: str,
+        exc: BaseException,
+    ) -> dict[str, Any]:
+        classification = classify_runtime_failure(exc)
+        payload = {
+            **classification.to_dict(),
+            "prompt_id": prompt_id,
+            "workflow_id": wf["id"],
+            "step": wf["current_step"],
+            "error_type": exc.__class__.__name__,
+            "error": str(exc),
+            "recorded_at": utc_now(),
+        }
+        state.setdefault("runtime_failure_history", []).append(payload)
+        del state["runtime_failure_history"][:-100]
+        row = self.db.fetchone(
+            "SELECT COALESCE(MAX(version),0) AS v FROM artifacts WHERE project_id=? AND workflow_id=? AND artifact_type='RUNTIME_FAILURE'",
+            (wf["project_id"], wf["id"]),
+        )
+        self.db.execute(
+            """INSERT INTO artifacts(id,project_id,workflow_id,artifact_type,prompt_id,version,status,security_level,context_hash,content_json,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                new_id("artifact"), wf["project_id"], wf["id"], "RUNTIME_FAILURE",
+                prompt_id, int((row or {}).get("v") or 0) + 1, classification.category.value,
+                self._project_level(wf["project_id"]),
+                __import__("hashlib").sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
+                json.dumps(payload, ensure_ascii=False), payload["recorded_at"],
+            ),
+        )
+        return payload
+
+    async def _execute_prompt_with_provider_retry(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        *,
+        prompt_id: str,
+        envelope: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute one business node with a finite provider retry policy.
+
+        The retry loop surrounds only the provider-backed prompt execution.  It
+        does not rebuild workflow state, re-enter repair bookkeeping, or consume
+        semantic repair budget.  Each failed provider attempt is persisted as a
+        RUNTIME_FAILURE artifact and each actual retry is an independent ledger
+        event.
+        """
+
+        policy = RetryPolicy.from_options(state.get("options") or {})
+        retry_key = f"{wf['current_step']}:{prompt_id}"
+        completed_attempts = 0
+
+        while True:
+            completed_attempts += 1
+            try:
+                result = await self.executor.execute(
+                    prompt_id,
+                    envelope,
+                    project_id=wf["project_id"],
+                    workflow_id=wf["id"],
+                    original_environment=state.get("original_environment"),
+                )
+            except (PromptExecutionError, ValueError, KeyError) as exc:
+                classification = classify_runtime_failure(exc)
+                if classification.category is not FailureCategory.PROVIDER_TRANSIENT:
+                    raise
+
+                failure = self._record_runtime_failure(
+                    wf,
+                    state,
+                    prompt_id=prompt_id,
+                    exc=exc,
+                )
+                decision = policy.decide(
+                    classification,
+                    completed_attempts=completed_attempts,
+                )
+                state["provider_wait"] = {
+                    "retry_key": retry_key,
+                    "completed_attempts": completed_attempts,
+                    "retry_number": decision.retry_number,
+                    "max_retries": decision.max_retries,
+                    "max_attempts": decision.max_attempts,
+                    "delay_seconds": decision.delay_seconds,
+                    "prompt_id": prompt_id,
+                    "failure_kind": classification.failure_kind,
+                    "http_status": classification.http_status,
+                    "retry_after_seconds": classification.retry_after_seconds,
+                    "decision": decision.to_dict(),
+                }
+
+                if not decision.should_retry:
+                    raise ProviderRetriesExhausted(
+                        exc,
+                        classification=classification,
+                        decision=decision,
+                        failure_payload=failure,
+                    ) from exc
+
+                RepairLedger.provider_retry(
+                    state,
+                    retry_key,
+                    details={
+                        "prompt_id": prompt_id,
+                        "completed_attempts": completed_attempts,
+                        "next_attempt": completed_attempts + 1,
+                        "failure_kind": classification.failure_kind,
+                        "http_status": classification.http_status,
+                        "delay_seconds": decision.delay_seconds,
+                        "reason": decision.reason,
+                    },
+                )
+                self._update(wf, state=state)
+                if decision.delay_seconds > 0:
+                    await asyncio.sleep(decision.delay_seconds)
+                continue
+
+            if completed_attempts > 1:
+                RepairLedger.provider_recovered(
+                    state,
+                    retry_key,
+                    details={
+                        "prompt_id": prompt_id,
+                        "completed_attempts": completed_attempts,
+                        "retries_used": completed_attempts - 1,
+                    },
+                )
+                state.pop("provider_wait", None)
+                self._update(wf, state=state)
+            return result
+
+    def _record_decision(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        prompt_id: str,
+        result: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, str, dict[str, Any]]:
+        output = result.get("output") or {}
+        raw_status = str(result.get("status") or output.get("status") or "ERROR")
+        if prompt_id not in CRITIC_PRODUCER and "CRITIC" not in prompt_id:
+            return None, raw_status, copy.deepcopy(output)
+
+        contract = get_semantic_contract()
+        guard_report = result.get("guard_report") or {
+            "schema_version": "1.0",
+            "status": "PASS",
+            "responsibility": "DETERMINISTIC_GUARD",
+            "contract_version": contract.version,
+            "contract_rule_registry_version": contract.rule_registry_version,
+            "contract_hash": contract.contract_hash,
+            "findings": [],
+        }
+        record = self.decision_arbiter.arbitrate(
+            output, guard_report, prompt_id=prompt_id
+        )
+        payload = record.to_dict()
+        effective_status, effective_output = self._effective_critic_result(result, payload)
+        step_result = state.setdefault("step_results", {}).setdefault(
+            str(wf["current_step"]), {}
+        )
+        step_result["model_status"] = raw_status
+        step_result["effective_status"] = effective_status
+        artifact_id = self.decision_arbiter.persist(
+            self.db,
+            project_id=wf["project_id"],
+            workflow_id=wf["id"],
+            prompt_id=prompt_id,
+            record=record,
+            security_level=self._project_level(wf["project_id"]),
+            workflow_state=state,
+            workflow_status=wf["status"],
+            current_step=wf["current_step"],
+        )
+        payload["artifact_id"] = artifact_id
+        return payload, effective_status, effective_output
+
+
+    @staticmethod
+    def _effective_critic_result(
+        result: dict[str, Any],
+        decision: dict[str, Any] | None,
+    ) -> tuple[str, dict[str, Any]]:
+        output = copy.deepcopy(result.get("output") or {})
+        if not decision:
+            return str(result.get("status") or output.get("status") or "ERROR"), output
+        mapping = {
+            "PASS": "PASS",
+            "REVISE": "REVISE",
+            "BLOCK": "BLOCK",
+            "WAITING_HUMAN_INPUT": "NEED_USER_INPUT",
+            "CONTRACT_CONFLICT": "BLOCK",
+        }
+        effective_status = mapping.get(
+            str(decision.get("decision") or ""),
+            str(result.get("status") or output.get("status") or "ERROR"),
+        )
+        actionable = []
+        for entry in (decision.get("decision_basis") or {}).get("actionable_findings") or []:
+            if isinstance(entry, dict) and isinstance(entry.get("finding"), dict):
+                finding = copy.deepcopy(entry["finding"])
+                # The decision source is audit metadata, not part of the common
+                # Finding schema passed to repair prompts.
+                finding.pop("rule_id", None)
+                finding.pop("responsibility", None)
+                finding.pop("source", None)
+                actionable.append(finding)
+        output["status"] = effective_status
+        output["findings"] = actionable
+        return effective_status, output
 
 
     def _observe_quality_result(self, wf: dict[str, Any], state: dict[str, Any], prompt_id: str, result: dict[str, Any]) -> None:
@@ -275,13 +540,15 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             raise KeyError(f"Unknown workflow: {workflow_type}")
         if not self.db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
             raise KeyError(f"Project not found: {project_id}")
-        active_rows = self.db.fetchall(
+        candidate_rows = self.db.fetchall(
             """SELECT id,status,state_json FROM workflows
                WHERE project_id=? AND workflow_type=?
-                 AND status IN ('RUNNING','WAITING_GATE','WAITING_PREREQUISITE','WAITING_CONFIGURATION','BLOCKED')
                ORDER BY created_at DESC""",
             (project_id, workflow_type),
         )
+        active_rows = [
+            row for row in candidate_rows if occupies_workflow_slot(row["status"])
+        ]
         active_parent = next(
             (
                 row
@@ -307,19 +574,22 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             "options": options or {},
             "step_results": {},
             "repair_attempts": {},
-            "repair_overrides": {},
             "public_search_results": None,
             "prerequisite_workflow_ids": prerequisite_bindings,
         }
         prerequisite_error = self._prerequisite_error(missing_prerequisites)
-        status = "WAITING_PREREQUISITE" if prerequisite_error else "RUNNING"
+        status = (
+            WorkflowStatus.WAITING_PREREQUISITE.value
+            if prerequisite_error
+            else WorkflowStatus.RUNNING.value
+        )
         if prerequisite_error:
             state["last_error"] = prerequisite_error
             state["waiting_prerequisite"] = True
         elif self.dependency_preflight is not None:
             report = self._workflow_dependency_report(project_id, workflow_type, options or {})
             if report is not None and report.blocking_issues:
-                status = "WAITING_CONFIGURATION"
+                status = WorkflowStatus.WAITING_CONFIGURATION.value
                 state["configuration_wait"] = {
                     **report.as_dict(),
                     "workflow_id": workflow_id,
@@ -335,7 +605,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             (workflow_id, project_id, workflow_type, status, 0, json.dumps(state, ensure_ascii=False), now, now),
         )
         self.db.audit("WORKFLOW_STARTED", project_id=project_id, object_id=workflow_id, metadata={"workflow_type": workflow_type})
-        if status == "WAITING_CONFIGURATION":
+        if status == WorkflowStatus.WAITING_CONFIGURATION.value:
             self.db.audit(
                 "WORKFLOW_WAITING_CONFIGURATION",
                 project_id=project_id,
@@ -432,9 +702,26 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
 
     async def advance(self, workflow_id: str) -> dict[str, Any]:
         wf = self.get(workflow_id)
-        if wf["status"] in {"COMPLETED", "CANCELLED"}:
+        if is_terminal(wf["status"]):
             return wf
         state = wf["state"]
+        if wf["status"] == WorkflowStatus.WAITING_PROVIDER.value:
+            wait = state.get("provider_wait") or {}
+            retry_key = str(wait.get("retry_key") or f"{wf['current_step']}:provider")
+            retry_limit = int(wait.get("retry_limit") or 2)
+            attempts = RepairLedger.count(state, "provider_retries", retry_key)
+            if attempts >= retry_limit:
+                state["last_error"] = (
+                    f"Provider retry limit exhausted for {retry_key}: {attempts}/{retry_limit}"
+                )
+                self._update(wf, status=WorkflowStatus.BLOCKED_PROVIDER.value, state=state)
+                return self.get(workflow_id)
+            state["recovered_from"] = "WAITING_PROVIDER"
+            state.pop("provider_wait", None)
+            state.pop("last_error", None)
+            self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
+            wf = self.get(workflow_id)
+            state = wf["state"]
         legacy_prerequisite_block = (
             wf["status"] == "BLOCKED"
             and str(state.get("last_error") or "").startswith("工作流前置条件未满足：")
@@ -448,7 +735,11 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 state.get("options") or {},
             ))
         )
-        if wf["status"] == "WAITING_PREREQUISITE" or legacy_prerequisite_block or needs_binding_migration:
+        if (
+            wf["status"] == WorkflowStatus.WAITING_PREREQUISITE.value
+            or legacy_prerequisite_block
+            or needs_binding_migration
+        ):
             prerequisite_bindings, missing_prerequisites = self._resolve_prerequisite_workflows(
                 wf["project_id"],
                 wf["workflow_type"],
@@ -459,16 +750,19 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             if prerequisite_error:
                 state["last_error"] = prerequisite_error
                 state["waiting_prerequisite"] = True
-                self._update(wf, status="WAITING_PREREQUISITE", state=state)
+                self._update(wf, status=WorkflowStatus.WAITING_PREREQUISITE.value, state=state)
                 return self.get(workflow_id)
             state.pop("last_error", None)
             state.pop("waiting_prerequisite", None)
             state["recovered_from"] = (
                 "WAITING_PREREQUISITE"
-                if wf["status"] in {"WAITING_PREREQUISITE", "BLOCKED"}
+                if wf["status"] in {
+                    WorkflowStatus.WAITING_PREREQUISITE.value,
+                    WorkflowStatus.BLOCKED.value,
+                }
                 else "PREREQUISITE_BINDING_MIGRATION"
             )
-            self._update(wf, status="RUNNING", state=state)
+            self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
             wf = self.get(workflow_id)
         legacy_configuration_report = None
         if wf["status"] == "BLOCKED" and self.dependency_preflight is not None:
@@ -476,7 +770,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 state.get("last_error") or "",
                 scope="LEGACY_BLOCKED_CONFIGURATION",
             )
-        if wf["status"] == "WAITING_CONFIGURATION" or legacy_configuration_report is not None:
+        if (
+            wf["status"] == WorkflowStatus.WAITING_CONFIGURATION.value
+            or legacy_configuration_report is not None
+        ):
             state = wf["state"]
             report = self._configuration_recheck_report(wf, state)
             if report is not None and report.blocking_issues:
@@ -486,17 +783,17 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     report,
                     source=(
                         "WAITING_CONFIGURATION_RECHECK"
-                        if wf["status"] == "WAITING_CONFIGURATION"
+                        if wf["status"] == WorkflowStatus.WAITING_CONFIGURATION.value
                         else "LEGACY_BLOCKED_CONFIGURATION_MIGRATION"
                     ),
                 )
             self._clear_configuration_wait(state)
             state["recovered_from"] = (
                 "WAITING_CONFIGURATION"
-                if wf["status"] == "WAITING_CONFIGURATION"
+                if wf["status"] == WorkflowStatus.WAITING_CONFIGURATION.value
                 else "LEGACY_CONFIGURATION_BLOCK"
             )
-            self._update(wf, status="RUNNING", state=state)
+            self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
             wf = self.get(workflow_id)
         if self._is_legacy_wf3_input_block(wf, wf["state"]):
             state = wf["state"]
@@ -584,7 +881,15 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     return self.get(workflow_id)
             retries = state.setdefault("technical_retry_attempts", {})
             retry_limit = 6 if state.get("options", {}).get("acceptance_run") else 2
-            retry_key = step_key
+            is_section_step = (
+                wf["current_step"] < len(steps)
+                and steps[wf["current_step"]].get("type") == "WRITE_SECTIONS"
+            )
+            retry_key = technical_retry_key(
+                step_key,
+                state,
+                is_section_step=is_section_step,
+            )
             current_prompt_id = (
                 str(steps[wf["current_step"]].get("prompt_id") or "")
                 if wf["current_step"] < len(steps)
@@ -592,8 +897,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             )
             if (
                 not current_prompt_id
-                and wf["current_step"] < len(steps)
-                and steps[wf["current_step"]].get("type") == "WRITE_SECTIONS"
+                and is_section_step
             ):
                 active_section_id = str(state.get("active_section_id") or "")
                 active_progress = (
@@ -611,10 +915,6 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 )
                 if phase_prompt:
                     current_prompt_id = str(phase_prompt[0] or "")
-                if active_section_id and active_phase:
-                    retry_key = (
-                        f"{step_key}:{active_section_id}:{active_phase}"
-                    )
             current_scope = f"stage:{current_prompt_id}" if current_prompt_id else ""
             has_current_deterministic_blocker = any(
                 str((record.get("finding") or {}).get("code") or "").startswith("QG_")
@@ -793,14 +1093,41 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 return self.get(workflow_id)
 
             prompt_id = step["prompt_id"]
+            pending_rereview = (state.get("pending_repair_rereviews") or {}).get(
+                prompt_id
+            )
             try:
+                if isinstance(pending_rereview, dict):
+                    self._start_repair_rereview(
+                        state, pending_rereview, critic_prompt=prompt_id
+                    )
+                    self._update(wf, state=state)
                 envelope = self.context_builder.build(prompt_id, wf["project_id"], workflow_id=workflow_id, workflow_state=state)
                 if prompt_id == "P-INTEGRATION-CRITIC":
                     self._validate_three_section_integration_envelope(state, envelope)
                     self._validate_full_proposal_integration_envelope(state, envelope)
-                result = await self.executor.execute(prompt_id, envelope, project_id=wf["project_id"], workflow_id=workflow_id, original_environment=state.get("original_environment"))
+                result = await self._execute_prompt_with_provider_retry(
+                    wf,
+                    state,
+                    prompt_id=prompt_id,
+                    envelope=envelope,
+                )
             except WorkflowInputRequired as exc:
                 return self._pause_for_workflow_input(wf, state, exc)
+            except ProviderRetriesExhausted as exc:
+                state["last_error"] = str(exc.original_exception)
+                state["provider_wait"] = {
+                    **(state.get("provider_wait") or {}),
+                    "exhausted": True,
+                    "exhausted_status": exc.decision.exhausted_status,
+                    "failure": exc.failure_payload,
+                }
+                self._update(
+                    wf,
+                    status=exc.decision.exhausted_status,
+                    state=state,
+                )
+                return self.get(workflow_id)
             except (PromptExecutionError, ValueError, KeyError) as exc:
                 required_environment = str(
                     self.pack.entry(prompt_id).get("required_environment") or ""
@@ -817,12 +1144,29 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                         report,
                         source=f"PROMPT_RUNTIME:{prompt_id}",
                     )
+                failure = self._record_runtime_failure(
+                    wf, state, prompt_id=prompt_id, exc=exc
+                )
                 state["last_error"] = str(exc)
-                self._update(wf, status="BLOCKED", state=state)
+                status = failure["workflow_status"]
+                self._update(wf, status=status, state=state)
                 return self.get(workflow_id)
 
             state["step_results"][str(wf["current_step"])] = {"prompt_id": prompt_id, "run_id": result["run_id"], "status": result["status"]}
             state["original_environment"] = result["route"]["environment"]
+            if isinstance(pending_rereview, dict):
+                self._complete_repair_rereview(
+                    state,
+                    pending_rereview,
+                    critic_prompt=prompt_id,
+                    review_run_id=str(result.get("run_id") or "") or None,
+                    status=str(result.get("status") or ""),
+                )
+                pending = state.get("pending_repair_rereviews")
+                if isinstance(pending, dict):
+                    pending.pop(prompt_id, None)
+                    if not pending:
+                        state.pop("pending_repair_rereviews", None)
             output = result["output"]
             if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS" and result["status"] == "PASS":
                 claim_validation = self.research_service.validate_synthesis(
@@ -841,10 +1185,28 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     return self.get(workflow_id)
                 self._update(wf, state=state)
             self._observe_quality_result(wf, state, prompt_id, result)
+            decision, effective_status, effective_output = self._record_decision(
+                wf, state, prompt_id, result
+            )
+            if decision and decision.get("decision") == "CONTRACT_CONFLICT":
+                state["last_error"] = (
+                    f"Decision responsibility protocol is inconsistent for {prompt_id}; "
+                    "the immutable critic output and guard report were preserved in DECISION_RECORD."
+                )
+                self._update(wf, status="BLOCKED_CONTRACT", state=state)
+                return self.get(workflow_id)
+            if effective_status == "REVISE":
+                state.setdefault("semantic_failure_history", []).append({
+                    **semantic_revise_classification().to_dict(),
+                    "prompt_id": prompt_id,
+                    "run_id": result.get("run_id"),
+                    "recorded_at": utc_now(),
+                })
+                del state["semantic_failure_history"][:-100]
             if prompt_id == "P-INTEGRATION-CRITIC" and self._three_section_mode(state):
                 state.setdefault("cross_section_review_history", []).append({
                     "run_id": result["run_id"],
-                    "status": result["status"],
+                    "status": effective_status,
                     "finding_codes": [
                         str(item.get("code") or "")
                         for item in output.get("findings") or []
@@ -864,30 +1226,34 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     state["last_error"] = str(exc)
                     self._update(wf, status="BLOCKED", state=state)
                     return self.get(workflow_id)
-            if result["status"] == "BLOCK":
+            if effective_status == "BLOCK":
                 self._update(wf, status="BLOCKED", state=state)
                 return self.get(workflow_id)
-            if prompt_id == "P-INTEGRATION-CRITIC" and result["status"] == "REVISE":
-                repair_state = self._prepare_integration_repair(wf, state, output)
+            if prompt_id == "P-INTEGRATION-CRITIC" and effective_status == "REVISE":
+                repair_state = self._prepare_integration_repair(wf, state, effective_output)
                 if repair_state == "SCHEDULED":
                     wf = self.get(workflow_id)
                     state = wf["state"]
                     continue
                 if repair_state == "EXHAUSTED":
                     return self.get(workflow_id)
-            if result["status"] == "REVISE" and self._can_auto_repair(prompt_id, state):
-                repaired = await self._auto_repair(wf, prompt_id, envelope, output, state)
+            if effective_status == "REVISE" and self._can_auto_repair(prompt_id, state):
+                repaired = await self._auto_repair(wf, prompt_id, envelope, effective_output, state)
                 if repaired:
+                    state.setdefault("pending_repair_rereviews", {})[prompt_id] = (
+                        self._repair_rereview_checkpoint(repaired)
+                    )
+                    self._update(wf, state=state)
                     continue
-            if result["status"] == "REVISE" and self._has_nonconfirmable_quality_failure(output):
-                codes = [str(item.get("code")) for item in output.get("findings", []) if str(item.get("code", "")).startswith("QG_")]
+            if effective_status == "REVISE" and self._has_nonconfirmable_quality_failure(effective_output):
+                codes = [str(item.get("code")) for item in effective_output.get("findings", []) if str(item.get("code", "")).startswith("QG_")]
                 state["last_error"] = (
                     f"{prompt_id} 未通过确定性质量校验：" + "、".join(codes[:8])
                     + "。该问题必须由对应生产/审查阶段重新生成或补充证据，不能通过人工空确认覆盖。"
                 )
                 self._update(wf, status="BLOCKED", state=state)
                 return self.get(workflow_id)
-            if result["status"] in {"REVISE", "NEED_USER_INPUT"}:
+            if effective_status in {"REVISE", "NEED_USER_INPUT"}:
                 gate_type = self.pack.entry(prompt_id).get("next_human_gate") or "PROJECT_GAP_RESOLUTION"
                 self._create_gate(wf, gate_type, target_id=result["run_id"], questions=output.get("user_questions", []))
                 self._update(wf, status="WAITING_GATE", state=state)

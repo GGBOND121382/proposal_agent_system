@@ -122,6 +122,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
         if not run or not run.get("output_json"):
             raise EvidenceIntegrityError(f"Committed call {call_key} has no matching prompt run")
         output = json.loads(run["output_json"])
+        input_envelope = json.loads(run.get("input_json") or "{}")
+        guard_report = self._observe_guard(run["prompt_id"], input_envelope, output)
         return {
             "run_id": run["id"],
             "prompt_id": run["prompt_id"],
@@ -132,6 +134,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "endpoint_id": run.get("endpoint_id"),
             },
             "output": output,
+            "guard_report": guard_report,
             "call_key": call_key,
             "reused_committed_result": True,
         }
@@ -322,18 +325,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
                         consumed_output.setdefault("warnings", []).append(
                             f"Deterministic outbound privacy guard redacted {len(redactions)} sensitive field occurrence(s)."
                         )
-                if self.quality_guard_enabled:
-                    guarded = self.quality_guard.apply(
-                        prompt_id,
-                        quality_context_envelope,
-                        copy.deepcopy(consumed_output),
-                    )
-                    self.policy.assert_output_unchanged(
-                        consumed_output,
-                        guarded,
-                        stage="proposal_quality_guard",
-                    )
-                    consumed_output = guarded
+                guard_report = self._observe_guard(
+                    prompt_id, quality_context_envelope, consumed_output
+                )
                 if self.pack.validate(prompt_id, "output", consumed_output):
                     continue
             except (
@@ -350,6 +344,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "endpoint_id": row.get("endpoint_id"),
                 "provider_output": provider_output,
                 "consumed_output": consumed_output,
+                "guard_report": guard_report,
                 "failed_at": row.get("created_at"),
                 "previous_error": row.get("error"),
                 "prior_model_request_spec_hash": prior_request_hash or None,
@@ -504,10 +499,11 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     consumed_output.setdefault("warnings", []).append(
                         f"Deterministic outbound privacy guard redacted {len(redactions)} sensitive field occurrence(s)."
                     )
-            if contract_recovery is None and self.quality_guard_enabled:
-                guarded = self.quality_guard.apply(prompt_id, quality_context_envelope, copy.deepcopy(consumed_output))
-                self.policy.assert_output_unchanged(consumed_output, guarded, stage="proposal_quality_guard")
-                consumed_output = guarded
+            guard_report = (
+                copy.deepcopy(contract_recovery.get("guard_report"))
+                if contract_recovery is not None
+                else self._observe_guard(prompt_id, quality_context_envelope, consumed_output)
+            )
             output_errors = self.pack.validate(prompt_id, "output", consumed_output)
             if output_errors:
                 raise PromptExecutionError("Output schema validation failed", validation_errors=output_errors)
@@ -536,6 +532,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
                 evidence=getattr(result, "evidence", {}),
+                guard_report=guard_report,
             )
             self.evidence_store.faults.hit("after_db_transaction", call_key, prompt_id=prompt_id)
             if prompt_id.endswith("CRITIC"):
@@ -563,6 +560,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     "endpoint_id": result.endpoint_id,
                 },
                 "output": consumed_output,
+                "guard_report": guard_report,
                 "call_key": call_key,
                 "reused_committed_result": False,
                 "contract_recovered_from_run_id": (
@@ -695,6 +693,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "input_compaction": kwargs.get("input_compaction"),
             "output_schema": kwargs.get("output_schema"),
             "output": kwargs.get("consumed_output"),
+            "guard_report": kwargs.get("guard_report"),
             "provider_parsed_output": kwargs.get("provider_output"),
             "raw_response_text": kwargs.get("raw_response_text"),
             "error": kwargs.get("error"),

@@ -56,10 +56,15 @@
 1. 使用确定性Section Profile和Section Contract；二者不匹配时BLOCK。
 2. 每个段落指定：argument_role、primary_claim_id、required_evidence_ids、novel_content_key和word_budget。
 3. 段落必须组成适合该章节的claim-evidence-warrant链；不同章节不得复用固定“定位—问题—方法—实施—指标—输出”骨架。
-4. 每个段落只推进一个新命题。`novel_content_key`必须属于当前Section Contract的`unique_information_keys`或其可追踪子键，在当前章节中唯一，并且不得出现在`prior_section_digest.new_information_keys`中。`allowed_shared_context_ids`只能作为背景引用，不能作为本章新增贡献。
-5. 若`revision_findings`非空，必须逐条说明蓝图中的对应修改位置；不得只更换措辞后原样保留问题。修订后的段落角色、命题和信息键必须与Finding指向的缺陷相匹配。
-6. 没有证据的事实、创新、指标和研究基础不得留空槽后继续写；必须生成unresolved slot。
-7. 文献综述段落必须包含代表工作、能力边界、局限机制和本项目切入点；方法章节必须包含形式化对象、机制和验证；创新章节必须绑定最近工作和可比较差异。
+4. 必须严格复用共享语义合同中的机器规则，不得在本Prompt内另造解释：
+   - `must_advance_claim_ids`的覆盖按`primary_claim_id`、`project_item_slots`和`technical_slots`的并集计算；不得把所有待覆盖命题强塞进单值`primary_claim_id`。
+   - `primary_claim_id`表示该段唯一主命题；`required_evidence_ids`、`fact_slots`和`metric_slots`必须提供独立支持，任何段落都不得把自己的`primary_claim_id`作为证据。
+   - `novel_content_key`可以等于`section_contract.unique_information_keys`中的根键，也可以使用`根键:子键`；不得使用未登记的分隔方式或章节外键。
+   - 章节要求的论证角色按共享合同的兼容关系满足，例如`RESEARCH_QUESTION`可以满足`PROBLEM`要求；不得自行建立另一套角色别名。
+5. 每个段落只推进一个新命题。`novel_content_key`必须属于当前Section Contract的`unique_information_keys`或其可追踪子键，在当前章节中唯一，并且不得出现在`prior_section_digest.new_information_keys`中。`allowed_shared_context_ids`只能作为背景引用，不能作为本章新增贡献。
+6. 若`revision_findings`非空，必须逐条说明蓝图中的对应修改位置；不得只更换措辞后原样保留问题。修订后的段落角色、命题和信息键必须与Finding指向的缺陷相匹配。
+7. 没有证据的事实、创新、指标和研究基础不得留空槽后继续写；必须生成unresolved slot。
+8. 文献综述段落必须包含代表工作、能力边界、局限机制和本项目切入点；方法章节必须包含形式化对象、机制和验证；创新章节必须绑定最近工作和可比较差异。
 
 只返回符合输出Schema的JSON。
 

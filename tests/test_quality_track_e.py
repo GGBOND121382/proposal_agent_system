@@ -166,7 +166,7 @@ def test_e1_relation_fact_metric_and_source_rules_are_deterministic():
     project["relations"][0]["target_item_type"] = "METRIC"
     metric = next(item for item in project["items"] if item["item_type"] == "METRIC")
     metric["content"]["verifier"] = ""
-    checked_project = guard.apply("P-PROJECT-DEFINITION-EXTRACT", project_env, project_output)
+    checked_project = guard.observe("P-PROJECT-DEFINITION-EXTRACT", project_env, project_output)
     assert {
         "QG_RELATION_MATRIX_DIRECTION_INVALID",
         "QG_METRIC_BASIS_INCOMPLETE",
@@ -176,7 +176,7 @@ def test_e1_relation_fact_metric_and_source_rules_are_deterministic():
     fact_output = sim.invoke("P-FACT-EXTRACT", fact_env)
     fact_output["result"]["fact_candidates"][0]["claim_text"] = "项目周期为36个月；项目经费为100万元。"
     fact_output["result"]["coverage"] = []
-    checked_fact = guard.apply("P-FACT-EXTRACT", fact_env, fact_output)
+    checked_fact = guard.observe("P-FACT-EXTRACT", fact_env, fact_output)
     assert {"QG_FACT_NOT_ATOMIC", "QG_FACT_SOURCE_COVERAGE_INCOMPLETE"}.issubset(_codes(checked_fact))
 
 
@@ -186,7 +186,7 @@ def test_e2_section_gate_uses_profile_specific_responsibility():
     env["payload"]["source_section"]["title"] = "创新点"
     env["payload"]["section_profile"]["profile_id"] = "RESEARCH_CONTENT"
     output = sim.invoke("P-WRITE-BLUEPRINT", env)
-    checked = guard.apply("P-WRITE-BLUEPRINT", env, output)
+    checked = guard.observe("P-WRITE-BLUEPRINT", env, output)
     assert "QG_WRONG_SECTION_PROFILE" in _codes(checked)
     finding = next(item for item in checked["findings"] if item["code"] == "QG_WRONG_SECTION_PROFILE")
     assert finding["suggested_route"] in {"PLANNING_AGENT", "WRITING_AGENT"}
@@ -212,7 +212,7 @@ def test_e3_e4_integration_checks_conflict_mapping_and_full_argument_chain():
         "evidence": "missing",
     })
     output["result"]["argument_chain_checks"] = output["result"]["argument_chain_checks"][:-1]
-    checked = guard.apply("P-INTEGRATION-CRITIC", env, output)
+    checked = guard.observe("P-INTEGRATION-CRITIC", env, output)
     assert {
         "QG_CROSS_SECTION_VALUE_CONFLICT",
         "QG_CROSS_SECTION_MAPPING_INCOMPLETE",

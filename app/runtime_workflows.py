@@ -7,6 +7,11 @@ from .runtime_executor import RecoverablePromptExecutionError
 from .runtime_evidence import InjectedFailure
 from .util import sha256_json, utc_now
 from .workflows import WorkflowEngine as BaseWorkflowEngine
+from .workflow_status import (
+    WorkflowStatus,
+    is_recoverable_block,
+    is_terminal,
+)
 
 
 class RecoverableWorkflowEngine(BaseWorkflowEngine):
@@ -38,15 +43,19 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
 
     def _recover_status(self, wf: dict[str, Any]) -> dict[str, Any]:
         state = wf["state"]
-        if wf["status"] == "WAITING_GATE" and not self._open_gate(wf["id"]):
+        if (
+            wf["status"] == WorkflowStatus.WAITING_GATE.value
+            and not self._open_gate(wf["id"])
+            and not state.get("waiting_on_child_workflow_ids")
+        ):
             state["recovered_from"] = "WAITING_GATE_WITHOUT_OPEN_GATE"
-            self._update(wf, status="RUNNING", state=state)
+            self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
             return self.get(wf["id"])
-        if wf["status"] == "BLOCKED" and state.get("runtime_recoverable"):
+        if is_recoverable_block(wf["status"]) and state.get("runtime_recoverable"):
             state["recovered_from"] = state.get("runtime_failure_point") or "RECOVERABLE_BLOCK"
             state["runtime_recoverable"] = False
             state.pop("last_error", None)
-            self._update(wf, status="RUNNING", state=state)
+            self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
             return self.get(wf["id"])
         return wf
 
@@ -61,7 +70,7 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
 
     async def _advance_once(self, workflow_id: str) -> dict[str, Any]:
         wf = self._recover_status(self.get(workflow_id))
-        if wf["status"] in {"COMPLETED", "CANCELLED"}:
+        if is_terminal(wf["status"]):
             return wf
         call_key = "workflow-" + sha256_json(
             {"workflow_id": workflow_id, "step": wf["current_step"], "status": wf["status"]}
@@ -73,14 +82,14 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
             result = await super().advance(workflow_id)
             state = result["state"]
             last_error = str(state.get("last_error") or "")
-            if result["status"] == "BLOCKED" and last_error.startswith("INJECTED_FAILURE:"):
+            if is_recoverable_block(result["status"]) and last_error.startswith("INJECTED_FAILURE:"):
                 parts = last_error.split(":", 2)
                 state["runtime_recoverable"] = True
                 state["runtime_failure_point"] = parts[1] if len(parts) > 1 else "UNKNOWN"
                 state["runtime_blocked_at"] = utc_now()
-                self._update(result, status="BLOCKED", state=state)
+                self._update(result, status=WorkflowStatus.BLOCKED_TECHNICAL.value, state=state)
                 result = self.get(workflow_id)
-            if result["status"] == "WAITING_GATE" and faults:
+            if result["status"] == WorkflowStatus.WAITING_GATE.value and faults:
                 faults.hit("after_gate_created", call_key)
             if faults:
                 faults.hit("after_workflow_advance", call_key)
@@ -92,7 +101,7 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
             state["runtime_recoverable"] = True
             state["runtime_failure_point"] = getattr(exc, "point", "WORKFLOW_ADVANCE")
             state["runtime_blocked_at"] = utc_now()
-            self._update(current, status="BLOCKED", state=state)
+            self._update(current, status=WorkflowStatus.BLOCKED_TECHNICAL.value, state=state)
             return self.get(workflow_id)
         except Exception as exc:
             current = self.get(workflow_id)
@@ -112,7 +121,7 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
             state["runtime_recoverable"] = True
             state["runtime_failure_point"] = "WORKFLOW_ADVANCE"
             state["runtime_blocked_at"] = utc_now()
-            self._update(current, status="BLOCKED", state=state)
+            self._update(current, status=WorkflowStatus.BLOCKED_TECHNICAL.value, state=state)
             self.db.audit(
                 "WORKFLOW_RUNTIME_EXCEPTION",
                 project_id=current["project_id"],

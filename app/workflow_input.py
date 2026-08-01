@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
+from .json_pointer import JsonPointerError, format_pointer, parse_pointer
 from .util import sha256_json
 
 
@@ -19,6 +21,77 @@ MATERIAL_INPUT_GATE_TYPES = {
     REFERENCE_TEMPLATE_INPUT,
     CURRENT_PROPOSAL_INPUT,
 }
+
+
+_POINTER_ROOTS = {"payload", "scope", "task", "security_context"}
+_LEGACY_PATH_TOKEN = re.compile(r"[^.\[\]]+|\[(0|[1-9][0-9]*)\]")
+
+
+def canonical_target_pointer(path: object, *, default_root: str = "payload") -> str:
+    """Return one canonical RFC 6901 target pointer.
+
+    Human-question definitions historically used dotted paths while prompt
+    schemas require JSON Pointer.  The conversion is deliberately syntax-only:
+    it never guesses aliases or creates missing schema members.
+    """
+
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("human resolution target path cannot be empty")
+    if raw.startswith("/"):
+        try:
+            return format_pointer(parse_pointer(raw))
+        except JsonPointerError as exc:
+            raise ValueError(f"invalid human resolution JSON Pointer: {raw!r}") from exc
+
+    tokens: list[str] = []
+    cursor = 0
+    for match in _LEGACY_PATH_TOKEN.finditer(raw):
+        if match.start() != cursor:
+            separator = raw[cursor:match.start()]
+            if separator != ".":
+                raise ValueError(f"unsupported legacy target path syntax: {raw!r}")
+        token = match.group(0)
+        tokens.append(token[1:-1] if token.startswith("[") else token)
+        cursor = match.end()
+    if cursor != len(raw) or not tokens:
+        raise ValueError(f"unsupported legacy target path syntax: {raw!r}")
+    if tokens[0] not in _POINTER_ROOTS:
+        if default_root not in _POINTER_ROOTS:
+            raise ValueError(f"unsupported default target root: {default_root!r}")
+        tokens.insert(0, default_root)
+    return format_pointer(tokens)
+
+
+def canonicalize_human_resolution(resolution: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy whose target paths use the canonical pointer contract."""
+
+    normalized = copy.deepcopy(resolution)
+    pointers: list[str] = []
+    for item in normalized.get("target_paths") or []:
+        pointer = canonical_target_pointer(item)
+        if pointer not in pointers:
+            pointers.append(pointer)
+    normalized["target_paths"] = pointers
+    return normalized
+
+
+def _runtime_dotted_path(pointer: str) -> str | None:
+    """Translate an authorized object-member pointer for the legacy setter.
+
+    Array members and keys containing dots are intentionally not translated,
+    because ``_set_path_if_valid`` only supports unambiguous object paths.
+    """
+
+    try:
+        tokens = parse_pointer(pointer)
+    except JsonPointerError:
+        return None
+    if not tokens or tokens[0] not in {"payload", "scope", "task"}:
+        return None
+    if any(not token or "." in token or token.isdigit() for token in tokens):
+        return None
+    return ".".join(tokens)
 
 
 class WorkflowInputRequired(ValueError):
@@ -164,11 +237,13 @@ def build_human_resolutions(
         coerced = _coerce_answer(value, question)
         if required and isinstance(coerced, str) and not coerced.strip():
             raise ValueError(f"必须回答：{question.get('prompt') or question.get('question') or question_id}")
-        target_paths = [
-            str(item).strip()
-            for item in (question.get("target_paths") or ([field_path] if field_path else []))
-            if str(item).strip()
-        ]
+        target_paths = []
+        for item in (question.get("target_paths") or ([field_path] if field_path else [])):
+            if not str(item).strip():
+                continue
+            pointer = canonical_target_pointer(item)
+            if pointer not in target_paths:
+                target_paths.append(pointer)
         resolution = {
             "resolution_id": "human-" + sha256_json(
                 {
@@ -200,13 +275,15 @@ def resolution_overrides(resolutions: list[dict[str, Any]]) -> dict[str, Any]:
     """
     overrides: dict[str, Any] = {}
     for resolution in resolutions:
-        paths = [str(item).strip() for item in resolution.get("target_paths") or [] if str(item).strip()]
-        if len(paths) != 1:
+        raw_paths = [item for item in resolution.get("target_paths") or [] if str(item).strip()]
+        if len(raw_paths) != 1:
             continue
-        path = paths[0]
-        if path in {"payload", "scope", "task", "security_context"}:
+        try:
+            pointer = canonical_target_pointer(raw_paths[0])
+        except ValueError:
             continue
-        if not path.startswith(("payload.", "scope.", "task.")):
+        path = _runtime_dotted_path(pointer)
+        if path is None:
             continue
         overrides[path] = copy.deepcopy(resolution.get("answer"))
     return overrides

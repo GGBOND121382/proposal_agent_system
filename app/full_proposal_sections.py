@@ -129,9 +129,21 @@ class FullProposalSectionsMixin:
                     self._append_section_run(progress, repaired, prompt_id="P-TARGETED-REPAIR", role="TARGETED_REPAIR")
                     self._update(wf, state=state)
                     try:
+                        self._start_repair_rereview(
+                            state, repaired, critic_prompt=prompt_id
+                        )
+                        self._update(wf, state=state)
                         _review_envelope, reviewed = await self._execute_section_prompt(
                             wf, state, section, progress, prompt_id, role="INDEPENDENT_REVIEW",
                         )
+                        self._complete_repair_rereview(
+                            state,
+                            repaired,
+                            critic_prompt=prompt_id,
+                            review_run_id=str(reviewed.get("run_id") or "") or None,
+                            status=str(reviewed.get("status") or ""),
+                        )
+                        self._update(wf, state=state)
                         while (
                             reviewed["status"] == "REVISE"
                             and self._can_auto_repair(prompt_id, state)
@@ -147,11 +159,22 @@ class FullProposalSectionsMixin:
                                 prompt_id="P-TARGETED-REPAIR",
                                 role="TARGETED_REPAIR",
                             )
+                            self._start_repair_rereview(
+                                state, repaired, critic_prompt=prompt_id
+                            )
                             self._update(wf, state=state)
                             _review_envelope, reviewed = await self._execute_section_prompt(
                                 wf, state, section, progress, prompt_id,
                                 role="INDEPENDENT_REVIEW",
                             )
+                            self._complete_repair_rereview(
+                                state,
+                                repaired,
+                                critic_prompt=prompt_id,
+                                review_run_id=str(reviewed.get("run_id") or "") or None,
+                                status=str(reviewed.get("status") or ""),
+                            )
+                            self._update(wf, state=state)
                     except (PromptExecutionError, ValueError, KeyError) as exc:
                         return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}", configuration_error=exc)
                     if reviewed["status"] != "PASS":

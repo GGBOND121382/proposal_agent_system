@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import collections
+import copy
 import math
 import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .contracts import get_semantic_contract
+from .contracts.semantic_checks import check_blueprint_semantics
 from .util import sha256_text
 
 
@@ -127,9 +130,14 @@ class QualityFinding:
     repair_instruction: str | None
     suggested_route: str
     blocking: bool = True
+    rule_id: str | None = None
+    responsibility: str = "DETERMINISTIC_GUARD"
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "rule_id": self.rule_id or self.code,
+            "responsibility": self.responsibility,
+            "source": "DETERMINISTIC_GUARD",
             "code": self.code,
             "severity": self.severity,
             "category": self.category,
@@ -275,7 +283,7 @@ class ProposalQualityGuard:
         "METRIC_JUSTIFICATION", "SECTION_UNIQUENESS", "STYLE_AND_DENSITY",
     }
 
-    def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    def observe(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
         payload = envelope.get("payload") or {}
         findings: list[QualityFinding] = []
 
@@ -351,8 +359,17 @@ class ProposalQualityGuard:
         elif prompt_id == "P-INTEGRATION-CRITIC":
             findings.extend(self._audit_document(payload, output))
 
-        self._merge_findings(output, findings)
-        return output
+        return self._guard_report(prompt_id, output, findings)
+    def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+        """Return an isolated copy of the model-owned output.
+
+        Deterministic observations are a separate decision channel and must never
+        be merged into, or used to rewrite, the model container.  Runtime callers
+        use :meth:`observe`; this legacy adapter remains only to preserve callers
+        that require a detached copy.
+        """
+
+        return copy.deepcopy(output)
 
     def _audit_project_definition(self, pd: dict[str, Any]) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
@@ -884,7 +901,13 @@ class ProposalQualityGuard:
         for p in paragraphs:
             if not isinstance(p, dict):
                 continue
-            slot_signatures.append((tuple(p.get("fact_slots") or []), tuple(p.get("project_item_slots") or [])))
+            slot_signatures.append((
+                tuple(p.get("fact_slots") or []),
+                tuple(p.get("project_item_slots") or []),
+                tuple(p.get("technical_slots") or []),
+                tuple(p.get("metric_slots") or []),
+                tuple(p.get("required_evidence_ids") or []),
+            ))
         if len(slot_signatures) >= 4 and len(set(slot_signatures)) <= 1:
             findings.append(QualityFinding(
                 "QG_BLUEPRINT_SINGLE_SOURCE_FOR_ALL_PARAGRAPHS", "P1", "BLUEPRINT", "BLUEPRINT",
@@ -901,99 +924,19 @@ class ProposalQualityGuard:
                 "PLANNING_AGENT",
             ))
 
-        contract = payload.get("section_contract") or {}
-        contract_id = str(contract.get("section_contract_id") or "")
-        contract_keys = [str(x) for x in contract.get("unique_information_keys") or []]
-        required_role_values = contract.get("required_argument_roles") or []
-        actual_roles = {
-            _canonical_argument_role(p.get("argument_role"))
-            for p in paragraphs
-            if isinstance(p, dict)
-        }
-        paragraph_keys = [str(p.get("novel_content_key") or "") for p in paragraphs if isinstance(p, dict)]
-        paragraph_claims = {
-            str(claim_id)
-            for paragraph in paragraphs
-            if isinstance(paragraph, dict)
-            for claim_id in [
-                paragraph.get("primary_claim_id"),
-                *(paragraph.get("project_item_slots") or []),
-                *(paragraph.get("technical_slots") or []),
-            ]
-            if claim_id
-        }
-        required_claims = {str(x) for x in contract.get("must_advance_claim_ids") or []}
-        prior_digests = payload.get("prior_section_digest") or []
-        prior_keys = {
-            str(key)
-            for digest in prior_digests if isinstance(digest, dict)
-            for key in digest.get("new_information_keys") or []
-        }
-
-        if contract_id and not all(paragraph_keys):
+        for violation in check_blueprint_semantics(blueprint, payload):
             findings.append(QualityFinding(
-                "QG_BLUEPRINT_MISSING_INFORMATION_IDENTITY", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.novel_content_key", "蓝图段落缺少新增信息键，后续无法判断章节是否推进了新内容。",
-                "为每个段落指定属于本章节合同的novel_content_key。", "WRITING_AGENT",
-            ))
-        if len(paragraph_keys) != len(set(paragraph_keys)):
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_DUPLICATE_INFORMATION_KEYS", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.novel_content_key", "同一章节内多个段落复用了相同新增信息键。",
-                "每个段落只推进一个独立信息单元，并使用唯一novel_content_key。", "WRITING_AGENT",
-            ))
-        foreign_keys = sorted(
-            key for key in paragraph_keys if key and contract_keys and not any(key == root or key.startswith(root + "-") or key.startswith(root + ":") for root in contract_keys)
-        )
-        if foreign_keys:
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_INFORMATION_KEY_OUTSIDE_CONTRACT", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.novel_content_key", f"有{len(foreign_keys)}个新增信息键不属于本章节合同。",
-                "仅使用section_contract.unique_information_keys及其子键。", "WRITING_AGENT",
-            ))
-        reused_prior = sorted(set(paragraph_keys) & prior_keys)
-        if reused_prior:
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_REUSES_PRIOR_INFORMATION", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.novel_content_key", f"蓝图复用了前文章节的{len(reused_prior)}个信息键。",
-                "更换为本章节独有信息键；共享背景只能通过allowed_shared_context_ids引用。", "WRITING_AGENT",
-            ))
-        missing_roles = _missing_required_argument_roles(
-            required_role_values,
-            actual_roles,
-        )
-        if missing_roles:
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_REQUIRED_ROLES_MISSING", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.argument_role", f"蓝图缺少章节合同要求的论证角色：{', '.join(missing_roles)}。",
-                "补齐章节Profile要求的论证角色，不得用通用段落替代。", "WRITING_AGENT",
-            ))
-        missing_claims = sorted(required_claims - paragraph_claims)
-        if missing_claims:
-            missing_claim_list = ", ".join(missing_claims)
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.primary_claim_id",
-                (
-                    f"Blueprint is missing {len(missing_claims)} required primary claim ID(s): "
-                    f"{missing_claim_list}."
-                ),
-                (
-                    "Preserve every already-covered primary claim and add or revise paragraph plans "
-                    f"so each missing ID ({missing_claim_list}) appears verbatim as one paragraph's "
-                    "primary_claim_id. Because primary_claim_id is singular, use at least "
-                    f"{len(required_claims)} paragraphs to cover all must_advance_claim_ids."
-                ),
+                violation.code,
+                "P1",
+                violation.category,
+                "BLUEPRINT",
+                violation.target_path,
+                violation.description,
+                violation.repair_instruction,
                 "WRITING_AGENT",
-            ))
-            # The legacy generic finding below is retained for compatibility but
-            # suppressed after emitting this actionable, ID-specific version.
-            missing_claims = []
-        if missing_claims:
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.primary_claim_id", f"蓝图没有推进章节合同要求的{len(missing_claims)}个命题。",
-                "将must_advance_claim_ids逐项绑定到至少一个段落。", "WRITING_AGENT",
+                blocking=violation.blocking,
+                rule_id=violation.rule_id,
+                responsibility=violation.responsibility.value,
             ))
         return findings
 
@@ -1425,6 +1368,30 @@ class ProposalQualityGuard:
         return findings
 
     @staticmethod
+    def _guard_report(
+        prompt_id: str,
+        output: dict[str, Any],
+        findings: list[QualityFinding],
+    ) -> dict[str, Any]:
+        if any(item.severity == "P0" and item.blocking for item in findings):
+            status = "BLOCK"
+        elif any(item.blocking for item in findings):
+            status = "REVISE"
+        else:
+            status = "PASS"
+        contract = get_semantic_contract()
+        return {
+            "schema_version": "1.0",
+            "prompt_id": prompt_id,
+            "status": status,
+            "blocking": status != "PASS",
+            "model_status_observed": str(output.get("status") or "PASS"),
+            "contract_version": contract.version,
+            "contract_rule_registry_version": contract.rule_registry_version,
+            "contract_hash": contract.contract_hash,
+            "responsibility": "DETERMINISTIC_GUARD",
+            "findings": [item.as_dict() for item in findings],
+        }
     def _merge_findings(output: dict[str, Any], findings: list[QualityFinding]) -> None:
         if not findings:
             return

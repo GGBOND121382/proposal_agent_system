@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from .runtime_failures import ProviderFailureKind
 from .security import Route
 from .simulated_llm import SimulatedLLM
 
@@ -18,6 +19,39 @@ JSON_PARSER_VERSION = "2026-07-29.v1-audited-local-repairs"
 
 class LLMError(RuntimeError):
     pass
+
+
+class ProviderError(LLMError):
+    """Typed provider failure preserved through PromptExecutionError causes."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: ProviderFailureKind,
+        http_status: int | None = None,
+        retry_after_seconds: float | None = None,
+        phase: str | None = None,
+        response_excerpt: str | None = None,
+        retryable_hint: bool | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.provider_failure_kind = kind
+        self.http_status = http_status
+        self.retry_after_seconds = retry_after_seconds
+        self.provider_phase = phase
+        self.response_excerpt = response_excerpt
+        self.retryable_hint = retryable_hint
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    raw = str(response.headers.get("Retry-After") or "").strip()
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -313,92 +347,131 @@ class ModelGateway:
             request["response_format"] = {"type": "json_object"}
             request["reasoning_split"] = True
             request["stream"] = True
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    if is_minimax:
-                        try:
-                            async with asyncio.timeout(self.settings.request_timeout_seconds):
-                                provider_attempts += 1
-                                content = await self._stream_chat_completion(
-                                    client,
-                                    f"{base_url}/chat/completions",
-                                    headers,
-                                    request,
-                                )
-                        except TimeoutError as exc:
-                            raise LLMError(
-                                f"LLM stream exceeded the total timeout of {self.settings.request_timeout_seconds} seconds"
-                            ) from exc
-                        try:
-                            output, parse_report = _extract_json_with_report(content)
-                        except LLMError as exc:
-                            if attempt < 2:
-                                await asyncio.sleep(2 ** attempt)
-                                continue
-                            raise LLMError(
-                                f"MiniMax returned malformed JSON after 3 attempts: {exc}"
-                            ) from exc
-                        return LLMResult(
-                            output=output,
-                            raw_text=content,
-                            model_id=route.model_id,
-                            endpoint_id=route.endpoint_id,
-                            parse_report=parse_report,
-                            response_contract_mode=response_contract_mode,
-                            provider_attempts=provider_attempts,
-                            fallback_reason=fallback_reason,
-                        )
 
-                    provider_attempts += 1
-                    response = await client.post(
-                        f"{base_url}/chat/completions",
-                        headers=headers,
-                        json=request,
-                    )
-                    if response.status_code >= 400:
-                        first_error_body = response.text[:1000]
-                        if self._is_structured_output_rejection(
-                            response.status_code,
-                            first_error_body,
-                        ):
-                            request["response_format"] = {"type": "json_object"}
-                            response_contract_mode = "JSON_OBJECT_FALLBACK"
-                            fallback_reason = (
-                                f"provider rejected json_schema with HTTP {response.status_code}: "
-                                + first_error_body
-                            )[:1200]
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                if is_minimax:
+                    try:
+                        async with asyncio.timeout(self.settings.request_timeout_seconds):
                             provider_attempts += 1
-                            response = await client.post(
+                            content = await self._stream_chat_completion(
+                                client,
                                 f"{base_url}/chat/completions",
-                                headers=headers,
-                                json=request,
+                                headers,
+                                request,
                             )
+                    except TimeoutError as exc:
+                        raise ProviderError(
+                            f"LLM stream exceeded the total timeout of {self.settings.request_timeout_seconds} seconds",
+                            kind=ProviderFailureKind.TIMEOUT,
+                            phase="stream",
+                            retryable_hint=True,
+                        ) from exc
                     try:
-                        response.raise_for_status()
-                    except httpx.HTTPStatusError as exc:
-                        body = response.text[:1000]
-                        raise LLMError(f"LLM endpoint returned {response.status_code}: {body}") from exc
-                    try:
-                        payload = response.json()
-                    except (json.JSONDecodeError, ValueError) as exc:
-                        raise LLMError("LLM endpoint returned a non-JSON response") from exc
-                break
-            except httpx.RequestError as exc:
-                if attempt < 2:
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-                detail = str(exc).strip() or repr(exc)
-                raise LLMError(
-                    f"LLM transport failed after 3 attempts ({type(exc).__name__}): {detail}"
-                ) from exc
+                        output, parse_report = _extract_json_with_report(content)
+                    except LLMError as exc:
+                        raise ProviderError(
+                            f"MiniMax returned malformed JSON: {exc}",
+                            kind=ProviderFailureKind.RESPONSE_PARSE,
+                            phase="response_parse",
+                            response_excerpt=content[:1000],
+                            retryable_hint=False,
+                        ) from exc
+                    return LLMResult(
+                        output=output,
+                        raw_text=content,
+                        model_id=route.model_id,
+                        endpoint_id=route.endpoint_id,
+                        parse_report=parse_report,
+                        response_contract_mode=response_contract_mode,
+                        provider_attempts=provider_attempts,
+                        fallback_reason=fallback_reason,
+                    )
+
+                provider_attempts += 1
+                response = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers=headers,
+                    json=request,
+                )
+                if response.status_code >= 400:
+                    first_error_body = response.text[:1000]
+                    if self._is_structured_output_rejection(
+                        response.status_code,
+                        first_error_body,
+                    ):
+                        request["response_format"] = {"type": "json_object"}
+                        response_contract_mode = "JSON_OBJECT_FALLBACK"
+                        fallback_reason = (
+                            f"provider rejected json_schema with HTTP {response.status_code}: "
+                            + first_error_body
+                        )[:1200]
+                        provider_attempts += 1
+                        response = await client.post(
+                            f"{base_url}/chat/completions",
+                            headers=headers,
+                            json=request,
+                        )
+                if response.status_code >= 400:
+                    body = response.text[:1000]
+                    raise ProviderError(
+                        f"LLM endpoint returned {response.status_code}: {body}",
+                        kind=ProviderFailureKind.HTTP_STATUS,
+                        http_status=response.status_code,
+                        retry_after_seconds=_retry_after_seconds(response),
+                        phase="request",
+                        response_excerpt=body,
+                    )
+                try:
+                    payload = response.json()
+                except (json.JSONDecodeError, ValueError) as exc:
+                    raise ProviderError(
+                        "LLM endpoint returned a non-JSON response",
+                        kind=ProviderFailureKind.RESPONSE_PARSE,
+                        phase="response_parse",
+                        response_excerpt=response.text[:1000],
+                        retryable_hint=False,
+                    ) from exc
+        except ProviderError:
+            raise
+        except httpx.TimeoutException as exc:
+            detail = str(exc).strip() or repr(exc)
+            raise ProviderError(
+                f"LLM transport timed out ({type(exc).__name__}): {detail}",
+                kind=ProviderFailureKind.TIMEOUT,
+                phase="request",
+                retryable_hint=True,
+            ) from exc
+        except httpx.RequestError as exc:
+            detail = str(exc).strip() or repr(exc)
+            raise ProviderError(
+                f"LLM transport failed ({type(exc).__name__}): {detail}",
+                kind=ProviderFailureKind.TRANSPORT,
+                phase="request",
+                retryable_hint=True,
+            ) from exc
+
         try:
             content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise LLMError("Invalid OpenAI-compatible response structure") from exc
+            raise ProviderError(
+                "Invalid OpenAI-compatible response structure",
+                kind=ProviderFailureKind.RESPONSE_SHAPE,
+                phase="response_shape",
+                retryable_hint=False,
+            ) from exc
         if isinstance(content, list):
             content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-        output, parse_report = _extract_json_with_report(str(content))
+        try:
+            output, parse_report = _extract_json_with_report(str(content))
+        except LLMError as exc:
+            raise ProviderError(
+                f"Provider returned malformed JSON: {exc}",
+                kind=ProviderFailureKind.RESPONSE_PARSE,
+                phase="response_parse",
+                response_excerpt=str(content)[:1000],
+                retryable_hint=False,
+            ) from exc
         return LLMResult(
             output=output,
             raw_text=str(content),
@@ -426,7 +499,14 @@ class ModelGateway:
         async with client.stream("POST", url, headers=headers, json=request) as response:
             if response.status_code >= 400:
                 body = (await response.aread()).decode("utf-8", errors="replace")[:1000]
-                raise LLMError(f"LLM endpoint returned {response.status_code}: {body}")
+                raise ProviderError(
+                    f"LLM endpoint returned {response.status_code}: {body}",
+                    kind=ProviderFailureKind.HTTP_STATUS,
+                    http_status=response.status_code,
+                    retry_after_seconds=_retry_after_seconds(response),
+                    phase="stream_open",
+                    response_excerpt=body,
+                )
             async for line in response.aiter_lines():
                 if not line.startswith("data:"):
                     continue
@@ -443,7 +523,13 @@ class ModelGateway:
                         piece = message["content"]
                     finish_reason = choice.get("finish_reason") or finish_reason
                 except (json.JSONDecodeError, AttributeError, IndexError, TypeError) as exc:
-                    raise LLMError("LLM stream returned an invalid event") from exc
+                    raise ProviderError(
+                        "LLM stream returned an invalid event",
+                        kind=ProviderFailureKind.STREAM_EVENT,
+                        phase="stream_event",
+                        response_excerpt=data[:1000],
+                        retryable_hint=True,
+                    ) from exc
                 if isinstance(piece, list):
                     piece = "".join(
                         part.get("text", "")
@@ -460,7 +546,17 @@ class ModelGateway:
                 else:
                     content += piece
         if not content:
-            raise LLMError("LLM stream completed without message content")
+            raise ProviderError(
+                "LLM stream completed without message content",
+                kind=ProviderFailureKind.EMPTY_STREAM,
+                phase="stream_complete",
+                retryable_hint=True,
+            )
         if finish_reason == "length":
-            raise LLMError("LLM stream reached the output token limit before completing")
+            raise ProviderError(
+                "LLM stream reached the output token limit before completing",
+                kind=ProviderFailureKind.OUTPUT_TRUNCATED,
+                phase="stream_complete",
+                retryable_hint=False,
+            )
         return content

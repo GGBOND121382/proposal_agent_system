@@ -1,0 +1,291 @@
+version: 2.1.0
+rule_registry_version: 1.2.0
+rules:
+  SC-ARGUMENT-ROLE-COMPATIBILITY:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_ROLE
+    blocking: true
+    description: Canonicalize argument roles and decide whether an actual role satisfies a required role.
+    config:
+      canonical:
+      - CONTEXT
+      - PROBLEM
+      - EVIDENCE
+      - GAP
+      - LIMITATION_MECHANISM
+      - CENTRAL_CLAIM
+      - RESEARCH_QUESTION
+      - METHOD
+      - WARRANT
+      - COUNTERARGUMENT
+      - BOUNDARY
+      - EVALUATION
+      - CONTRIBUTION
+      - TRANSITION
+      aliases:
+        BACKGROUND_POSITIONING: CONTEXT
+        BACKGROUND_ANALYSIS: CONTEXT
+        PROBLEM_SUMMARY: PROBLEM
+        GAP_IDENTIFICATION: GAP
+        METHOD_COMMITMENT: METHOD
+        METHOD_DESCRIPTION: METHOD
+        EXPECTED_CONTRIBUTION: CONTRIBUTION
+        CASE_ANALYSIS: CONTEXT
+        PRIOR_WORK_SURVEY: EVIDENCE
+        GAP_FORMATION: WARRANT
+        MOTIVATION_ARGUMENT: WARRANT
+        CENTRAL_STATEMENT: CENTRAL_CLAIM
+        CENTRAL_PROPOSITION: CENTRAL_CLAIM
+        GAP_TO_RQ_MAPPING: RESEARCH_QUESTION
+        RESEARCH_QUESTIONS: RESEARCH_QUESTION
+        DIFFICULTY_EXPLANATION: LIMITATION_MECHANISM
+        OBJECTIVE_MAPPING: CENTRAL_CLAIM
+        SUCCESS_DEFINITION: EVALUATION
+        PROPOSITION_CONNECTION: WARRANT
+        RESEARCH_OBJECT_DEFINITION: CONTEXT
+        MECHANISM_OUTLINE: METHOD
+        INTERMEDIATE_OUTPUT: CONTRIBUTION
+        TASK_DEPENDENCY: WARRANT
+        TECHNICAL_ROUTE: METHOD
+        ARCHITECTURE_LAYERS: METHOD
+        VERIFICATION_EXECUTION: EVALUATION
+        EXPERIMENT_DESIGN: EVALUATION
+        SYSTEM_CONSTRAINTS: BOUNDARY
+        CONSTRAINT_SPECIFICATION: BOUNDARY
+        BOUNDARY_CONDITIONS: BOUNDARY
+        BASELINE_COMPARISON: EVIDENCE
+        NOVEL_MECHANISM: CENTRAL_CLAIM
+        EXPECTED_IMPROVEMENT: CONTRIBUTION
+        APPLICABLE_CONDITIONS: BOUNDARY
+        SCENARIO_DEFINITION: CONTEXT
+        CONTROL_GROUPS: EVALUATION
+        PERTURBATION_SET: EVALUATION
+        BASELINE_PROCEDURE: METHOD
+        METRIC_DIMENSIONS: EVALUATION
+        UNKNOWN_DECLARATION: BOUNDARY
+        UNKNOWN_INVENTORY: EVIDENCE
+        IMPACT_ASSESSMENT: LIMITATION_MECHANISM
+        MITIGATION_STRATEGY: METHOD
+        REVISED_PLAN: CONTRIBUTION
+        PHASE_PLAN: METHOD
+        RISK_IDENTIFICATION: COUNTERARGUMENT
+        RISK_CONTROL: WARRANT
+        EXPECTED_DELIVERABLES: CONTRIBUTION
+        DELIVERY_FORM: CONTRIBUTION
+        CENTRAL_RECAP: CENTRAL_CLAIM
+        RQ_COMMITMENT: RESEARCH_QUESTION
+        CONTRIBUTION_STATEMENT: CONTRIBUTION
+      compatibility:
+        PROBLEM:
+        - PROBLEM
+        - RESEARCH_QUESTION
+        RESEARCH_QUESTION:
+        - RESEARCH_QUESTION
+        - PROBLEM
+  SC-INFORMATION-KEY-HIERARCHY:
+    responsibility: DETERMINISTIC_GUARD
+    category: INFORMATION_KEY
+    blocking: true
+    description: Decide whether an information key is an approved root or an approved hierarchical child.
+    config:
+      hierarchy_separator: ':'
+      exact_root_is_valid: true
+      child_keys_are_valid: true
+      legacy_dash_children: false
+  SC-CLAIM-COVERAGE:
+    responsibility: DETERMINISTIC_GUARD
+    category: CLAIM_COVERAGE
+    blocking: true
+    description: Compute covered claims from the union of all registered claim-bearing blueprint fields.
+    config:
+      fields:
+      - primary_claim_id
+      - project_item_slots
+      - technical_slots
+      primary_claim_required_roles:
+      - CENTRAL_CLAIM
+      - RESEARCH_QUESTION
+  SC-EVIDENCE-SELF-REFERENCE:
+    responsibility: DETERMINISTIC_GUARD
+    category: EVIDENCE_EXCLUSION
+    blocking: true
+    description: Compute evidence identifiers and reject a primary claim used as its own evidence.
+    config:
+      evidence_fields:
+      - required_evidence_ids
+      - fact_slots
+      - metric_slots
+      forbid_self_evidence: true
+  SC-EVIDENCE-CONTRACT-COVERAGE:
+    responsibility: DETERMINISTIC_GUARD
+    category: EVIDENCE_COVERAGE
+    blocking: true
+    description: Require every evidence identifier mandated by the section contract to be bound by the blueprint.
+    config:
+      contract_field: must_use_evidence_ids
+  SC-REFERENCE-FIELD-SEMANTICS:
+    responsibility: OUTPUT_INTEGRITY
+    category: REFERENCE_FIELD
+    blocking: true
+    description: Classify every identifier-like schema field so validation and normalization share one
+      meaning.
+    config:
+      input_object_fields:
+      - required_input_ids
+      - evidence_refs
+      registered_suffix_aliases:
+        unresolved_slot_ids:
+        - UNKNOWN
+        - ABSENT-FACT
+      groups:
+        ENTITY_REF:
+        - acceptance_refs
+        - accepted_claim_ids
+        - advanced_claim_ids
+        - affected_section_ids
+        - allowed_shared_context_ids
+        - blocking_node_ids
+        - blueprint_deviation_paragraph_ids
+        - checked_component_ids
+        - checked_item_ids
+        - checked_node_ids
+        - checked_paragraph_ids
+        - checked_relation_ids
+        - checked_rule_ids
+        - checked_task_ids
+        - claim_ids
+        - closest_prior_work_ids
+        - component_ids
+        - contaminated_component_ids
+        - deliverable_refs
+        - distinguished_from_section_ids
+        - evaluation_ids
+        - evidence_ids
+        - fact_slots
+        - foundation_evidence_ids
+        - gap_ids
+        - innovation_ids
+        - input_trace_ids
+        - invalid_relation_ids
+        - item_ids
+        - linked_gap_ids
+        - method_ids
+        - methods
+        - metric_slots
+        - must_advance_claim_ids
+        - must_not_repeat_section_ids
+        - must_use_evidence_ids
+        - objective_ids
+        - open_conflicts
+        - output_trace_ids
+        - overflow_section_ids
+        - paragraph_ids
+        - prerequisite_section_ids
+        - preserved_trace_ids
+        - project_item_slots
+        - protected_object_ids
+        - protected_section_ids
+        - read_only_object_ids
+        - read_only_section_ids
+        - rejected_claim_ids
+        - relation_ids
+        - required_evidence_ids
+        - required_input_ids
+        - research_question_ids
+        - sections
+        - status_upgrade_item_ids
+        - supporting_section_ids
+        - target_ids
+        - target_object_ids
+        - target_section_ids
+        - technical_slots
+        - trace_link_ids
+        - unsupported_claim_ids
+        - unsupported_trace_ids
+        - used_in_paragraph_ids
+        - user_question_ids
+        - work_package_ids
+        - work_package_refs
+        SOURCE_REF:
+        - source_ids
+        - source_refs
+        FINDING_REF:
+        - ambiguous_rule_ids
+        - block_ids
+        - blocking_conflict_ids
+        - blocking_ids
+        - checked_issue_ids
+        - conflict_ids
+        - covered_rule_ids
+        - issue_ids
+        - open_conflict_ids
+        ENTITY_OR_FIELD_PATH:
+        - evidence_refs
+        - unresolved_slot_ids
+        JSON_POINTER:
+        - allowed_paths
+        - changed_paths
+        - protected_paths
+        - target_paths
+        OBJECT_REF:
+        - original_input_refs
+        UNRESOLVED_DESCRIPTOR:
+        - affected_scenarios
+        - critical_unresolved_slot_ids
+        - invalid_slot_refs
+        - locked_fact_violations
+        - missing_input_ids
+        - missing_item_ids
+        - missing_trace_ids
+        - new_unapproved_trace_ids
+        - uncovered_revision_task_ids
+        - unresolved_required_inputs
+        HUMAN_TEXT:
+        - required_user_confirmations
+        PROTOCOL_REF:
+        - allowed_model_endpoint_ids
+        NEW_ENTITY_ID:
+        - architecture_id
+        - attachment_id
+        - blueprint_id
+        - candidate_id
+        - central_proposition_id
+        - check_id
+        - claim_id
+        - component_id
+        - conflict_id
+        - decision_id
+        - document_id
+        - edge_id
+        - gap_id
+        - gate_id
+        - gate_request_id
+        - graph_id
+        - issue_id
+        - item_id
+        - need_id
+        - node_id
+        - object_id
+        - package_id
+        - paragraph_id
+        - passage_id
+        - pattern_id
+        - plan_id
+        - profile_id
+        - query_id
+        - question_id
+        - relation_id
+        - research_question_id
+        - resolution_id
+        - revision_task_id
+        - rule_id
+        - section_contract_id
+        - section_id
+        - section_profile_id
+        - segment_id
+        - source_id
+        - span_id
+        - task_id
+        - task_instruction_id
+        - template_id
+        - trace_id

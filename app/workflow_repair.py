@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import copy
 import inspect
+import json
 import re
 from typing import Any
 
 from .executor import PromptExecutionError
-from .util import sha256_json
+from .util import new_id, sha256_json, utc_now
+from .repair_ledger import RepairLedger
+from .json_pointer import JsonPointerError, join_pointer, parse_pointer
 from .workflow_defs import CRITIC_PRODUCER
 
 
@@ -26,6 +29,12 @@ PRODUCER_RESULT_KEY = {
     "P-WRITE-CONTENT": None,
     "P-EXPRESSION-POLISH": None,
 }
+
+
+def repair_override_key(producer_prompt: str, state: dict[str, Any]) -> str:
+    section_id = str(state.get("active_section_id") or "").strip()
+    return f"section:{section_id}:{producer_prompt}" if section_id else producer_prompt
+
 PRODUCER_ROLE = {
     "P-SECURITY-CLASSIFY": "SECURITY_REVIEW_AGENT",
     "P-SAFE-ONLINE-PACKAGE": "SECURITY_REVIEW_AGENT",
@@ -105,8 +114,97 @@ class WorkflowRepairMixin:
 
     @classmethod
     def _repair_override_key(cls, producer_prompt: str, state: dict[str, Any]) -> str:
-        section_id = str(state.get("active_section_id") or "").strip()
-        return f"section:{section_id}:{producer_prompt}" if section_id else producer_prompt
+        return repair_override_key(producer_prompt, state)
+
+    @classmethod
+    def _deactivate_repair_application(
+        cls,
+        state: dict[str, Any],
+        producer_prompt: str,
+    ) -> None:
+        """Deactivate the current repair pointer without mutating artifacts.
+
+        A newly generated producer result supersedes any repair application for
+        the previous candidate.  Historical artifacts remain immutable for
+        audit, while the workflow state retains only pointers that are currently
+        active.
+        """
+        target_key = cls._repair_override_key(producer_prompt, state)
+        index = state.get("repair_application_artifact_ids")
+        if not isinstance(index, dict):
+            return
+        index.pop(target_key, None)
+        if not index:
+            state.pop("repair_application_artifact_ids", None)
+
+    def _supersede_repair_subject(
+        self,
+        state: dict[str, Any],
+        *,
+        critic_prompt: str,
+        producer_prompt: str,
+        reason: str,
+    ) -> None:
+        attempt_key = self._repair_state_key(critic_prompt, state)
+        RepairLedger.reset_semantic_budget(
+            state,
+            attempt_key,
+            reason=reason,
+            details={
+                "critic_prompt": critic_prompt,
+                "producer_prompt": producer_prompt,
+            },
+        )
+        attempts = state.get("repair_attempts")
+        if isinstance(attempts, dict):
+            attempts.pop(attempt_key, None)
+        self._deactivate_repair_application(state, producer_prompt)
+        pending = state.get("pending_repair_rereviews")
+        if isinstance(pending, dict):
+            checkpoint = pending.get(critic_prompt)
+            if isinstance(checkpoint, dict) and checkpoint.get("repair_attempt_key") == attempt_key:
+                pending.pop(critic_prompt, None)
+            if not pending:
+                state.pop("pending_repair_rereviews", None)
+
+    @staticmethod
+    def _reset_section_repair_state(
+        state: dict[str, Any],
+        section_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        prefix = f"section:{section_id}:"
+        attempts = state.get("repair_attempts")
+        if isinstance(attempts, dict):
+            for key in list(attempts):
+                if key.startswith(prefix):
+                    attempts.pop(key, None)
+        ledger = state.get(RepairLedger.ROOT_KEY)
+        if isinstance(ledger, dict):
+            counts = ledger.get("semantic_repairs")
+            if isinstance(counts, dict):
+                for key in list(counts):
+                    if key.startswith(prefix):
+                        RepairLedger.reset_semantic_budget(
+                            state, key, reason=reason, details={"section_id": section_id}
+                        )
+        repair_index = state.get("repair_application_artifact_ids")
+        if isinstance(repair_index, dict):
+            for key in list(repair_index):
+                if key.startswith(prefix):
+                    repair_index.pop(key, None)
+            if not repair_index:
+                state.pop("repair_application_artifact_ids", None)
+        pending = state.get("pending_repair_rereviews")
+        if isinstance(pending, dict):
+            for prompt_id, checkpoint in list(pending.items()):
+                if isinstance(checkpoint, dict) and str(
+                    checkpoint.get("repair_attempt_key") or ""
+                ).startswith(prefix):
+                    pending.pop(prompt_id, None)
+            if not pending:
+                state.pop("pending_repair_rereviews", None)
 
     def _can_auto_repair(self, prompt_id: str, state: dict[str, Any]) -> bool:
         if prompt_id not in CRITIC_PRODUCER:
@@ -121,10 +219,9 @@ class WorkflowRepairMixin:
         # explicitly permit bounded convergence when an independent re-review
         # exposes a second set of repairable findings.
         repair_limit = max(1, min(configured_limit, 3))
-        return (
-            int(state.setdefault("repair_attempts", {}).get(key, 0))
-            < repair_limit
-        )
+        ledger_count = RepairLedger.count(state, "semantic_repairs", key)
+        legacy_count = int(state.setdefault("repair_attempts", {}).get(key, 0))
+        return max(ledger_count, legacy_count) < repair_limit
 
     _REPAIR_ID_FIELDS = (
         "claim_id",
@@ -154,8 +251,8 @@ class WorkflowRepairMixin:
         ``original_object.content``.  Most producer results are objects, while
         ``P-FACT-EXTRACT`` exposes the ``fact_candidates`` result as a list.
         Wrap collection-shaped results under their canonical result key and
-        remember that key so the repaired value can be restored to its original
-        shape before it is placed in ``repair_overrides``.
+        remember that key so the repaired value can be restored before it is
+        persisted as a versioned ``REPAIR_APPLICATION`` artifact.
         """
         if isinstance(original, dict):
             return copy.deepcopy(original), None
@@ -181,18 +278,91 @@ class WorkflowRepairMixin:
         return f"repair:{producer_slug}:{sha256_json(content)[:16]}"
 
     @classmethod
-    def _collection_selector(
+    def _collection_item_index(
         cls,
         items: list[Any],
-        identity: str,
-    ) -> str | None:
-        identity = str(identity or "").strip()
+        selector: str,
+    ) -> int | None:
+        """Resolve a Critic collection selector to one concrete array index."""
+
+        identity = str(selector or "").strip()
         if not identity:
             return None
-        for field in cls._REPAIR_ID_FIELDS:
-            for item in items:
-                if isinstance(item, dict) and str(item.get(field) or "") == identity:
-                    return f"{field}={identity}"
+        if identity.isdigit():
+            index = int(identity)
+            return index if 0 <= index < len(items) else None
+        field_name: str | None = None
+        field_value = identity
+        if "=" in identity:
+            field_name, field_value = (part.strip() for part in identity.split("=", 1))
+            if field_name not in cls._REPAIR_ID_FIELDS or not field_value:
+                return None
+        candidate_fields = (field_name,) if field_name else cls._REPAIR_ID_FIELDS
+        matches = [
+            index
+            for index, item in enumerate(items)
+            if isinstance(item, dict)
+            and any(str(item.get(field) or "") == field_value for field in candidate_fields)
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    @staticmethod
+    def _locator_tokens(raw_path: str) -> list[str]:
+        """Parse a Critic locator into decoded path/selector tokens.
+
+        Critic finding locations are not part of the Targeted Repair wire
+        protocol and may use human-readable dot/bracket notation.  This method
+        translates that locator exactly once at the boundary.  All paths sent
+        to or returned by ``P-TARGETED-REPAIR`` remain strict RFC 6901 JSON
+        Pointers.
+        """
+
+        raw = str(raw_path or "").strip()
+        if not raw:
+            return []
+        if raw.startswith("/"):
+            tokens = list(parse_pointer(raw))
+        else:
+            raw = re.sub(r"^\$\.?", "", raw)
+            tokens: list[str] = []
+            for field, selector in re.findall(
+                r"(?:^|\.)([A-Za-z_][A-Za-z0-9_-]*)|\[([^\]]+)\]",
+                raw,
+            ):
+                token = (field or selector).strip()
+                if token:
+                    tokens.append(token)
+            if not tokens and raw:
+                tokens = [part.strip() for part in raw.split(".") if part.strip()]
+        while tokens and tokens[0] in {"result", "payload"}:
+            tokens.pop(0)
+        if tokens and tokens[0] == "content":
+            tokens.pop(0)
+        if tokens and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*_candidate", tokens[0]):
+            tokens.pop(0)
+        return tokens
+
+    @classmethod
+    def _paragraph_tokens(
+        cls,
+        tokens: list[str],
+        *,
+        content: dict[str, Any],
+    ) -> list[str] | None:
+        paragraphs = content.get("paragraphs")
+        if not isinstance(paragraphs, list):
+            return None
+        if tokens and tokens[0] == "paragraphs":
+            if len(tokens) == 1:
+                return ["paragraphs"]
+            index = cls._collection_item_index(paragraphs, tokens[1])
+            if index is None:
+                return None
+            return ["paragraphs", str(index), *tokens[2:]]
+        if tokens:
+            index = cls._collection_item_index(paragraphs, tokens[0])
+            if index is not None:
+                return ["paragraphs", str(index), *tokens[1:]]
         return None
 
     @classmethod
@@ -203,62 +373,42 @@ class WorkflowRepairMixin:
         content: dict[str, Any],
         collection_key: str | None,
     ) -> str:
-        path = str(raw_path or "").strip().replace("/", ".")
-        path = re.sub(r"\.+", ".", path).strip(".")
-        path = re.sub(r"^\$\.?", "", path)
-        path = re.sub(r"^(?:result|payload)\.", "", path)
-        if path.startswith("content."):
-            path = path[len("content.") :]
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*_candidate", path):
-            path = ""
-        path = re.sub(r"^[A-Za-z_][A-Za-z0-9_]*_candidate\.", "", path)
-        if not path or path in {"result", "payload", "content"}:
-            return f"content.{collection_key}" if collection_key else "content"
-        if not collection_key:
-            return f"content.{path}"
+        """Translate one Critic locator to a resolvable RFC 6901 repair path."""
 
-        items = content.get(collection_key)
-        if not isinstance(items, list):
-            return f"content.{path}"
+        try:
+            tokens = cls._locator_tokens(raw_path)
+        except JsonPointerError as exc:
+            raise ValueError(str(exc)) from exc
+        if not tokens:
+            return join_pointer("content", collection_key) if collection_key else join_pointer("content")
 
-        collection_pattern = re.fullmatch(
-            rf"{re.escape(collection_key)}\[([^\]]+)\](?:\.(.+))?",
-            path,
-        )
-        if collection_pattern:
-            selector = collection_pattern.group(1).strip()
-            suffix = collection_pattern.group(2)
-            if not selector.isdigit() and "=" not in selector:
-                selector = cls._collection_selector(items, selector) or selector
-            canonical = f"content.{collection_key}[{selector}]"
-            return canonical + (f".{suffix}" if suffix else "")
+        if collection_key:
+            items = content.get(collection_key)
+            if not isinstance(items, list):
+                raise ValueError(f"repair collection does not exist: {collection_key}")
+            if tokens[0] == collection_key:
+                if len(tokens) == 1:
+                    return join_pointer("content", collection_key)
+                selector = tokens[1]
+                suffix = tokens[2:]
+            else:
+                selector = tokens[0]
+                suffix = tokens[1:]
+            index = cls._collection_item_index(items, selector)
+            if index is None:
+                if len(items) == 1 and isinstance(items[0], dict) and selector in items[0]:
+                    index = 0
+                    suffix = tokens
+                else:
+                    raise ValueError(
+                        f"Critic locator does not identify one {collection_key} item: {raw_path!r}"
+                    )
+            return join_pointer("content", collection_key, index, *suffix)
 
-        if path == collection_key:
-            return f"content.{collection_key}"
-
-        dotted_collection_pattern = re.fullmatch(
-            rf"{re.escape(collection_key)}\.([^.]*)?(?:\.(.+))?",
-            path,
-        )
-        if dotted_collection_pattern:
-            selector = str(dotted_collection_pattern.group(1) or "").strip()
-            suffix = dotted_collection_pattern.group(2)
-            if selector:
-                if not selector.isdigit() and "=" not in selector:
-                    selector = cls._collection_selector(items, selector) or selector
-                canonical = f"content.{collection_key}[{selector}]"
-                return canonical + (f".{suffix}" if suffix else "")
-            return f"content.{collection_key}"
-
-        identity, separator, suffix = path.partition(".")
-        selector = cls._collection_selector(items, identity)
-        if selector:
-            canonical = f"content.{collection_key}[{selector}]"
-            return canonical + (f".{suffix}" if separator and suffix else "")
-
-        if len(items) == 1 and isinstance(items[0], dict) and identity in items[0]:
-            return f"content.{collection_key}[0].{path}"
-        return f"content.{collection_key}.{path}"
+        paragraph_tokens = cls._paragraph_tokens(tokens, content=content)
+        if paragraph_tokens is not None:
+            return join_pointer("content", *paragraph_tokens)
+        return join_pointer("content", *tokens)
 
     @staticmethod
     def _restore_repaired_shape(
@@ -284,6 +434,160 @@ class WorkflowRepairMixin:
             return False, None
         return True, copy.deepcopy(value)
 
+    def _persist_repair_application(
+        self,
+        *,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        producer_prompt: str,
+        critic_prompt: str,
+        repair_run_id: str,
+        original_object_hash: str,
+        repaired_value: Any,
+        findings: list[dict[str, Any]],
+        allowed_paths: list[str],
+        collection_key: str | None,
+    ) -> str:
+        target_key = self._repair_override_key(producer_prompt, state)
+        artifact_id = new_id("artifact")
+        payload = {
+            "schema_version": "1.0.0",
+            "workflow_id": wf["id"],
+            "producer_prompt": producer_prompt,
+            "critic_prompt": critic_prompt,
+            "target_key": target_key,
+            "section_id": str(state.get("active_section_id") or "") or None,
+            "repair_run_id": repair_run_id,
+            "application_status": "APPLIED",
+            "original_object_hash": original_object_hash,
+            "repaired_value_hash": sha256_json(repaired_value),
+            "repaired_value": copy.deepcopy(repaired_value),
+            "finding_codes": [
+                str(item.get("code")) for item in findings if item.get("code")
+            ],
+            "allowed_paths": list(allowed_paths),
+            "collection_key": collection_key,
+            "authority": "TARGETED_REPAIR_APPLICATION",
+        }
+        next_state = copy.deepcopy(state)
+        ids = next_state.setdefault("repair_application_artifact_ids", {}).setdefault(
+            target_key, []
+        )
+        ids.append(artifact_id)
+        del ids[:-50]
+        with self.db.transaction() as tx:
+            version = tx.next_artifact_version(
+                project_id=wf["project_id"],
+                workflow_id=wf["id"],
+                artifact_type="REPAIR_APPLICATION",
+                prompt_id=producer_prompt,
+            )
+            tx.execute(
+                """INSERT INTO artifacts(id,project_id,workflow_id,artifact_type,prompt_id,version,status,security_level,context_hash,content_json,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    artifact_id,
+                    wf["project_id"],
+                    wf["id"],
+                    "REPAIR_APPLICATION",
+                    producer_prompt,
+                    version,
+                    "PASS",
+                    self._project_level(wf["project_id"]),
+                    sha256_json(payload),
+                    json.dumps(payload, ensure_ascii=False),
+                    utc_now(),
+                ),
+            )
+            tx.update_workflow(
+                workflow_id=wf["id"],
+                status=str(wf.get("status") or "RUNNING"),
+                current_step=int(wf.get("current_step") or 0),
+                state=next_state,
+                expected_updated_at=wf.get("updated_at"),
+            )
+            tx.audit(
+                "REPAIR_APPLICATION_APPLIED",
+                project_id=wf["project_id"],
+                object_id=artifact_id,
+                metadata={
+                    "workflow_id": wf["id"],
+                    "producer_prompt": producer_prompt,
+                    "critic_prompt": critic_prompt,
+                    "target_key": target_key,
+                    "repair_run_id": repair_run_id,
+                    "version": version,
+                },
+            )
+
+        state.clear()
+        state.update(next_state)
+        wf["state"] = state
+        return artifact_id
+
+    @staticmethod
+    def _repair_lifecycle_identity(repaired: dict[str, Any]) -> tuple[str, str, str]:
+        repair_id = str(repaired.get("repair_id") or "").strip()
+        attempt_key = str(repaired.get("repair_attempt_key") or "").strip()
+        artifact_id = str(
+            repaired.get("repair_application_artifact_id") or ""
+        ).strip()
+        if not repair_id or not attempt_key or not artifact_id:
+            raise ValueError("Applied repair is missing lifecycle identity")
+        return repair_id, attempt_key, artifact_id
+
+    @classmethod
+    def _repair_rereview_checkpoint(
+        cls,
+        repaired: dict[str, Any],
+    ) -> dict[str, Any]:
+        repair_id, attempt_key, artifact_id = cls._repair_lifecycle_identity(repaired)
+        return {
+            "repair_id": repair_id,
+            "repair_attempt_key": attempt_key,
+            "repair_application_artifact_id": artifact_id,
+            "run_id": str(repaired.get("run_id") or "") or None,
+        }
+
+    def _start_repair_rereview(
+        self,
+        state: dict[str, Any],
+        repaired: dict[str, Any],
+        *,
+        critic_prompt: str,
+    ) -> int:
+        repair_id, attempt_key, artifact_id = self._repair_lifecycle_identity(repaired)
+        count = RepairLedger.rereview_started(
+            state,
+            attempt_key,
+            repair_id=repair_id,
+            run_id=str(repaired.get("run_id") or "") or None,
+            application_artifact_id=artifact_id,
+            details={"critic_prompt": critic_prompt},
+        )
+        state.setdefault("repair_attempts", {})[attempt_key] = count
+        return count
+
+    def _complete_repair_rereview(
+        self,
+        state: dict[str, Any],
+        repaired: dict[str, Any],
+        *,
+        critic_prompt: str,
+        review_run_id: str | None,
+        status: str,
+    ) -> int:
+        repair_id, attempt_key, artifact_id = self._repair_lifecycle_identity(repaired)
+        return RepairLedger.rereview_completed(
+            state,
+            attempt_key,
+            repair_id=repair_id,
+            run_id=review_run_id,
+            application_artifact_id=artifact_id,
+            status=status,
+            details={"critic_prompt": critic_prompt},
+        )
+
     async def _auto_repair(self, wf: dict[str, Any], critic_prompt: str, critic_input: dict[str, Any], critic_output: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
         producer = CRITIC_PRODUCER[critic_prompt]
         findings = [
@@ -303,12 +607,11 @@ class WorkflowRepairMixin:
             "_repair_override",
             None,
         )
-        if callable(repair_override_reader):
-            repair_override = repair_override_reader(state, producer)
-        else:
-            repair_override = (state.get("repair_overrides") or {}).get(
-                self._repair_override_key(producer, state)
-            )
+        repair_override = (
+            repair_override_reader(state, producer)
+            if callable(repair_override_reader)
+            else None
+        )
         if repair_override is not None:
             original = repair_override
         elif hasattr(self.context_builder, "_section_prompt_result"):
@@ -341,7 +644,6 @@ class WorkflowRepairMixin:
         previous_attempts = int(
             state.setdefault("repair_attempts", {}).get(attempt_key, 0)
         )
-        state.setdefault("repair_attempts", {})[attempt_key] = previous_attempts + 1
         object_id = self._repair_object_id(repair_content, producer)
         original_object = {
             "object_type": producer.removeprefix("P-").replace("-", "_"),
@@ -363,6 +665,11 @@ class WorkflowRepairMixin:
             for item in repair_content.get("paragraphs") or []
             if isinstance(item, dict) and item.get("paragraph_id")
         ]
+        paragraph_index_by_id = {
+            str(item.get("paragraph_id")): index
+            for index, item in enumerate(repair_content.get("paragraphs") or [])
+            if isinstance(item, dict) and item.get("paragraph_id")
+        }
         def split_target_paths(value: str) -> list[str]:
             parts: list[str] = []
             current: list[str] = []
@@ -421,13 +728,15 @@ class WorkflowRepairMixin:
             for part in target_parts:
                 if not str(part or "").strip():
                     continue
-                allowed_paths.append(
-                    self._canonical_repair_path(
+                try:
+                    canonical_path = self._canonical_repair_path(
                         part,
                         content=repair_content,
                         collection_key=collection_key,
                     )
-                )
+                except ValueError:
+                    continue
+                allowed_paths.append(canonical_path)
             if producer in {"P-WRITE-CONTENT", "P-WRITE-BLUEPRINT"}:
                 paragraph_ids = [
                     *bracket_ids,
@@ -438,7 +747,11 @@ class WorkflowRepairMixin:
                     ),
                 ]
                 for paragraph_id in dict.fromkeys(paragraph_ids):
-                    allowed_paths.append(f"content.{paragraph_id}")
+                    paragraph_index = paragraph_index_by_id.get(paragraph_id)
+                    if paragraph_index is not None:
+                        allowed_paths.append(
+                            join_pointer("content", "paragraphs", paragraph_index)
+                        )
             finding_code = str(finding.get("code") or "")
             finding_text = " ".join(
                 str(finding.get(field) or "")
@@ -449,7 +762,7 @@ class WorkflowRepairMixin:
                 and "WORD_BUDGET" in finding_code
             ):
                 allowed_paths.extend(
-                    f"content.{paragraph_id}.word_budget"
+                    join_pointer("content", "paragraphs", paragraph_index_by_id[paragraph_id], "word_budget")
                     for paragraph_id in original_paragraph_ids
                 )
             if (
@@ -460,7 +773,7 @@ class WorkflowRepairMixin:
                 )
             ):
                 allowed_paths.extend(
-                    f"content.{paragraph_id}.novel_content_key"
+                    join_pointer("content", "paragraphs", paragraph_index_by_id[paragraph_id], "novel_content_key")
                     for paragraph_id in original_paragraph_ids
                 )
             if producer == "P-WRITE-CONTENT" and any(
@@ -468,19 +781,19 @@ class WorkflowRepairMixin:
                 for marker in ("PAGE_BUDGET", "篇幅", "字数", "word budget")
             ):
                 allowed_paths.extend(
-                    f"content.paragraphs[{index}].text"
+                    join_pointer("content", "paragraphs", index, "text")
                     for index, _paragraph_id in enumerate(original_paragraph_ids)
                 )
             if producer == "P-WRITE-CONTENT" and "novel_content_key" in finding_text:
                 allowed_paths.extend(
-                    f"content.paragraphs[{index}].novel_content_key"
+                    join_pointer("content", "paragraphs", index, "novel_content_key")
                     for index, _paragraph_id in enumerate(original_paragraph_ids)
                 )
         if producer == "P-WRITE-CONTENT" and allowed_paths:
             allowed_paths.extend(
                 [
-                    "content.candidate_text",
-                    "content.claim_advancement",
+                    join_pointer("content", "candidate_text"),
+                    join_pointer("content", "claim_advancement"),
                 ]
             )
         allowed_paths = list(dict.fromkeys(allowed_paths))
@@ -494,6 +807,20 @@ class WorkflowRepairMixin:
             "payload.protected_hashes": [],
             "payload.original_input_refs": [original_ref],
         }
+        repair_id = new_id("repair")
+        ledger_details = {
+            "critic_prompt": critic_prompt,
+            "producer_prompt": producer,
+            "finding_codes": [
+                str(item.get("code")) for item in findings if item.get("code")
+            ],
+        }
+        RepairLedger.repair_created(
+            state,
+            attempt_key,
+            repair_id=repair_id,
+            details=ledger_details,
+        )
         try:
             envelope = self.context_builder.build(
                 "P-TARGETED-REPAIR",
@@ -510,28 +837,48 @@ class WorkflowRepairMixin:
                 original_environment=state.get("original_environment", "OFFLINE_LOCAL"),
             )
         except (PromptExecutionError, ValueError, KeyError):
-            # Contract construction and technical execution failures did not
-            # produce a repair candidate and must not consume semantic budget.
-            state.setdefault("repair_attempts", {})[attempt_key] = previous_attempts
+            # Provider/technical/contract failures never enter the semantic
+            # repair budget.  The CREATED event remains as an accurate audit.
             return None
-        if repaired["status"] != "PASS":
+        run_id = str(repaired.get("run_id") or "") or None
+        RepairLedger.model_returned(
+            state,
+            attempt_key,
+            repair_id=repair_id,
+            run_id=run_id,
+            details={**ledger_details, "status": repaired.get("status")},
+        )
+        output = repaired.get("output")
+        result_payload = output.get("result") if isinstance(output, dict) else None
+        if not isinstance(result_payload, dict):
             return None
-        repaired_object = repaired["output"]["result"]["repaired_object"]
+        RepairLedger.schema_validated(
+            state,
+            attempt_key,
+            repair_id=repair_id,
+            run_id=run_id,
+            details=ledger_details,
+        )
+        if repaired.get("status") != "PASS":
+            return None
+        repaired_object = result_payload.get("repaired_object")
         restored, repaired_value = self._restore_repaired_shape(
             repaired_object,
             collection_key,
         )
-        if not restored:
+        if not restored or sha256_json(repaired_value) == sha256_json(original):
             return None
-        self.quality_manager.record_targeted_repair(
-            project_id=wf["project_id"],
-            workflow_id=str(state.get("quality_parent_workflow_id") or wf["id"]),
-            repair_run_id=repaired["run_id"],
-            finding_codes=[str(item.get("code")) for item in findings if item.get("code")],
-            workflow_state=state,
+        RepairLedger.diff_validated(
+            state,
+            attempt_key,
+            repair_id=repair_id,
+            run_id=run_id,
+            details={
+                **ledger_details,
+                "original_hash": original_object["object_hash"],
+                "repaired_hash": sha256_json(repaired_value),
+            },
         )
-        override_key = self._repair_override_key(producer, state)
-        state.setdefault("repair_overrides", {})[override_key] = repaired_value
         if collection_key:
             state.setdefault("repair_shape_adaptations", []).append({
                 "producer_prompt": producer,
@@ -541,5 +888,34 @@ class WorkflowRepairMixin:
                 "repair_run_id": repaired["run_id"],
             })
         state["original_environment"] = repaired["route"]["environment"]
-        self._update(wf, state=state)
+        artifact_id = self._persist_repair_application(
+            wf=wf,
+            state=state,
+            producer_prompt=producer,
+            critic_prompt=critic_prompt,
+            repair_run_id=repaired["run_id"],
+            original_object_hash=original_object["object_hash"],
+            repaired_value=repaired_value,
+            findings=findings,
+            allowed_paths=allowed_paths,
+            collection_key=collection_key,
+        )
+        self.quality_manager.record_targeted_repair(
+            project_id=wf["project_id"],
+            workflow_id=str(state.get("quality_parent_workflow_id") or wf["id"]),
+            repair_run_id=repaired["run_id"],
+            finding_codes=[str(item.get("code")) for item in findings if item.get("code")],
+            workflow_state=state,
+        )
+        RepairLedger.applied(
+            state,
+            attempt_key,
+            repair_id=repair_id,
+            run_id=run_id,
+            application_artifact_id=artifact_id,
+            details=ledger_details,
+        )
+        repaired["repair_id"] = repair_id
+        repaired["repair_attempt_key"] = attempt_key
+        repaired["repair_application_artifact_id"] = artifact_id
         return repaired

@@ -154,12 +154,90 @@
             "locked": true,
             "confidence": "HIGH",
             "item_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "item_id": "item-002",
+            "item_type": "WORK_PACKAGE",
+            "domain": "RESEARCH_CONTENT",
+            "content": {
+              "name": "原型构建与场景验证",
+              "research_object": "面向项目目标形成可验证原型",
+              "inputs": [
+                "item-001"
+              ],
+              "main_activities": [
+                "构建原型",
+                "开展场景验证"
+              ],
+              "methods": [],
+              "outputs": [
+                "原型及验证记录"
+              ],
+              "responsible_organization": null,
+              "acceptance_refs": []
+            },
+            "knowledge_status": "CONFIRMED",
+            "owner_ref": null,
+            "source_refs": [
+              {
+                "source_id": "src-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认的示例内容",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ],
+            "security_level": "INTERNAL",
+            "locked": true,
+            "confidence": "HIGH",
+            "item_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           }
         ],
-        "relations": [],
+        "relations": [
+          {
+            "relation_id": "rel-001",
+            "source_item_id": "item-001",
+            "source_item_type": "OBJECTIVE",
+            "relation_type": "DECOMPOSES_TO",
+            "target_item_id": "item-002",
+            "target_item_type": "WORK_PACKAGE",
+            "status": "CONFIRMED",
+            "confidence": "HIGH",
+            "source_refs": [
+              {
+                "source_id": "src-001",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": null,
+                "section_id": null,
+                "span_start": null,
+                "span_end": null,
+                "quoted_text": "用户确认的示例内容",
+                "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "authority_rank": 100,
+                "security_level": "INTERNAL"
+              }
+            ],
+            "security_level": "INTERNAL",
+            "relation_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
         "domain_readiness": [
           {
             "domain": "OBJECTIVES",
+            "completeness": 1.0,
+            "confirmation_ratio": 1.0,
+            "evidence_ratio": 1.0,
+            "open_conflicts": 0,
+            "readiness": "READY",
+            "missing_item_types": []
+          },
+          {
+            "domain": "RESEARCH_CONTENT",
             "completeness": 1.0,
             "confirmation_ratio": 1.0,
             "evidence_ratio": 1.0,
@@ -776,7 +854,7 @@
         "type": "UNCERTAIN",
         "description": "关键事实尚未确认",
         "target_paths": [
-          "payload"
+          "/payload"
         ],
         "required_action": "用户确认",
         "blocking": true
@@ -789,7 +867,7 @@
         "question": "请确认关键事实。",
         "reason": "事实状态未知",
         "target_paths": [
-          "payload"
+          "/payload"
         ],
         "answer_schema": {
           "type": "BOOLEAN",

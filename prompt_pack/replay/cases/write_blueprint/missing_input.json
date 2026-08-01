@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-WRITE-BLUEPRINT",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -600,30 +600,86 @@
           {
             "paragraph_id": "bp-p-001",
             "sequence": 1,
-            "function": "总述",
+            "function": "界定动态运输场景中的核心问题",
             "must_answer": [
-              "研究内容总体逻辑"
+              "现有静态方法为什么不能同时控制质量、时延与扰动"
             ],
             "fact_slots": [
               "fact-001"
             ],
             "project_item_slots": [
-              "item-001"
+              "prop-001"
             ],
             "technical_slots": [],
             "metric_slots": [],
             "source_strategy": "REPLACE",
             "forbidden_content": [
-              "未确认技术"
+              "未确认技术",
+              "部署操作说明"
             ],
-            "transition_requirement": null,
+            "transition_requirement": "由问题约束过渡到拟研究的方法机制",
             "argument_role": "PROBLEM",
-            "primary_claim_id": "claim-001",
+            "primary_claim_id": "rq-001",
             "required_evidence_ids": [
+              "gap-001"
+            ],
+            "novel_content_key": "sec-001-RESEARCH_CONTENT-claim:problem",
+            "word_budget": 250
+          },
+          {
+            "paragraph_id": "bp-p-002",
+            "sequence": 2,
+            "function": "说明约束映射与低扰动重规划方法",
+            "must_answer": [
+              "采用什么形式化对象和机制解决上述问题"
+            ],
+            "fact_slots": [],
+            "project_item_slots": [
+              "wp-001",
+              "wp-002"
+            ],
+            "technical_slots": [
+              "method-001"
+            ],
+            "metric_slots": [],
+            "source_strategy": "INSERT",
+            "forbidden_content": [
+              "把未确认算法写成既有成果"
+            ],
+            "transition_requirement": "由方法机制过渡到可比较验证",
+            "argument_role": "METHOD",
+            "primary_claim_id": "method-001",
+            "required_evidence_ids": [
+              "gap-001"
+            ],
+            "novel_content_key": "sec-001-RESEARCH_CONTENT-claim:method",
+            "word_budget": 300
+          },
+          {
+            "paragraph_id": "bp-p-003",
+            "sequence": 3,
+            "function": "定义场景、基线和评价证据",
+            "must_answer": [
+              "如何验证方法对质量、时延和扰动的联合改进"
+            ],
+            "fact_slots": [],
+            "project_item_slots": [],
+            "technical_slots": [],
+            "metric_slots": [
               "fact-001"
             ],
-            "novel_content_key": "sec-001-novel-001",
-            "word_budget": 180
+            "source_strategy": "INSERT",
+            "forbidden_content": [
+              "无测量方法的先进性结论"
+            ],
+            "transition_requirement": null,
+            "argument_role": "EVALUATION",
+            "primary_claim_id": "exp-001",
+            "required_evidence_ids": [
+              "method-001"
+            ],
+            "novel_content_key": "sec-001-RESEARCH_CONTENT-evidence:evaluation",
+            "word_budget": 250
           }
         ],
         "unresolved_slot_ids": [],
@@ -634,7 +690,9 @@
         {
           "revision_task_id": "rt-001",
           "paragraph_ids": [
-            "bp-p-001"
+            "bp-p-001",
+            "bp-p-002",
+            "bp-p-003"
           ]
         }
       ],
@@ -642,7 +700,8 @@
         {
           "source_id": "item-001",
           "used_in_paragraph_ids": [
-            "bp-p-001"
+            "bp-p-001",
+            "bp-p-002"
           ]
         }
       ]
@@ -654,7 +713,7 @@
         "type": "MISSING",
         "description": "缺少必需输入",
         "target_paths": [
-          "payload"
+          "/payload"
         ],
         "required_action": "补充输入",
         "blocking": true
@@ -667,7 +726,7 @@
         "question": "请补充必需输入。",
         "reason": "当前输入不足",
         "target_paths": [
-          "payload"
+          "/payload"
         ],
         "answer_schema": {
           "type": "OBJECT",

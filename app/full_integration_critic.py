@@ -40,6 +40,43 @@ class FullIntegrationCriticMixin:
     persisted prompt runs before and after every P-INTEGRATION-CRITIC call.
     """
 
+    def _section_result_producer_workflow(
+        self,
+        *,
+        project_id: str,
+        section_result: dict[str, Any],
+        fallback_workflow_id: str,
+    ) -> str:
+        """Resolve and verify the workflow that produced a final section.
+
+        A low-disturbance replacement child keeps unaffected section snapshots
+        from superseded children. Group ownership therefore cannot be reused as
+        producer provenance. The recorded owner is cross-checked against the
+        workflow that executed the final successful Expression Critic run.
+        """
+
+        recorded = str(section_result.get("producer_workflow_id") or "")
+        final_review_run_id = ""
+        for run in reversed(section_result.get("runs") or []):
+            if not isinstance(run, dict):
+                continue
+            if run.get("status") == "PASS" and run.get("prompt_id") == "P-EXPRESSION-CRITIC":
+                final_review_run_id = str(run.get("run_id") or "")
+                break
+        derived = ""
+        if final_review_run_id:
+            row = self.db.fetchone(
+                "SELECT workflow_id FROM prompt_runs WHERE id=? AND project_id=?",
+                (final_review_run_id, project_id),
+            ) or {}
+            derived = str(row.get("workflow_id") or "")
+        if recorded and derived and recorded != derived:
+            raise ValueError(
+                f"章节 {section_result.get('section_id')} 的 producer_workflow_id 与最终复审运行血缘不一致："
+                f"recorded={recorded}, derived={derived}"
+            )
+        return recorded or derived or fallback_workflow_id
+
     def _validate_full_proposal_integration_envelope(
         self,
         state: dict[str, Any],
@@ -74,11 +111,12 @@ class FullIntegrationCriticMixin:
                 raise ValueError(f"并发组 {group_id} 未登记到全文审查子工作流集合。")
             child = self.get(workflow_id)
             child_state = child["state"]
-            actual_sections = {
-                str(item.get("section_id"))
+            section_results = [
+                item
                 for item in child_state.get("section_results") or []
                 if isinstance(item, dict) and item.get("section_id")
-            }
+            ]
+            actual_sections = {str(item.get("section_id")) for item in section_results}
             if (
                 child.get("status") != "COMPLETED"
                 or str(child_state.get("parent_workflow_id") or "") == ""
@@ -89,10 +127,25 @@ class FullIntegrationCriticMixin:
                     f"并发组 {group_id} 尚未形成与冻结合同一致的完成快照；"
                     f"status={child.get('status')}, expected={sorted(expected_sections)}, actual={sorted(actual_sections)}"
                 )
+            allowed_lineage = {
+                workflow_id,
+                *(str(item) for item in record.get("superseded_workflow_ids") or [] if item),
+            }
+            by_section = {str(item.get("section_id")): item for item in section_results}
             for section_id in expected_sections:
                 if section_id in section_owner:
                     raise ValueError(f"章节 {section_id} 被多个并发组声明为最终责任方。")
-                section_owner[section_id] = workflow_id
+                producer_workflow_id = self._section_result_producer_workflow(
+                    project_id=str(child.get("project_id") or ""),
+                    section_result=by_section[section_id],
+                    fallback_workflow_id=workflow_id,
+                )
+                if producer_workflow_id not in allowed_lineage:
+                    raise ValueError(
+                        f"章节 {section_id} 的生产工作流不属于当前并发组的受信血缘："
+                        f"producer={producer_workflow_id}, allowed={sorted(allowed_lineage)}"
+                    )
+                section_owner[section_id] = producer_workflow_id
 
         payload = envelope.get("payload") or {}
         candidates = payload.get("candidate_sections") or []

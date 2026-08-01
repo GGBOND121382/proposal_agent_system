@@ -4,16 +4,75 @@ import json
 from typing import Any
 
 from .util import new_id, sha256_json, utc_now
+from .workflow_status import ensure_transition
 from .workflow_defs import GATE_ACTIONS, GATE_ROLE
 from .wf3_input import WF3_INPUT_GATE_TYPE, options_from_gate_answers
 from .workflow_input import (
     MATERIAL_INPUT_GATE_TYPES,
     build_human_resolutions,
-    resolution_overrides,
 )
 
 
 class WorkflowGateMixin:
+    @staticmethod
+    def _prepare_human_resolution_artifacts(
+        *,
+        gate: dict[str, Any],
+        prompt_id: str,
+        resolutions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        prepared: list[dict[str, Any]] = []
+        for resolution in resolutions:
+            payload = {
+                "schema_version": "1.0.0",
+                "gate_id": gate["id"],
+                "workflow_id": gate["workflow_id"],
+                "prompt_id": prompt_id,
+                "resolution": resolution,
+                "authority": "HUMAN_GATE_DECISION",
+                "supersedes_state_override": True,
+            }
+            prepared.append(
+                {
+                    "artifact_id": new_id("artifact"),
+                    "payload": payload,
+                    "created_at": utc_now(),
+                }
+            )
+        return prepared
+    @staticmethod
+    def _insert_human_resolution_artifacts(
+        tx: Any,
+        *,
+        gate: dict[str, Any],
+        prompt_id: str,
+        prepared: list[dict[str, Any]],
+    ) -> None:
+        for item in prepared:
+            version = tx.next_artifact_version(
+                project_id=gate["project_id"],
+                workflow_id=gate["workflow_id"],
+                artifact_type="HUMAN_RESOLUTION",
+                prompt_id=prompt_id,
+            )
+            payload = item["payload"]
+            tx.execute(
+                """INSERT INTO artifacts(id,project_id,workflow_id,artifact_type,prompt_id,version,status,security_level,context_hash,content_json,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    item["artifact_id"],
+                    gate["project_id"],
+                    gate["workflow_id"],
+                    "HUMAN_RESOLUTION",
+                    prompt_id,
+                    version,
+                    "PASS",
+                    gate["security_level"],
+                    sha256_json(payload),
+                    json.dumps(payload, ensure_ascii=False),
+                    item["created_at"],
+                ),
+            )
     def _create_gate(self, wf: dict[str, Any], gate_type: str, *, target_id: str, questions: list[dict[str, Any]]) -> str:
         existing = self.db.fetchone("SELECT id FROM gates WHERE workflow_id=? AND gate_type=? AND status='OPEN'", (wf["id"], gate_type))
         if existing:
@@ -88,6 +147,7 @@ class WorkflowGateMixin:
             state.setdefault("technical_retry_attempts", {}).pop(str(wf["current_step"]), None)
 
         resolutions: list[dict[str, Any]] = []
+        prepared_resolution_artifacts: list[dict[str, Any]] = []
         if approved and answers and target_prompt_id and gate["gate_type"] not in MATERIAL_INPUT_GATE_TYPES:
             resolutions = build_human_resolutions(
                 gate_id=gate_id,
@@ -98,16 +158,22 @@ class WorkflowGateMixin:
                 decided_role=decided_role,
             )
             if resolutions:
-                stored = state.setdefault("human_resolutions", {})
-                prompt_resolutions = stored.setdefault(target_prompt_id, [])
-                prompt_resolutions.extend(resolutions)
-                del prompt_resolutions[:-50]
-                state.setdefault("human_input_overrides", {}).setdefault(target_prompt_id, {}).update(
-                    resolution_overrides(resolutions)
+                prepared_resolution_artifacts = self._prepare_human_resolution_artifacts(
+                    gate=gate,
+                    prompt_id=target_prompt_id,
+                    resolutions=resolutions,
                 )
+                artifact_ids = [item["artifact_id"] for item in prepared_resolution_artifacts]
+                state.setdefault("human_resolution_artifact_ids", {}).setdefault(
+                    target_prompt_id, []
+                ).extend(artifact_ids)
+                del state["human_resolution_artifact_ids"][target_prompt_id][:-50]
+                # Deliberately do not create hidden business overrides in workflow state.
+                state.pop("human_input_overrides", None)
+                state.pop("human_resolutions", None)
         status = "APPROVED" if approved else ("CANCELLED" if action == "CANCEL" else "REJECTED")
-        decision = {"action": action, "comment": comment, "answers": answers or [], "decided_by": decided_by, "decided_role": decided_role, "decided_at": utc_now(), "context_hash": gate["context_hash"]}
-        self.db.execute("UPDATE gates SET status=?,decision_json=?,updated_at=? WHERE id=?", (status, json.dumps(decision, ensure_ascii=False), utc_now(), gate_id))
+        decided_at = utc_now()
+        decision = {"action": action, "comment": comment, "answers": answers or [], "decided_by": decided_by, "decided_role": decided_role, "decided_at": decided_at, "context_hash": gate["context_hash"]}
         if approved:
             section_gate_matches = (
                 bool(section_input_gate)
@@ -174,24 +240,57 @@ class WorkflowGateMixin:
                         "answers": answers or [],
                     }
                     next_step += 1
-        self._update(
-            wf,
-            status="RUNNING" if approved else "BLOCKED",
-            current_step=next_step,
-            state=state,
-        )
-        self.db.audit("GATE_DECIDED", project_id=gate["project_id"], object_id=gate_id, metadata={"gate_type": gate["gate_type"], "status": status, "decided_role": decided_role})
-        if approved and gate["gate_type"] == WF3_INPUT_GATE_TYPE:
-            self.db.audit(
-                "WF3_RESEARCH_NEED_PROVIDED",
+        workflow_status = "RUNNING" if approved else "BLOCKED"
+        with self.db.transaction() as tx:
+            gate_cursor = tx.execute(
+                """UPDATE gates
+                   SET status=?,decision_json=?,updated_at=?
+                   WHERE id=? AND status='OPEN' AND context_hash=?""",
+                (
+                    status,
+                    json.dumps(decision, ensure_ascii=False),
+                    decided_at,
+                    gate_id,
+                    gate["context_hash"],
+                ),
+            )
+            if gate_cursor.rowcount != 1:
+                raise ValueError("Gate was already decided or its context changed")
+            if prepared_resolution_artifacts:
+                self._insert_human_resolution_artifacts(
+                    tx,
+                    gate=gate,
+                    prompt_id=target_prompt_id,
+                    prepared=prepared_resolution_artifacts,
+                )
+            tx.update_workflow(
+                workflow_id=wf["id"],
+                status=workflow_status,
+                current_step=next_step,
+                state=state,
+                expected_updated_at=wf.get("updated_at"),
+            )
+            tx.audit(
+                "GATE_DECIDED",
                 project_id=gate["project_id"],
-                object_id=gate["workflow_id"],
+                object_id=gate_id,
                 metadata={
-                    "gate_id": gate_id,
-                    "target_task_type": state.get("options", {}).get("target_task_type"),
-                    "answer_count": len(answers or []),
+                    "gate_type": gate["gate_type"],
+                    "status": status,
+                    "decided_role": decided_role,
                 },
             )
+            if approved and gate["gate_type"] == WF3_INPUT_GATE_TYPE:
+                tx.audit(
+                    "WF3_RESEARCH_NEED_PROVIDED",
+                    project_id=gate["project_id"],
+                    object_id=gate["workflow_id"],
+                    metadata={
+                        "gate_id": gate_id,
+                        "target_task_type": state.get("options", {}).get("target_task_type"),
+                        "answer_count": len(answers or []),
+                    },
+                )
         return self._gate(gate_id)
 
     def list_gates(self, project_id: str | None = None, workflow_id: str | None = None) -> list[dict[str, Any]]:

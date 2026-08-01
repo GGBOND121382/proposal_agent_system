@@ -154,12 +154,20 @@ def test_quality_guard_blocks_unknown_chain_ids_and_routes_finding(completed_ful
     run = _latest_integration_run(db, completed["id"])
     output = copy.deepcopy(run["output"])
     output["result"]["argument_chain_checks"][0]["source_ids"] = ["fabricated-gap"]
-    checked = executor.quality_guard.apply("P-INTEGRATION-CRITIC", copy.deepcopy(run["input"]), output)
-    codes = {item["code"] for item in checked["findings"]}
+    report = executor.quality_guard.observe(
+        "P-INTEGRATION-CRITIC",
+        copy.deepcopy(run["input"]),
+        output,
+    )
+    codes = {item["code"] for item in report["findings"]}
     assert "QG_ARGUMENT_CHAIN_ID_UNKNOWN" in codes
-    assert checked["status"] == "BLOCK"
-    route = next(item for item in checked["result"]["routing_actions"] if item["finding_code"] == "QG_ARGUMENT_CHAIN_ID_UNKNOWN")
-    assert route["route"] == "INTEGRATION_AGENT"
+    assert report["status"] == "BLOCK"
+    finding = next(
+        item
+        for item in report["findings"]
+        if item["code"] == "QG_ARGUMENT_CHAIN_ID_UNKNOWN"
+    )
+    assert finding["suggested_route"] == "INTEGRATION_AGENT"
 
 
 def test_quality_guard_checks_innovation_foundation_and_metric_responsibilities(completed_full_integration):
@@ -182,12 +190,16 @@ def test_quality_guard_checks_innovation_foundation_and_metric_responsibilities(
         if profile == "OUTPUTS_AND_METRICS":
             for paragraph in item["candidate"]["paragraphs"]:
                 paragraph["evidence_ids"] = [x for x in paragraph.get("evidence_ids", []) if x != "experiment-001"]
-    checked = executor.quality_guard.apply("P-INTEGRATION-CRITIC", envelope, copy.deepcopy(run["output"]))
-    codes = {item["code"] for item in checked["findings"]}
+    report = executor.quality_guard.observe(
+        "P-INTEGRATION-CRITIC",
+        envelope,
+        copy.deepcopy(run["output"]),
+    )
+    codes = {item["code"] for item in report["findings"]}
     assert "QG_INNOVATION_SECTION_LACKS_BASELINE_BINDING" in codes
     assert "QG_FOUNDATION_SECTION_NOT_BOUND_TO_EVIDENCE" in codes
     assert "QG_METRIC_SECTION_LACKS_BASELINE_EVIDENCE" in codes
-    assert checked["status"] == "REVISE"
+    assert report["status"] == "REVISE"
 
 
 def test_pass_after_repair_requires_changed_candidate_set_and_new_review(completed_full_integration):

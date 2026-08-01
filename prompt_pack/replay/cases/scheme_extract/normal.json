@@ -124,16 +124,16 @@
             "mandatory": true,
             "source_refs": [
               {
-                "source_id": "src-001",
-                "source_type": "USER_CONFIRMATION",
-                "document_version_id": null,
-                "section_id": null,
+                "source_id": "doc-001",
+                "source_type": "APPLICATION_GUIDE",
+                "document_version_id": "docv-001",
+                "section_id": "sec-001",
                 "span_start": null,
                 "span_end": null,
-                "quoted_text": "用户确认的示例内容",
+                "quoted_text": "现有正文示例。",
                 "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "authority_rank": 100,
-                "security_level": "INTERNAL"
+                "authority_rank": 80,
+                "security_level": "PUBLIC"
               }
             ],
             "security_level": "PUBLIC"
@@ -145,7 +145,7 @@
       },
       "extraction_coverage": [
         {
-          "source_id": "src-001",
+          "source_id": "doc-001",
           "covered_rule_ids": [
             "rule-001"
           ]

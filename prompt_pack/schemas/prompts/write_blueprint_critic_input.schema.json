@@ -10,7 +10,7 @@
       "const": "P-WRITE-BLUEPRINT-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "task": {
       "type": "object",
