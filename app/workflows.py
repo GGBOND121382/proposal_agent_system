@@ -5,7 +5,6 @@ import copy
 import json
 from typing import Any
 
-from .contracts import get_semantic_contract
 from .dependency_preflight import DependencyIssue, DependencyReport
 from .executor import PromptExecutionError
 from .decision_arbiter import DecisionArbiter
@@ -17,6 +16,7 @@ from .runtime_failures import (
     semantic_revise_classification,
 )
 from .quality import QualityGateBlocked, QualityLifecycleManager
+from .quality_guard import QualityGuardContractError, require_guard_report
 from .research import PublicResearchError
 from .util import new_id, utc_now
 from .workflow_authoring import WorkflowAuthoringMixin
@@ -220,19 +220,21 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
     ) -> tuple[dict[str, Any] | None, str, dict[str, Any]]:
         output = result.get("output") or {}
         raw_status = str(result.get("status") or output.get("status") or "ERROR")
-        if prompt_id not in CRITIC_PRODUCER and "CRITIC" not in prompt_id:
-            return None, raw_status, copy.deepcopy(output)
+        is_critic = prompt_id in CRITIC_PRODUCER or "CRITIC" in prompt_id
 
-        contract = get_semantic_contract()
-        guard_report = result.get("guard_report") or {
-            "schema_version": "1.0",
-            "status": "PASS",
-            "responsibility": "DETERMINISTIC_GUARD",
-            "contract_version": contract.version,
-            "contract_rule_registry_version": contract.rule_registry_version,
-            "contract_hash": contract.contract_hash,
-            "findings": [],
-        }
+        try:
+            guard_report = require_guard_report(
+                result,
+                prompt_id=prompt_id,
+                model_output=output,
+                default_guard_enabled=getattr(
+                    self.executor, "quality_guard_enabled", None
+                ),
+            )
+        except QualityGuardContractError as exc:
+            raise PromptExecutionError(str(exc)) from exc
+        if not is_critic and str(guard_report.get("status") or "PASS") == "PASS":
+            return None, raw_status, copy.deepcopy(output)
         record = self.decision_arbiter.arbitrate(
             output, guard_report, prompt_id=prompt_id
         )
@@ -1184,9 +1186,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     self._update(wf, status="BLOCKED", state=state)
                     return self.get(workflow_id)
                 self._update(wf, state=state)
-            self._observe_quality_result(wf, state, prompt_id, result)
             decision, effective_status, effective_output = self._record_decision(
                 wf, state, prompt_id, result
+            )
+            observed_result = copy.deepcopy(result)
+            observed_result["status"] = effective_status
+            observed_result["output"] = copy.deepcopy(effective_output)
+            self._observe_quality_result(
+                wf, state, prompt_id, observed_result
             )
             if decision and decision.get("decision") == "CONTRACT_CONFLICT":
                 state["last_error"] = (

@@ -203,12 +203,22 @@ class DecisionArbiter:
         ]
 
         conflict = bool(protocol_errors)
+        guard_user_routed = [
+            item
+            for item in guard_blocking
+            if str(item.get("suggested_route") or "").upper() == "USER"
+        ]
+        actionable_human_gate = (
+            critic_status == "NEED_USER_INPUT" or bool(blocking_questions)
+        ) and (
+            not guard_blocking or len(guard_user_routed) == len(guard_blocking)
+        )
         if conflict:
             decision = "CONTRACT_CONFLICT"
+        elif actionable_human_gate:
+            decision = "WAITING_HUMAN_INPUT"
         elif guard_blocking:
             decision = "BLOCK" if guard_status == "BLOCK" else "REVISE"
-        elif critic_status == "NEED_USER_INPUT" or blocking_questions:
-            decision = "WAITING_HUMAN_INPUT"
         elif owned_critic:
             decision = "BLOCK" if critic_status == "BLOCK" else "REVISE"
         elif critic_status == "BLOCK":

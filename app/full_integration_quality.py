@@ -233,44 +233,6 @@ class FullIntegrationQualityMixin:
                 ))
         return findings
 
-    @staticmethod
-    def _merge_findings(output: dict[str, Any], findings: list[QualityFinding]) -> None:
-        BaseProposalQualityGuard._merge_findings(output, findings)
-        result = output.get("result")
-        if not isinstance(result, dict) or not isinstance(result.get("routing_actions"), list):
-            return
-        allowed_routes = {
-            "PROJECT_KNOWLEDGE_AGENT", "SECURITY_REVIEW_AGENT", "PLANNING_AGENT",
-            "WRITING_AGENT", "USER", "BLOCK", "ARGUMENT_ARCHITECTURE_AGENT",
-            "EXPRESSION_EDITOR_AGENT", "INTEGRATION_AGENT",
-        }
-        actions = result["routing_actions"]
-        action_codes = {
-            str(item.get("finding_code")) for item in actions if isinstance(item, dict)
-        }
-        for item in output.get("findings") or []:
-            if not isinstance(item, dict) or not item.get("blocking", True):
-                continue
-            code = str(item.get("code") or "")
-            if not code or code in action_codes:
-                continue
-            route = str(item.get("suggested_route") or "BLOCK")
-            if route == "ORIGINAL_PRODUCER":
-                route = "WRITING_AGENT"
-            if route not in allowed_routes:
-                route = "BLOCK"
-            actions.append({
-                "finding_code": code,
-                "route": route,
-                "reason": str(
-                    item.get("repair_instruction")
-                    or item.get("description")
-                    or "阻断问题必须返回责任阶段处理。"
-                ),
-            })
-            action_codes.add(code)
-
-
 class FullProposalQualityGuard(FullIntegrationQualityMixin, BaseProposalQualityGuard):
     """Baseline proposal checks plus complete-document integration checks."""
 

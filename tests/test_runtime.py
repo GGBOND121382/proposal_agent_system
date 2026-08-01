@@ -17,6 +17,7 @@ from app.runtime_api import PromptExecutor
 from app.runtime_api import DocxExporter
 from app.runtime_api import ModelGateway
 from app.pack import PromptPack
+from app.quality_guard import disabled_guard_report
 from app.research import PublicResearchService
 from app.security import RoutingDenied, SecurityRouter
 from app.simulated_llm import SimulatedLLM
@@ -2065,6 +2066,7 @@ def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, m
         if prompt_id == "P-TEMPLATE-CRITIC":
             output["status"] = "NEED_USER_INPUT"
             output["user_questions"] = ["请确认模板范围。"]
+        guard_report = disabled_guard_report(prompt_id, output)
         return {
             "run_id": new_id("run"),
             "status": output["status"],
@@ -2074,6 +2076,9 @@ def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, m
                 "endpoint_id": "test-endpoint",
             },
             "output": output,
+            "guard_report": guard_report,
+            "quality_guard_enabled": False,
+            "guard_observation_status": guard_report["observation_status"],
         }
 
     monkeypatch.setattr(builder, "build", build)

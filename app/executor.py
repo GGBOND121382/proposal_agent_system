@@ -26,6 +26,13 @@ from .output_integrity import (
     validate_reference_ids,
 )
 from .proposal_quality import ProposalQualityGuard, SECTION_FUNCTION_ROLE_ALIASES
+from .quality_guard import (
+    QualityGuardContractError,
+    QualityGuardObserver,
+    disabled_guard_report,
+    ensure_quality_guard_observer,
+    observe_guard,
+)
 from .security import RoutingDenied, SecurityRouter
 from .status_ontology import (
     implied_temporal_status_from_claim_alias,
@@ -67,35 +74,40 @@ class PromptExecutionError(RuntimeError):
 
 
 class PromptExecutor:
-    def __init__(self, db, pack, router: SecurityRouter, gateway: ModelGateway, *, quality_guard: ProposalQualityGuard | None = None, quality_guard_enabled: bool = True):
+    def __init__(
+        self,
+        db,
+        pack,
+        router: SecurityRouter,
+        gateway: ModelGateway,
+        *,
+        quality_guard: QualityGuardObserver | None = None,
+        quality_guard_enabled: bool = True,
+    ):
         self.db = db
         self.pack = pack
         self.router = router
         self.gateway = gateway
-        self.quality_guard = quality_guard or ProposalQualityGuard()
-        self.quality_guard_enabled = quality_guard_enabled
+        self.quality_guard: QualityGuardObserver = quality_guard or ProposalQualityGuard()
+        self.quality_guard_enabled = bool(quality_guard_enabled)
+        if self.quality_guard_enabled:
+            try:
+                ensure_quality_guard_observer(self.quality_guard)
+            except QualityGuardContractError as exc:
+                raise PromptExecutionError(str(exc)) from exc
+
     def _observe_guard(
         self,
         prompt_id: str,
         envelope: dict[str, Any],
         output: dict[str, Any],
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         if not self.quality_guard_enabled:
-            return None
-        observer = getattr(self.quality_guard, "observe", None)
-        if not callable(observer):
-            raise PromptExecutionError(
-                f"Quality guard {type(self.quality_guard).__name__} does not expose the non-mutating observe contract"
-            )
-        snapshot = copy.deepcopy(output)
-        report = observer(prompt_id, envelope, snapshot)
-        if snapshot != output:
-            raise PromptExecutionError(
-                "Deterministic guard mutated the model output while producing guard_report"
-            )
-        if not isinstance(report, dict):
-            raise PromptExecutionError("Deterministic guard did not return an object guard_report")
-        return copy.deepcopy(report)
+            return disabled_guard_report(prompt_id, output)
+        try:
+            return observe_guard(self.quality_guard, prompt_id, envelope, output)
+        except QualityGuardContractError as exc:
+            raise PromptExecutionError(str(exc)) from exc
 
     @staticmethod
     def _source_ref_authority(source_type: str) -> int:
@@ -1155,6 +1167,8 @@ class PromptExecutor:
                 "route": {"environment": route.environment, "model_id": result.model_id, "endpoint_id": result.endpoint_id},
                 "output": output,
                 "guard_report": guard_report,
+                "quality_guard_enabled": self.quality_guard_enabled,
+                "guard_observation_status": guard_report.get("observation_status"),
             }
         except (PromptExecutionError, RoutingDenied, OutboundPrivacyError, LLMError, KeyError, ValueError) as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)

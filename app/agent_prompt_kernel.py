@@ -20,6 +20,7 @@ from .proposal_quality import (
 )
 from .full_integration_quality import FullProposalQualityGuard
 from .json_pointer import JsonPointerError, is_ancestor_or_same, parse_pointer, paths_overlap
+from .quality_guard import build_guard_report, observe_guard
 
 
 CRITIC_PROMPTS = {
@@ -237,30 +238,39 @@ class AgentPromptKernelValidator:
         self.pack = pack
         self.base_guard = FullProposalQualityGuard()
 
-    def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    def observe(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+        """Return a composite, non-mutating deterministic guard report.
+
+        The base proposal guard and Track-B checks are independent observers.
+        Their Findings are combined only in the guard report; the model-owned
+        output container remains unchanged.
+        """
+
         payload = envelope.get("payload") or {}
-        original_status = str(output.get("status") or "PASS")
-        original_verdict = (output.get("result") or {}).get("verdict")
+        base_report = observe_guard(self.base_guard, prompt_id, envelope, output)
+        working_output = copy.deepcopy(output)
         model_findings = copy.deepcopy(output.get("findings") or [])
 
-        checked = self.base_guard.apply(prompt_id, envelope, output)
+        # Integration statistics are recomputed only on the private observer
+        # view.  They may inform Track-B checks but are never written back to the
+        # provider output.
         if prompt_id == "P-INTEGRATION-CRITIC":
-            self._replace_document_statistics_with_main_body_only(payload, checked)
+            self._replace_document_statistics_with_main_body_only(payload, working_output)
 
         findings: list[TrackBFinding] = []
         if prompt_id in {"P-SCHEME-EXTRACT", "P-SCHEME-CRITIC"}:
             scheme = (
-                (checked.get("result") or {}).get("scheme_profile")
+                (working_output.get("result") or {}).get("scheme_profile")
                 if prompt_id == "P-SCHEME-EXTRACT"
                 else payload.get("scheme_candidate")
             ) or {}
             coverage = (
-                (checked.get("result") or {}).get("extraction_coverage") or []
+                (working_output.get("result") or {}).get("extraction_coverage") or []
                 if prompt_id == "P-SCHEME-EXTRACT"
                 else None
             )
             ambiguous = (
-                (checked.get("result") or {}).get("ambiguous_rule_ids") or []
+                (working_output.get("result") or {}).get("ambiguous_rule_ids") or []
                 if prompt_id == "P-SCHEME-EXTRACT"
                 else []
             )
@@ -268,7 +278,7 @@ class AgentPromptKernelValidator:
 
         if prompt_id in {"P-PROJECT-DEFINITION-EXTRACT", "P-PROJECT-DEFINITION-CRITIC"}:
             project_definition = (
-                (checked.get("result") or {}).get("project_definition")
+                (working_output.get("result") or {}).get("project_definition")
                 if prompt_id == "P-PROJECT-DEFINITION-EXTRACT"
                 else payload.get("project_definition_candidate")
             ) or {}
@@ -276,12 +286,12 @@ class AgentPromptKernelValidator:
 
         if prompt_id in {"P-FACT-EXTRACT", "P-FACT-CRITIC"}:
             facts = (
-                (checked.get("result") or {}).get("fact_candidates")
+                (working_output.get("result") or {}).get("fact_candidates")
                 if prompt_id == "P-FACT-EXTRACT"
                 else payload.get("fact_candidates")
             ) or []
             coverage = (
-                (checked.get("result") or {}).get("coverage") or []
+                (working_output.get("result") or {}).get("coverage") or []
                 if prompt_id == "P-FACT-EXTRACT"
                 else None
             )
@@ -291,12 +301,14 @@ class AgentPromptKernelValidator:
             findings.extend(self._audit_finding_precision(model_findings, payload))
 
         if prompt_id == "P-TARGETED-REPAIR":
-            findings.extend(self._audit_repair_scope(payload, checked.get("result") or {}))
+            findings.extend(
+                self._audit_repair_scope(payload, working_output.get("result") or {})
+            )
 
         if prompt_id in {"P-EXPRESSION-POLISH", "P-EXPRESSION-CRITIC"}:
             source = payload.get("content_candidate") or {}
             polished = (
-                checked.get("result") or {}
+                working_output.get("result") or {}
                 if prompt_id == "P-EXPRESSION-POLISH"
                 else payload.get("polished_candidate") or {}
             )
@@ -314,7 +326,7 @@ class AgentPromptKernelValidator:
             if profile_id == "CONCLUSION":
                 findings.extend(
                     self._audit_conclusion(
-                        _candidate_for_prompt(prompt_id, payload, checked),
+                        _candidate_for_prompt(prompt_id, payload, working_output),
                         payload,
                     )
                 )
@@ -322,9 +334,42 @@ class AgentPromptKernelValidator:
         if prompt_id == "P-INTEGRATION-CRITIC":
             findings.extend(self._audit_body_appendix_boundary(payload))
 
-        ProposalQualityGuard._merge_findings(checked, findings)
-        self._recalculate_status(checked, original_status, original_verdict)
-        return checked
+        track_findings = [item.as_dict() for item in findings]
+        combined = [
+            *[copy.deepcopy(item) for item in base_report.get("findings") or []],
+            *track_findings,
+        ]
+        return build_guard_report(
+            prompt_id,
+            output,
+            combined,
+            components=[
+                {
+                    "observer": type(self.base_guard).__name__,
+                    "status": base_report.get("status"),
+                    "finding_count": len(base_report.get("findings") or []),
+                },
+                {
+                    "observer": type(self).__name__,
+                    "status": (
+                        "BLOCK"
+                        if any(item.severity == "P0" and item.blocking for item in findings)
+                        else "REVISE"
+                        if any(item.blocking for item in findings)
+                        else "PASS"
+                    ),
+                    "finding_count": len(findings),
+                },
+            ],
+        )
+
+    def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+        """Legacy compatibility adapter returning an isolated model-output copy.
+
+        Runtime quality decisions must use :meth:`observe`.
+        """
+
+        return copy.deepcopy(output)
 
     @staticmethod
     def _audit_scheme(
@@ -959,51 +1004,6 @@ class AgentPromptKernelValidator:
                     evidence_refs=[section_id],
                 ))
         return findings
-
-    @staticmethod
-    def _recalculate_status(
-        output: dict[str, Any],
-        original_status: str,
-        original_verdict: Any,
-    ) -> None:
-        findings = [item for item in output.get("findings") or [] if isinstance(item, dict)]
-        deterministic_p0 = any(
-            str(item.get("code") or "").startswith("QG_")
-            and item.get("severity") == "P0"
-            and item.get("blocking", True)
-            for item in findings
-        )
-        deterministic_p1 = any(
-            str(item.get("code") or "").startswith("QG_")
-            and item.get("severity") == "P1"
-            and item.get("blocking", True)
-            for item in findings
-        )
-        if deterministic_p0:
-            status = "BLOCK"
-        elif deterministic_p1:
-            # Deterministic P1 failures must return to the responsible
-            # producer for repair.  A model-authored P0 missing-input finding
-            # remains gateable and must not incorrectly escalate this repair
-            # state to an unrecoverable BLOCK.
-            status = "REVISE"
-        elif original_status == "NEED_USER_INPUT":
-            status = "NEED_USER_INPUT"
-        elif any(item.get("severity") == "P0" and item.get("blocking", True) for item in findings):
-            status = "BLOCK"
-        elif any(item.get("severity") == "P1" and item.get("blocking", True) for item in findings):
-            status = "REVISE"
-        else:
-            status = original_status
-        output["status"] = status
-        result = output.get("result")
-        if isinstance(result, dict) and "verdict" in result:
-            if status == "BLOCK":
-                result["verdict"] = "BLOCK"
-            elif status == "REVISE":
-                result["verdict"] = "REVISE"
-            elif original_verdict is not None:
-                result["verdict"] = original_verdict
 
     @staticmethod
     def validate_repository(root: Path) -> dict[str, Any]:

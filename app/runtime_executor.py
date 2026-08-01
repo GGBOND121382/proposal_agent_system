@@ -135,6 +135,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
             },
             "output": output,
             "guard_report": guard_report,
+            "quality_guard_enabled": self.quality_guard_enabled,
+            "guard_observation_status": guard_report.get("observation_status"),
             "call_key": call_key,
             "reused_committed_result": True,
         }
@@ -561,6 +563,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 },
                 "output": consumed_output,
                 "guard_report": guard_report,
+                "quality_guard_enabled": self.quality_guard_enabled,
+                "guard_observation_status": guard_report.get("observation_status"),
                 "call_key": call_key,
                 "reused_committed_result": False,
                 "contract_recovered_from_run_id": (
@@ -694,6 +698,10 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "output_schema": kwargs.get("output_schema"),
             "output": kwargs.get("consumed_output"),
             "guard_report": kwargs.get("guard_report"),
+            "quality_guard_enabled": self.quality_guard_enabled,
+            "guard_observation_status": (
+                (kwargs.get("guard_report") or {}).get("observation_status")
+            ),
             "provider_parsed_output": kwargs.get("provider_output"),
             "raw_response_text": kwargs.get("raw_response_text"),
             "error": kwargs.get("error"),

@@ -3,7 +3,9 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
+from app.executor import PromptExecutionError, PromptExecutor
 from app.pack import PromptPack
+from app.quality_guard import ensure_quality_guard_observer, validate_guard_report
 from app.track_b import TrackBAgentPromptValidator
 
 
@@ -26,10 +28,39 @@ def test_track_b_repository_contract_covers_b1_to_b10():
     assert all(item["passed"] for item in report["checks"].values())
 
 
-def test_production_runtime_enables_track_b_validator():
-    source = (ROOT / "app" / "runtime_factory.py").read_text(encoding="utf-8")
-    assert "TrackBAgentPromptValidator(pack)" in source
-    assert "build_runtime_stack" in (ROOT / "app" / "main.py").read_text(encoding="utf-8")
+def test_production_runtime_track_b_satisfies_observer_contract():
+    pack, validator = _runtime()
+    assert ensure_quality_guard_observer(validator) is validator
+    executor = PromptExecutor(
+        None,
+        pack,
+        None,
+        None,
+        quality_guard=validator,
+        quality_guard_enabled=True,
+    )
+    assert executor.quality_guard is validator
+
+
+def test_executor_rejects_apply_only_guard_at_startup():
+    class LegacyApplyOnlyGuard:
+        def apply(self, prompt_id, envelope, output):
+            return output
+
+    pack = PromptPack(ROOT / "prompt_pack")
+    try:
+        PromptExecutor(
+            None,
+            pack,
+            None,
+            None,
+            quality_guard=LegacyApplyOnlyGuard(),
+            quality_guard_enabled=True,
+        )
+    except PromptExecutionError as exc:
+        assert "does not expose the non-mutating observe contract" in str(exc)
+    else:
+        raise AssertionError("apply-only guard must fail during executor construction")
 
 
 def test_b1_scheme_extrapolation_cannot_be_mandatory():
@@ -39,9 +70,9 @@ def test_b1_scheme_extrapolation_cannot_be_mandatory():
     rule = output["result"]["scheme_profile"]["rules"][0]
     rule["mandatory"] = True
     rule["source_refs"][0]["source_type"] = "MODEL_INFERENCE"
-    checked = validator.apply("P-SCHEME-EXTRACT", env, output)
-    assert checked["status"] == "REVISE"
-    assert "QG_SCHEME_EXTRAPOLATION_AS_MANDATORY" in _codes(checked)
+    report = validator.observe("P-SCHEME-EXTRACT", env, output)
+    assert report["status"] == "REVISE"
+    assert "QG_SCHEME_EXTRAPOLATION_AS_MANDATORY" in _codes(report)
 
 
 def test_need_user_input_is_not_converted_to_block_by_model_p0_finding():
@@ -63,34 +94,29 @@ def test_need_user_input_is_not_converted_to_block_by_model_p0_finding():
         "blocking": True,
     }]
 
-    checked = validator.apply("P-SCHEME-EXTRACT", env, output)
+    report = validator.observe("P-SCHEME-EXTRACT", env, output)
 
-    assert checked["status"] == "NEED_USER_INPUT"
+    assert report["status"] == "PASS"
+    assert report["model_status_observed"] == "NEED_USER_INPUT"
+    assert output["status"] == "NEED_USER_INPUT"
 
 
-def test_deterministic_p1_routes_repair_without_escalating_model_p0():
-    _, validator = _runtime()
-    output = {
-        "status": "NEED_USER_INPUT",
-        "result": {"verdict": "BLOCK"},
-        "findings": [
-            {
-                "code": "MODEL_MISSING_INPUT",
-                "severity": "P0",
-                "blocking": True,
-            },
-            {
-                "code": "QG_CRITIC_PARTIAL",
-                "severity": "P1",
-                "blocking": True,
-            },
-        ],
-    }
+def test_deterministic_findings_do_not_rewrite_model_status_or_verdict():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-SCHEME-EXTRACT")
+    output = pack.replay_output("P-SCHEME-EXTRACT")
+    output["status"] = "NEED_USER_INPUT"
+    output["result"]["verdict"] = "BLOCK"
+    rule = output["result"]["scheme_profile"]["rules"][0]
+    rule["mandatory"] = True
+    rule["source_refs"][0]["source_type"] = "MODEL_INFERENCE"
+    before = copy.deepcopy(output)
 
-    validator._recalculate_status(output, "NEED_USER_INPUT", "BLOCK")
+    report = validator.observe("P-SCHEME-EXTRACT", env, output)
 
-    assert output["status"] == "REVISE"
-    assert output["result"]["verdict"] == "REVISE"
+    assert report["status"] == "REVISE"
+    assert report["model_status_observed"] == "NEED_USER_INPUT"
+    assert output == before
 
 
 def test_repair_scope_accepts_generic_collection_wildcard():
@@ -143,8 +169,8 @@ def test_b2_project_relation_direction_is_checked():
         "security_level": "INTERNAL",
         "relation_hash": "1" * 64,
     }]
-    checked = validator.apply("P-PROJECT-DEFINITION-EXTRACT", env, output)
-    assert "QG_PROJECT_RELATION_DIRECTION_INVALID" in _codes(checked)
+    report = validator.observe("P-PROJECT-DEFINITION-EXTRACT", env, output)
+    assert "QG_PROJECT_RELATION_DIRECTION_INVALID" in _codes(report)
 
 
 def test_b3_fact_records_must_be_atomic_and_numeric_values_bound():
@@ -154,8 +180,8 @@ def test_b3_fact_records_must_be_atomic_and_numeric_values_bound():
     claim = output["result"]["fact_candidates"][0]
     claim["claim_text"] = "团队已完成2个原型；项目拟在2027年开展3组验证。"
     claim["numeric_values"] = []
-    checked = validator.apply("P-FACT-EXTRACT", env, output)
-    assert {"QG_FACT_NOT_ATOMIC", "QG_FACT_NUMERIC_BINDING_MISSING"} <= _codes(checked)
+    report = validator.observe("P-FACT-EXTRACT", env, output)
+    assert {"QG_FACT_NOT_ATOMIC", "QG_FACT_NUMERIC_BINDING_MISSING"} <= _codes(report)
 
 
 def test_b3_identifier_numbers_do_not_require_fake_numeric_bindings():
@@ -173,8 +199,8 @@ def test_b3_identifier_numbers_do_not_require_fake_numeric_bindings():
         claim = output["result"]["fact_candidates"][0]
         claim["claim_text"] = text
         claim["numeric_values"] = []
-        checked = validator.apply("P-FACT-EXTRACT", env, output)
-        assert "QG_FACT_NUMERIC_BINDING_MISSING" not in _codes(checked), text
+        report = validator.observe("P-FACT-EXTRACT", env, output)
+        assert "QG_FACT_NUMERIC_BINDING_MISSING" not in _codes(report), text
 
 
 def test_b3_substantive_numbers_still_require_numeric_bindings():
@@ -191,8 +217,8 @@ def test_b3_substantive_numbers_still_require_numeric_bindings():
         claim = output["result"]["fact_candidates"][0]
         claim["claim_text"] = text
         claim["numeric_values"] = []
-        checked = validator.apply("P-FACT-EXTRACT", env, output)
-        assert "QG_FACT_NUMERIC_BINDING_MISSING" in _codes(checked), text
+        report = validator.observe("P-FACT-EXTRACT", env, output)
+        assert "QG_FACT_NUMERIC_BINDING_MISSING" in _codes(report), text
 
 
 def test_b7_critic_findings_must_be_precise():
@@ -212,8 +238,8 @@ def test_b7_critic_findings_must_be_precise():
         "suggested_route": "WRITING_AGENT",
         "blocking": True,
     }]
-    checked = validator.apply("P-WRITE-CRITIC", env, output)
-    assert "QG_CRITIC_FINDING_NOT_PRECISE" in _codes(checked)
+    report = validator.observe("P-WRITE-CRITIC", env, output)
+    assert "QG_CRITIC_FINDING_NOT_PRECISE" in _codes(report)
 
 
 def test_b7_targeted_repair_rejects_non_pointer_paths():
@@ -224,10 +250,10 @@ def test_b7_targeted_repair_rejects_non_pointer_paths():
     env["payload"]["protected_paths"] = []
     output["result"]["changed_paths"] = ["content.text"]
 
-    checked = validator.apply("P-TARGETED-REPAIR", env, output)
+    report = validator.observe("P-TARGETED-REPAIR", env, output)
 
-    assert checked["status"] == "REVISE"
-    assert "QG_REPAIR_PATH_INVALID" in _codes(checked)
+    assert report["status"] == "REVISE"
+    assert "QG_REPAIR_PATH_INVALID" in _codes(report)
 
 
 def test_b7_targeted_repair_allows_only_pointer_descendants():
@@ -240,10 +266,10 @@ def test_b7_targeted_repair_allows_only_pointer_descendants():
         "/content/paragraphs/1/novel_content_key",
     ]
 
-    checked = validator.apply("P-TARGETED-REPAIR", env, output)
+    report = validator.observe("P-TARGETED-REPAIR", env, output)
 
-    assert "QG_REPAIR_PATH_INVALID" not in _codes(checked)
-    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in _codes(checked)
+    assert "QG_REPAIR_PATH_INVALID" not in _codes(report)
+    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" not in _codes(report)
 
 
 def test_b7_targeted_repair_pointer_ancestry_is_token_based():
@@ -256,9 +282,9 @@ def test_b7_targeted_repair_pointer_ancestry_is_token_based():
         "/content/paragraphs/10/novel_content_key",
     ]
 
-    checked = validator.apply("P-TARGETED-REPAIR", env, output)
+    report = validator.observe("P-TARGETED-REPAIR", env, output)
 
-    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" in _codes(checked)
+    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" in _codes(report)
 
 
 def test_b7_targeted_repair_cannot_replace_ancestor_of_protected_path():
@@ -271,9 +297,9 @@ def test_b7_targeted_repair_cannot_replace_ancestor_of_protected_path():
     ]
     output["result"]["changed_paths"] = ["/content/paragraphs/0"]
 
-    checked = validator.apply("P-TARGETED-REPAIR", env, output)
+    report = validator.observe("P-TARGETED-REPAIR", env, output)
 
-    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" in _codes(checked)
+    assert "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST" in _codes(report)
 
 
 def test_b8_expression_polish_preserves_structural_blocks():
@@ -282,8 +308,8 @@ def test_b8_expression_polish_preserves_structural_blocks():
     output = pack.replay_output("P-EXPRESSION-POLISH")
     source = env["payload"]["content_candidate"]
     source["candidate_text"] = source.get("candidate_text", "") + "\n[[TABLE]] 指标 | 数值"
-    checked = validator.apply("P-EXPRESSION-POLISH", env, output)
-    assert "QG_EXPRESSION_STRUCTURE_BLOCK_CHANGED" in _codes(checked)
+    report = validator.observe("P-EXPRESSION-POLISH", env, output)
+    assert "QG_EXPRESSION_STRUCTURE_BLOCK_CHANGED" in _codes(report)
 
 
 def test_b9_conclusion_answers_all_questions_and_reuses_known_claims_only():
@@ -305,11 +331,11 @@ def test_b9_conclusion_answers_all_questions_and_reuses_known_claims_only():
         "central-track-b",
         "new-unproved-method-track-b",
     ]
-    checked = validator.apply("P-WRITE-CONTENT", env, output)
+    report = validator.observe("P-WRITE-CONTENT", env, output)
     assert {
         "QG_CONCLUSION_QUESTIONS_UNANSWERED",
         "QG_CONCLUSION_INTRODUCES_NEW_CLAIM",
-    } <= _codes(checked)
+    } <= _codes(report)
     assert pack.section_profile_for("结论")["profile_id"] == "CONCLUSION"
 
 
@@ -342,9 +368,13 @@ def test_b10_appendix_is_excluded_from_main_body_repetition_statistics():
     env["payload"]["candidate_sections"] = sections
     env["payload"]["document_section_map"] = section_map
     env["payload"]["narrative_architecture"] = {"section_contracts": contracts}
-    checked = validator.apply("P-INTEGRATION-CRITIC", env, output)
-    assert "QG_DOCUMENT_TEMPLATE_REPETITION" not in _codes(checked)
-    assert pack.validate("P-INTEGRATION-CRITIC", "output", checked) == []
+    report = validator.observe("P-INTEGRATION-CRITIC", env, output)
+    assert "QG_DOCUMENT_TEMPLATE_REPETITION" not in _codes(report)
+    assert validate_guard_report(
+        report,
+        prompt_id="P-INTEGRATION-CRITIC",
+        model_output=output,
+    ) == []
 
 
 def test_b10_main_body_blocks_appendix_only_engineering_topics():
@@ -357,5 +387,5 @@ def test_b10_main_body_blocks_appendix_only_engineering_topics():
     env["payload"]["narrative_architecture"] = {
         "section_contracts": [{"section_id": section_id, "placement": "MAIN_BODY"}],
     }
-    checked = validator.apply("P-INTEGRATION-CRITIC", env, output)
-    assert "QG_MAIN_BODY_CONTAINS_APPENDIX_TOPIC" in _codes(checked)
+    report = validator.observe("P-INTEGRATION-CRITIC", env, output)
+    assert "QG_MAIN_BODY_CONTAINS_APPENDIX_TOPIC" in _codes(report)

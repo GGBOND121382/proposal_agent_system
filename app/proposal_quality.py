@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from .contracts import get_semantic_contract
+from .quality_guard import build_guard_report
 from .contracts.semantic_checks import check_blueprint_semantics
 from .util import sha256_text
 
@@ -1180,10 +1180,22 @@ class ProposalQualityGuard:
 
     def _audit_document(self, payload: dict[str, Any], output: dict[str, Any]) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
-        sections = payload.get("candidate_sections") or []
+        all_sections = [
+            item
+            for item in payload.get("candidate_sections") or []
+            if isinstance(item, dict)
+        ]
         section_map = payload.get("document_section_map") or []
-        expected_candidate_ids = {str(item.get("section_id")) for item in section_map if isinstance(item, dict) and item.get("candidate_id")}
-        actual_candidate_ids = {str(item.get("section_id")) for item in sections if isinstance(item, dict)}
+        expected_candidate_ids = {
+            str(item.get("section_id"))
+            for item in section_map
+            if isinstance(item, dict) and item.get("candidate_id")
+        }
+        actual_candidate_ids = {
+            str(item.get("section_id"))
+            for item in all_sections
+            if item.get("section_id")
+        }
         if expected_candidate_ids and actual_candidate_ids != expected_candidate_ids:
             findings.append(QualityFinding(
                 "QG_INTEGRATION_CANDIDATE_SET_INCOMPLETE", "P1", "INTEGRATION", "CANDIDATE_DOCUMENT",
@@ -1191,6 +1203,16 @@ class ProposalQualityGuard:
                 "终止审查并报告上下文装配错误，禁止使用Replay种子或单章候选替代全文。",
                 "INTEGRATION_AGENT",
             ))
+        placements = {
+            str(item.get("section_id")): str(item.get("placement") or "MAIN_BODY")
+            for item in ((payload.get("narrative_architecture") or {}).get("section_contracts") or [])
+            if isinstance(item, dict) and item.get("section_id")
+        }
+        sections = [
+            item
+            for item in all_sections
+            if placements.get(str(item.get("section_id") or ""), "MAIN_BODY") != "APPENDIX"
+        ]
         texts = []
         all_paragraphs: list[tuple[str, str]] = []
         all_sentences: list[tuple[str, str]] = []
@@ -1249,18 +1271,6 @@ class ProposalQualityGuard:
             ]
             for sid in ids if sid
         })
-        result = output.setdefault("result", {})
-        result["redundancy_report"] = {
-            "exact_duplicate_groups": len(exact_repeated),
-            "semantic_template_groups": len(high_repeat),
-            "affected_section_ids": affected_section_ids,
-            "representative_signatures": [sha256_text(text)[:16] for text in list(exact_repeated)[:4]]
-            + [sha256_text(sentence)[:16] for sentence in list(high_repeat)[:4]]
-            + [sha256_text(skeleton)[:16] for skeleton in list(template_skeletons)[:4]],
-            "duplicate_information_key_groups": len(duplicate_information),
-            "claim_overconcentration_groups": len(claim_overconcentration),
-            "template_skeleton_groups": len(template_skeletons),
-        }
         if exact_repeated or high_repeat or template_skeletons:
             findings.append(QualityFinding(
                 "QG_DOCUMENT_TEMPLATE_REPETITION", "P1", "INTEGRATION", "CANDIDATE_DOCUMENT",
@@ -1367,59 +1377,18 @@ class ProposalQualityGuard:
             ))
         return findings
 
-    @staticmethod
     def _guard_report(
+        self,
         prompt_id: str,
         output: dict[str, Any],
         findings: list[QualityFinding],
     ) -> dict[str, Any]:
-        if any(item.severity == "P0" and item.blocking for item in findings):
-            status = "BLOCK"
-        elif any(item.blocking for item in findings):
-            status = "REVISE"
-        else:
-            status = "PASS"
-        contract = get_semantic_contract()
-        return {
-            "schema_version": "1.0",
-            "prompt_id": prompt_id,
-            "status": status,
-            "blocking": status != "PASS",
-            "model_status_observed": str(output.get("status") or "PASS"),
-            "contract_version": contract.version,
-            "contract_rule_registry_version": contract.rule_registry_version,
-            "contract_hash": contract.contract_hash,
-            "responsibility": "DETERMINISTIC_GUARD",
-            "findings": [item.as_dict() for item in findings],
-        }
-    def _merge_findings(output: dict[str, Any], findings: list[QualityFinding]) -> None:
-        if not findings:
-            return
-        existing = output.setdefault("findings", [])
-        existing_codes = {str(item.get("code")) for item in existing if isinstance(item, dict)}
-        for finding in findings:
-            if finding.code not in existing_codes:
-                existing.append(finding.as_dict())
-                existing_codes.add(finding.code)
-        has_blocking_user_question = any(
-            isinstance(question, dict) and bool(question.get("blocking"))
-            for question in output.get("user_questions") or []
+        return build_guard_report(
+            prompt_id,
+            output,
+            [item.as_dict() for item in findings],
+            components=[{
+                "observer": type(self).__name__,
+                "finding_count": len(findings),
+            }],
         )
-        human_gate_required = (
-            output.get("status") == "NEED_USER_INPUT"
-            or has_blocking_user_question
-        )
-        if any(f.severity == "P0" for f in findings) and not human_gate_required:
-            output["status"] = "BLOCK"
-        elif human_gate_required:
-            # Missing project-owner information is recoverable through a human
-            # gate even when its proposal-quality severity is P0.  Preserve the
-            # P0 finding as the gate reason; do not turn an actionable gate into
-            # an unrecoverable workflow dead end.
-            output["status"] = "NEED_USER_INPUT"
-        elif any(f.severity == "P1" and f.blocking for f in findings):
-            output["status"] = "REVISE"
-        result = output.get("result")
-        if isinstance(result, dict) and "verdict" in result and output.get("status") != "PASS":
-            allowed = {"ACCEPT", "REVISE", "BLOCK"}
-            result["verdict"] = "BLOCK" if output["status"] == "BLOCK" else "REVISE"

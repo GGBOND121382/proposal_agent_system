@@ -10,7 +10,9 @@ from app.db import Database
 from app.exporter import ExportDenied
 from app.runtime_api import DocxExporter
 from app.pack import PromptPack
+from app.decision_arbiter import DecisionArbiter
 from app.proposal_quality import ProposalQualityGuard, QualityFinding
+from app.quality_guard import build_guard_report
 from app.quality import QualityGateBlocked, QualityLifecycleManager
 from app.simulated_llm import SimulatedLLM
 from app.util import utc_now
@@ -19,9 +21,9 @@ from app.util import utc_now
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_quality_p0_preserves_actionable_human_gate_status():
+def test_quality_p0_user_routed_finding_preserves_actionable_human_gate():
     output = {
-        "status": "PASS",
+        "status": "NEED_USER_INPUT",
         "result": {},
         "findings": [],
         "user_questions": [{
@@ -39,11 +41,21 @@ def test_quality_p0_preserves_actionable_human_gate_status():
         None,
         "USER",
     )
+    report = build_guard_report(
+        "P-PROJECT-READINESS-CRITIC",
+        output,
+        [finding.as_dict()],
+    )
 
-    ProposalQualityGuard._merge_findings(output, [finding])
+    record = DecisionArbiter().arbitrate(
+        output,
+        report,
+        prompt_id="P-PROJECT-READINESS-CRITIC",
+    )
 
     assert output["status"] == "NEED_USER_INPUT"
-    assert output["findings"][0]["severity"] == "P0"
+    assert record.decision == "WAITING_HUMAN_INPUT"
+    assert record.guard_report["findings"][0]["severity"] == "P0"
 
 
 def test_blueprint_quality_unifies_section_function_roles_and_bound_claims():
