@@ -284,10 +284,11 @@ def _insert_repair_application(
     status: str,
     application_status: str,
     repaired_value: Any,
+    workflow_id: str = "workflow-1",
 ) -> None:
     payload = {
         "schema_version": "1.0.0",
-        "workflow_id": "workflow-1",
+        "workflow_id": workflow_id,
         "producer_prompt": "P-WRITE-BLUEPRINT",
         "critic_prompt": "P-WRITE-BLUEPRINT-CRITIC",
         "target_key": "section:section-1:P-WRITE-BLUEPRINT",
@@ -308,7 +309,7 @@ def _insert_repair_application(
         (
             artifact_id,
             "project-1",
-            "workflow-1",
+            workflow_id,
             "REPAIR_APPLICATION",
             "P-WRITE-BLUEPRINT",
             version,
@@ -322,8 +323,6 @@ def _insert_repair_application(
 
 
 def test_repair_application_context_uses_latest_pass_applied_artifact(tmp_path: Path) -> None:
-    from app.context_base import _CURRENT_WORKFLOW_ID
-
     db, builder = _runtime(tmp_path)
     _insert_repair_application(
         db,
@@ -369,11 +368,11 @@ def test_repair_application_context_uses_latest_pass_applied_artifact(tmp_path: 
         },
     }
 
-    token = _CURRENT_WORKFLOW_ID.set("workflow-1")
-    try:
-        repaired = builder._repair_override(state, "P-WRITE-BLUEPRINT")
-    finally:
-        _CURRENT_WORKFLOW_ID.reset(token)
+    repaired = builder._repair_override(
+        state,
+        "P-WRITE-BLUEPRINT",
+        workflow_id="workflow-1",
+    )
 
     assert repaired == {"blueprint_id": "BP-1", "value": "accepted-new"}
 
@@ -472,3 +471,53 @@ def test_content_candidates_use_candidate_consumed_by_final_expression_review(
         assert len(selected) == 1
         assert selected[0]["run_id"] == "run-final-review"
         assert selected[0]["candidate"] == accepted_candidate
+
+
+def test_repair_application_lookup_uses_explicit_workflow_outside_build_scope(
+    tmp_path: Path,
+) -> None:
+    db, builder = _runtime(tmp_path)
+    _insert_repair_application(
+        db,
+        artifact_id="repair-workflow-1",
+        version=1,
+        status="PASS",
+        application_status="APPLIED",
+        repaired_value={"blueprint_id": "BP-WF1", "value": "workflow-1"},
+        workflow_id="workflow-1",
+    )
+    _insert_repair_application(
+        db,
+        artifact_id="repair-workflow-2",
+        version=1,
+        status="PASS",
+        application_status="APPLIED",
+        repaired_value={"blueprint_id": "BP-WF2", "value": "workflow-2"},
+        workflow_id="workflow-2",
+    )
+    state = {
+        "active_section_id": "section-1",
+        "repair_application_artifact_ids": {
+            "section:section-1:P-WRITE-BLUEPRINT": [
+                "repair-workflow-1",
+                "repair-workflow-2",
+            ]
+        },
+    }
+
+    from app.context_base import _CURRENT_WORKFLOW_ID
+
+    token = _CURRENT_WORKFLOW_ID.set("workflow-2")
+    try:
+        assert builder._repair_override(
+            state,
+            "P-WRITE-BLUEPRINT",
+            workflow_id="workflow-1",
+        ) == {"blueprint_id": "BP-WF1", "value": "workflow-1"}
+    finally:
+        _CURRENT_WORKFLOW_ID.reset(token)
+    assert builder._repair_override(
+        state,
+        "P-WRITE-BLUEPRINT",
+        workflow_id="workflow-2",
+    ) == {"blueprint_id": "BP-WF2", "value": "workflow-2"}

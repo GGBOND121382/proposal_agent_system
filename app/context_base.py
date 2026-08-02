@@ -70,6 +70,17 @@ class ContextBuilder:
         self.pack = pack
         self._input_schema_cache: dict[str, dict[str, Any]] = {}
 
+    @staticmethod
+    def _resolve_workflow_id(workflow_id: str | None) -> str | None:
+        """Resolve workflow identity at the artifact access boundary.
+
+        Workflow-aware callers must pass the id explicitly. The ContextVar is
+        retained only as a compatibility fallback for helpers invoked strictly
+        inside one context-build scope.
+        """
+        explicit = str(workflow_id or "").strip()
+        return explicit or _CURRENT_WORKFLOW_ID.get()
+
     def build(self, prompt_id: str, project_id: str, *, workflow_id: str | None = None, workflow_state: dict[str, Any] | None = None, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         project = self.db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
         if not project:
@@ -659,7 +670,7 @@ class ContextBuilder:
         This prevents a newer BLOCK/REVISE artifact from shadowing the last
         confirmed PASS result.
         """
-        active_workflow_id = workflow_id or _CURRENT_WORKFLOW_ID.get()
+        active_workflow_id = self._resolve_workflow_id(workflow_id)
         if active_workflow_id:
             accepted_source_ids = (
                 [active_workflow_id]
@@ -745,9 +756,11 @@ class ContextBuilder:
         self,
         state: dict[str, Any],
         producer_prompt: str,
+        *,
+        workflow_id: str | None,
     ) -> Any:
         target_key = repair_override_key(producer_prompt, state)
-        workflow_id = _CURRENT_WORKFLOW_ID.get()
+        workflow_id = self._resolve_workflow_id(workflow_id)
         indexed_ids = (state.get("repair_application_artifact_ids") or {}).get(target_key)
         indexed_ids = [str(item) for item in indexed_ids or [] if str(item).strip()]
         if workflow_id and indexed_ids:
@@ -1100,6 +1113,8 @@ class ContextBuilder:
         self,
         project: dict[str, Any],
         docs: list[dict[str, Any]],
+        *,
+        workflow_id: str | None,
     ) -> list[dict[str, Any]]:
         """Return references to persisted source objects without copying their content.
 
@@ -1128,7 +1143,7 @@ class ContextBuilder:
                 "display_name": str(document.get("title") or document.get("document_id") or "项目材料")[:200],
             })
 
-        active_workflow_id = _CURRENT_WORKFLOW_ID.get()
+        active_workflow_id = self._resolve_workflow_id(workflow_id)
         active_exists = bool(
             active_workflow_id
             and self.db.fetchone("SELECT id FROM workflows WHERE id=?", (active_workflow_id,))
@@ -1182,6 +1197,7 @@ class ContextBuilder:
         config: dict[str, Any],
         docs: list[dict[str, Any]],
         state: dict[str, Any],
+        workflow_id: str | None,
     ) -> dict[str, Any]:
         options = copy.deepcopy(state.get("options")) if isinstance(state.get("options"), dict) else {}
         if isinstance(options.get("wf3"), dict):
@@ -1189,8 +1205,8 @@ class ContextBuilder:
             nested.update({key: value for key, value in options.items() if key != "wf3"})
             options = nested
         argument_graph = (
-            self._result(project["id"], "P-ARGUMENT-ARCHITECTURE", "argument_architecture")
-            or self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed")
+            self._result(project["id"], "P-ARGUMENT-ARCHITECTURE", "argument_architecture", workflow_id=workflow_id)
+            or self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed", workflow_id=workflow_id)
         )
         research_need, origin = build_research_need(
             project_id=project["id"],
@@ -1213,7 +1229,7 @@ class ContextBuilder:
             )
         source_items = options.get("source_items") if isinstance(options.get("source_items"), list) else None
         if source_items is None:
-            source_items = self._wf3_source_items(project, docs)
+            source_items = self._wf3_source_items(project, docs, workflow_id=workflow_id)
         target_task_type = normalize_target_task_type(options.get("target_task_type"))
         previous_resolution = state.get("wf3_input_resolution") if isinstance(state.get("wf3_input_resolution"), dict) else {}
         if (
@@ -1296,7 +1312,7 @@ class ContextBuilder:
         workflow_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return only claims accepted by the WF-3 bound to the active workflow."""
-        active_workflow_id = workflow_id or _CURRENT_WORKFLOW_ID.get()
+        active_workflow_id = self._resolve_workflow_id(workflow_id)
         params: list[Any] = [project_id]
         workflow_filter = ""
         if active_workflow_id:
@@ -1635,6 +1651,7 @@ class ContextBuilder:
                 config=config,
                 docs=docs,
                 state=state,
+                workflow_id=workflow_id,
             )
             replacements.extend([
                 ("payload.research_need", wf3_payload["research_need"]),
@@ -1647,6 +1664,7 @@ class ContextBuilder:
                 config=config,
                 docs=docs,
                 state=state,
+                workflow_id=workflow_id,
             )
             package_candidate = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE") or {}
             replacements.extend([
@@ -1746,7 +1764,7 @@ class ContextBuilder:
                 ],
             ))
         if "deterministic_findings" in payload and prompt_id.endswith("-CRITIC"):
-            producer_output = self._latest_output(project["id"], prompt_id.removesuffix("-CRITIC"))
+            producer_output = self._latest_output(project["id"], prompt_id.removesuffix("-CRITIC"), workflow_id=workflow_id)
             replacements.append((
                 "payload.deterministic_findings",
                 list((producer_output or {}).get("findings") or []),
@@ -1859,9 +1877,9 @@ class ContextBuilder:
             self._result(project["id"], "P-FACT-EXTRACT", "fact_candidates")
             or []
         )
-        public_claims_for_argument = self._approved_public_claims(project["id"])
+        public_claims_for_argument = self._approved_public_claims(project["id"], workflow_id=workflow_id)
         raw_argument_result = (
-            self._repair_override(state, "P-ARGUMENT-ARCHITECTURE")
+            self._repair_override(state, "P-ARGUMENT-ARCHITECTURE", workflow_id=workflow_id)
             or self._result(project["id"], "P-ARGUMENT-ARCHITECTURE")
         )
         canonical_argument_result = self._canonicalize_argument_result_from_sections(
@@ -1911,8 +1929,8 @@ class ContextBuilder:
                     if key and isinstance(value, dict):
                         value = value.get(key)
                 else:
-                    value = self._result(project["id"], producer, key)
-                    repair_override = self._repair_override(state, producer)
+                    value = self._result(project["id"], producer, key, workflow_id=workflow_id)
+                    repair_override = self._repair_override(state, producer, workflow_id=workflow_id)
                     if repair_override is not None:
                         value = repair_override
                     if (
@@ -1925,7 +1943,7 @@ class ContextBuilder:
 
         project_definition = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "project_definition")
         proposal_contract = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "proposal_contract")
-        argument_graph_seed = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed")
+        argument_graph_seed = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed", workflow_id=workflow_id)
         argument_override = canonical_argument_result
         if isinstance(argument_override, dict):
             argument_graph = (
@@ -1960,7 +1978,7 @@ class ContextBuilder:
                 if contract.get("section_id") == current_section.get("section_id") or contract.get("title") == current_section.get("title"):
                     section_contract = contract
                     break
-        blueprint = self._repair_override(state, "P-WRITE-BLUEPRINT")
+        blueprint = self._repair_override(state, "P-WRITE-BLUEPRINT", workflow_id=workflow_id)
         if blueprint is None:
             blueprint = self._result(project["id"], "P-WRITE-BLUEPRINT", "blueprint")
         content_candidates = self._content_candidates(
@@ -2100,13 +2118,13 @@ class ContextBuilder:
         if "approved_blueprint" in payload and blueprint:
             replacements.append(("payload.approved_blueprint", blueprint))
         if "content_candidate" in payload:
-            raw_content = self._repair_override(state, "P-WRITE-CONTENT")
+            raw_content = self._repair_override(state, "P-WRITE-CONTENT", workflow_id=workflow_id)
             if raw_content is None:
                 raw_content = self._result(project["id"], "P-WRITE-CONTENT")
             if raw_content:
                 replacements.append(("payload.content_candidate", raw_content))
         if "polished_candidate" in payload:
-            polished = self._repair_override(state, "P-EXPRESSION-POLISH")
+            polished = self._repair_override(state, "P-EXPRESSION-POLISH", workflow_id=workflow_id)
             if polished is None:
                 polished = self._result(project["id"], "P-EXPRESSION-POLISH")
             if polished:

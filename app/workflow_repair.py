@@ -608,7 +608,11 @@ class WorkflowRepairMixin:
             None,
         )
         repair_override = (
-            repair_override_reader(state, producer)
+            repair_override_reader(
+                state,
+                producer,
+                workflow_id=str(wf.get("id") or "") or None,
+            )
             if callable(repair_override_reader)
             else None
         )

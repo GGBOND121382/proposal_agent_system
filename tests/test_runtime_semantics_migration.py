@@ -156,7 +156,7 @@ def test_migration_is_idempotent_after_successful_apply(tmp_path: Path) -> None:
 
 
 def test_legacy_override_migration_artifacts_are_consumed_by_context(tmp_path: Path) -> None:
-    from app.context_base import ContextBuilder, _CURRENT_WORKFLOW_ID
+    from app.context_base import ContextBuilder
 
     path = _seed(tmp_path)
     migration.migrate(path, apply=True)
@@ -170,11 +170,11 @@ def test_legacy_override_migration_artifacts_are_consumed_by_context(tmp_path: P
     )
     assert {item["answer"] for item in resolutions} == {"confirmed", "additional"}
 
-    token = _CURRENT_WORKFLOW_ID.set("workflow-1")
-    try:
-        repaired = builder._repair_override(state, "P-WRITE-BLUEPRINT")
-    finally:
-        _CURRENT_WORKFLOW_ID.reset(token)
+    repaired = builder._repair_override(
+        state,
+        "P-WRITE-BLUEPRINT",
+        workflow_id="workflow-1",
+    )
     assert repaired["blueprint_id"] == "BP-1"
     assert repaired["paragraphs"][0]["text"] == "repaired"
 

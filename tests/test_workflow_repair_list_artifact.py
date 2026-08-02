@@ -49,6 +49,27 @@ class ListResultContext:
         return envelope
 
 
+
+
+class MigratedRepairContext(ListResultContext):
+    def __init__(self) -> None:
+        super().__init__()
+        self.workflow_ids: list[str | None] = []
+
+    def _repair_override(
+        self,
+        state: dict[str, Any],
+        producer_prompt: str,
+        *,
+        workflow_id: str | None,
+    ) -> Any:
+        assert producer_prompt == "P-FACT-EXTRACT"
+        self.workflow_ids.append(workflow_id)
+        return copy.deepcopy(FACTS)
+
+    def _result(self, *args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("explicit REPAIR_APPLICATION must be used before producer fallback")
+
 class ListRepairExecutor:
     async def execute(self, prompt_id: str, envelope: dict[str, Any], **_: Any) -> dict[str, Any]:
         assert prompt_id == "P-TARGETED-REPAIR"
@@ -241,3 +262,34 @@ def test_targeted_repair_schema_accepts_every_registered_producer_role() -> None
         schema["properties"]["payload"]["properties"]["original_producer"]["enum"]
     )
     assert set(PRODUCER_ROLE.values()) <= allowed
+
+
+def test_auto_repair_reads_migrated_application_with_explicit_workflow_id(tmp_path) -> None:
+    harness = RepairHarness(tmp_path)
+    context = MigratedRepairContext()
+    harness.context_builder = context
+    wf = harness.workflow()
+    state = {
+        "repair_attempts": {},
+        "original_environment": "OFFLINE_LOCAL",
+        "repair_application_artifact_ids": {"P-FACT-EXTRACT": ["migrated-repair"]},
+    }
+    critic_output = {
+        "status": "REVISE",
+        "findings": [
+            {
+                "code": "FACT_CRITIC_STATUS_UPGRADE",
+                "repairable": True,
+                "target_path_or_span": "METRIC-PROJ-001.claim_type",
+                "repair_instruction": "将该候选的claim_type改为EXPECTED_RESULT。",
+            }
+        ],
+    }
+
+    repaired = asyncio.run(
+        harness._auto_repair(wf, "P-FACT-CRITIC", {}, critic_output, state)
+    )
+
+    assert repaired is not None
+    assert context.workflow_ids == ["wf-1"]
+    assert len(context.envelopes) == 1
