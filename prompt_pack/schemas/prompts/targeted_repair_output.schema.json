@@ -10,9 +10,10 @@
       "const": "P-TARGETED-REPAIR"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.4.0"
     },
     "status": {
+      "description": "PASS when every requested finding is resolved and the repaired object has no new current issue. REVISE describes a current issue in repaired_object, never a historical finding already listed in resolved_finding_ids.",
       "type": "string",
       "enum": [
         "PASS",
@@ -25,9 +26,11 @@
       "type": "object",
       "properties": {
         "repaired_object": {
+          "description": "Complete repaired object. Values outside allowed_paths must be copied exactly from original_object.content; runtime computes the real JSON diff and rejects unauthorized changes.",
           "type": "object"
         },
         "changed_paths": {
+          "description": "RFC 6901 paths that truthfully cover every real difference between original_object.content and repaired_object, with no path that lacks a corresponding object diff.",
           "type": "array",
           "items": {
             "type": "string",
@@ -61,20 +64,26 @@
             ]
           }
         },
-        "resolved_finding_codes": {
+        "resolved_finding_ids": {
+          "description": "Exact finding_instance_id values from findings_to_repair that this repaired object resolves. Historical findings are acknowledged here and must not be copied into top-level findings as 'resolved' diagnostics.",
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "minItems": 1
+          "minItems": 1,
+          "uniqueItems": true
         },
-        "unresolved_finding_codes": {
+        "unresolved_finding_ids": {
+          "description": "Exact finding_instance_id values from findings_to_repair that remain unresolved in repaired_object. Empty when all requested findings are resolved.",
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
-          }
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "uniqueItems": true
         }
       },
       "additionalProperties": false,
@@ -82,11 +91,12 @@
         "repaired_object",
         "changed_paths",
         "unchanged_protected_hashes",
-        "resolved_finding_codes",
-        "unresolved_finding_codes"
+        "resolved_finding_ids",
+        "unresolved_finding_ids"
       ]
     },
     "findings": {
+      "description": "Only current problems that still exist in or were introduced by repaired_object. Must be empty when all requested findings are resolved and no new problem exists; never echo resolved input findings.",
       "type": "array",
       "items": {
         "$ref": "../common/finding.schema.json"

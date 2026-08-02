@@ -52,6 +52,24 @@ def test_nonretryable_failure_never_retries_even_with_budget():
     assert decision.reason == "provider failure is not retryable"
 
 
+def test_contract_regeneration_exhausts_to_contract_block_not_provider_block():
+    policy = RetryPolicy(max_retries=1, base_delay_seconds=0)
+    classification = FailureClassification(
+        category=FailureCategory.OUTPUT_CONTRACT,
+        workflow_status="BLOCKED_CONTRACT",
+        retryable=True,
+        consumes_semantic_repair_budget=False,
+        reason="provider response syntax failure",
+    )
+
+    first = policy.decide(classification, completed_attempts=1)
+    exhausted = policy.decide(classification, completed_attempts=2)
+
+    assert first.should_retry is True
+    assert exhausted.should_retry is False
+    assert exhausted.exhausted_status == "BLOCKED_CONTRACT"
+
+
 def test_options_are_bounded_and_zero_retries_is_supported():
     policy = RetryPolicy.from_options(
         {

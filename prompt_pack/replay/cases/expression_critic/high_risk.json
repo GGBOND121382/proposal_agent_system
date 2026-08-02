@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-EXPRESSION-CRITIC",
-    "prompt_version": "3.1.0",
+    "prompt_version": "3.4.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -990,246 +990,26 @@
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-EXPRESSION-CRITIC",
-    "prompt_version": "3.1.0",
+    "prompt_version": "3.4.0",
     "status": "BLOCK",
     "result": {
       "verdict": "BLOCK",
       "checked_paragraph_ids": [
         "p-001"
       ],
-      "unsupported_trace_ids": [],
-      "blueprint_deviation_paragraph_ids": [],
-      "scope_violations": [],
-      "profile_acceptance_results": [
-        {
-          "rule": "表达检查1",
-          "passed": true,
-          "evidence": "段落p-001"
+      "expression_assessment": {
+        "checks": {
+          "MEANING_PRESERVATION": true,
+          "TRACE_PRESERVATION": true,
+          "ACADEMIC_TONE": true,
+          "SENTENCE_CLARITY": true,
+          "TRANSITION_LOGIC": true,
+          "REDUNDANCY": true,
+          "TERMINOLOGY": true,
+          "DOCUMENT_TYPE_FIT": true
         },
-        {
-          "rule": "表达检查2",
-          "passed": true,
-          "evidence": "段落p-001"
-        },
-        {
-          "rule": "表达检查3",
-          "passed": true,
-          "evidence": "段落p-001"
-        },
-        {
-          "rule": "表达检查4",
-          "passed": true,
-          "evidence": "段落p-001"
-        },
-        {
-          "rule": "表达检查5",
-          "passed": true,
-          "evidence": "段落p-001"
-        },
-        {
-          "rule": "表达检查6",
-          "passed": true,
-          "evidence": "段落p-001"
-        }
-      ],
-      "quality_dimensions": [
-        {
-          "dimension": "DOCUMENT_TYPE_FIT",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "CENTRAL_THESIS",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "ARGUMENT_CHAIN",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "EVIDENCE_SUPPORT",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "METHOD_SUBSTANCE",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "INNOVATION_BASELINE",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "FEASIBILITY_FOUNDATION",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "METRIC_JUSTIFICATION",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "SECTION_UNIQUENESS",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "STYLE_AND_DENSITY",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "PAGE_BUDGET",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        },
-        {
-          "dimension": "CROSS_SECTION_CONSISTENCY",
-          "score": 4,
-          "passed": true,
-          "evidence": [
-            "测试回放证据"
-          ],
-          "required_action": null
-        }
-      ],
-      "duplicate_signatures": [],
-      "document_type_drift_terms": [],
-      "paragraph_reviews": [
-        {
-          "paragraph_id": "p-001",
-          "passed": true,
-          "argument_role": "EVIDENCE",
-          "claim_supported": true,
-          "new_information_added": true,
-          "issues": []
-        }
-      ],
-      "expression_checks": [
-        {
-          "dimension": "MEANING_PRESERVATION",
-          "passed": true,
-          "paragraph_ids": [
-            "p-001"
-          ],
-          "evidence": "输入输出对照一致。"
-        },
-        {
-          "dimension": "TRACE_PRESERVATION",
-          "passed": true,
-          "paragraph_ids": [
-            "p-001"
-          ],
-          "evidence": "输入输出对照一致。"
-        },
-        {
-          "dimension": "ACADEMIC_TONE",
-          "passed": true,
-          "paragraph_ids": [
-            "p-001"
-          ],
-          "evidence": "输入输出对照一致。"
-        },
-        {
-          "dimension": "SENTENCE_CLARITY",
-          "passed": true,
-          "paragraph_ids": [
-            "p-001"
-          ],
-          "evidence": "输入输出对照一致。"
-        },
-        {
-          "dimension": "TRANSITION_LOGIC",
-          "passed": true,
-          "paragraph_ids": [
-            "p-001"
-          ],
-          "evidence": "输入输出对照一致。"
-        },
-        {
-          "dimension": "REDUNDANCY",
-          "passed": true,
-          "paragraph_ids": [
-            "p-001"
-          ],
-          "evidence": "输入输出对照一致。"
-        },
-        {
-          "dimension": "TERMINOLOGY",
-          "passed": true,
-          "paragraph_ids": [
-            "p-001"
-          ],
-          "evidence": "输入输出对照一致。"
-        },
-        {
-          "dimension": "DOCUMENT_TYPE_FIT",
-          "passed": true,
-          "paragraph_ids": [
-            "p-001"
-          ],
-          "evidence": "输入输出对照一致。"
-        }
-      ],
-      "trace_preservation": {
-        "input_trace_ids": [
-          "trace-001"
-        ],
-        "output_trace_ids": [
-          "trace-001"
-        ],
-        "missing_trace_ids": [],
-        "new_unapproved_trace_ids": [],
-        "preserved": true
+        "affected_paragraph_ids": [],
+        "evidence_summary": "输入输出对照一致。 输入输出对照一致。"
       }
     },
     "findings": [],

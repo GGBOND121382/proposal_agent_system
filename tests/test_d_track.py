@@ -104,6 +104,7 @@ def test_docx_export_candidates_require_later_expression_critic_pass(tmp_path: P
 def test_pdf_converter_fails_closed_without_libreoffice(tmp_path: Path, monkeypatch):
     docx = tmp_path / "sample.docx"
     Document().save(docx)
+    monkeypatch.delenv("LIBREOFFICE_EXECUTABLE", raising=False)
     monkeypatch.setattr("app.pdf_exporter.shutil.which", lambda name: None)
     with pytest.raises(PdfConversionError, match="cannot be silently skipped"):
         PdfConverter(SimpleNamespace()).convert(docx)

@@ -10,7 +10,7 @@
       "const": "P-WRITE-CONTENT"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.2.0"
     },
     "task": {
       "type": "object",

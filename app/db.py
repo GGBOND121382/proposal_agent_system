@@ -190,13 +190,14 @@ class DatabaseTransaction:
         current_step: int,
         state: dict[str, Any],
         expected_updated_at: str | None = None,
-    ) -> None:
+    ) -> str:
+        updated_at = utc_now()
         sql = "UPDATE workflows SET status=?,current_step=?,state_json=?,updated_at=? WHERE id=?"
         params: tuple[Any, ...] = (
             status,
             current_step,
             json.dumps(state, ensure_ascii=False),
-            utc_now(),
+            updated_at,
             workflow_id,
         )
         if expected_updated_at is not None:
@@ -209,6 +210,7 @@ class DatabaseTransaction:
                     f"workflow changed during atomic update: {workflow_id}"
                 )
             raise KeyError(f"workflow not found during atomic update: {workflow_id}")
+        return updated_at
 
 
 class Database:

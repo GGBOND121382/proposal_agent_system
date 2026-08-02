@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from jsonschema import Draft202012Validator
 from app.contract_registry import (
     _collect_runtime_objects,
     augment_prompt_with_field_ownership_contract,
+    augment_prompt_with_reference_integrity_contract,
     normalize_registered_enum_aliases_against_schema,
     repair_field_ownership_against_schema,
 )
@@ -91,6 +93,93 @@ def test_schema_bound_enum_alias_normalizer_is_narrow(pack: PromptPack) -> None:
     )
     assert report["normalized_count"] == 1
     assert report["changes"][0]["rule"] == "REGISTERED_ALIAS"
+
+
+def test_write_content_trace_source_kind_has_explicit_container_ownership(
+    pack: PromptPack,
+) -> None:
+    prompt = (ROOT / "prompt_pack/prompts/writing/write_content.md").read_text(
+        encoding="utf-8"
+    )
+    trace_schema = json.loads(
+        (ROOT / "prompt_pack/schemas/common/trace_link.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    description = trace_schema["properties"]["source_kind"]["description"]
+    registry = json.loads(
+        (ROOT / "prompt_pack/config/prompt_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    write_content_entry = next(
+        item
+        for item in registry["prompts"]
+        if item["prompt_id"] == "P-WRITE-CONTENT"
+    )
+
+    assert "payload.confirmed_facts" in prompt
+    assert "`FACT`" in prompt
+    assert "claim_type=EXPECTED_RESULT" in prompt
+    assert "payload.confirmed_facts to FACT" in description
+    assert "claim_type" in description
+    assert write_content_entry["prompt_version"] == "3.2.0"
+    build_source = (ROOT / "prompt_pack/tools/build_v2.py").read_text(
+        encoding="utf-8"
+    )
+    assert "'P-WRITE-CONTENT': '3.2.0'" in build_source
+    assert "payload.confirmed_facts to FACT" in build_source
+    assert "'ARGUMENT_NODE','SECTION_CONTRACT','SKILL_ARTIFACT'" in build_source
+    assert pack.schema("P-WRITE-CONTENT", "input")["properties"]["prompt_version"] == {
+        "const": "3.2.0"
+    }
+    assert pack.schema("P-WRITE-CONTENT", "output")["properties"]["prompt_version"] == {
+        "const": "3.2.0"
+    }
+    for fixture_path in (
+        ROOT / "prompt_pack/replay/cases/write_content"
+    ).glob("*.json"):
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        assert fixture["input"]["prompt_version"] == "3.2.0"
+        if fixture["expected_output"] is not None:
+            assert fixture["expected_output"]["prompt_version"] == "3.2.0"
+
+
+def test_schema_generated_reference_contract_names_definitions_and_references(
+    pack: PromptPack,
+) -> None:
+    schema = pack.inlined_schema("P-WRITE-CONTENT", "output")
+    generated = augment_prompt_with_reference_integrity_contract(
+        "base",
+        schema,
+        contract_id="test-reference-integrity",
+    )
+
+    assert "自动生成的引用完整性契约" in generated
+    assert "$.result.paragraphs[*].trace_link_ids" in generated
+    assert "$.result.trace_links[*].trace_id" in generated
+    assert "禁止悬空引用" in generated
+    assert generated.count("REFERENCE_INTEGRITY_CONTRACT:START") == 1
+
+    regenerated = augment_prompt_with_reference_integrity_contract(
+        generated,
+        schema,
+        contract_id="test-reference-integrity",
+    )
+    assert regenerated.count("REFERENCE_INTEGRITY_CONTRACT:START") == 1
+
+
+def test_claim_type_is_not_postprocessed_into_trace_source_kind(pack: PromptPack) -> None:
+    output = pack.replay_output("P-WRITE-CONTENT")
+    output["result"]["trace_links"][0]["source_kind"] = "EXPECTED_RESULT"
+
+    normalized = _executor(pack)._normalize_output("P-WRITE-CONTENT", output)
+
+    assert normalized["result"]["trace_links"][0]["source_kind"] == "EXPECTED_RESULT"
+    assert any(
+        "source_kind" in error and "EXPECTED_RESULT" in error
+        for error in pack.validate("P-WRITE-CONTENT", "output", normalized)
+    )
 
 
 def test_all_normal_replays_remain_schema_valid_after_full_normalization(
@@ -234,6 +323,7 @@ def test_targeted_repair_open_object_wrapper_fields_are_not_guessed(pack: Prompt
     envelope["payload"]["original_object"]["content"] = {"text": "old"}
     envelope["payload"]["allowed_paths"] = ["/content/text"]
     envelope["payload"]["findings_to_repair"] = [{
+        "finding_instance_id": "finding-text-fix-001",
         "code": "TEXT_FIX",
         "target_path_or_span": "/content/text",
     }]
@@ -243,8 +333,8 @@ def test_targeted_repair_open_object_wrapper_fields_are_not_guessed(pack: Prompt
         "changed_paths": ["/content/text"],
     }
     output["result"].pop("changed_paths")
-    output["result"]["resolved_finding_codes"] = ["TEXT_FIX"]
-    output["result"]["unresolved_finding_codes"] = []
+    output["result"]["resolved_finding_ids"] = ["finding-text-fix-001"]
+    output["result"]["unresolved_finding_ids"] = []
     output["findings"] = []
 
     normalized = _executor(pack)._normalize_output(

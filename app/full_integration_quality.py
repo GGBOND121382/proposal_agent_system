@@ -9,8 +9,20 @@ from .proposal_quality import QualityFinding
 class FullIntegrationQualityMixin:
     """Deterministic whole-proposal checks layered over the existing quality guard."""
 
-    def _audit_document(self, payload: dict[str, Any], output: dict[str, Any]) -> list[QualityFinding]:
-        findings = list(super()._audit_document(payload, output))
+    def _audit_document(
+        self,
+        payload: dict[str, Any],
+        output: dict[str, Any],
+        *,
+        observations: dict[str, Any] | None = None,
+    ) -> list[QualityFinding]:
+        findings = list(
+            super()._audit_document(
+                payload,
+                output,
+                observations=observations,
+            )
+        )
         sections = payload.get("candidate_sections") or []
         section_map = payload.get("document_section_map") or []
         # Three-section and legacy integration tests retain their established

@@ -78,6 +78,15 @@ def check_blueprint_semantics(
     )
     paragraph_keys = tuple(str(paragraph.get("novel_content_key") or "") for paragraph in paragraphs)
 
+    def paragraph_field_path(
+        paragraph: Mapping[str, Any],
+        index: int,
+        field: str,
+    ) -> str:
+        """Return an unambiguous locator accepted by targeted repair."""
+        identity = str(paragraph.get("paragraph_id") or index)
+        return f"paragraphs[{identity}].{field}"
+
     if contract_id and not all(paragraph_keys):
         violations.append(
             _violation(
@@ -85,7 +94,7 @@ def check_blueprint_semantics(
                 "SC-INFORMATION-KEY-HIERARCHY",
                 code="QG_BLUEPRINT_MISSING_INFORMATION_IDENTITY",
                 category="BLUEPRINT",
-                target_path="paragraphs.novel_content_key",
+                target_path="paragraphs",
                 description="蓝图段落缺少新增信息键，后续无法判断章节是否推进了新内容。",
                 repair_instruction="为每个段落指定属于本章节合同的novel_content_key。",
             )
@@ -98,26 +107,30 @@ def check_blueprint_semantics(
                 "SC-INFORMATION-KEY-HIERARCHY",
                 code="QG_BLUEPRINT_DUPLICATE_INFORMATION_KEYS",
                 category="BLUEPRINT",
-                target_path="paragraphs.novel_content_key",
+                target_path="paragraphs",
                 description="同一章节内多个段落复用了相同新增信息键。",
                 repair_instruction="每个段落只推进一个独立信息单元，并使用唯一novel_content_key。",
             )
         )
 
-    foreign_keys = sorted(
-        key
-        for key in paragraph_keys
-        if key and contract_keys and not active.information_key_belongs(key, contract_keys)
-    )
-    if foreign_keys:
+    foreign_keys = [
+        (index, paragraph, key)
+        for index, (paragraph, key) in enumerate(zip(paragraphs, paragraph_keys))
+        if key
+        and contract_keys
+        and not active.information_key_belongs(key, contract_keys)
+    ]
+    for index, paragraph, key in foreign_keys:
         violations.append(
             _violation(
                 active,
                 "SC-INFORMATION-KEY-HIERARCHY",
                 code="QG_BLUEPRINT_INFORMATION_KEY_OUTSIDE_CONTRACT",
                 category="BLUEPRINT",
-                target_path="paragraphs.novel_content_key",
-                description=f"有{len(foreign_keys)}个新增信息键不属于本章节合同。",
+                target_path=paragraph_field_path(
+                    paragraph, index, "novel_content_key"
+                ),
+                description=f"信息键{key!r}不属于本章节合同。",
                 repair_instruction="仅使用section_contract.unique_information_keys及其子键。",
             )
         )
@@ -128,16 +141,22 @@ def check_blueprint_semantics(
         if isinstance(digest, Mapping)
         for key in digest.get("new_information_keys") or ()
     }
-    reused_prior = sorted(set(paragraph_keys) & prior_keys)
-    if reused_prior:
+    reused_prior = [
+        (index, paragraph, key)
+        for index, (paragraph, key) in enumerate(zip(paragraphs, paragraph_keys))
+        if key in prior_keys
+    ]
+    for index, paragraph, key in reused_prior:
         violations.append(
             _violation(
                 active,
                 "SC-INFORMATION-KEY-HIERARCHY",
                 code="QG_BLUEPRINT_REUSES_PRIOR_INFORMATION",
                 category="BLUEPRINT",
-                target_path="paragraphs.novel_content_key",
-                description=f"蓝图复用了前文章节的{len(reused_prior)}个信息键。",
+                target_path=paragraph_field_path(
+                    paragraph, index, "novel_content_key"
+                ),
+                description=f"蓝图复用了前文章节的信息键{key!r}。",
                 repair_instruction="更换为本章节独有信息键；共享背景只能通过allowed_shared_context_ids引用。",
             )
         )
@@ -154,26 +173,33 @@ def check_blueprint_semantics(
                 "SC-ARGUMENT-ROLE-COMPATIBILITY",
                 code="QG_BLUEPRINT_REQUIRED_ROLES_MISSING",
                 category="BLUEPRINT",
-                target_path="paragraphs.argument_role",
+                target_path="paragraphs",
                 description=f"蓝图缺少章节合同要求的论证角色：{', '.join(missing_roles)}。",
                 repair_instruction="补齐章节Profile要求的论证角色，不得用通用段落替代。",
             )
         )
 
-    self_evidence = {
-        str(paragraph.get("paragraph_id") or ""): sorted(active.self_evidence_ids(paragraph))
-        for paragraph in paragraphs
-        if active.self_evidence_ids(paragraph)
-    }
-    if self_evidence:
+    self_evidence = [
+        (index, paragraph, field, primary)
+        for index, paragraph in enumerate(paragraphs)
+        for primary in [str(paragraph.get("primary_claim_id") or "")]
+        for field in active.evidence_fields
+        if primary and primary in active.evidence_ids_for_field(paragraph, field)
+    ]
+    for index, paragraph, evidence_field, primary in self_evidence:
         violations.append(
             _violation(
                 active,
                 "SC-EVIDENCE-SELF-REFERENCE",
                 code="QG_BLUEPRINT_SELF_EVIDENCE",
                 category="EVIDENCE",
-                target_path="paragraphs.required_evidence_ids",
-                description=f"{len(self_evidence)}个段落把主命题自身列为证据。",
+                target_path=paragraph_field_path(
+                    paragraph, index, evidence_field
+                ),
+                description=(
+                    f"段落{paragraph.get('paragraph_id') or index!s}把主命题"
+                    f"{primary}列入证据字段{evidence_field}。"
+                ),
                 repair_instruction="删除主命题自引用，并绑定独立事实、来源、实验、指标或论证节点。",
             )
         )
@@ -189,7 +215,7 @@ def check_blueprint_semantics(
                 "SC-EVIDENCE-CONTRACT-COVERAGE",
                 code="QG_BLUEPRINT_REQUIRED_EVIDENCE_MISSING",
                 category="EVIDENCE",
-                target_path="paragraphs.required_evidence_ids",
+                target_path="paragraphs",
                 description=(
                     f"Blueprint is missing {len(missing_evidence)} contract-required "
                     f"evidence ID(s): {missing_evidence_list}."
@@ -216,7 +242,7 @@ def check_blueprint_semantics(
                 "SC-CLAIM-COVERAGE",
                 code="QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING",
                 category="BLUEPRINT",
-                target_path="paragraphs.primary_claim_id",
+                target_path="paragraphs",
                 description=(
                     f"Blueprint is missing {len(missing_claims)} required claim ID(s): "
                     f"{missing_claim_list}."

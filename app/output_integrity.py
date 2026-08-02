@@ -243,7 +243,7 @@ def _resolve_reference_id_alias(
     raw_reference_id: str,
     known_ids: Iterable[str],
     *,
-    allow_unresolved_descriptor_suffix: bool = False,
+    registered_descriptor_suffixes: Iterable[str] = (),
     allow_entity_field_path: bool = False,
 ) -> tuple[str | None, str | None]:
     resolved, alias_kind = _resolve_source_id_alias(
@@ -271,37 +271,14 @@ def _resolve_reference_id_alias(
             }
             if len(longest_candidates) == 1:
                 return next(iter(longest_candidates)), "ENTITY_FIELD_PATH"
-    if allow_unresolved_descriptor_suffix:
-        for suffix in (
-            "-ABSENT-FACT",
-            "-UNKNOWN",
-            "-UNRESOLVED",
-            "-MISSING",
-        ):
+    for registered_suffix in registered_descriptor_suffixes:
+        suffix = "-" + str(registered_suffix).strip().upper().lstrip("-")
+        if suffix != "-":
             if not raw.upper().endswith(suffix):
                 continue
             candidate = raw[:-len(suffix)]
             if candidate in set(known_ids):
-                return candidate, "UNRESOLVED_DESCRIPTOR_SUFFIX"
-    match = re.fullmatch(r"(.+)-PROJ-(\d+)", raw, flags=re.IGNORECASE)
-    if not match:
-        return None, None
-    stem = match.group(1)
-    number = int(match.group(2))
-    candidates = {
-        str(candidate)
-        for candidate in known_ids
-        if (
-            (candidate_match := re.fullmatch(
-                rf"{re.escape(stem)}-(\d+)",
-                str(candidate),
-                flags=re.IGNORECASE,
-            ))
-            and int(candidate_match.group(1)) == number
-        )
-    }
-    if len(candidates) == 1:
-        return next(iter(candidates)), "PROJECT_NAMESPACE_ALIAS"
+                return candidate, "REGISTERED_DESCRIPTOR_SUFFIX"
     return None, None
 
 
@@ -367,25 +344,6 @@ def _pointer(path: tuple[Any, ...]) -> str:
 def _collect_defined_ids(value: Any) -> set[str]:
     found: set[str] = set()
 
-    # A prompt exposes named, structured payload/result objects as entities in
-    # their own right even when the object schema has no dedicated ``*_id``
-    # field.  Providers therefore reasonably use names such as
-    # ``proposal_contract`` or ``argument_graph`` in required_input_ids and
-    # evidence_refs.  Register only first-level structured containers; scalar
-    # field names and arbitrary nested JSON paths remain invalid references.
-    if isinstance(value, Mapping):
-        for namespace in ("payload", "result"):
-            container = value.get(namespace)
-            if not isinstance(container, Mapping):
-                continue
-            for key, item in container.items():
-                if (
-                    isinstance(key, str)
-                    and key.strip()
-                    and isinstance(item, (Mapping, list))
-                ):
-                    found.add(key.strip())
-
     def visit(node: Any) -> None:
         if isinstance(node, list):
             for item in node:
@@ -421,6 +379,28 @@ def _collect_defined_ids(value: Any) -> set[str]:
     return found
 
 
+def _collect_named_input_object_ids(value: Any) -> set[str]:
+    """Return exact names of structured top-level input payload objects.
+
+    These names form a separate reference namespace. Only fields explicitly
+    registered by the semantic contract may cite them; they must never make a
+    plain ENTITY_REF such as ``checked_item_ids`` valid by accident.
+    """
+
+    if not isinstance(value, Mapping):
+        return set()
+    payload = value.get("payload")
+    if not isinstance(payload, Mapping):
+        return set()
+    return {
+        str(key).strip()
+        for key, item in payload.items()
+        if isinstance(key, str)
+        and key.strip()
+        and isinstance(item, (Mapping, list))
+    }
+
+
 def _collect_visible_reference_ids(value: Any) -> set[str]:
     """Collect references already admitted by the trusted input envelope.
 
@@ -448,6 +428,32 @@ def _collect_visible_reference_ids(value: Any) -> set[str]:
 
     visit(value)
     return found
+
+
+def _collect_inherited_repair_entity_ids(value: Any) -> set[str]:
+    """Return entity IDs explicitly inherited from an original producer call.
+
+    ``source_id`` is normally excluded from the generic entity namespace so a
+    provenance citation cannot accidentally authorize an arbitrary entity
+    reference.  Targeted repair is different: its dedicated inherited catalog
+    is a system-built, read-only receipt of the producer's prior semantic
+    namespace.  Only that typed field bridges those IDs into ENTITY_REF.
+    """
+
+    if not isinstance(value, Mapping) or value.get("prompt_id") != "P-TARGETED-REPAIR":
+        return set()
+    payload = value.get("payload")
+    if not isinstance(payload, Mapping):
+        return set()
+    catalog = payload.get("inherited_source_catalog")
+    if not isinstance(catalog, list):
+        return set()
+    return {
+        str(entry.get("source_id") or "").strip()
+        for entry in catalog
+        if isinstance(entry, Mapping)
+        and str(entry.get("source_id") or "").strip()
+    }
 
 
 def _collect_source_ids(value: Any) -> set[str]:
@@ -1142,12 +1148,15 @@ def normalize_reference_id_aliases(
     remain unchanged and are rejected by ``validate_reference_ids``.
     """
     normalized = copy.deepcopy(output)
-    known = (
+    known_entities = (
         _collect_defined_ids(envelope or {})
         | _collect_visible_reference_ids(envelope or {})
+        | _collect_inherited_repair_entity_ids(envelope or {})
         | _collect_defined_ids(normalized)
         | _REGISTERED_DIAGNOSTIC_REFS
     )
+    named_input_objects = _collect_named_input_object_ids(envelope or {})
+    contract = get_semantic_contract()
     changes: list[dict[str, Any]] = []
 
     def visit(node: Any, path: tuple[Any, ...]) -> None:
@@ -1160,6 +1169,9 @@ def normalize_reference_id_aliases(
         for key, value in list(node.items()):
             current = (*path, key)
             if _is_reference_array_field(key) and isinstance(value, list):
+                known = set(known_entities)
+                if contract.allows_input_object(key):
+                    known.update(named_input_objects)
                 rebuilt: list[Any] = []
                 for index, raw in enumerate(value):
                     if not isinstance(raw, str):
@@ -1169,10 +1181,10 @@ def normalize_reference_id_aliases(
                     resolved, alias_kind = _resolve_reference_id_alias(
                         identifier,
                         known,
-                        allow_unresolved_descriptor_suffix=(
-                            key == "unresolved_slot_ids"
+                        registered_descriptor_suffixes=(
+                            contract.registered_reference_suffixes(key)
                         ),
-                        allow_entity_field_path=(key == "evidence_refs"),
+                        allow_entity_field_path=contract.allows_entity_field_path(key),
                     )
                     if resolved is not None and alias_kind:
                         rebuilt.append(resolved)
@@ -1191,6 +1203,7 @@ def normalize_reference_id_aliases(
     visit(normalized, ())
     return normalized, {
         "schema_version": "1.0",
+        "normalization_policy": "EXACT_OR_REGISTERED_PRESENTATION_ONLY",
         "normalized_count": len(changes),
         "changes": changes,
     }
@@ -1201,12 +1214,15 @@ def validate_reference_ids(
     envelope: Mapping[str, Any] | None,
 ) -> list[str]:
     """Validate reference-only ID arrays against visible/defined entities."""
-    known = (
+    known_entities = (
         _collect_defined_ids(envelope or {})
         | _collect_visible_reference_ids(envelope or {})
+        | _collect_inherited_repair_entity_ids(envelope or {})
         | _collect_defined_ids(output)
         | _REGISTERED_DIAGNOSTIC_REFS
     )
+    named_input_objects = _collect_named_input_object_ids(envelope or {})
+    contract = get_semantic_contract()
     errors: list[str] = []
     root_status = output.get("status") if isinstance(output, Mapping) else None
 
@@ -1220,6 +1236,11 @@ def validate_reference_ids(
         for key, value in node.items():
             current = (*path, key)
             if _is_reference_array_field(key) and isinstance(value, list):
+                known = set(known_entities)
+                if contract.allows_input_object(key):
+                    known.update(named_input_objects)
+                semantic = contract.field_semantic(key)
+                semantic_label = semantic.value if semantic is not None else "REFERENCE"
                 # BLOCK/ERROR artifacts are never consumed as authoritative
                 # workflow facts; their free-form diagnostic evidence labels
                 # remain trace-only.
@@ -1231,7 +1252,8 @@ def validate_reference_ids(
                         continue
                     if raw not in known:
                         errors.append(
-                            f"{_pointer((*current, index))}: reference ID {raw!r} is not present in the input or defined output entities"
+                            f"{_pointer((*current, index))}: {semantic_label} reference ID {raw!r} "
+                            "is not present in its allowed input namespace or defined output entities"
                         )
             visit(value, current)
 

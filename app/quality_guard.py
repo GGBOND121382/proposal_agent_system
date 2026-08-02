@@ -89,6 +89,7 @@ def build_guard_report(
     findings: list[dict[str, Any]],
     *,
     components: list[dict[str, Any]] | None = None,
+    observations: Mapping[str, Any] | None = None,
     observation_status: str = "OBSERVED",
 ) -> dict[str, Any]:
     normalized_findings = _deduplicate_findings(findings)
@@ -109,6 +110,8 @@ def build_guard_report(
     }
     if components is not None:
         report["components"] = copy.deepcopy(components)
+    if observations is not None:
+        report["observations"] = copy.deepcopy(dict(observations))
     return report
 
 
@@ -188,6 +191,9 @@ def validate_guard_report(
         or any(not isinstance(item, Mapping) for item in components)
     ):
         errors.append("components must be an array of objects")
+    observations = report.get("observations")
+    if observations is not None and not isinstance(observations, Mapping):
+        errors.append("observations must be an object")
     return errors
 
 

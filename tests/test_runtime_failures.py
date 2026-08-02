@@ -57,7 +57,7 @@ def test_typed_http_authentication_error_is_configuration_not_retryable():
     assert result.workflow_status == "WAITING_CONFIGURATION"
 
 
-def test_typed_malformed_response_is_contract_failure_not_transport_retry():
+def test_typed_malformed_response_allows_bounded_whole_object_regeneration():
     exc = _wrapped_provider_error(
         kind=ProviderFailureKind.RESPONSE_PARSE,
         phase="response_parse",
@@ -65,8 +65,24 @@ def test_typed_malformed_response_is_contract_failure_not_transport_retry():
     )
     result = classify_runtime_failure(exc)
     assert result.category is FailureCategory.OUTPUT_CONTRACT
-    assert result.retryable is False
+    assert result.retryable is True
     assert result.workflow_status == "BLOCKED_CONTRACT"
+    assert result.consumes_semantic_repair_budget is False
+
+
+def test_typed_schema_shape_failure_allows_bounded_whole_object_regeneration():
+    exc = _wrapped_provider_error(
+        kind=ProviderFailureKind.RESPONSE_SHAPE,
+        phase="output_schema_validation",
+        retryable_hint=False,
+        validation_errors=["/result: expected object"],
+    )
+    result = classify_runtime_failure(exc)
+    assert result.category is FailureCategory.OUTPUT_CONTRACT
+    assert result.retryable is True
+    assert result.failure_kind == "RESPONSE_SHAPE"
+    assert result.workflow_status == "BLOCKED_CONTRACT"
+    assert result.consumes_semantic_repair_budget is False
 
 
 def test_legacy_timeout_text_precedes_json_contract_marker():

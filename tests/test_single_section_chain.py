@@ -52,7 +52,13 @@ class FakeContextBuilder:
         envelope = {
             "prompt_id": prompt_id,
             "section_id": section_id,
-            "payload": {"candidate": candidate},
+            "payload": {
+                "candidate": candidate,
+                "revision_findings": copy.deepcopy(
+                    ((state.get("section_revision_findings") or {}).get(section_id))
+                    or []
+                ),
+            },
             "overrides": copy.deepcopy(overrides or {}),
         }
         self.envelopes.append(copy.deepcopy(envelope))
@@ -94,13 +100,17 @@ class ScriptedExecutor:
             self.context.results[prompt_id] = result
         elif prompt_id == "P-TARGETED-REPAIR":
             original = envelope["overrides"]["payload.original_object"]["content"]
+            finding_ids = [
+                str(item["finding_instance_id"])
+                for item in envelope["overrides"]["payload.findings_to_repair"]
+            ]
             repaired = {**original, "repaired": True}
             output["result"] = {
                 "repaired_object": repaired,
                 "changed_paths": ["/content/candidate_text"],
                 "unchanged_protected_hashes": [],
-                "resolved_finding_codes": ["TEST_REPAIR"],
-                "unresolved_finding_codes": [],
+                "resolved_finding_ids": finding_ids,
+                "unresolved_finding_ids": [],
             }
         if status in {"REVISE", "BLOCK"} and not output["findings"]:
             output["findings"] = [
@@ -200,6 +210,33 @@ class ChainHarness(WorkflowAuthoringMixin, WorkflowRepairMixin):
         return "INTERNAL"
 
 
+class ArbitratedChainHarness(ChainHarness):
+    """Exercise the production section decision seam without database plumbing."""
+
+    def _record_decision(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        prompt_id: str,
+        result: dict[str, Any],
+    ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        from app.decision_arbiter import DecisionArbiter
+        from app.quality_guard import build_guard_report
+        from app.workflows import WorkflowEngine
+
+        output = result["output"]
+        record = DecisionArbiter().arbitrate(
+            output,
+            build_guard_report(prompt_id, output, []),
+            prompt_id=prompt_id,
+        ).to_dict()
+        effective_status, effective_output = WorkflowEngine._effective_critic_result(
+            result,
+            record,
+        )
+        return record, effective_status, effective_output
+
+
 SECTION = {"section_id": "section-1", "title": "研究内容"}
 
 
@@ -219,6 +256,37 @@ def test_single_section_happy_path_runs_exact_chain_and_gate():
     section_result = harness.wf["state"]["section_results"][0]
     assert section_result["section_id"] == "section-1"
     assert section_result["status"] == "COMPLETED"
+
+
+def test_section_chain_uses_arbiter_effective_status_and_preserves_raw_run():
+    harness = ArbitratedChainHarness(
+        [SECTION],
+        {"P-WRITE-BLUEPRINT-CRITIC": ["REVISE"]},
+    )
+    original_execute = harness.executor.execute
+
+    async def execute_with_nonblocking_finding(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        result = await original_execute(*args, **kwargs)
+        if args[0] == "P-WRITE-BLUEPRINT-CRITIC":
+            result["output"]["findings"][0]["blocking"] = False
+            harness.executor.calls[-1]["output"]["findings"][0]["blocking"] = False
+        return result
+
+    harness.executor.execute = execute_with_nonblocking_finding
+
+    completed = asyncio.run(
+        harness._write_sections(harness.wf, harness.wf["state"])
+    )
+
+    assert completed["status"] == "WAITING_GATE"
+    assert harness.executor.calls[1]["status"] == "REVISE"
+    assert harness.executor.calls[1]["output"]["status"] == "REVISE"
+    assert all(
+        call["prompt_id"] != "P-TARGETED-REPAIR"
+        for call in harness.executor.calls
+    )
+    section_runs = harness.wf["state"]["section_results"][0]["runs"]
+    assert section_runs[1]["status"] == "PASS"
 
 
 def test_blueprint_and_content_revise_each_get_one_targeted_repair_and_rereview():
@@ -369,6 +437,37 @@ def test_acceptance_run_regenerates_producer_rejected_by_quality_guard():
     assert "integration_repair_section_ids" not in harness.wf["state"]
 
 
+def test_section_feedback_tracks_latest_decision_and_is_consumed_by_producer_pass():
+    harness = ChainHarness([SECTION])
+    state = harness.wf["state"]
+    state["active_section_id"] = "section-1"
+
+    for code in ("FIRST_CANDIDATE_DEFECT", "LATEST_CANDIDATE_DEFECT"):
+        result = {
+            "status": "REVISE",
+            "output": {
+                "status": "REVISE",
+                "findings": [{"code": code, "repairable": True}],
+            },
+        }
+        harness._apply_section_decision(
+            harness.wf, state, "P-WRITE-BLUEPRINT", result
+        )
+
+    assert state["section_revision_findings"]["section-1"] == [
+        {"code": "LATEST_CANDIDATE_DEFECT", "repairable": True}
+    ]
+
+    harness._apply_section_decision(
+        harness.wf,
+        state,
+        "P-WRITE-BLUEPRINT",
+        {"status": "PASS", "output": {"status": "PASS", "findings": []}},
+    )
+
+    assert "section-1" not in state["section_revision_findings"]
+
+
 def test_each_acceptance_producer_regeneration_gets_a_distinct_call_key():
     harness = ChainHarness(
         [SECTION],
@@ -388,6 +487,42 @@ def test_each_acceptance_producer_regeneration_gets_a_distinct_call_key():
     assert blueprint_calls[1]["requested_call_key"]
     assert blueprint_calls[2]["requested_call_key"]
     assert blueprint_calls[1]["requested_call_key"] != blueprint_calls[2]["requested_call_key"]
+
+
+def test_acceptance_call_key_changes_when_feedback_changes_at_same_round():
+    harness = ChainHarness([SECTION])
+    state = harness.wf["state"]
+    state["active_section_id"] = "section-1"
+    state["active_section"] = SECTION
+    state["acceptance_candidate_rounds"] = {
+        "section:section-1:P-WRITE-BLUEPRINT": 1
+    }
+    progress = {
+        "section_id": "section-1",
+        "phase": "BLUEPRINT",
+        "status": "RUNNING",
+        "runs": [],
+    }
+
+    call_keys = []
+    for code in ("FIRST_INPUT", "CHANGED_INPUT"):
+        state["section_revision_findings"] = {
+            "section-1": [{"code": code, "repairable": True}]
+        }
+        _envelope, result = asyncio.run(
+            harness._execute_section_prompt(
+                harness.wf,
+                state,
+                SECTION,
+                progress,
+                "P-WRITE-BLUEPRINT",
+            )
+        )
+        call_keys.append(result["requested_call_key"])
+
+    assert call_keys[0]
+    assert call_keys[1]
+    assert call_keys[0] != call_keys[1]
 
 
 def test_test_acceptance_can_regenerate_fully_repairable_critic_block():

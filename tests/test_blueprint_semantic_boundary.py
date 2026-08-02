@@ -99,6 +99,18 @@ def test_deterministic_blueprint_checker_emits_registered_rule_ids() -> None:
         "QG_BLUEPRINT_SELF_EVIDENCE",
         "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING",
     }
+    paths_by_code = {item.code: item.target_path for item in violations}
+    assert paths_by_code["QG_BLUEPRINT_INFORMATION_KEY_OUTSIDE_CONTRACT"] == (
+        "paragraphs[P-1].novel_content_key"
+    )
+    assert paths_by_code["QG_BLUEPRINT_REUSES_PRIOR_INFORMATION"] == (
+        "paragraphs[P-2].novel_content_key"
+    )
+    assert paths_by_code["QG_BLUEPRINT_SELF_EVIDENCE"] == (
+        "paragraphs[P-1].required_evidence_ids"
+    )
+    assert paths_by_code["QG_BLUEPRINT_REQUIRED_ROLES_MISSING"] == "paragraphs"
+    assert paths_by_code["QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING"] == "paragraphs"
 
 
 def test_deterministic_blueprint_checker_does_not_mutate_inputs() -> None:
@@ -109,6 +121,22 @@ def test_deterministic_blueprint_checker_does_not_mutate_inputs() -> None:
     check_blueprint_semantics(blueprint, payload)
     assert payload == before_payload
     assert blueprint == before_blueprint
+
+
+def test_self_evidence_finding_targets_the_actual_evidence_field() -> None:
+    blueprint = _valid_blueprint()
+    blueprint["paragraphs"][0]["fact_slots"] = ["CLAIM-1"]
+    blueprint["paragraphs"][0]["required_evidence_ids"] = ["FACT-1"]
+
+    violations = check_blueprint_semantics(blueprint, _payload())
+    self_evidence = [
+        item for item in violations
+        if item.code == "QG_BLUEPRINT_SELF_EVIDENCE"
+    ]
+
+    assert [item.target_path for item in self_evidence] == [
+        "paragraphs[P-1].fact_slots"
+    ]
 
 
 def test_quality_guard_delegates_deterministic_blueprint_findings() -> None:
@@ -269,7 +297,7 @@ def test_critic_normal_replay_checks_every_valid_blueprint_paragraph() -> None:
     payload = case["input"]["payload"]
     blueprint = payload["blueprint_candidate"]
     assert check_blueprint_semantics(blueprint, payload) == ()
-    assert case["input"]["prompt_version"] == "3.0.0"
+    assert case["input"]["prompt_version"] == "3.1.0"
     result = case["expected_output"]["result"]
     assert result["checked_paragraph_ids"] == [
         paragraph["paragraph_id"] for paragraph in blueprint["paragraphs"]

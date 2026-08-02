@@ -313,7 +313,8 @@ def test_integration_rejects_cross_section_template_repetition():
     checked = guard.observe("P-INTEGRATION-CRITIC", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_DOCUMENT_TEMPLATE_REPETITION" in _codes(checked)
-    assert set(output["result"]["redundancy_report"]["affected_section_ids"]) == {f"section-{i:03d}" for i in range(4)}
+    report = checked["observations"]["main_body_redundancy_report"]
+    assert set(report["affected_section_ids"]) == {f"section-{i:03d}" for i in range(4)}
 
 
 def test_blueprint_rejects_reuse_of_prior_section_information_key():
@@ -383,7 +384,7 @@ def test_integration_rejects_duplicate_information_claim_concentration_and_same_
         "QG_DOCUMENT_DUPLICATE_INFORMATION_KEYS",
         "QG_DOCUMENT_CLAIM_OVERCONCENTRATION",
     }.issubset(_codes(checked))
-    report = output["result"]["redundancy_report"]
+    report = checked["observations"]["main_body_redundancy_report"]
     assert report["duplicate_information_key_groups"] == 1
     assert report["claim_overconcentration_groups"] == 1
     assert report["template_skeleton_groups"] >= 1
@@ -519,6 +520,23 @@ def test_quality_guard_failure_outputs_remain_schema_valid():
     checked_argument = guard.observe("P-ARGUMENT-ARCHITECTURE", argument_env, argument_output)
     assert checked_argument["status"] == "REVISE"
     assert pack.validate("P-ARGUMENT-ARCHITECTURE", "output", argument_output) == []
+
+
+def test_expression_critic_uses_role_specific_compact_contract():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-CRITIC")
+    output = sim.invoke("P-EXPRESSION-CRITIC", env)
+
+    assert set(output["result"]) == {
+        "verdict",
+        "checked_paragraph_ids",
+        "expression_assessment",
+    }
+    assert len(output["result"]["expression_assessment"]["checks"]) == 8
+    assert pack.validate("P-EXPRESSION-CRITIC", "output", output) == []
+
+    report = guard.observe("P-EXPRESSION-CRITIC", env, output)
+    assert "QG_CRITIC_DIMENSIONS_TOO_SHALLOW" not in _codes(report)
 
 
 def test_section_critic_must_check_profile_rules_and_required_scorecard():

@@ -1,5 +1,5 @@
-version: 2.1.0
-rule_registry_version: 1.2.0
+version: 2.3.0
+rule_registry_version: 1.3.0
 rules:
   SC-ARGUMENT-ROLE-COMPATIBILITY:
     responsibility: DETERMINISTIC_GUARD
@@ -7,6 +7,7 @@ rules:
     blocking: true
     description: Canonicalize argument roles and decide whether an actual role satisfies a required role.
     config:
+      finding_locator_strategy: COLLECTION_SCOPE_WHEN_MISSING
       canonical:
       - CONTEXT
       - PROBLEM
@@ -88,6 +89,7 @@ rules:
     blocking: true
     description: Decide whether an information key is an approved root or an approved hierarchical child.
     config:
+      finding_locator_strategy: PER_INSTANCE_EXISTING_FIELD
       hierarchy_separator: ':'
       exact_root_is_valid: true
       child_keys_are_valid: true
@@ -98,6 +100,7 @@ rules:
     blocking: true
     description: Compute covered claims from the union of all registered claim-bearing blueprint fields.
     config:
+      finding_locator_strategy: COLLECTION_SCOPE_WHEN_MISSING
       fields:
       - primary_claim_id
       - project_item_slots
@@ -111,6 +114,7 @@ rules:
     blocking: true
     description: Compute evidence identifiers and reject a primary claim used as its own evidence.
     config:
+      finding_locator_strategy: PER_INSTANCE_EXISTING_FIELD
       evidence_fields:
       - required_evidence_ids
       - fact_slots
@@ -122,13 +126,15 @@ rules:
     blocking: true
     description: Require every evidence identifier mandated by the section contract to be bound by the blueprint.
     config:
+      finding_locator_strategy: COLLECTION_SCOPE_WHEN_MISSING
       contract_field: must_use_evidence_ids
   SC-REFERENCE-FIELD-SEMANTICS:
     responsibility: OUTPUT_INTEGRITY
     category: REFERENCE_FIELD
     blocking: true
     description: Classify every identifier-like schema field so validation and normalization share one
-      meaning.
+      meaning; entity field paths must be anchored by an exact visible entity ID and bare property names
+      are never references.
     config:
       input_object_fields:
       - required_input_ids

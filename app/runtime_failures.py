@@ -111,6 +111,17 @@ _CONTRACT_PROVIDER_KINDS = frozenset(
     }
 )
 
+# These failures occur before a provider response can become a valid business
+# object.  Re-running the complete model call is therefore a technical
+# regeneration, not a semantic repair and not JSON post-processing.
+_WHOLE_OBJECT_REGENERATION_KINDS = frozenset(
+    {
+        ProviderFailureKind.RESPONSE_PARSE.value,
+        ProviderFailureKind.RESPONSE_SHAPE.value,
+        ProviderFailureKind.OUTPUT_TRUNCATED.value,
+    }
+)
+
 
 def _exception_chain(exc: BaseException, *, limit: int = 12) -> tuple[BaseException, ...]:
     values: list[BaseException] = []
@@ -235,12 +246,18 @@ def _classification_from_provider(
         )
 
     if kind in _CONTRACT_PROVIDER_KINDS:
+        retryable = kind in _WHOLE_OBJECT_REGENERATION_KINDS
         return FailureClassification(
             FailureCategory.OUTPUT_CONTRACT,
             WorkflowStatus.BLOCKED_CONTRACT.value,
+            retryable,
             False,
-            False,
-            "provider response could not satisfy the declared output contract",
+            (
+                "provider response could not form a valid business object; "
+                "bounded whole-object regeneration is allowed"
+                if retryable
+                else "provider response could not satisfy the declared output contract"
+            ),
             kind,
             status,
             retry_after,

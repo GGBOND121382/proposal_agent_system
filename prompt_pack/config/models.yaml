@@ -6,6 +6,8 @@ models:
   enabled: true
   capabilities:
     structured_output: true
+    strict_json_schema: PROVIDER_NEGOTIATED
+    json_object_fallback: true
     long_context: true
     chinese_writing: true
     document_analysis: true
@@ -19,6 +21,8 @@ models:
   enabled: true
   capabilities:
     structured_output: true
+    strict_json_schema: PROVIDER_NEGOTIATED
+    json_object_fallback: true
     long_context: true
     chinese_writing: true
     document_analysis: true
@@ -32,6 +36,8 @@ models:
   enabled: ${ONLINE_LLM_ENABLED:false}
   capabilities:
     structured_output: true
+    strict_json_schema: PROVIDER_NEGOTIATED
+    json_object_fallback: true
     long_context: true
   defaults:
     temperature: 0.1

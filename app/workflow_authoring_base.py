@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .executor import PromptExecutionError
+from .llm import MODEL_RESPONSE_PROTOCOL_VERSION
 from .util import sha256_json, sha256_text
 from .workflow_input import CURRENT_PROPOSAL_INPUT, WorkflowInputRequired, material_input_questions
 
@@ -47,6 +48,81 @@ class WorkflowAuthoringMixin:
             record["role"] = role
         progress["runs"].append(record)
 
+    def _apply_section_decision(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        prompt_id: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Derive section control state through the workflow decision authority.
+
+        Prompt runs and their model outputs are immutable evidence.  The section
+        chain must nevertheless branch on the same critic/guard arbitration as
+        ordinary workflow steps; otherwise a model-level ``REVISE`` containing
+        no owned blocking finding can consume repair budget and block the
+        workflow.  Keep the raw result untouched and return a derived control
+        view carrying the effective status and actionable findings.
+
+        The callable check preserves the standalone mixin contract used by
+        lightweight authoring harnesses.  The production WorkflowEngine always
+        supplies ``_record_decision``.
+        """
+        recorder = getattr(self, "_record_decision", None)
+        derived = dict(result)
+        if callable(recorder):
+            decision, effective_status, effective_output = recorder(
+                wf,
+                state,
+                prompt_id,
+                result,
+            )
+            derived["model_status"] = str(
+                result.get("status")
+                or (result.get("output") or {}).get("status")
+                or "ERROR"
+            )
+            derived["status"] = effective_status
+            derived["output"] = effective_output
+            if decision is not None:
+                derived["decision"] = decision
+        self._sync_section_revision_feedback(state, prompt_id, derived)
+        return derived
+
+    def _sync_section_revision_feedback(
+        self,
+        state: dict[str, Any],
+        prompt_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        """Keep producer feedback aligned with the latest effective decision.
+
+        Revision feedback is control state, not an append-only audit stream.  A
+        new REVISE/BLOCK decision must replace the previous candidate's feedback
+        even when the regeneration budget is already exhausted.  Conversely, a
+        producer PASS proves that the feedback supplied to that producer has
+        been consumed and must not leak into a later authoring phase.  Raw runs
+        and decision artifacts remain the immutable history.
+        """
+        section_id = str(state.get("active_section_id") or "")
+        if not section_id:
+            return
+        status = str(
+            result.get("status")
+            or (result.get("output") or {}).get("status")
+            or ""
+        ).upper()
+        feedback_by_section = state.setdefault("section_revision_findings", {})
+        if status in {"REVISE", "BLOCK"}:
+            output = result.get("output") or {}
+            feedback_by_section[section_id] = [
+                dict(item)
+                for item in output.get("findings") or []
+                if isinstance(item, dict)
+            ]
+        elif status == "PASS" and prompt_id in self.SECTION_PRODUCER_PHASES:
+            feedback_by_section.pop(section_id, None)
+
     def _block_section_chain(
         self,
         wf: dict[str, Any],
@@ -56,6 +132,16 @@ class WorkflowAuthoringMixin:
         *,
         configuration_error: Exception | str | None = None,
     ) -> dict[str, Any]:
+        repair_failure = state.get("last_targeted_repair_failure")
+        if isinstance(repair_failure, dict):
+            message = self._targeted_repair_failure_message(
+                state,
+                prompt_id=str(
+                    repair_failure.get("critic_prompt")
+                    or "P-TARGETED-REPAIR"
+                ),
+                fallback=message,
+            )
         section_id = str(section.get("section_id") or "")
         progress = state.setdefault("section_progress", {}).setdefault(section_id, {})
         report = (
@@ -114,16 +200,34 @@ class WorkflowAuthoringMixin:
                     "section_id": state.get("active_section_id"),
                     "prompt_id": prompt_id,
                     "candidate_round": candidate_round,
+                    # A round number is only loop position, not semantic call
+                    # identity.  Recovery may intentionally reset/rebase a
+                    # budget after a prompt or contract upgrade.  Binding the
+                    # key to the complete envelope preserves restart
+                    # idempotency for identical input while preventing reuse of
+                    # an older candidate under changed prompts or feedback.
+                    "input_hash": sha256_json(envelope),
+                    "model_response_protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
                 }
             )[:24]
-        result = await self.executor.execute(
-            prompt_id,
-            envelope,
-            project_id=wf["project_id"],
-            workflow_id=wf["id"],
-            original_environment=state.get("original_environment"),
-            call_key=requested_call_key,
-        )
+        provider_retry = getattr(self, "_execute_prompt_with_provider_retry", None)
+        if callable(provider_retry):
+            result = await provider_retry(
+                wf,
+                state,
+                prompt_id=prompt_id,
+                envelope=envelope,
+                call_key=requested_call_key,
+            )
+        else:
+            result = await self.executor.execute(
+                prompt_id,
+                envelope,
+                project_id=wf["project_id"],
+                workflow_id=wf["id"],
+                original_environment=state.get("original_environment"),
+                call_key=requested_call_key,
+            )
         if prompt_id == "P-WRITE-CONTENT" and self.diagram_enrichment is not None and result["status"] == "PASS":
             result["output"] = await self.diagram_enrichment.enrich(
                 project_id=wf["project_id"],
@@ -136,6 +240,12 @@ class WorkflowAuthoringMixin:
                     if result["output"].get("source_refs") else "INTERNAL"
                 ),
             )
+        result = self._apply_section_decision(
+            wf,
+            state,
+            prompt_id,
+            result,
+        )
         self._append_section_run(progress, result, prompt_id=prompt_id, role=role)
         state["original_environment"] = result["route"]["environment"]
         # A freshly generated producer object is a new repair subject. Repair
@@ -196,7 +306,6 @@ class WorkflowAuthoringMixin:
         candidate_rounds[producer_round_key] = (
             int(candidate_rounds.get(producer_round_key, 0)) + 1
         )
-        state.setdefault("section_revision_findings", {})[section_id] = findings
         self._deactivate_repair_application(state, producer_prompt)
         progress["phase"] = producer_phase_name
         progress["status"] = "RUNNING"
@@ -254,7 +363,6 @@ class WorkflowAuthoringMixin:
         rounds[round_key] = int(rounds.get(round_key, 0)) + 1
         candidate_rounds = state.setdefault("acceptance_candidate_rounds", {})
         candidate_rounds[round_key] = int(candidate_rounds.get(round_key, 0)) + 1
-        state.setdefault("section_revision_findings", {})[section_id] = findings
         self._deactivate_repair_application(state, producer_prompt)
         progress["phase"] = producer_phase
         progress["status"] = "RUNNING"

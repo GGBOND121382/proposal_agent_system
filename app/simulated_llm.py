@@ -900,8 +900,12 @@ class SimulatedLLM:
         base["result"]["repaired_object"] = original
         base["result"]["changed_paths"] = [join_pointer("content", "issues", 1, "description")]
         base["result"]["unchanged_protected_hashes"] = []
-        base["result"]["resolved_finding_codes"] = ["PLAN_SIMULATED_REPAIR"]
-        base["result"]["unresolved_finding_codes"] = []
+        base["result"]["resolved_finding_ids"] = [
+            str(item.get("finding_instance_id"))
+            for item in envelope.get("payload", {}).get("findings_to_repair") or []
+            if isinstance(item, dict) and item.get("finding_instance_id")
+        ]
+        base["result"]["unresolved_finding_ids"] = []
         return base
 
     def _handle_write_blueprint(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -1891,19 +1895,26 @@ class SimulatedLLM:
         polished = payload.get("polished_candidate") or {}
         paragraphs = polished.get("paragraphs") or []
         ids = [str(p.get("paragraph_id")) for p in paragraphs if p.get("paragraph_id")]
-        input_traces = [str(t.get("trace_id")) for t in raw.get("trace_links", []) if t.get("trace_id")]
-        output_traces = [str(t.get("trace_id")) for t in polished.get("trace_links", []) if t.get("trace_id")]
+        input_traces = {str(t.get("trace_id")) for t in raw.get("trace_links", []) if t.get("trace_id")}
+        output_traces = {str(t.get("trace_id")) for t in polished.get("trace_links", []) if t.get("trace_id")}
         dimensions = ["MEANING_PRESERVATION", "TRACE_PRESERVATION", "ACADEMIC_TONE", "SENTENCE_CLARITY", "TRANSITION_LOGIC", "REDUNDANCY", "TERMINOLOGY", "DOCUMENT_TYPE_FIT"]
         base["result"] = {
-            "verdict": "ACCEPT", "checked_paragraph_ids": ids, "unsupported_trace_ids": [],
-            "blueprint_deviation_paragraph_ids": [], "scope_violations": [],
-            "profile_acceptance_results": [{"rule": f"表达质量检查：{d}", "passed": True, "evidence": "逐段对比原始候选与润色候选。"} for d in dimensions],
-            "quality_dimensions": self._quality_dimensions(True), "duplicate_signatures": [], "document_type_drift_terms": [],
-            "paragraph_reviews": [{"paragraph_id": pid, "passed": True, "argument_role": str(next((p.get("paragraph_role") for p in paragraphs if p.get("paragraph_id") == pid), "EVIDENCE")), "claim_supported": True, "new_information_added": True, "issues": []} for pid in ids],
-            "expression_checks": [{"dimension": d, "passed": True, "paragraph_ids": ids, "evidence": "含义、来源和文种保持一致。"} for d in dimensions],
-            "trace_preservation": {"input_trace_ids": input_traces, "output_trace_ids": output_traces, "missing_trace_ids": sorted(set(input_traces) - set(output_traces)), "new_unapproved_trace_ids": sorted(set(output_traces) - set(input_traces)), "preserved": set(input_traces) == set(output_traces)},
+            "verdict": "ACCEPT" if input_traces == output_traces else "REVISE",
+            "checked_paragraph_ids": ids,
+            "expression_assessment": {
+                "checks": {
+                    dimension: input_traces == output_traces
+                    if dimension == "TRACE_PRESERVATION"
+                    else True
+                    for dimension in dimensions
+                },
+                "affected_paragraph_ids": []
+                if input_traces == output_traces
+                else ids,
+                "evidence_summary": "逐段对比含义与表达，并由确定性Guard独立核验结构和Trace保真。",
+            },
         }
-        base["status"] = "PASS" if set(input_traces) == set(output_traces) else "REVISE"; base["findings"] = []
+        base["status"] = "PASS" if input_traces == output_traces else "REVISE"; base["findings"] = []
         return base
 
     def _handle_final_confidentiality_review(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:

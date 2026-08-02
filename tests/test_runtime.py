@@ -17,7 +17,7 @@ from app.runtime_api import PromptExecutor
 from app.runtime_api import DocxExporter
 from app.runtime_api import ModelGateway
 from app.pack import PromptPack
-from app.quality_guard import disabled_guard_report
+from app.quality_guard import build_guard_report, disabled_guard_report
 from app.research import PublicResearchService
 from app.security import RoutingDenied, SecurityRouter
 from app.simulated_llm import SimulatedLLM
@@ -470,7 +470,7 @@ def test_normalizer_removes_schema_keyword_emitted_as_instance_data(runtime):
     assert normalized["findings"][0]["category"] == "EVIDENCE"
     assert normalized["status"] == "REVISE"
     errors = pack.validate("P-SCHEME-CRITIC", "output", normalized)
-    assert any(error.startswith("/findings/0/category:") for error in errors)
+    assert not any(error.startswith("/findings/0/category:") for error in errors)
     assert any(error.startswith("/findings/0/evidence_refs/0:") for error in errors)
 
 
@@ -759,6 +759,7 @@ def test_targeted_repair_normalizer_does_not_rewrite_business_budgets(runtime):
         for index in range(len(paragraphs))
     ]
     envelope["payload"]["findings_to_repair"] = [{
+        "finding_instance_id": "finding-word-budget-001",
         "code": "WORD_BUDGET_EXCEED",
         "description": "合同规定总字数为1000字，但当前总计1500字。",
     }]
@@ -766,8 +767,8 @@ def test_targeted_repair_normalizer_does_not_rewrite_business_budgets(runtime):
         "paragraphs": [dict(item) for item in paragraphs],
     }
     output["result"]["changed_paths"] = list(envelope["payload"]["allowed_paths"])
-    output["result"]["resolved_finding_codes"] = ["WORD_BUDGET_EXCEED"]
-    output["result"]["unresolved_finding_codes"] = []
+    output["result"]["resolved_finding_ids"] = ["finding-word-budget-001"]
+    output["result"]["unresolved_finding_ids"] = []
 
     normalized = executor._normalize_output("P-TARGETED-REPAIR", output, envelope)
     repaired = normalized["result"]["repaired_object"]["content"]["paragraphs"]
@@ -795,6 +796,7 @@ def test_targeted_repair_normalizer_preserves_model_scope_receipt_for_guard(runt
         "/content/paragraphs/2/text",
     ]
     envelope["payload"]["findings_to_repair"] = [{
+        "finding_instance_id": "finding-quality-dimension-001",
         "code": "QUALITY_DIMENSION_FAILED",
         "target_path_or_span": "/content/paragraphs/1/text",
     }]
@@ -809,10 +811,10 @@ def test_targeted_repair_normalizer_preserves_model_scope_receipt_for_guard(runt
         "/content/paragraphs/1/text",
         "/content/paragraphs/2/text",
     ]
-    output["result"]["resolved_finding_codes"] = [
-        "QUALITY_DIMENSION_FAILED-EXPERIMENT-DESIGN",
+    output["result"]["resolved_finding_ids"] = [
+        "finding-quality-dimension-001",
     ]
-    output["result"]["unresolved_finding_codes"] = []
+    output["result"]["unresolved_finding_ids"] = []
     output["findings"] = [{
         "code": "REPAIR_COMPLETED",
         "blocking": False,
@@ -821,8 +823,8 @@ def test_targeted_repair_normalizer_preserves_model_scope_receipt_for_guard(runt
     normalized = executor._normalize_output("P-TARGETED-REPAIR", output, envelope)
 
     assert normalized["result"]["repaired_object"]["content"] == repaired
-    assert normalized["result"]["resolved_finding_codes"] == [
-        "QUALITY_DIMENSION_FAILED-EXPERIMENT-DESIGN",
+    assert normalized["result"]["resolved_finding_ids"] == [
+        "finding-quality-dimension-001",
     ]
     assert normalized["result"]["changed_paths"] == output["result"]["changed_paths"]
     assert normalized["findings"] == output["findings"]
@@ -1848,6 +1850,7 @@ def test_targeted_repair_normalizer_does_not_rewrite_fact_collection(runtime):
         "/content/fact_candidates/0/claim_type",
     ]
     envelope["payload"]["findings_to_repair"] = [{
+        "finding_instance_id": "finding-fact-status-001",
         "code": "FACT_CRITIC_STATUS_UPGRADE",
         "severity": "P1",
         "category": "FACT",
@@ -1878,8 +1881,8 @@ def test_targeted_repair_normalizer_does_not_rewrite_fact_collection(runtime):
         "/content/fact_candidates/1/claim_type",
         "/content/fact_candidates/2",
     ]
-    output["result"]["resolved_finding_codes"] = ["FACT_CRITIC_STATUS_UPGRADE"]
-    output["result"]["unresolved_finding_codes"] = []
+    output["result"]["resolved_finding_ids"] = ["finding-fact-status-001"]
+    output["result"]["unresolved_finding_ids"] = []
     output["findings"] = []
 
     normalized = executor._normalize_output("P-TARGETED-REPAIR", output, envelope)
@@ -2066,7 +2069,12 @@ def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, m
         if prompt_id == "P-TEMPLATE-CRITIC":
             output["status"] = "NEED_USER_INPUT"
             output["user_questions"] = ["请确认模板范围。"]
-        guard_report = disabled_guard_report(prompt_id, output)
+        guard_enabled = bool(executor.quality_guard_enabled)
+        guard_report = (
+            build_guard_report(prompt_id, output, [])
+            if guard_enabled
+            else disabled_guard_report(prompt_id, output)
+        )
         return {
             "run_id": new_id("run"),
             "status": output["status"],
@@ -2077,7 +2085,7 @@ def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, m
             },
             "output": output,
             "guard_report": guard_report,
-            "quality_guard_enabled": False,
+            "quality_guard_enabled": guard_enabled,
             "guard_observation_status": guard_report["observation_status"],
         }
 
@@ -2086,7 +2094,7 @@ def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, m
 
     advanced = asyncio.run(engine.advance(workflow["id"]))
 
-    assert calls[:2] == ["P-TEMPLATE-EXTRACT", "P-TEMPLATE-CRITIC"]
+    assert calls[:2] == ["P-TEMPLATE-EXTRACT", "P-TEMPLATE-CRITIC"], advanced["state"].get("last_error")
     assert advanced["status"] == "WAITING_GATE"
     assert advanced["state"]["technical_retry_attempts"]["0"] == 2
     assert advanced["state"]["contract_migration_retry_versions"]["0"] == executor.output_normalizer_version

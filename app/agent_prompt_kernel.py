@@ -339,10 +339,24 @@ class AgentPromptKernelValidator:
             *[copy.deepcopy(item) for item in base_report.get("findings") or []],
             *track_findings,
         ]
+        observations: dict[str, Any] = copy.deepcopy(
+            base_report.get("observations") or {}
+        )
+        if prompt_id == "P-INTEGRATION-CRITIC":
+            redundancy_report = (
+                (working_output.get("result") or {}).get(
+                    "main_body_redundancy_report"
+                )
+            )
+            if isinstance(redundancy_report, dict):
+                observations.setdefault("main_body_redundancy_report", copy.deepcopy(
+                    redundancy_report
+                ))
         return build_guard_report(
             prompt_id,
             output,
             combined,
+            observations=observations or None,
             components=[
                 {
                     "observer": type(self.base_guard).__name__,
@@ -741,23 +755,38 @@ class AgentPromptKernelValidator:
                 "ORIGINAL_PRODUCER",
                 evidence_refs=[*outside, *protected_hits],
             ))
-        requested_codes = {
-            str(item.get("code"))
+        requested_ids = {
+            str(item.get("finding_instance_id"))
             for item in payload.get("findings_to_repair") or []
-            if isinstance(item, dict) and item.get("code")
+            if isinstance(item, dict) and item.get("finding_instance_id")
         }
-        resolved = {str(item) for item in result.get("resolved_finding_codes") or []}
-        unknown = sorted(resolved - requested_codes)
+        resolved = {str(item) for item in result.get("resolved_finding_ids") or []}
+        unresolved = {
+            str(item) for item in result.get("unresolved_finding_ids") or []
+        }
+        unknown = sorted((resolved | unresolved) - requested_ids)
+        missing = sorted(requested_ids - resolved - unresolved)
         if unknown:
             findings.append(_finding(
                 "QG_REPAIR_RESOLVED_UNKNOWN_FINDING",
                 "CONTENT",
                 "REPAIRED_OBJECT",
-                "result.resolved_finding_codes",
+                "result.resolved_finding_ids",
                 f"修复结果宣称关闭{len(unknown)}个本轮未请求的Finding。",
                 "只报告findings_to_repair中的代码；其余问题必须由独立Critic重新发现和关闭。",
                 "ORIGINAL_PRODUCER",
                 evidence_refs=unknown,
+            ))
+        if missing:
+            findings.append(_finding(
+                "QG_REPAIR_FINDING_UNCLASSIFIED",
+                "CONTENT",
+                "REPAIRED_OBJECT",
+                "result.unresolved_finding_ids",
+                f"Targeted repair omitted {len(missing)} finding instances.",
+                "Classify every finding_instance_id as resolved or unresolved.",
+                "ORIGINAL_PRODUCER",
+                evidence_refs=missing,
             ))
         return findings
 

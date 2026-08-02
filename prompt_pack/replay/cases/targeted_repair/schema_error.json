@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-TARGETED-REPAIR",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.4.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -43,6 +43,7 @@
       "original_producer": "WRITING_AGENT",
       "findings_to_repair": [
         {
+          "finding_instance_id": "finding-replay-001",
           "code": "WRITE_UNSOURCED_CLAIM",
           "severity": "P1",
           "category": "CONTENT",
@@ -76,6 +77,18 @@
           "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "security_level": "INTERNAL",
           "display_name": "示例对象"
+        }
+      ],
+      "inherited_source_catalog": [
+        {
+          "source_id": "fact-001",
+          "object_path": "payload.fact_context.0",
+          "source_type": "MODEL_INFERENCE",
+          "document_version_id": null,
+          "section_id": null,
+          "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "authority_rank": 60,
+          "security_level": "INTERNAL"
         }
       ]
     },

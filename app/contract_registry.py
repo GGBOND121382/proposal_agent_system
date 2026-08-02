@@ -28,7 +28,7 @@ from .status_ontology import (
     normalize_temporal_status,
 )
 
-CONTRACT_REGISTRY_VERSION = "5.1.0"
+CONTRACT_REGISTRY_VERSION = "5.4.0"
 
 
 def prepare_schema_contract(schema: Mapping[str, Any]) -> dict[str, Any]:
@@ -1447,6 +1447,81 @@ def augment_prompt_with_field_ownership_contract(
         + "\n".join(rows)
         + "\n"
         + FIELD_OWNERSHIP_CONTRACT_END
+    )
+    return base + "\n\n" + block + "\n"
+
+
+def reference_integrity_contract_lines(schema: Mapping[str, Any]) -> list[str]:
+    """Return schema paths grouped by their registered reference semantics."""
+
+    root_schema = prepare_schema_contract(schema)
+    definitions: set[str] = set()
+    references: set[str] = set()
+    entity_or_field_paths: set[str] = set()
+
+    def walk(node_schema: Mapping[str, Any], path: str) -> None:
+        effective = _effective_schema(node_schema, None, root_schema)
+        semantic = str(effective.get("x-reference-semantic") or "")
+        if semantic == "NEW_ENTITY_ID":
+            definitions.add(path)
+        elif semantic in {"ENTITY_REF", "SOURCE_REF", "FINDING_REF"}:
+            references.add(path)
+        elif semantic == "ENTITY_OR_FIELD_PATH":
+            entity_or_field_paths.add(path)
+        for key, child in (effective.get("properties") or {}).items():
+            if isinstance(child, Mapping):
+                walk(child, f"{path}.{key}")
+        items = effective.get("items")
+        if isinstance(items, Mapping):
+            walk(items, f"{path}[*]")
+
+    walk(root_schema, "$")
+    rows: list[str] = []
+    if definitions:
+        rows.append("- 本次输出中可定义实体ID的路径：" + " / ".join(f"`{item}`" for item in sorted(definitions)))
+    if references:
+        rows.append("- 必须解析为真实实体的引用路径：" + " / ".join(f"`{item}`" for item in sorted(references)))
+    if entity_or_field_paths:
+        rows.append(
+            "- 只允许实体ID或实体锚定字段路径的引用路径："
+            + " / ".join(f"`{item}`" for item in sorted(entity_or_field_paths))
+        )
+    return rows
+
+
+REFERENCE_INTEGRITY_CONTRACT_START = "<!-- REFERENCE_INTEGRITY_CONTRACT:START -->"
+REFERENCE_INTEGRITY_CONTRACT_END = "<!-- REFERENCE_INTEGRITY_CONTRACT:END -->"
+
+
+def augment_prompt_with_reference_integrity_contract(
+    prompt: str,
+    schema: Mapping[str, Any],
+    *,
+    contract_id: str,
+) -> str:
+    """Append the model-facing form of the runtime reference validator."""
+
+    rows = reference_integrity_contract_lines(schema)
+    if not rows:
+        return prompt
+    base = prompt
+    if REFERENCE_INTEGRITY_CONTRACT_START in base:
+        base = base.split(REFERENCE_INTEGRITY_CONTRACT_START, 1)[0].rstrip()
+    block = (
+        REFERENCE_INTEGRITY_CONTRACT_START
+        + "\n# 自动生成的引用完整性契约\n"
+        + f"契约ID：`{contract_id}`；注册表版本：`{CONTRACT_REGISTRY_VERSION}`。\n"
+        + "每一个引用ID必须逐字等于输入中可见的真实实体ID，或等于本次输出中实际定义的实体ID；"
+          "仅声明一个引用不能定义实体。禁止悬空引用、占位ID、只生成引用而漏掉实体，也不得通过删除引用掩盖应有的来源关系。\n"
+        + "引用数组的每个字符串只能包含纯ID或契约允许的实体锚定字段路径；禁止在同一字符串中追加括号说明、引号、冒号说明、来源类型、数组位置、Hash或解释文字。"
+          "需要说明证据含义时写入Finding的description或repair_instruction，不得污染evidence_refs等引用字段。\n"
+        + "命名空间必须分离：根级trusted_source_catalog中的source_id只服务于source_refs来源绑定；"
+          "尤其禁止把input-*合成目录ID写入evidence_refs或其他实体引用字段。"
+          "ENTITY_OR_FIELD_PATH应引用输入对象内部真实定义的candidate_id、paragraph_id等自然实体ID，"
+          "或引用语义契约登记的顶层输入对象名（例如polished_candidate）；不得引用目录容器ID。\n"
+        + "\n".join(rows)
+        + "\n"
+        + REFERENCE_INTEGRITY_CONTRACT_END
     )
     return base + "\n\n" + block + "\n"
 

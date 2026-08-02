@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .runtime_failures import FailureClassification, WorkflowStatus
+from .runtime_failures import FailureCategory, FailureClassification, WorkflowStatus
 
 
 @dataclass(frozen=True)
@@ -148,6 +148,10 @@ class RetryPolicy:
             max_attempts=max_attempts,
             delay_seconds=delay,
             waiting_status=WorkflowStatus.WAITING_PROVIDER.value,
-            exhausted_status=WorkflowStatus.BLOCKED_PROVIDER.value,
+            exhausted_status=(
+                WorkflowStatus.BLOCKED_PROVIDER.value
+                if classification.category is FailureCategory.PROVIDER_TRANSIENT
+                else classification.workflow_status
+            ),
             reason=reason,
         )

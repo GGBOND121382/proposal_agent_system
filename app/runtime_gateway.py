@@ -8,8 +8,10 @@ from typing import Any
 from .llm import (
     JSON_PARSER_VERSION,
     LLMResult,
+    MODEL_RESPONSE_PROTOCOL_VERSION,
     ModelGateway as BaseModelGateway,
     _extract_json_with_report,
+    _load_strict_json_object,
 )
 from .runtime_evidence import ModelCallEvidenceStore
 from .runtime_policy import CapabilityPolicy
@@ -60,6 +62,7 @@ class AuditedModelGateway(BaseModelGateway):
             "input_envelope": envelope,
             "output_schema": output_schema,
             "input_sha256": sha256_json(envelope),
+            "model_response_protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
         }
         self.evidence_store.faults.hit("before_request_persist", call_key, prompt_id=prompt_id)
         request_meta = self.evidence_store.write_request(call_key, request_payload)
@@ -85,7 +88,13 @@ class AuditedModelGateway(BaseModelGateway):
 
         self.evidence_store.faults.hit("before_model_request", call_key, prompt_id=prompt_id)
         result = await super().invoke(route, prompt_id, system_prompt, envelope, output_schema)
-        raw_parsed, raw_parse_report = _extract_json_with_report(result.raw_text)
+        if result.response_contract_mode in {
+            "JSON_SCHEMA_STRICT",
+            "FUNCTION_SERIALIZED_JSON_STREAM_MINIMAX",
+        }:
+            raw_parsed, raw_parse_report = _load_strict_json_object(result.raw_text)
+        else:
+            raw_parsed, raw_parse_report = _extract_json_with_report(result.raw_text)
         response_meta = self.evidence_store.write_response(
             call_key,
             raw_text=result.raw_text,

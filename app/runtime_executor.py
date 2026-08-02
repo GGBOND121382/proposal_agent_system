@@ -14,7 +14,7 @@ from .executor import (
     PromptExecutor as BasePromptExecutor,
 )
 from .contract_registry import CONTRACT_REGISTRY_VERSION
-from .llm import LLMError
+from .llm import LLMError, MODEL_RESPONSE_PROTOCOL_VERSION
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
 from .output_integrity import TRUSTED_SOURCE_CATALOG_VERSION, attach_trusted_source_catalog
 from .runtime_evidence import EvidenceIntegrityError, InjectedFailure, ModelCallEvidenceStore
@@ -73,6 +73,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "model_profile": profiles.get(profile_name),
                 "output_schema": self.pack.inlined_schema(prompt_id, "output"),
                 "trusted_source_catalog_contract_version": TRUSTED_SOURCE_CATALOG_VERSION,
+                "model_response_protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
             }
         except (AttributeError, KeyError, TypeError):
             return {"prompt_id": prompt_id}
@@ -455,11 +456,19 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 result = await self.gateway.invoke(route, prompt_id, system_prompt, model_envelope, output_schema)
             raw_response_text = result.raw_text
             provider_output = copy.deepcopy(result.output)
-            consumed_output = (
-                copy.deepcopy(contract_recovery["consumed_output"])
-                if contract_recovery is not None
-                else self._normalize_output(prompt_id, provider_output, model_envelope)
-            )
+            try:
+                consumed_output = (
+                    copy.deepcopy(contract_recovery["consumed_output"])
+                    if contract_recovery is not None
+                    else self._normalize_output(prompt_id, provider_output, model_envelope)
+                )
+            except PromptExecutionError as exc:
+                raise self._provider_contract_failure(
+                    f"Provider output contract validation failed: {exc}",
+                    raw_response_text,
+                    phase="output_structure_validation",
+                    validation_errors=exc.validation_errors,
+                ) from exc
             self.policy.assert_output_unchanged(
                 provider_output,
                 consumed_output,
@@ -508,7 +517,23 @@ class RuntimePromptExecutor(BasePromptExecutor):
             )
             output_errors = self.pack.validate(prompt_id, "output", consumed_output)
             if output_errors:
-                raise PromptExecutionError("Output schema validation failed", validation_errors=output_errors)
+                raise self._provider_contract_failure(
+                    "Provider output failed strict schema validation",
+                    raw_response_text,
+                    phase="output_schema_validation",
+                    validation_errors=output_errors,
+                )
+            try:
+                self._validate_output_semantics(
+                    prompt_id, model_envelope, consumed_output
+                )
+            except PromptExecutionError as exc:
+                raise self._provider_contract_failure(
+                    f"Provider output failed semantic contract validation: {exc}",
+                    raw_response_text,
+                    phase="output_semantic_validation",
+                    validation_errors=exc.validation_errors,
+                ) from exc
             status = consumed_output.get("status", "ERROR")
             duration_ms = int((time.perf_counter() - started) * 1000)
             self.evidence_store.faults.hit("before_db_transaction", call_key, prompt_id=prompt_id)
@@ -600,7 +625,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
             )
             if persistence_error:
                 error += " | ERROR_EVIDENCE_PERSISTENCE_FAILED: " + persistence_error
-            raise PromptExecutionError(error, validation_errors=details) from exc
+            raise PromptExecutionError(
+                error, validation_errors=details, run_id=run_id
+            ) from exc
 
     def _next_version(self, conn, project_id: str, prompt_id: str, artifact_type: str) -> int:
         row = conn.execute(

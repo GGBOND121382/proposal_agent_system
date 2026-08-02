@@ -14,8 +14,11 @@ SCHEMA = 'https://json-schema.org/draft/2020-12/schema'
 SEC_LEVELS = ['PUBLIC','INTERNAL','SENSITIVE','CLASSIFIED']
 STATUSES = ['PASS','REVISE','NEED_USER_INPUT','BLOCK']
 PROMPT_VERSIONS = {
-    'P-WRITE-BLUEPRINT': '3.0.0',
-    'P-WRITE-BLUEPRINT-CRITIC': '3.0.0',
+    'P-WRITE-BLUEPRINT': '3.1.0',
+    'P-WRITE-BLUEPRINT-CRITIC': '3.1.0',
+    'P-WRITE-CONTENT': '3.2.0',
+    'P-EXPRESSION-CRITIC': '3.4.0',
+    'P-TARGETED-REPAIR': '3.4.0',
 }
 
 def prompt_version(prompt_id: str) -> str:
@@ -90,13 +93,17 @@ common_schemas={
     'security_level': enum(SEC_LEVELS)
 }, required=['source_id','source_type','authority_rank','security_level']),
 'finding.schema.json': obj({
+    'finding_instance_id': idstr(),
     'code': s(), 'severity': enum(['P0','P1','P2','P3']),
-    'category': enum(['SECURITY','SOURCE','FACT','SCHEME','PROJECT_DEFINITION','READINESS','TEMPLATE','PLAN','BLUEPRINT','CONTENT','INTEGRATION','FORMAT','SYSTEM']),
+    'category': enum(['SECURITY','SOURCE','FACT','SCHEME','PROJECT_DEFINITION','READINESS','TEMPLATE','PLAN','BLUEPRINT','ARGUMENT','CONTENT','EXPRESSION','INTEGRATION','FORMAT','SYSTEM']),
     'target_type': s(), 'target_path_or_span': nullable(s(0)), 'description': s(),
     'evidence_refs': arr(idstr()), 'repairable': bools(), 'repair_instruction': nullable(s(0)),
-    'suggested_route': enum(['ORIGINAL_PRODUCER','PROJECT_KNOWLEDGE_AGENT','SECURITY_REVIEW_AGENT','PLANNING_AGENT','WRITING_AGENT','INTEGRATION_AGENT','USER','BLOCK']),
+    'suggested_route': enum(['ORIGINAL_PRODUCER','PROJECT_KNOWLEDGE_AGENT','SECURITY_REVIEW_AGENT','PLANNING_AGENT','ARGUMENT_ARCHITECTURE_AGENT','WRITING_AGENT','EXPRESSION_EDITOR_AGENT','INTEGRATION_AGENT','USER','BLOCK']),
     'blocking': bools()
-}),
+}, required=[
+    'code','severity','category','target_type','target_path_or_span','description',
+    'evidence_refs','repairable','repair_instruction','suggested_route','blocking'
+]),
 'user_question.schema.json': obj({
     'question_id': idstr(), 'question_type': enum(['CONFIRMATION','MISSING_INFORMATION','CONFLICT_RESOLUTION','CHOICE','SECURITY_APPROVAL_INPUT']),
     'question': s(), 'reason': s(), 'target_paths': arr(s(),1),
@@ -109,8 +116,8 @@ common_schemas={
 }),
 'trace_link.schema.json': obj({
     'trace_id': idstr(), 'target_path': s(),
-    'source_kind': enum(['FACT','PROJECT_ITEM','PROJECT_RELATION','SCHEME_RULE','TEMPLATE_COMPONENT','SOURCE_TEXT','USER_INSTRUCTION','PUBLIC_CLAIM']),
-    'source_id': idstr(), 'source_path_or_span': nullable(s(0)), 'support_type': enum(['DIRECT','DERIVED','CONSTRAINT','STYLE_ONLY']),
+    'source_kind': {**enum(['FACT','PROJECT_ITEM','PROJECT_RELATION','SCHEME_RULE','TEMPLATE_COMPONENT','SOURCE_TEXT','USER_INSTRUCTION','PUBLIC_CLAIM','ARGUMENT_NODE','SECTION_CONTRACT','SKILL_ARTIFACT']), 'description': 'Origin object/container category, never the source object claim_type, item_type, knowledge_status, or temporal status. Map payload.confirmed_facts to FACT (including facts whose claim_type is PLAN, EXPECTED_RESULT, REQUIREMENT, or MODEL_INFERENCE); payload.project_subgraph.items to PROJECT_ITEM; payload.project_subgraph.relations to PROJECT_RELATION; payload.argument_graph nodes to ARGUMENT_NODE; payload.section_contract to SECTION_CONTRACT; source text/spans to SOURCE_TEXT; and public claims to PUBLIC_CLAIM.'},
+    'source_id': {**idstr(), 'description': 'Exact identifier of the referenced source object inside the container designated by source_kind.'}, 'source_path_or_span': nullable(s(0)), 'support_type': enum(['DIRECT','DERIVED','CONSTRAINT','STYLE_ONLY']),
     'source_hash': nullable(hashstr())
 }),
 'security_context.schema.json': obj({
@@ -273,7 +280,7 @@ D={
 'P-WRITE-CONTENT':('依据已通过审查的蓝图生成段落级、可追踪、范围受控的正式正文候选。',['approved_blueprint','source_section','project_subgraph','confirmed_facts','technical_inputs','metric_inputs','read_only_context','template_context','section_profile','security_constraints'],['按蓝图顺序逐段生成','COPY_EDIT_ONLY时保持所有业务命题不变','实质修改只使用确认对象','每个实质性句子建立Trace Link','保持主体、时间、数字、否定和限定词','存在关键空槽时停止并提问','输出结构化段落而非仅全文'],['WRITE_BLUEPRINT_DEVIATION','WRITE_UNSOURCED_CLAIM','WRITE_STATUS_UPGRADE','WRITE_SCOPE_VIOLATION','WRITE_UNRESOLVED_PLACEHOLDER']),
 'P-WRITE-CRITIC':('独立审查正文候选的计划覆盖、事实准确、章节功能、范围和可追踪性。',['content_candidate','approved_blueprint','source_section','project_subgraph','confirmed_facts','technical_inputs','metric_inputs','section_profile','task_instruction','security_constraints'],['逐段对照蓝图','逐句核对Trace Link','检查主体时间数字限定词','检查无来源技术和成果','检查模式与修改范围','检查章节Profile验收规则'],['WRITE_CRITIC_UNSOURCED_CLAIM','WRITE_CRITIC_STATUS_UPGRADE','WRITE_CRITIC_SCOPE_VIOLATION','WRITE_CRITIC_PROFILE_FAILURE']),
 'P-INTEGRATION-CRITIC':('审查多章节候选与项目知识之间的事实、术语、数字和映射一致性。',['candidate_sections','document_section_map','project_definition','fact_package','scheme_profile','terminology','security_policy'],['检查同一实体称谓','检查重复数字及条件','检查目标到任务到路线到成果指标映射','检查前文定义与后文使用','检查章节重复和矛盾','将问题路由到正确角色'],['INTEGRATION_TERM_CONFLICT','INTEGRATION_NUMERIC_CONFLICT','INTEGRATION_MAPPING_GAP','INTEGRATION_CROSS_SECTION_CONTRADICTION']),
-'P-TARGETED-REPAIR':('仅在指定路径修复指定Finding，保持所有保护字段和未授权内容不变。',['original_object','original_producer','findings_to_repair','allowed_paths','protected_paths','protected_hashes','original_input_refs'],['验证Finding可修复','只读取原始输入和指定Finding','生成最小修改','列出changed_paths','证明protected_paths未变','无法局部修复时返回BLOCK'],['REPAIR_SCOPE_EXCESS','REPAIR_PROTECTED_FIELD_CHANGED','REPAIR_NEW_UNSUPPORTED_CONTENT']),
+'P-TARGETED-REPAIR':('仅在指定路径修复指定Finding，保持所有保护字段和未授权内容不变。',['original_object','original_producer','findings_to_repair','allowed_paths','protected_paths','protected_hashes','original_input_refs','inherited_source_catalog'],['验证Finding可修复','只读取原始输入和指定Finding','生成最小修改','列出changed_paths','证明protected_paths未变','无法局部修复时返回BLOCK'],['REPAIR_SCOPE_EXCESS','REPAIR_PROTECTED_FIELD_CHANGED','REPAIR_NEW_UNSUPPORTED_CONTENT']),
 }
 
 # generic field schemas used in payload/results
@@ -318,7 +325,8 @@ FIELD_SCHEMAS={
 'approved_blueprint':object_ref,'read_only_context':arr(ref('../common/document_section.schema.json')),
 'content_candidate':obj({'candidate_id':idstr(),'candidate_text':s(),'paragraphs':arr(ref('../common/paragraph.schema.json'),1),'trace_links':arr(trace_ref,1),'term_usage':arr(obj({'term':s(),'canonical_term':s(),'paragraph_ids':arr(idstr(),1)})),'unresolved_items':arr(unresolved_ref)}),
 'candidate_sections':arr(obj({'section_id':idstr(),'candidate':FIELD_SCHEMAS.get('content_candidate',{})}) if False else object_ref,1),'document_section_map':arr(obj({'section_id':idstr(),'title':s(),'level':{'type':'integer','minimum':0},'candidate_id':nullable(idstr())})),'terminology':arr(obj({'canonical_term':s(),'aliases':arr(s()),'definition':s()})),
-'original_producer':enum(['SECURITY_REVIEW_AGENT','PROJECT_KNOWLEDGE_AGENT','TEMPLATE_AGENT','PLANNING_AGENT','WRITING_AGENT']),'findings_to_repair':arr(finding_ref,1),'allowed_paths':arr(json_pointer(),1),'protected_paths':arr(json_pointer()),'protected_hashes':arr(obj({'path':json_pointer(),'hash':hashstr()})),'original_input_refs':arr(object_ref,1)
+'original_producer':enum(['SECURITY_REVIEW_AGENT','PROJECT_KNOWLEDGE_AGENT','TEMPLATE_AGENT','PLANNING_AGENT','ARGUMENT_ARCHITECTURE_AGENT','WRITING_AGENT','EXPRESSION_EDITOR_AGENT']),'findings_to_repair':arr({'allOf':[finding_ref, {'required':['finding_instance_id']}]},1),'allowed_paths':arr(json_pointer(),1),'protected_paths':arr(json_pointer()),'protected_hashes':arr(obj({'path':json_pointer(),'hash':hashstr()})),'original_input_refs':arr(object_ref,1),'inherited_source_catalog':arr(ref('../common/trusted_source_catalog_entry.schema.json'),0,True),
+'contract_feedback':obj({'attempt':{'type':'integer','minimum':2,'maximum':6},'validation_errors':arr(s(),1)}, required=['attempt','validation_errors'])
 }
 # V3 writing inputs are shared common contracts rather than ad-hoc prompt-local copies.
 FIELD_SCHEMAS['proposal_contract']=ref('../common/proposal_contract.schema.json')
@@ -362,7 +370,7 @@ R={
 'P-WRITE-CONTENT':obj({'candidate_id':idstr(),'candidate_text':s(),'paragraphs':arr(ref('../common/paragraph.schema.json'),1),'trace_links':arr(trace_ref,1),'term_usage':arr(obj({'term':s(),'canonical_term':s(),'paragraph_ids':arr(idstr(),1)})),'unresolved_items':arr(unresolved_ref),'source_preservation_summary':arr(obj({'source_span':s(),'action':enum(['PRESERVED','REPHRASED','REPLACED','REMOVED']),'paragraph_id':idstr()}))}),
 'P-WRITE-CRITIC':obj({'verdict':enum(['ACCEPT','REVISE','BLOCK']),'checked_paragraph_ids':arr(idstr()),'unsupported_trace_ids':arr(idstr()),'blueprint_deviation_paragraph_ids':arr(idstr()),'scope_violations':arr(s()),'profile_acceptance_results':arr(obj({'rule':s(),'passed':bools(),'evidence':s()}))}),
 'P-INTEGRATION-CRITIC':obj({'verdict':enum(['ACCEPT','REVISE','BLOCK']),'terminology_checks':arr(obj({'term':s(),'consistent':bools(),'sections':arr(idstr())})),'numeric_checks':arr(obj({'value_key':s(),'consistent':bools(),'occurrences':arr(s())})),'mapping_checks':arr(obj({'mapping_type':enum(['OBJECTIVE_TO_WORK_PACKAGE','WORK_PACKAGE_TO_METHOD','WORK_PACKAGE_TO_DELIVERABLE','DELIVERABLE_TO_METRIC']),'source_id':idstr(),'target_ids':arr(idstr()),'complete':bools()})),'routing_actions':arr(obj({'finding_code':s(),'route':enum(['PROJECT_KNOWLEDGE_AGENT','SECURITY_REVIEW_AGENT','PLANNING_AGENT','WRITING_AGENT','USER','BLOCK']),'reason':s()}))}),
-'P-TARGETED-REPAIR':obj({'repaired_object':{'type':'object'},'changed_paths':arr(json_pointer(),1),'unchanged_protected_hashes':arr(obj({'path':json_pointer(),'hash':hashstr()})),'resolved_finding_codes':arr(s(),1),'unresolved_finding_codes':arr(s())}),
+'P-TARGETED-REPAIR':obj({'repaired_object':{'type':'object','description':'Complete repaired object. Values outside allowed_paths must be copied exactly from original_object.content; runtime computes the real JSON diff and rejects unauthorized changes.'},'changed_paths':{**arr(json_pointer(),1),'description':'RFC 6901 paths that truthfully cover every real difference between original_object.content and repaired_object, with no path that lacks a corresponding object diff.'},'unchanged_protected_hashes':arr(obj({'path':json_pointer(),'hash':hashstr()})),'resolved_finding_ids':arr(idstr(),1,True),'unresolved_finding_ids':arr(idstr(),0,True)}),
 }
 
 # shared input envelope fields
@@ -371,6 +379,8 @@ workflow_types=['PROJECT_INTAKE','TEMPLATE_EXTRACTION','HYBRID_ONLINE_ASSIST','P
 def input_schema(prompt_id, fields):
     payload_props={f:FIELD_SCHEMAS[f] for f in fields}
     optional_fields = ['human_resolutions'] if prompt_id in {'P-WRITE-BLUEPRINT','P-WRITE-BLUEPRINT-CRITIC'} else []
+    if prompt_id == 'P-TARGETED-REPAIR':
+        optional_fields.extend(['human_resolutions', 'contract_feedback'])
     payload_props.update({f: FIELD_SCHEMAS[f] for f in optional_fields})
     return {'$schema':SCHEMA,'$id':f"{slug(prompt_id)}_input.schema.json",**obj({
         'schema_version':{'const':'2.0'},'prompt_id':{'const':prompt_id},'prompt_version':{'const':prompt_version(prompt_id)},
@@ -480,7 +490,7 @@ model_endpoints={'version':'2.0','endpoints':[{
     'endpoint_id':'offline-primary','environment':'OFFLINE_LOCAL','provider':'openai-compatible','base_url':'${OFFLINE_LLM_BASE_URL}','api_key_secret':'OFFLINE_LLM_API_KEY','enabled':'${OFFLINE_LLM_ENABLED:true}','allowed_security_levels':SEC_LEVELS,'allowed_task_types':['SECURITY_CLASSIFICATION','SCHEME_EXTRACTION','PROJECT_DEFINITION','FACT_EXTRACTION','TEMPLATE_EXTRACTION','REVISION_PLANNING','BLUEPRINT_WRITING','CONTENT_WRITING','CRITIC','INTEGRATION','TARGETED_REPAIR'],'data_policy':{'retention':'NONE','training_usage':'DISALLOWED','request_logging':'METADATA_ONLY','response_logging':'METADATA_ONLY'},'network_policy':{'internet_access':False},'limits':{'connect_timeout_seconds':10,'read_timeout_seconds':180,'total_timeout_seconds':600,'max_concurrency':2,'max_input_tokens':64000,'max_output_tokens':32000}},
 {'endpoint_id':'online-public-primary','environment':'ONLINE_PUBLIC','provider':'openai-compatible','base_url':'${ONLINE_LLM_BASE_URL}','api_key_secret':'ONLINE_LLM_API_KEY','enabled':'${ONLINE_LLM_ENABLED:false}','allowed_security_levels':['PUBLIC'],'allowed_task_types':['PUBLIC_RESEARCH_PLAN','PUBLIC_RESEARCH_SYNTHESIS','PUBLIC_RESEARCH_CRITIC','PUBLIC_TEMPLATE_ANALYSIS','GENERIC_LANGUAGE_ASSIST'],'data_policy':{'retention':'PROVIDER_CONFIGURED','training_usage':'DISALLOWED','request_logging':'REDACTED','response_logging':'REDACTED'},'network_policy':{'internet_access':True},'limits':{'connect_timeout_seconds':15,'read_timeout_seconds':180,'total_timeout_seconds':240,'max_concurrency':4,'max_input_tokens':32000,'max_output_tokens':8000}}]}
 dump_yaml(ROOT/'config/model_endpoints.yaml',model_endpoints)
-models={'version':'2.0','models':[{'model_id':'offline-general-primary','endpoint_id':'offline-primary','provider_model_name':'${OFFLINE_GENERAL_MODEL}','enabled':True,'capabilities':{'structured_output':True,'long_context':True,'chinese_writing':True,'document_analysis':True},'defaults':{'temperature':0.1,'top_p':0.9,'max_output_tokens':32000}}, {'model_id':'offline-critic-primary','endpoint_id':'offline-primary','provider_model_name':'${OFFLINE_CRITIC_MODEL}','enabled':True,'capabilities':{'structured_output':True,'long_context':True,'chinese_writing':True,'document_analysis':True},'defaults':{'temperature':0.0,'top_p':1.0,'max_output_tokens':16000}}, {'model_id':'online-public-primary','endpoint_id':'online-public-primary','provider_model_name':'${ONLINE_PUBLIC_MODEL}','enabled':'${ONLINE_LLM_ENABLED:false}','capabilities':{'structured_output':True,'long_context':True},'defaults':{'temperature':0.1,'top_p':0.9,'max_output_tokens':8000}}]}
+models={'version':'2.0','models':[{'model_id':'offline-general-primary','endpoint_id':'offline-primary','provider_model_name':'${OFFLINE_GENERAL_MODEL}','enabled':True,'capabilities':{'structured_output':True,'strict_json_schema':'PROVIDER_NEGOTIATED','json_object_fallback':True,'long_context':True,'chinese_writing':True,'document_analysis':True},'defaults':{'temperature':0.1,'top_p':0.9,'max_output_tokens':32000}}, {'model_id':'offline-critic-primary','endpoint_id':'offline-primary','provider_model_name':'${OFFLINE_CRITIC_MODEL}','enabled':True,'capabilities':{'structured_output':True,'strict_json_schema':'PROVIDER_NEGOTIATED','json_object_fallback':True,'long_context':True,'chinese_writing':True,'document_analysis':True},'defaults':{'temperature':0.0,'top_p':1.0,'max_output_tokens':16000}}, {'model_id':'online-public-primary','endpoint_id':'online-public-primary','provider_model_name':'${ONLINE_PUBLIC_MODEL}','enabled':'${ONLINE_LLM_ENABLED:false}','capabilities':{'structured_output':True,'strict_json_schema':'PROVIDER_NEGOTIATED','json_object_fallback':True,'long_context':True},'defaults':{'temperature':0.1,'top_p':0.9,'max_output_tokens':8000}}]}
 dump_yaml(ROOT/'config/models.yaml',models)
 # update profiles to model IDs
 pm={'version':'2.0','profiles':{
@@ -510,6 +520,8 @@ def sample_for_field(name):
             return json.loads(authoritative_case.read_text(encoding='utf-8'))['expected_output']['result']['blueprint']
         return payload[name]
     h='a'*64
+    if name == 'inherited_source_catalog':
+        return [{'source_id':'fact-001','object_path':'payload.fact_context.0','source_type':'MODEL_INFERENCE','document_version_id':None,'section_id':None,'source_hash':h,'authority_rank':60,'security_level':'INTERNAL'}]
     sr={'source_id':'src-001','source_type':'USER_CONFIRMATION','document_version_id':None,'section_id':None,'span_start':None,'span_end':None,'quoted_text':'用户确认的示例内容','source_hash':h,'authority_rank':100,'security_level':'INTERNAL'}
     oref={'object_id':'obj-001','object_type':'GENERIC','version':1,'object_hash':h,'security_level':'INTERNAL','display_name':'示例对象'}
     section={'section_id':'sec-001','section_key':'research_content','title':'研究内容','level':1,'text':'现有正文示例。','text_hash':h,'block_ids':['block-001'],'contains_table':False,'contains_formula':False,'contains_image':False,'contains_comment':False,'contains_revision':False,'security_level':'INTERNAL'}
@@ -532,6 +544,9 @@ def sample_for_field(name):
 
 def base_input(pid, fields, case_type):
     payload={f:sample_for_field(f) for f in fields}
+    if pid == 'P-TARGETED-REPAIR':
+        for index, finding in enumerate(payload.get('findings_to_repair') or []):
+            finding['finding_instance_id'] = f'finding-replay-{index + 1:03d}'
     d={'schema_version':'2.0','prompt_id':pid,'prompt_version':prompt_version(pid),'task':{'task_id':'task-001','workflow_type':'PROPOSAL_AUTHORING' if 'PUBLIC' not in pid else 'HYBRID_ONLINE_ASSIST','current_step':slug(pid).upper(),'attempt':1,'writing_mode':'SUBSTANTIVE_REVISION'},'security_context':sample_for_field('security_constraints'),'scope':{'project_id':'project-001','target_object_ids':['obj-001'],'read_only_object_ids':[],'protected_object_ids':[]},'freshness':{'source_document_hash':'a'*64,'target_section_hash':'a'*64,'scheme_profile_hash':'a'*64,'project_definition_hash':'a'*64,'fact_context_hash':'a'*64,'template_hash':'a'*64,'security_policy_hash':'a'*64},'payload':payload,'expected_output_schema':f'schemas/prompts/{slug(pid)}_output.schema.json'}
     if case_type=='schema_error': d.pop('security_context')
     if case_type=='missing_input':
@@ -574,7 +589,7 @@ def minimal_result(pid, case_type):
 'P-WRITE-CONTENT':{'candidate_id':'cand-001','candidate_text':'本项目拟开展相关研究。','paragraphs':sample_for_field('content_candidate')['paragraphs'],'trace_links':sample_for_field('trace_links'),'term_usage':[{'term':'本项目','canonical_term':'本项目','paragraph_ids':['p-001']}],'unresolved_items':[],'source_preservation_summary':[{'source_span':'原章节','action':'REPHRASED','paragraph_id':'p-001'}]},
 'P-WRITE-CRITIC':{'verdict':'ACCEPT','checked_paragraph_ids':['p-001'],'unsupported_trace_ids':[],'blueprint_deviation_paragraph_ids':[],'scope_violations':[],'profile_acceptance_results':[{'rule':'目标与任务对应','passed':True,'evidence':'段落p-001'}]},
 'P-INTEGRATION-CRITIC':{'verdict':'ACCEPT','terminology_checks':[{'term':'本项目','consistent':True,'sections':['sec-001']}],'numeric_checks':[],'mapping_checks':[{'mapping_type':'OBJECTIVE_TO_WORK_PACKAGE','source_id':'item-001','target_ids':['item-002'],'complete':True}],'routing_actions':[]},
-'P-TARGETED-REPAIR':{'repaired_object':{'content':'已删除无来源陈述'},'changed_paths':['/content/paragraphs/0'],'unchanged_protected_hashes':[{'path':'/metadata','hash':h}],'resolved_finding_codes':['WRITE_UNSOURCED_CLAIM'],'unresolved_finding_codes':[]}
+'P-TARGETED-REPAIR':{'repaired_object':{'content':'已删除无来源陈述'},'changed_paths':['/content/paragraphs/0'],'unchanged_protected_hashes':[{'path':'/metadata','hash':h}],'resolved_finding_ids':['finding-replay-001'],'unresolved_finding_ids':[]}
     }[pid]
     status='PASS'; findings=[]; unresolved=[]; questions=[]; warnings=[]
     if case_type=='missing_input':

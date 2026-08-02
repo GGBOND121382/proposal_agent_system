@@ -187,8 +187,18 @@ class SemanticContract:
     def evidence_ids(self, paragraph: Mapping[str, Any]) -> set[str]:
         evidence: set[str] = set()
         for field in self.evidence_fields:
-            evidence.update(self._ids(paragraph.get(field)))
+            evidence.update(self.evidence_ids_for_field(paragraph, field))
         return evidence
+
+    def evidence_ids_for_field(
+        self,
+        paragraph: Mapping[str, Any],
+        field: str,
+    ) -> set[str]:
+        """Return evidence IDs from one contract-registered evidence field."""
+        if str(field) not in self.evidence_fields:
+            return set()
+        return self._ids(paragraph.get(field))
 
     def required_evidence_ids(self, section_contract: Mapping[str, Any]) -> set[str]:
         return self._ids(section_contract.get(self.required_evidence_contract_field))
@@ -287,6 +297,13 @@ class SemanticContract:
         )
         coverage = ", ".join(self.claim_coverage_fields)
         evidence = ", ".join(self.evidence_fields)
+        entity_field_path_fields = ", ".join(
+            sorted(
+                field_name
+                for field_name, semantic in self.reference_field_semantics.items()
+                if semantic is ReferenceSemantic.ENTITY_OR_FIELD_PATH
+            )
+        )
         return (
             f"{self.prompt_identity()}\n\n"
             "## 已登记的机器规则\n"
@@ -301,6 +318,13 @@ class SemanticContract:
             f"Evidence fields are: {evidence}. A claim must never cite itself as evidence.\n"
             "Reference fields are governed by the registered field semantics used by schema and "
             "runtime validation; diagnostic descriptors and human text are not entity references.\n"
+            f"ENTITY_OR_FIELD_PATH fields are: {entity_field_path_fields}. Every value in these fields "
+            "must be either (1) an exact entity ID visible in the input/current output, (2) an exact "
+            "registered top-level input-object name, or (3) a field path anchored by such an entity ID, "
+            "using '<entity_id>.<field>' or '<entity_id>:<field>'. Never emit an unanchored property "
+            "name such as 'must_answer', 'source_refs', or 'required_evidence_ids'. For example, cite "
+            "'P-ABS-005' or 'P-ABS-005.must_answer', never 'must_answer' alone. If field-level precision "
+            "is unnecessary, cite only the owning entity ID.\n"
             "The deterministic owner of each registered rule is authoritative for that rule. "
             "Producer, Critic, and Repair must not create a competing local interpretation."
         )

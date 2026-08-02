@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -282,60 +281,75 @@ class DecisionArbiter:
         workflow_state: dict[str, Any],
         workflow_status: str,
         current_step: int,
-    ) -> str:
+        expected_updated_at: str | None = None,
+    ) -> tuple[str, str]:
         """Atomically persist the record, workflow index/state, and audit event."""
 
         payload = record.to_dict()
         artifact_id = new_id("artifact")
-        next_state = copy.deepcopy(workflow_state)
-        next_state.setdefault("decision_record_ids", []).append(artifact_id)
-        del next_state["decision_record_ids"][:-100]
+        # Preserve the identity of the live workflow state and every nested
+        # checkpoint object held by an active section loop. Replacing the state
+        # from a deep copy here detached those references: a later phase update
+        # changed an orphan rather than the state persisted by the engine.
+        # Mutate only the decision index and restore it if the transaction fails.
+        had_decision_index = "decision_record_ids" in workflow_state
+        decision_ids = workflow_state.setdefault("decision_record_ids", [])
+        if not isinstance(decision_ids, list):
+            raise TypeError("workflow_state.decision_record_ids must be a list")
+        previous_decision_ids = list(decision_ids)
+        decision_ids.append(artifact_id)
+        del decision_ids[:-100]
 
-        with db.transaction() as tx:
-            version = tx.next_artifact_version(
-                project_id=project_id,
-                workflow_id=workflow_id,
-                artifact_type="DECISION_RECORD",
-                prompt_id=prompt_id,
-            )
-            tx.execute(
-                """INSERT INTO artifacts(id,project_id,workflow_id,artifact_type,prompt_id,version,status,security_level,context_hash,content_json,created_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    artifact_id,
-                    project_id,
-                    workflow_id,
-                    "DECISION_RECORD",
-                    prompt_id,
-                    version,
-                    record.decision,
-                    security_level,
-                    sha256_json(payload),
-                    json.dumps(payload, ensure_ascii=False),
-                    record.created_at,
-                ),
-            )
-            tx.update_workflow(
-                workflow_id=workflow_id,
-                status=workflow_status,
-                current_step=current_step,
-                state=next_state,
-            )
-            tx.audit(
-                "DECISION_RECORDED",
-                project_id=project_id,
-                object_id=artifact_id,
-                metadata={
-                    "workflow_id": workflow_id,
-                    "prompt_id": prompt_id,
-                    "version": version,
-                    "decision": record.decision,
-                    "record_id": record.record_id,
-                    "contract_hash": record.contract_hash,
-                },
-            )
+        try:
+            with db.transaction() as tx:
+                version = tx.next_artifact_version(
+                    project_id=project_id,
+                    workflow_id=workflow_id,
+                    artifact_type="DECISION_RECORD",
+                    prompt_id=prompt_id,
+                )
+                tx.execute(
+                    """INSERT INTO artifacts(id,project_id,workflow_id,artifact_type,prompt_id,version,status,security_level,context_hash,content_json,created_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        artifact_id,
+                        project_id,
+                        workflow_id,
+                        "DECISION_RECORD",
+                        prompt_id,
+                        version,
+                        record.decision,
+                        security_level,
+                        sha256_json(payload),
+                        json.dumps(payload, ensure_ascii=False),
+                        record.created_at,
+                    ),
+                )
+                updated_at = tx.update_workflow(
+                    workflow_id=workflow_id,
+                    status=workflow_status,
+                    current_step=current_step,
+                    state=workflow_state,
+                    expected_updated_at=expected_updated_at,
+                )
+                tx.audit(
+                    "DECISION_RECORDED",
+                    project_id=project_id,
+                    object_id=artifact_id,
+                    metadata={
+                        "workflow_id": workflow_id,
+                        "prompt_id": prompt_id,
+                        "version": version,
+                        "decision": record.decision,
+                        "record_id": record.record_id,
+                        "contract_hash": record.contract_hash,
+                    },
+                )
+        except BaseException:
+            if had_decision_index:
+                decision_ids[:] = previous_decision_ids
+            else:
+                workflow_state.pop("decision_record_ids", None)
+            raise
 
-        workflow_state.clear()
-        workflow_state.update(next_state)
-        return artifact_id
-
+        return artifact_id, updated_at

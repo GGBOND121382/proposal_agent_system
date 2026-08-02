@@ -6,10 +6,12 @@ import re
 import time
 from typing import Any
 
-from .llm import LLMError, ModelGateway
+from .llm import LLMError, ModelGateway, ProviderError
+from .json_pointer import is_ancestor_or_same, join_pointer, paths_overlap
 from .contract_registry import (
     augment_prompt_with_enum_contract,
     augment_prompt_with_field_ownership_contract,
+    augment_prompt_with_reference_integrity_contract,
     normalize_registered_enum_aliases_against_schema,
     repair_field_ownership_against_schema,
     required_null_container_errors,
@@ -26,6 +28,7 @@ from .output_integrity import (
     validate_reference_ids,
 )
 from .proposal_quality import ProposalQualityGuard, SECTION_FUNCTION_ROLE_ALIASES
+from .runtime_failures import ProviderFailureKind
 from .quality_guard import (
     QualityGuardContractError,
     QualityGuardObserver,
@@ -68,9 +71,16 @@ def _schema_source_type(value: Any) -> Any:
 
 
 class PromptExecutionError(RuntimeError):
-    def __init__(self, message: str, *, validation_errors: list[str] | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        validation_errors: list[str] | None = None,
+        run_id: str | None = None,
+    ):
         super().__init__(message)
         self.validation_errors = validation_errors or []
+        self.run_id = run_id
 
 
 class PromptExecutor:
@@ -95,6 +105,30 @@ class PromptExecutor:
                 ensure_quality_guard_observer(self.quality_guard)
             except QualityGuardContractError as exc:
                 raise PromptExecutionError(str(exc)) from exc
+
+    @staticmethod
+    def _provider_contract_failure(
+        message: str,
+        raw_response_text: str | None,
+        *,
+        phase: str,
+        validation_errors: list[str] | None = None,
+    ) -> ProviderError:
+        """Type a provider-authored business-object contract failure.
+
+        The response remains immutable.  The typed failure lets the workflow
+        request a bounded new whole object with a fresh attempt identity rather
+        than blocking as if an internal workflow invariant had failed.
+        """
+
+        return ProviderError(
+            message,
+            kind=ProviderFailureKind.RESPONSE_SHAPE,
+            phase=phase,
+            response_excerpt=str(raw_response_text or "")[:1000],
+            retryable_hint=False,
+            validation_errors=validation_errors,
+        )
 
     def _observe_guard(
         self,
@@ -1074,6 +1108,172 @@ class PromptExecutor:
                 )
         return normalized
 
+    @staticmethod
+    def _targeted_repair_diff_paths(
+        before: Any,
+        after: Any,
+        path_tokens: tuple[Any, ...] = (),
+    ) -> list[str]:
+        """Return minimal RFC 6901 paths whose JSON values actually changed."""
+
+        if type(before) is not type(after):
+            return [join_pointer(*path_tokens)]
+        if isinstance(before, dict):
+            paths: list[str] = []
+            for key in sorted(set(before) | set(after), key=str):
+                child_tokens = (*path_tokens, key)
+                if key not in before or key not in after:
+                    paths.append(join_pointer(*child_tokens))
+                else:
+                    paths.extend(
+                        PromptExecutor._targeted_repair_diff_paths(
+                            before[key], after[key], child_tokens
+                        )
+                    )
+            return paths
+        if isinstance(before, list):
+            if len(before) != len(after):
+                return [join_pointer(*path_tokens)]
+            paths: list[str] = []
+            for index, (left, right) in enumerate(zip(before, after)):
+                paths.extend(
+                    PromptExecutor._targeted_repair_diff_paths(
+                        left, right, (*path_tokens, index)
+                    )
+                )
+            return paths
+        return [] if before == after else [join_pointer(*path_tokens)]
+
+    @staticmethod
+    def _validate_output_semantics(
+        prompt_id: str,
+        envelope: dict[str, Any],
+        output: dict[str, Any],
+    ) -> None:
+        """Validate cross-field business invariants without mutating output."""
+
+        if prompt_id != "P-TARGETED-REPAIR":
+            return
+        requested = [
+            str(item.get("finding_instance_id") or "")
+            for item in (envelope.get("payload") or {}).get("findings_to_repair") or []
+            if isinstance(item, dict)
+        ]
+        result = output.get("result") or {}
+        resolved = [str(item) for item in result.get("resolved_finding_ids") or []]
+        unresolved = [
+            str(item) for item in result.get("unresolved_finding_ids") or []
+        ]
+        errors: list[str] = []
+        if not requested or any(not item for item in requested):
+            errors.append(
+                "/payload/findings_to_repair: every finding requires finding_instance_id"
+            )
+        if len(set(requested)) != len(requested):
+            errors.append(
+                "/payload/findings_to_repair: finding_instance_id values must be unique"
+            )
+        overlap = sorted(set(resolved) & set(unresolved))
+        if overlap:
+            errors.append(
+                "/result: resolved_finding_ids and unresolved_finding_ids overlap: "
+                + ", ".join(overlap)
+            )
+        requested_set = set(requested)
+        classified_set = set(resolved) | set(unresolved)
+        unknown = sorted(classified_set - requested_set)
+        missing = sorted(requested_set - classified_set)
+        if unknown:
+            errors.append(
+                "/result: finding ids not present in findings_to_repair: "
+                + ", ".join(unknown)
+            )
+        if missing:
+            errors.append(
+                "/result: findings not classified as resolved or unresolved: "
+                + ", ".join(missing)
+            )
+        if str(output.get("status") or "").upper() == "PASS" and unresolved:
+            errors.append(
+                "/status: PASS requires unresolved_finding_ids to be empty"
+            )
+        payload = envelope.get("payload") or {}
+        original_object = payload.get("original_object") or {}
+        original_content = original_object.get("content")
+        repaired_object = result.get("repaired_object")
+        if not isinstance(original_content, dict) or not isinstance(
+            repaired_object, dict
+        ):
+            errors.append(
+                "/result/repaired_object: targeted repair requires an object matching original_object.content"
+            )
+        else:
+            repaired_document = (
+                repaired_object
+                if isinstance(repaired_object.get("content"), dict)
+                else {"content": repaired_object}
+            )
+            original_document = {"content": original_content}
+            actual_paths = PromptExecutor._targeted_repair_diff_paths(
+                original_document, repaired_document
+            )
+            allowed_paths = [str(item) for item in payload.get("allowed_paths") or []]
+            protected_paths = [
+                str(item) for item in payload.get("protected_paths") or []
+            ]
+            declared_paths = [
+                str(item) for item in result.get("changed_paths") or []
+            ]
+            for path in actual_paths:
+                if not any(
+                    is_ancestor_or_same(allowed, path)
+                    for allowed in allowed_paths
+                ):
+                    errors.append(
+                        f"/result/repaired_object: actual changed path {path!r} is outside allowed_paths"
+                    )
+                if any(paths_overlap(protected, path) for protected in protected_paths):
+                    errors.append(
+                        f"/result/repaired_object: actual changed path {path!r} overlaps protected_paths"
+                    )
+                if not any(
+                    is_ancestor_or_same(declared, path)
+                    for declared in declared_paths
+                ):
+                    errors.append(
+                        f"/result/changed_paths: actual changed path {path!r} was not declared"
+                    )
+            for path in declared_paths:
+                if not any(is_ancestor_or_same(path, actual) for actual in actual_paths):
+                    errors.append(
+                        f"/result/changed_paths: declared path {path!r} has no corresponding object diff"
+                    )
+            expected_protected = [
+                {
+                    "path": str(item.get("path") or ""),
+                    "hash": str(item.get("hash") or ""),
+                }
+                for item in payload.get("protected_hashes") or []
+                if isinstance(item, dict)
+            ]
+            reported_protected = [
+                {
+                    "path": str(item.get("path") or ""),
+                    "hash": str(item.get("hash") or ""),
+                }
+                for item in result.get("unchanged_protected_hashes") or []
+                if isinstance(item, dict)
+            ]
+            if reported_protected != expected_protected:
+                errors.append(
+                    "/result/unchanged_protected_hashes: must exactly echo payload.protected_hashes"
+                )
+        if errors:
+            raise PromptExecutionError(
+                "Targeted repair finding closure validation failed",
+                validation_errors=errors,
+            )
+
     async def execute(
         self,
         prompt_id: str,
@@ -1113,7 +1313,17 @@ class PromptExecutor:
             system_prompt = self._system_prompt(prompt_id, output_schema, model_envelope)
             result = await self.gateway.invoke(route, prompt_id, system_prompt, model_envelope, output_schema)
             raw_response_text = result.raw_text
-            output = self._normalize_output(prompt_id, result.output, model_envelope)
+            try:
+                output = self._normalize_output(prompt_id, result.output, model_envelope)
+            except PromptExecutionError as exc:
+                raise ProviderError(
+                    f"Provider output contract validation failed: {exc}",
+                    kind=ProviderFailureKind.RESPONSE_SHAPE,
+                    phase="output_structure_validation",
+                    response_excerpt=str(raw_response_text or "")[:1000],
+                    retryable_hint=False,
+                    validation_errors=exc.validation_errors,
+                ) from exc
             parse_report = dict(getattr(result, "parse_report", {}) or {})
             repair_count = int(parse_report.get("repair_count") or 0)
             code_fence_removed = bool(parse_report.get("code_fence_removed"))
@@ -1143,13 +1353,35 @@ class PromptExecutor:
             if callable(structure_validator):
                 post_structure_errors = structure_validator(prompt_id, "output", output)
                 if post_structure_errors:
-                    raise PromptExecutionError(
-                        "Post-normalization output container structure validation failed",
+                    raise ProviderError(
+                        "Provider output failed post-normalization container validation",
+                        kind=ProviderFailureKind.RESPONSE_SHAPE,
+                        phase="output_structure_validation",
+                        response_excerpt=str(raw_response_text or "")[:1000],
+                        retryable_hint=False,
                         validation_errors=post_structure_errors,
                     )
             output_errors = self.pack.validate(prompt_id, "output", output)
             if output_errors:
-                raise PromptExecutionError("Output schema validation failed", validation_errors=output_errors)
+                raise ProviderError(
+                    "Provider output failed strict schema validation",
+                    kind=ProviderFailureKind.RESPONSE_SHAPE,
+                    phase="output_schema_validation",
+                    response_excerpt=str(raw_response_text or "")[:1000],
+                    retryable_hint=False,
+                    validation_errors=output_errors,
+                )
+            try:
+                self._validate_output_semantics(prompt_id, model_envelope, output)
+            except PromptExecutionError as exc:
+                raise ProviderError(
+                    f"Provider output failed semantic contract validation: {exc}",
+                    kind=ProviderFailureKind.RESPONSE_SHAPE,
+                    phase="output_semantic_validation",
+                    response_excerpt=str(raw_response_text or "")[:1000],
+                    retryable_hint=False,
+                    validation_errors=exc.validation_errors,
+                ) from exc
             status = output.get("status", "ERROR")
             duration_ms = int((time.perf_counter() - started) * 1000)
             self._save_run(run_id, project_id, workflow_id, prompt_id, status, result.model_id, result.endpoint_id, input_hash, model_envelope, output, None, duration_ms)
@@ -1183,7 +1415,9 @@ class PromptExecutor:
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
             )
-            raise PromptExecutionError(error, validation_errors=details) from exc
+            raise PromptExecutionError(
+                error, validation_errors=details, run_id=run_id
+            ) from exc
         except (AttributeError, TypeError, IndexError) as exc:
             # Last-resort execution boundary.  Declared model-output container
             # mismatches should already be reported by the structure preflight;
@@ -1226,7 +1460,7 @@ class PromptExecutor:
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
             )
-            raise PromptExecutionError(error) from exc
+            raise PromptExecutionError(error, run_id=run_id) from exc
 
     @staticmethod
     def _compact_paragraph_text(text: str, *, limit: int = 180) -> str:
@@ -1561,6 +1795,11 @@ class PromptExecutor:
             base_prompt,
             output_schema,
             contract_id=f"prompt-pack:{prompt_id}:field-ownership",
+        )
+        base_prompt = augment_prompt_with_reference_integrity_contract(
+            base_prompt,
+            output_schema,
+            contract_id=f"prompt-pack:{prompt_id}:reference-integrity",
         )
         semantic_contract = get_semantic_contract()
         base_prompt = semantic_contract.inject_into_prompt(base_prompt)

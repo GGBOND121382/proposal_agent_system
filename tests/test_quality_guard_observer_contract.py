@@ -222,7 +222,10 @@ def test_non_critic_guard_finding_is_arbitrated_instead_of_silently_ignored():
     engine.executor = SimpleNamespace(quality_guard_enabled=True)
     engine.db = None
     engine.decision_arbiter = DecisionArbiter()
-    engine.decision_arbiter.persist = lambda *args, **kwargs: "artifact-decision"
+    engine.decision_arbiter.persist = lambda *args, **kwargs: (
+        "artifact-decision",
+        kwargs.get("expected_updated_at") or "test-updated-at",
+    )
     engine._project_level = lambda project_id: "INTERNAL"
 
     output = {

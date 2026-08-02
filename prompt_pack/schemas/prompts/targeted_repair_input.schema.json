@@ -10,7 +10,7 @@
       "const": "P-TARGETED-REPAIR"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.4.0"
     },
     "task": {
       "type": "object",
@@ -163,11 +163,21 @@
         "findings_to_repair": {
           "type": "array",
           "items": {
-            "$ref": "../common/finding.schema.json"
+            "allOf": [
+              {
+                "$ref": "../common/finding.schema.json"
+              },
+              {
+                "required": [
+                  "finding_instance_id"
+                ]
+              }
+            ]
           },
           "minItems": 1
         },
         "allowed_paths": {
+          "description": "RFC 6901 roots authorizing each listed path and all of its descendants. For example /content/paragraphs/2 authorizes /content/paragraphs/2/function. A child path never authorizes its parent or siblings; protected_paths always take precedence.",
           "type": "array",
           "items": {
             "type": "string",
@@ -218,11 +228,42 @@
           "minItems": 1,
           "x-reference-semantic": "OBJECT_REF"
         },
+        "inherited_source_catalog": {
+          "type": "array",
+          "description": "Read-only semantic entity namespace inherited from the original producer input. These entries authorize references to existing upstream entities but do not authorize changing any additional path.",
+          "items": {
+            "$ref": "../common/trusted_source_catalog_entry.schema.json"
+          },
+          "uniqueItems": true
+        },
         "human_resolutions": {
           "type": "array",
           "items": {
             "$ref": "../common/human_resolution.schema.json"
           }
+        },
+        "contract_feedback": {
+          "type": "object",
+          "properties": {
+            "attempt": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 6
+            },
+            "validation_errors": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "attempt",
+            "validation_errors"
+          ]
         }
       },
       "additionalProperties": false,
@@ -233,7 +274,8 @@
         "allowed_paths",
         "protected_paths",
         "protected_hashes",
-        "original_input_refs"
+        "original_input_refs",
+        "inherited_source_catalog"
       ]
     },
     "expected_output_schema": {

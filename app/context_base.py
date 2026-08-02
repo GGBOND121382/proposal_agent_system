@@ -827,7 +827,7 @@ class ContextBuilder:
             return canonical
 
         tag_pattern = re.compile(
-            r"(?<![A-Za-z0-9])`?(RC|BASE)-0*(\d+)`?(?![A-Za-z0-9])",
+            r"(?<![A-Za-z0-9])`?(RQ|OBJ|RC|BASE)-0*(\d+)`?(?![A-Za-z0-9])",
             re.IGNORECASE,
         )
         rq_pattern = re.compile(
@@ -838,8 +838,44 @@ class ContextBuilder:
             r"(?<![A-Za-z0-9])`?RC-0*(\d+)`?(?![A-Za-z0-9])",
             re.IGNORECASE,
         )
+        obj_pattern = re.compile(
+            r"(?<![A-Za-z0-9])`?OBJ-0*(\d+)`?(?![A-Za-z0-9])",
+            re.IGNORECASE,
+        )
+
+        def canonical_tag_id(value: Any) -> str:
+            raw = str(value or "").strip()
+            match = re.fullmatch(
+                r"(RQ|OBJ|RC|BASE)-0*(\d+)", raw, flags=re.IGNORECASE
+            )
+            if not match:
+                return raw
+            return f"{match.group(1).upper()}-{int(match.group(2)):03d}"
+
+        # Legacy persisted argument results used non-padded tag identities and
+        # two edge field presentations. Canonicalize identities at this single
+        # trusted context boundary; do not infer entities from free prose.
+        for node in nodes:
+            if isinstance(node, dict) and node.get("node_id"):
+                node["node_id"] = canonical_tag_id(node["node_id"])
+        research_questions = architecture.get("research_questions")
+        if isinstance(research_questions, list):
+            for question in research_questions:
+                if isinstance(question, dict) and question.get("node_id"):
+                    question["node_id"] = canonical_tag_id(question["node_id"])
+        edges = architecture.get("edges")
+        if not isinstance(edges, list):
+            edges = []
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            for field in ("source_id", "target_id", "source_node_id", "target_node_id"):
+                if edge.get(field):
+                    edge[field] = canonical_tag_id(edge[field])
+
         declarations: dict[str, tuple[str, dict[str, Any] | None]] = {}
         declared_question_work_packages: dict[str, str] = {}
+        declared_question_objectives: dict[str, str] = {}
         for section in sections:
             if not isinstance(section, dict):
                 continue
@@ -848,6 +884,7 @@ class ContextBuilder:
                 line = raw_line.rstrip("\r\n")
                 rq_numbers = rq_pattern.findall(line)
                 rc_numbers = rc_pattern.findall(line)
+                obj_numbers = obj_pattern.findall(line)
                 if rq_numbers and rc_numbers:
                     pairs = (
                         zip(rq_numbers, rc_numbers)
@@ -858,6 +895,16 @@ class ContextBuilder:
                         declared_question_work_packages[
                             f"RQ-{int(rq_number):03d}"
                         ] = f"RC-{int(rc_number):03d}"
+                if rq_numbers and obj_numbers:
+                    pairs = (
+                        zip(rq_numbers, obj_numbers)
+                        if len(rq_numbers) == len(obj_numbers)
+                        else [(rq_numbers[0], obj_numbers[0])]
+                    )
+                    for rq_number, obj_number in pairs:
+                        declared_question_objectives[
+                            f"RQ-{int(rq_number):03d}"
+                        ] = f"OBJ-{int(obj_number):03d}"
                 matches = list(tag_pattern.finditer(line))
                 for index, match in enumerate(matches):
                     prefix = match.group(1).upper()
@@ -880,6 +927,22 @@ class ContextBuilder:
                             source_ref["span_start"] = section_offset
                             source_ref["span_end"] = section_offset + len(line)
                             source_ref["quoted_text"] = line
+                        elif section.get("document_id") or section.get("section_id"):
+                            source_ref = {
+                                "source_id": str(
+                                    section.get("document_id")
+                                    or section.get("section_id")
+                                ),
+                                "source_type": "CURRENT_PROPOSAL",
+                                "document_version_id": section.get("document_version_id"),
+                                "section_id": section.get("section_id"),
+                                "span_start": section_offset,
+                                "span_end": section_offset + len(line),
+                                "quoted_text": line,
+                                "source_hash": section.get("text_hash") or sha256_text(line),
+                                "authority_rank": int(section.get("authority_rank") or 85),
+                                "security_level": section.get("security_level") or "INTERNAL",
+                            }
                         else:
                             source_ref = None
                         declarations[node_id] = (statement, source_ref)
@@ -894,13 +957,17 @@ class ContextBuilder:
             if node_id in existing_node_ids:
                 continue
             prefix = node_id.split("-", 1)[0]
+            node_type = {
+                "RQ": "RESEARCH_QUESTION",
+                "OBJ": "OBJECTIVE",
+                "RC": "WORK_PACKAGE",
+                "BASE": "TEAM_EVIDENCE",
+            }[prefix]
             nodes.append({
                 "node_id": node_id,
-                "node_type": (
-                    "WORK_PACKAGE" if prefix == "RC" else "TEAM_EVIDENCE"
-                ),
+                "node_type": node_type,
                 "statement": statement,
-                "status": "PLANNED" if prefix == "RC" else "UNKNOWN",
+                "status": "UNKNOWN" if prefix == "BASE" else "PLANNED",
                 "source_refs": [source_ref] if source_ref else [],
             })
             existing_node_ids.add(node_id)
@@ -916,22 +983,38 @@ class ContextBuilder:
                 if not isinstance(row, dict):
                     continue
                 question_id = str(row.get("research_question_id") or "")
+                question_id = canonical_tag_id(question_id)
+                row["research_question_id"] = question_id
                 work_package_id = declared_question_work_packages.get(question_id)
                 if work_package_id and work_package_id in existing_node_ids:
                     row["work_package_ids"] = [work_package_id]
+                else:
+                    row["work_package_ids"] = [
+                        canonical_tag_id(item)
+                        for item in row.get("work_package_ids") or []
+                    ]
+                objective_id = declared_question_objectives.get(question_id)
+                if objective_id and objective_id in existing_node_ids:
+                    row["objective_ids"] = [objective_id]
+                else:
+                    row["objective_ids"] = [
+                        canonical_tag_id(item)
+                        for item in row.get("objective_ids") or []
+                    ]
 
-        edges = architecture.get("edges")
-        if not isinstance(edges, list):
-            edges = []
         existing_edge_pairs = {
-            (str(edge.get("source_id")), str(edge.get("target_id")))
+            (
+                str(edge.get("source_id") or edge.get("source_node_id") or ""),
+                str(edge.get("target_id") or edge.get("target_node_id") or ""),
+            )
             for edge in edges
             if isinstance(edge, dict)
         }
         for question_id, work_package_id in declared_question_work_packages.items():
-            objective_id = question_id.replace("RQ-", "OBJ-", 1)
+            objective_id = declared_question_objectives.get(question_id)
             if (
-                objective_id not in existing_node_ids
+                not objective_id
+                or objective_id not in existing_node_ids
                 or work_package_id not in existing_node_ids
                 or (objective_id, work_package_id) in existing_edge_pairs
             ):

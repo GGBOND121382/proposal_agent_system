@@ -3,6 +3,11 @@
   "$id": "finding.schema.json",
   "type": "object",
   "properties": {
+    "finding_instance_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
     "code": {
       "type": "string",
       "minLength": 1
@@ -21,6 +26,7 @@
       "enum": [
         "SECURITY",
         "SOURCE",
+        "EVIDENCE",
         "FACT",
         "SCHEME",
         "PROJECT_DEFINITION",
@@ -56,6 +62,7 @@
       "minLength": 1
     },
     "evidence_refs": {
+      "description": "Each value must be an exact visible entity ID, a registered top-level input-object name, or an entity-anchored field path such as P-ABS-005.must_answer. Bare property names such as must_answer are invalid.",
       "type": "array",
       "items": {
         "type": "string",

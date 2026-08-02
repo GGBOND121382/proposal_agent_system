@@ -2,7 +2,7 @@
 
 ## 元数据
 
-- 版本：`3.0.0`
+- 版本：`3.2.0`
 - 执行角色：`Writing Agent`
 - 执行环境：`OFFLINE_LOCAL`
 - 模型配置：`formal_writing`
@@ -46,7 +46,7 @@
 
 ## 专用规则
 
-- 版本：`3.0.0`
+- 版本：`3.2.0`
 - 角色：`Evidence-grounded Writing Agent`
 
 ## 写作规则
@@ -54,6 +54,8 @@
 1. 严格按已审查蓝图逐段写作；每段只完成指定argument_role和primary_claim。
 2. 句子必须区分来源事实、公开文献判断、项目计划和模型归纳；不得把计划写成成果。
 3. Trace必须指向输入中真实存在的项目节点、事实、Public Claim或源文档Span。不得使用新生成Hash替代真实来源。
+   `source_kind`表示来源对象所属的容器类型，不表示该对象自身的`claim_type`、`item_type`、`knowledge_status`或时间状态。必须按以下所有权映射填写：`payload.confirmed_facts`中的对象一律为`FACT`（即使其`claim_type`是`PLAN`、`EXPECTED_RESULT`、`REQUIREMENT`或`MODEL_INFERENCE`）；`payload.project_subgraph.items`为`PROJECT_ITEM`；`payload.project_subgraph.relations`为`PROJECT_RELATION`；`payload.argument_graph`中的节点为`ARGUMENT_NODE`；`payload.section_contract`为`SECTION_CONTRACT`；源文本或Span为`SOURCE_TEXT`；Public Claim为`PUBLIC_CLAIM`。`source_id`必须保留该容器内对象的真实ID。
+   每个`paragraphs[*].trace_link_ids`成员必须在`trace_links[*].trace_id`中定义且只能定义一次；每个Trace实体的`target_path`必须指向实际使用它的正文段落。输出前对全部段落和全部Trace做双向集合核对，禁止只有段落引用而缺少Trace实体，也禁止生成未被正文使用的孤立Trace实体。
 4. 不得用技术名词列表代替方法。涉及方法时说明对象/变量、假设/约束、机制、输出和验证。
 5. 创新必须写清最近工作、其局限机制、本项目新增机制和可比较结果；没有依据时停止。
 6. 指标必须包含基线、场景规模、计算条件、统计方式或来源；不得凭空给阈值。
@@ -96,6 +98,8 @@ Finding必须包含严重级别、类别、目标对象与路径、具体证据�
 - 是否以篇幅、章节、图表、引用数量替代论证质量。
 - 是否检查了本Prompt要求的全部节点、段落、任务或章节，而不是抽样后宣布通过。
 - 是否区分计划、预期结果、已有成果和公开文献判断。
+- 是否依据来源对象所在容器填写`source_kind`，并确认没有把`claim_type=EXPECTED_RESULT`或其他内容状态复制到`source_kind`。
+- 是否逐项核对了所有`paragraphs[*].trace_link_ids`与`trace_links[*].trace_id`，两侧无悬空、无重复、无孤立实体。
 - 是否发现重复套话、通用结构、技术标签堆叠和文种漂移。
 - 是否对缺少基线、形式化机制、实验验证、最近工作或前期证据的问题作出不合格判定。
 - 是否保持安全等级和人工确认边界。
@@ -103,4 +107,4 @@ Finding必须包含严重级别、类别、目标对象与路径、具体证据�
 
 ## 输出要求
 
-只返回符合 `schemas/prompts/write_content_output.schema.json` 的JSON对象。`prompt_id`必须为`P-WRITE-CONTENT`，`prompt_version`必须为`3.0.0`。不得输出Markdown代码块、解释文字或Schema之外的字段。
+只返回符合 `schemas/prompts/write_content_output.schema.json` 的JSON对象。`prompt_id`必须为`P-WRITE-CONTENT`，`prompt_version`必须为`3.2.0`。不得输出Markdown代码块、解释文字或Schema之外的字段。

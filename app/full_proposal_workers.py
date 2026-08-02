@@ -7,7 +7,7 @@ from typing import Any
 
 from .dependency_preflight import DependencyIssue, DependencyReport
 from .full_proposal_contract import FULL_PROPOSAL_GROUP_ORDER
-from .util import new_id, sha256_json, utc_now
+from .util import new_id, utc_now
 from .workflow_status import (
     WorkflowStatus,
     WorkflowStatusClass,
@@ -35,72 +35,18 @@ class FullProposalWorkersMixin:
         # each stage to exercise the same group-level concurrency in acceptance.
         if (state.get("options") or {}).get("concurrent_group_child"):
             await asyncio.sleep(0)
-        envelope = self.context_builder.build(
+        # All call identity, provider retry, arbitration, feedback lifecycle,
+        # repair-subject and persistence semantics belong to the shared section
+        # executor.  Keeping a second copy here allowed serial/full-proposal
+        # execution to drift whenever the base contract changed.
+        return await super()._execute_section_prompt(
+            wf,
+            state,
+            section,
+            progress,
             prompt_id,
-            wf["project_id"],
-            workflow_id=wf["id"],
-            workflow_state=state,
+            role=role,
         )
-        candidate_round_key = (
-            f"section:{state.get('active_section_id') or ''}:{prompt_id}"
-        )
-        candidate_round = int(
-            (state.get("acceptance_candidate_rounds") or {}).get(
-                candidate_round_key,
-                0,
-            )
-        )
-        requested_call_key = None
-        if candidate_round:
-            requested_call_key = "call-acceptance-" + sha256_json(
-                {
-                    "workflow_id": wf["id"],
-                    "section_id": state.get("active_section_id"),
-                    "prompt_id": prompt_id,
-                    "candidate_round": candidate_round,
-                }
-            )[:24]
-        result = await self.executor.execute(
-            prompt_id,
-            envelope,
-            project_id=wf["project_id"],
-            workflow_id=wf["id"],
-            original_environment=state.get("original_environment"),
-            call_key=requested_call_key,
-        )
-        if prompt_id == "P-WRITE-CONTENT" and self.diagram_enrichment is not None and result["status"] == "PASS":
-            result["output"] = await self.diagram_enrichment.enrich(
-                project_id=wf["project_id"],
-                workflow_id=wf["id"],
-                run_id=result["run_id"],
-                section=section,
-                output=result["output"],
-                security_level=(
-                    result["output"].get("source_refs", [{}])[0].get("security_level", "INTERNAL")
-                    if result["output"].get("source_refs") else "INTERNAL"
-                ),
-            )
-        self._append_section_run(progress, result, prompt_id=prompt_id, role=role)
-        state["original_environment"] = result["route"]["environment"]
-        if result["status"] == "PASS":
-            critic_prompt = next(
-                (
-                    critic
-                    for critic, (producer, _phase) in self.SECTION_CRITIC_PRODUCERS.items()
-                    if producer == prompt_id
-                ),
-                None,
-            )
-            if critic_prompt:
-                self._supersede_repair_subject(
-                    state,
-                    critic_prompt=critic_prompt,
-                    producer_prompt=prompt_id,
-                    reason="FRESH_PRODUCER_PASS",
-                )
-        self._observe_quality_result(wf, state, prompt_id, result)
-        self._update(wf, state=state)
-        return envelope, result
 
     def _create_full_proposal_child(
         self,

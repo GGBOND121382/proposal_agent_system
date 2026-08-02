@@ -403,16 +403,24 @@ class SequencePromptExecutor:
     def __init__(self, outcomes):
         self.outcomes = list(outcomes)
         self.calls = 0
+        self.call_kwargs = []
 
     async def execute(self, *args, **kwargs):
         self.calls += 1
+        self.call_kwargs.append(dict(kwargs))
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
 
 
-def _wrapped_provider_failure(kind, *, http_status=None, retry_after=None):
+def _wrapped_provider_failure(
+    kind,
+    *,
+    http_status=None,
+    retry_after=None,
+    retryable_hint=True,
+):
     from app.executor import PromptExecutionError
     from app.llm import ProviderError
 
@@ -421,7 +429,7 @@ def _wrapped_provider_failure(kind, *, http_status=None, retry_after=None):
         kind=kind,
         http_status=http_status,
         retry_after_seconds=retry_after,
-        retryable_hint=True,
+        retryable_hint=retryable_hint,
     )
     try:
         raise PromptExecutionError("prompt execution failed") from provider
@@ -508,6 +516,67 @@ def test_same_node_empty_stream_retries_then_recovers_without_semantic_budget(tm
     )["n"] == 2
 
 
+def test_response_parse_failure_regenerates_with_distinct_attempt_identity(tmp_path):
+    from app.repair_ledger import RepairLedger
+    from app.runtime_failures import ProviderFailureKind
+    from app.workflows import WorkflowEngine
+
+    db = make_executor_db(tmp_path)
+    state = {
+        "workflow_type": "WF-1_PROJECT_INTAKE",
+        "options": {
+            "provider_retry_limit": 1,
+            "provider_retry_base_delay_seconds": 0,
+        },
+        "step_results": {},
+        "active_section_id": "section-1",
+        "section_progress": {"section-1": {"phase": "BLUEPRINT_CRITIC"}},
+    }
+    wf = _workflow_for_retry_test(db, state)
+    success = {"run_id": "run-ok", "status": "PASS", "output": {"status": "PASS"}}
+    executor = SequencePromptExecutor(
+        [
+            _wrapped_provider_failure(
+                ProviderFailureKind.RESPONSE_PARSE,
+                retryable_hint=False,
+            ),
+            success,
+        ]
+    )
+    engine = WorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        executor,
+        SimpleNamespace(),
+    )
+
+    result = asyncio.run(
+        engine._execute_prompt_with_provider_retry(
+            wf,
+            state,
+            prompt_id="P-WRITE-BLUEPRINT-CRITIC",
+            envelope={"payload": {}},
+            call_key="call-section-review",
+        )
+    )
+
+    assert result is success
+    assert executor.calls == 2
+    call_keys = [item["call_key"] for item in executor.call_kwargs]
+    assert len(set(call_keys)) == 2
+    assert call_keys[0].startswith("call-section-review-cycle-")
+    assert call_keys[0].endswith("-attempt-1")
+    assert call_keys[1].endswith("-attempt-2")
+    cycle = state["provider_call_cycles"][
+        "2:P-WRITE-BLUEPRINT-CRITIC:section-1:BLUEPRINT_CRITIC"
+    ]
+    assert cycle["input_hash"] == sha256_json({"payload": {}})
+    retry_key = "2:P-WRITE-BLUEPRINT-CRITIC:section-1:BLUEPRINT_CRITIC"
+    assert RepairLedger.count(state, "provider_retries", retry_key) == 1
+    assert RepairLedger.count(state, "semantic_repairs", retry_key) == 0
+
+
 def test_same_node_retry_exhaustion_reports_total_attempts(tmp_path):
     from app.retry_policy import ProviderRetriesExhausted
     from app.runtime_failures import ProviderFailureKind
@@ -553,6 +622,178 @@ def test_same_node_retry_exhaustion_reports_total_attempts(tmp_path):
     assert captured.value.decision.exhausted_status == "BLOCKED_PROVIDER"
     assert state["provider_wait"]["completed_attempts"] == 2
     assert state["provider_wait"]["decision"]["should_retry"] is False
+
+
+def test_provider_exhaustion_has_same_typed_owner_at_section_boundary(tmp_path):
+    from app.retry_policy import ProviderRetriesExhausted
+    from app.runtime_failures import ProviderFailureKind
+    from app.workflows import WorkflowEngine
+
+    db = make_executor_db(tmp_path)
+    state = {
+        "workflow_type": "WF-4_PROPOSAL_AUTHORING",
+        "options": {
+            "provider_retry_limit": 0,
+            "provider_retry_base_delay_seconds": 0,
+        },
+        "step_results": {},
+        "runtime_recoverable": True,
+        "runtime_failure_point": "WORKFLOW_ADVANCE",
+        "runtime_blocked_at": utc_now(),
+    }
+    wf = _workflow_for_retry_test(db, state)
+    executor = SequencePromptExecutor(
+        [_wrapped_provider_failure(ProviderFailureKind.RESPONSE_PARSE)]
+    )
+    engine = WorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        executor,
+        SimpleNamespace(),
+    )
+
+    with pytest.raises(ProviderRetriesExhausted) as captured:
+        asyncio.run(
+            engine._execute_prompt_with_provider_retry(
+                wf,
+                state,
+                prompt_id="P-WRITE-CRITIC",
+                envelope={"payload": {}},
+            )
+        )
+
+    blocked = engine._block_provider_retries_exhausted(
+        wf,
+        state,
+        captured.value,
+        boundary="WRITE_SECTIONS",
+    )
+
+    assert blocked["status"] == captured.value.decision.exhausted_status
+    assert blocked["state"]["provider_wait"]["exhausted"] is True
+    assert blocked["state"]["provider_wait"]["boundary"] == "WRITE_SECTIONS"
+    assert "runtime_failure_point" not in blocked["state"]
+    audit = db.fetchone(
+        "SELECT metadata_json FROM audit_events "
+        "WHERE object_id=? AND event_type='PROVIDER_RETRIES_EXHAUSTED' "
+        "ORDER BY id DESC LIMIT 1",
+        (wf["id"],),
+    )
+    assert json.loads(audit["metadata_json"])["prompt_id"] == "P-WRITE-CRITIC"
+
+
+def test_protocol_upgrade_recovers_only_exhausted_provider_checkpoint(tmp_path):
+    from app.llm import MODEL_RESPONSE_PROTOCOL_VERSION
+    from app.repair_ledger import RepairLedger
+    from app.workflows import WorkflowEngine
+
+    db = make_executor_db(tmp_path)
+    retry_key = "5:P-WRITE-CONTENT:new-objective:CONTENT"
+    state = {
+        "active_section_id": "new-objective",
+        "section_progress": {
+            "new-objective": {"phase": "CONTENT", "status": "RUNNING"}
+        },
+        "provider_wait": {
+            "retry_key": retry_key,
+            "exhausted": True,
+            "failure": {"retryable": True, "failure_kind": "RESPONSE_SHAPE"},
+        },
+        "provider_call_cycles": {
+            retry_key: {
+                "protocol_version": "older-provider-protocol",
+                "cycle_id": "old-cycle",
+            }
+        },
+        "last_error": "old provider response shape failed",
+    }
+    RepairLedger.provider_retry(state, retry_key)
+    now = utc_now()
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-protocol-recovery",
+            "project-1",
+            "WF-4_PROPOSAL_AUTHORING",
+            "BLOCKED_CONTRACT",
+            5,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    engine = WorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+    )
+    wf = engine.get("wf-protocol-recovery")
+
+    assert engine._recover_provider_block_after_protocol_upgrade(wf, wf["state"])
+
+    recovered = engine.get("wf-protocol-recovery")
+    recovered_state = recovered["state"]
+    assert recovered["status"] == "RUNNING"
+    assert recovered_state["section_progress"]["new-objective"]["phase"] == "CONTENT"
+    assert "provider_wait" not in recovered_state
+    assert "last_error" not in recovered_state
+    assert RepairLedger.count(recovered_state, "provider_retries", retry_key) == 1
+    recovery = recovered_state["checkpoint_recovery_history"][-1]
+    assert recovery["from_protocol_version"] == "older-provider-protocol"
+    assert recovery["to_protocol_version"] == MODEL_RESPONSE_PROTOCOL_VERSION
+    audit = db.fetchone(
+        "SELECT metadata_json FROM audit_events "
+        "WHERE object_id=? AND event_type='PROVIDER_PROTOCOL_CHECKPOINT_RECOVERED' "
+        "ORDER BY id DESC LIMIT 1",
+        ("wf-protocol-recovery",),
+    )
+    assert json.loads(audit["metadata_json"])["retry_key"] == retry_key
+
+
+def test_current_protocol_does_not_reopen_exhausted_provider_checkpoint(tmp_path):
+    from app.llm import MODEL_RESPONSE_PROTOCOL_VERSION
+    from app.workflows import WorkflowEngine
+
+    db = make_executor_db(tmp_path)
+    retry_key = "5:P-WRITE-CONTENT:new-objective:CONTENT"
+    state = {
+        "provider_wait": {
+            "retry_key": retry_key,
+            "exhausted": True,
+            "failure": {"retryable": True},
+        },
+        "provider_call_cycles": {
+            retry_key: {"protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION}
+        },
+    }
+    now = utc_now()
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-current-protocol",
+            "project-1",
+            "WF-4_PROPOSAL_AUTHORING",
+            "BLOCKED_CONTRACT",
+            5,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    engine = WorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+    )
+    wf = engine.get("wf-current-protocol")
+
+    assert not engine._recover_provider_block_after_protocol_upgrade(wf, wf["state"])
+    assert engine.get("wf-current-protocol")["status"] == "BLOCKED_CONTRACT"
 
 
 def _insert_wf4_failure(db, *, status, classification, legacy_state=None):

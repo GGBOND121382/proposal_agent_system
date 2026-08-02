@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from app.db import Database
+from app.executor import PromptExecutionError
 from app.util import sha256_json, utc_now
 from app.workflow_repair import WorkflowRepairMixin
 
@@ -87,6 +88,75 @@ class ListRepairExecutor:
         }
 
 
+class ContractRetryExecutor(ListRepairExecutor):
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def execute(
+        self, prompt_id: str, envelope: dict[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
+        self.attempts += 1
+        if self.attempts == 1:
+            raise PromptExecutionError(
+                "Output schema validation failed",
+                validation_errors=[
+                    "/result: 'unresolved_finding_ids' is a required property"
+                ],
+                run_id="run-contract-error-1",
+            )
+        result = await super().execute(prompt_id, envelope, **kwargs)
+        finding_ids = [
+            str(item["finding_instance_id"])
+            for item in envelope["overrides"]["payload.findings_to_repair"]
+        ]
+        result["output"]["result"].update(
+            {
+                "resolved_finding_ids": finding_ids,
+                "unresolved_finding_ids": [],
+            }
+        )
+        return result
+
+
+class ExhaustedContractRetryExecutor:
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        self.attempts += 1
+        raise PromptExecutionError(
+            "Output schema validation failed",
+            validation_errors=[
+                "/result: 'unresolved_finding_ids' is a required property"
+            ],
+            run_id=f"run-contract-error-{self.attempts}",
+        )
+
+
+class TwoContractFailuresThenPassExecutor(ContractRetryExecutor):
+    async def execute(
+        self, prompt_id: str, envelope: dict[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
+        self.attempts += 1
+        if self.attempts <= 2:
+            raise PromptExecutionError(
+                "Output schema validation failed after malformed JSON regeneration",
+                run_id=f"run-malformed-{self.attempts}",
+            )
+        result = await ListRepairExecutor.execute(
+            self, prompt_id, envelope, **kwargs
+        )
+        finding_ids = [
+            str(item["finding_instance_id"])
+            for item in envelope["overrides"]["payload.findings_to_repair"]
+        ]
+        result["output"]["result"].update({
+            "resolved_finding_ids": finding_ids,
+            "unresolved_finding_ids": [],
+        })
+        return result
+
+
 class RecordingQualityManager:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -100,6 +170,7 @@ class RepairHarness(WorkflowRepairMixin):
         self.context_builder = ListResultContext()
         self.executor = ListRepairExecutor()
         self.quality_manager = RecordingQualityManager()
+        self.provider_retry_calls: list[dict[str, Any]] = []
         self.db = Database(tmp_path / "runtime.sqlite3")
         now = utc_now()
         self.db.execute(
@@ -120,6 +191,94 @@ class RepairHarness(WorkflowRepairMixin):
     def _project_level(project_id: str) -> str:
         assert project_id == "project-1"
         return "INTERNAL"
+
+    @staticmethod
+    def _update(wf: dict[str, Any], **updates: Any) -> None:
+        wf.update(updates)
+
+    async def _execute_prompt_with_provider_retry(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        *,
+        prompt_id: str,
+        envelope: dict[str, Any],
+        call_key: str | None = None,
+        retry_categories=None,
+    ) -> dict[str, Any]:
+        self.provider_retry_calls.append({
+            "prompt_id": prompt_id,
+            "call_key": call_key,
+            "retry_categories": retry_categories,
+        })
+        return await self.executor.execute(
+            prompt_id,
+            envelope,
+            project_id=wf["project_id"],
+            workflow_id=wf["id"],
+            original_environment=state.get("original_environment"),
+            call_key=call_key,
+        )
+
+
+def test_targeted_repair_inherits_original_producer_semantic_namespace(tmp_path) -> None:
+    harness = RepairHarness(tmp_path)
+    now = utc_now()
+    producer_input = {
+        "security_context": {"input_max_security_level": "INTERNAL"},
+        "payload": {
+            "argument_nodes": [
+                {
+                    "node_id": "RC-002",
+                    "node_type": "WORK_PACKAGE",
+                    "security_level": "INTERNAL",
+                }
+            ]
+        },
+    }
+    harness.db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "run-content-source-1",
+            "project-1",
+            "wf-1",
+            "P-WRITE-CONTENT",
+            "PASS",
+            "model-1",
+            "endpoint-1",
+            "a" * 64,
+            "b" * 64,
+            json.dumps(producer_input),
+            json.dumps({"result": {"candidate_id": "candidate-1"}}),
+            None,
+            1,
+            now,
+        ),
+    )
+    state = {
+        "active_section_id": "section-1",
+        "section_progress": {
+            "section-1": {
+                "runs": [
+                    {
+                        "prompt_id": "P-WRITE-CONTENT",
+                        "run_id": "run-content-source-1",
+                        "status": "PASS",
+                    }
+                ]
+            }
+        },
+    }
+
+    catalog = harness._inherited_producer_source_catalog(
+        harness.workflow(), state, "P-WRITE-CONTENT"
+    )
+
+    assert "RC-002" in {entry["source_id"] for entry in catalog}
+    assert all(not entry["source_id"].startswith("input-") for entry in catalog)
 
 
 def test_repair_application_artifact_replaces_list_shaped_state_override(tmp_path) -> None:
@@ -152,6 +311,12 @@ def test_repair_application_artifact_replaces_list_shaped_state_override(tmp_pat
     )
 
     assert repaired is not None
+    from app.runtime_failures import FailureCategory
+
+    assert harness.provider_retry_calls[0]["retry_categories"] == frozenset({
+        FailureCategory.PROVIDER_TRANSIENT
+    })
+    assert harness.provider_retry_calls[0]["call_key"].startswith("call-repair-")
     envelope = harness.context_builder.envelopes[0]
     original_object = envelope["overrides"]["payload.original_object"]
     assert original_object["content"] == {"fact_candidates": FACTS}
@@ -202,6 +367,149 @@ def test_list_repair_rejects_missing_collection_wrapper() -> None:
     assert value is None
 
 
+def test_contract_failure_regenerates_complete_repair_without_semantic_budget(tmp_path) -> None:
+    harness = RepairHarness(tmp_path)
+    harness.executor = ContractRetryExecutor()
+    wf = harness.workflow()
+    state = {
+        "repair_attempts": {},
+        "original_environment": "OFFLINE_LOCAL",
+        "options": {"targeted_repair_contract_retry_limit": 1},
+    }
+    critic_output = {
+        "status": "REVISE",
+        "findings": [
+            {
+                "code": "FACT_CRITIC_STATUS_UPGRADE",
+                "repairable": True,
+                "target_path_or_span": "METRIC-PROJ-001.claim_type",
+                "repair_instruction": "change the first claim type",
+            },
+            {
+                "code": "FACT_CRITIC_STATUS_UPGRADE",
+                "repairable": True,
+                "target_path_or_span": "FACT-PROJ-002.claim_type",
+                "repair_instruction": "change the second claim type",
+            },
+        ],
+    }
+
+    repaired = asyncio.run(
+        harness._auto_repair(
+            wf, "P-FACT-CRITIC", {}, critic_output, state
+        )
+    )
+
+    assert repaired is not None
+    assert harness.executor.attempts == 2
+    assert len(harness.context_builder.envelopes) == 2
+    first_findings = harness.context_builder.envelopes[0]["overrides"][
+        "payload.findings_to_repair"
+    ]
+    assert first_findings[0]["code"] == first_findings[1]["code"]
+    assert first_findings[0]["finding_instance_id"] != first_findings[1][
+        "finding_instance_id"
+    ]
+    feedback = harness.context_builder.envelopes[1]["overrides"][
+        "payload.contract_feedback"
+    ]
+    assert feedback["attempt"] == 2
+    assert "unresolved_finding_ids" in feedback["validation_errors"][0]
+    ledger = state["repair_ledger_v1"]
+    assert sum(ledger["technical_retries"].values()) == 1
+    assert sum(ledger["semantic_repairs"].values()) == 0
+    events = [item["event"] for item in ledger["events"]]
+    assert "CONTRACT_REJECTED" in events
+    assert "TECHNICAL_RETRY" in events
+    assert "CONTRACT_RECOVERED" in events
+    assert "REREVIEW_STARTED" not in events
+    assert "last_targeted_repair_failure" not in state
+
+
+def test_contract_retry_exhaustion_preserves_exact_failure_and_semantic_budget(tmp_path) -> None:
+    harness = RepairHarness(tmp_path)
+    harness.executor = ExhaustedContractRetryExecutor()
+    wf = harness.workflow()
+    state = {
+        "repair_attempts": {},
+        "original_environment": "OFFLINE_LOCAL",
+        "options": {"targeted_repair_contract_retry_limit": 1},
+    }
+    critic_output = {
+        "status": "REVISE",
+        "findings": [
+            {
+                "code": "FACT_CRITIC_STATUS_UPGRADE",
+                "repairable": True,
+                "target_path_or_span": "METRIC-PROJ-001.claim_type",
+                "repair_instruction": "change the claim type",
+            }
+        ],
+    }
+
+    repaired = asyncio.run(
+        harness._auto_repair(
+            wf, "P-FACT-CRITIC", {}, critic_output, state
+        )
+    )
+
+    assert repaired is None
+    assert harness.executor.attempts == 2
+    failure = state["last_targeted_repair_failure"]
+    assert failure["category"] == "OUTPUT_CONTRACT_ERROR"
+    assert failure["run_id"] == "run-contract-error-2"
+    assert failure["technical_retries_used"] == 1
+    assert failure["consumes_semantic_repair_budget"] is False
+    ledger = state["repair_ledger_v1"]
+    assert sum(ledger["technical_retries"].values()) == 1
+    assert sum(ledger["semantic_repairs"].values()) == 0
+    assert [item["event"] for item in ledger["events"]].count(
+        "CONTRACT_REJECTED"
+    ) == 2
+    message = harness._targeted_repair_failure_message(
+        state,
+        prompt_id="P-FACT-CRITIC",
+        fallback="fallback",
+    )
+    assert "unresolved_finding_ids" in message
+    assert "run-contract-error-2" in message
+
+
+def test_default_contract_budget_matches_shared_two_retry_policy(tmp_path) -> None:
+    harness = RepairHarness(tmp_path)
+    harness.executor = TwoContractFailuresThenPassExecutor()
+    wf = harness.workflow()
+    state = {
+        "repair_attempts": {},
+        "original_environment": "OFFLINE_LOCAL",
+        "options": {},
+    }
+    critic_output = {
+        "status": "REVISE",
+        "findings": [{
+            "code": "FACT_CRITIC_STATUS_UPGRADE",
+            "repairable": True,
+            "target_path_or_span": "METRIC-PROJ-001.claim_type",
+            "repair_instruction": "change the claim type",
+        }],
+    }
+
+    repaired = asyncio.run(
+        harness._auto_repair(
+            wf, "P-FACT-CRITIC", {}, critic_output, state
+        )
+    )
+
+    assert repaired is not None
+    assert harness.executor.attempts == 3
+    assert sum(
+        state["repair_ledger_v1"]["technical_retries"].values()
+    ) == 2
+    assert sum(
+        state["repair_ledger_v1"]["semantic_repairs"].values()
+    ) == 0
+
+
 def test_list_repair_accepts_plain_content_wrapper() -> None:
     restored, value = RepairHarness._restore_repaired_shape(
         {"content": {"fact_candidates": copy.deepcopy(FACTS)}},
@@ -230,6 +538,47 @@ def test_candidate_wrapper_is_removed_from_producer_repair_path() -> None:
         content=content,
         collection_key=None,
     ) == "/content/research_design_matrix/0/method_ids"
+
+
+def test_semantic_locator_cannot_authorize_a_nonexistent_content_field() -> None:
+    import pytest
+
+    content = {
+        "section_contract_id": "SC-001",
+        "paragraphs": [{"paragraph_id": "P-ABS-001", "function": "定位"}],
+    }
+    with pytest.raises(ValueError, match="existing repair-object field"):
+        RepairHarness._canonical_repair_path(
+            "SC-001",
+            content=content,
+            collection_key=None,
+        )
+
+
+def test_guard_paragraph_locator_resolves_to_exact_existing_field() -> None:
+    content = {
+        "paragraphs": [
+            {
+                "paragraph_id": "P-ABS-001",
+                "required_evidence_ids": ["FACT-001"],
+            },
+            {
+                "paragraph_id": "P-ABS-002",
+                "required_evidence_ids": ["FACT-002"],
+            },
+        ]
+    }
+
+    assert RepairHarness._canonical_repair_path(
+        "paragraphs[P-ABS-002].required_evidence_ids",
+        content=content,
+        collection_key=None,
+    ) == "/content/paragraphs/1/required_evidence_ids"
+    assert RepairHarness._canonical_repair_path(
+        "paragraphs",
+        content=content,
+        collection_key=None,
+    ) == "/content/paragraphs"
 
 
 def test_collection_locators_resolve_to_concrete_json_pointer_indexes() -> None:

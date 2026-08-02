@@ -9,7 +9,15 @@ from typing import Any
 from .executor import PromptExecutionError
 from .util import new_id, sha256_json, utc_now
 from .repair_ledger import RepairLedger
-from .json_pointer import JsonPointerError, join_pointer, parse_pointer
+from .runtime_failures import FailureCategory, classify_runtime_failure
+from .retry_policy import ProviderRetriesExhausted
+from .json_pointer import (
+    JsonPointerError,
+    is_ancestor_or_same,
+    join_pointer,
+    parse_pointer,
+)
+from .output_integrity import attach_trusted_source_catalog
 from .workflow_defs import CRITIC_PRODUCER
 
 
@@ -52,6 +60,154 @@ PRODUCER_ROLE = {
 
 
 class WorkflowRepairMixin:
+    def _inherited_producer_source_catalog(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        producer_prompt: str,
+    ) -> list[dict[str, Any]]:
+        """Return the semantic source namespace seen by the original producer.
+
+        A repair is a constrained continuation of the producer call.  It must
+        therefore inherit the producer's read-only entity namespace; otherwise
+        a critic can legitimately request an existing upstream entity while the
+        repair validator incorrectly treats that identifier as dangling.
+
+        The inherited value contains catalog metadata only, never copied source
+        prose.  Synthetic envelope/container identities are omitted because
+        they are call-local implementation details rather than business
+        entities the repaired object may reference.
+        """
+
+        db = getattr(self, "db", None)
+        if not callable(getattr(db, "fetchone", None)) or not callable(
+            getattr(db, "fetchall", None)
+        ):
+            return []
+
+        candidate_run_ids: list[str] = []
+        active_section_id = str(state.get("active_section_id") or "").strip()
+        if active_section_id:
+            progress = (
+                (state.get("section_progress") or {}).get(active_section_id) or {}
+            )
+            candidate_run_ids.extend(
+                str(item.get("run_id") or "").strip()
+                for item in reversed(progress.get("runs") or [])
+                if isinstance(item, dict)
+                and item.get("prompt_id") == producer_prompt
+                and str(item.get("run_id") or "").strip()
+            )
+
+        rows: list[dict[str, Any]] = []
+        seen_run_ids: set[str] = set()
+        for run_id in candidate_run_ids:
+            if run_id in seen_run_ids:
+                continue
+            seen_run_ids.add(run_id)
+            row = db.fetchone(
+                "SELECT id,input_json FROM prompt_runs "
+                "WHERE id=? AND workflow_id=? AND prompt_id=? AND output_json IS NOT NULL",
+                (run_id, wf["id"], producer_prompt),
+            )
+            if row:
+                rows.append(row)
+        rows.extend(
+            row
+            for row in db.fetchall(
+                "SELECT id,input_json FROM prompt_runs "
+                "WHERE workflow_id=? AND prompt_id=? AND output_json IS NOT NULL "
+                "ORDER BY created_at DESC,id DESC",
+                (wf["id"], producer_prompt),
+            )
+            if str(row.get("id") or "") not in seen_run_ids
+        )
+
+        for row in rows:
+            try:
+                producer_input = json.loads(row.get("input_json") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            catalog = attach_trusted_source_catalog(producer_input).get(
+                "trusted_source_catalog"
+            ) or []
+            inherited: list[dict[str, Any]] = []
+            seen_source_ids: set[str] = set()
+            for entry in catalog:
+                if not isinstance(entry, dict):
+                    continue
+                source_id = str(entry.get("source_id") or "").strip()
+                if (
+                    not source_id
+                    or source_id.startswith("input-")
+                    or source_id in seen_source_ids
+                ):
+                    continue
+                seen_source_ids.add(source_id)
+                inherited.append(copy.deepcopy(entry))
+            if inherited:
+                return inherited
+        return []
+
+    @staticmethod
+    def _identified_repair_findings(
+        critic_prompt: str,
+        findings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Give every repairable finding a stable per-instance identity.
+
+        Finding codes describe a class of defect and are not unique.  The
+        critic may legitimately emit the same code for different target paths,
+        so repair closure must be tracked by a deterministic instance id.
+        """
+
+        identified: list[dict[str, Any]] = []
+        for ordinal, finding in enumerate(findings):
+            item = copy.deepcopy(finding)
+            digest = sha256_json(
+                {
+                    "critic_prompt": critic_prompt,
+                    "ordinal": ordinal,
+                    "code": item.get("code"),
+                    "target_type": item.get("target_type"),
+                    "target_path_or_span": item.get("target_path_or_span"),
+                    "description": item.get("description"),
+                }
+            )
+            item["finding_instance_id"] = f"finding-{digest[:32]}"
+            identified.append(item)
+        return identified
+
+    @staticmethod
+    def _targeted_repair_failure_message(
+        state: dict[str, Any],
+        *,
+        prompt_id: str,
+        fallback: str,
+    ) -> str:
+        failure = state.get("last_targeted_repair_failure")
+        if not isinstance(failure, dict):
+            return fallback
+        category = str(failure.get("category") or "TARGETED_REPAIR_FAILURE")
+        error = str(failure.get("error") or fallback)
+        validation_errors = [
+            str(item)
+            for item in failure.get("validation_errors") or []
+            if str(item).strip()
+        ]
+        if validation_errors:
+            error += " | " + "; ".join(validation_errors[:5])
+        retries = int(failure.get("technical_retries_used") or 0)
+        provider_retries = int(failure.get("provider_retries_used") or 0)
+        run_id = str(failure.get("run_id") or "").strip()
+        suffix = f"; run_id={run_id}" if run_id else ""
+        return (
+            f"{prompt_id} targeted repair failed [{category}] after "
+            f"{retries} technical contract retries and {provider_retries} provider retries: "
+            f"{error}{suffix}. "
+            "Semantic repair budget was not consumed."
+        )
+
     def _context_result(
         self,
         project_id: str,
@@ -408,6 +564,10 @@ class WorkflowRepairMixin:
         paragraph_tokens = cls._paragraph_tokens(tokens, content=content)
         if paragraph_tokens is not None:
             return join_pointer("content", *paragraph_tokens)
+        if tokens[0] not in content:
+            raise ValueError(
+                f"Critic locator does not identify an existing repair-object field: {raw_path!r}"
+            )
         return join_pointer("content", *tokens)
 
     @staticmethod
@@ -499,7 +659,7 @@ class WorkflowRepairMixin:
                     utc_now(),
                 ),
             )
-            tx.update_workflow(
+            updated_at = tx.update_workflow(
                 workflow_id=wf["id"],
                 status=str(wf.get("status") or "RUNNING"),
                 current_step=int(wf.get("current_step") or 0),
@@ -523,6 +683,7 @@ class WorkflowRepairMixin:
         state.clear()
         state.update(next_state)
         wf["state"] = state
+        wf["updated_at"] = updated_at
         return artifact_id
 
     @staticmethod
@@ -590,7 +751,7 @@ class WorkflowRepairMixin:
 
     async def _auto_repair(self, wf: dict[str, Any], critic_prompt: str, critic_input: dict[str, Any], critic_output: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
         producer = CRITIC_PRODUCER[critic_prompt]
-        findings = [
+        findings = self._identified_repair_findings(critic_prompt, [
             item
             for item in critic_output.get("findings", [])
             if item.get("repairable", False)
@@ -598,7 +759,7 @@ class WorkflowRepairMixin:
                 str(item.get("code") or "").startswith("QG_")
                 and str(item.get("target_type") or "").endswith("CRITIC")
             )
-        ]
+        ])
         if not findings:
             return None
         result_key = PRODUCER_RESULT_KEY.get(producer)
@@ -729,6 +890,7 @@ class WorkflowRepairMixin:
                 for item in match.group(1).split(",")
                 if item.strip() and not item.strip().isdigit()
             ]
+            canonical_paths_for_finding: list[str] = []
             for part in target_parts:
                 if not str(part or "").strip():
                     continue
@@ -741,6 +903,7 @@ class WorkflowRepairMixin:
                 except ValueError:
                     continue
                 allowed_paths.append(canonical_path)
+                canonical_paths_for_finding.append(canonical_path)
             if producer in {"P-WRITE-CONTENT", "P-WRITE-BLUEPRINT"}:
                 paragraph_ids = [
                     *bracket_ids,
@@ -752,9 +915,20 @@ class WorkflowRepairMixin:
                 ]
                 for paragraph_id in dict.fromkeys(paragraph_ids):
                     paragraph_index = paragraph_index_by_id.get(paragraph_id)
-                    if paragraph_index is not None:
+                    paragraph_root = (
+                        join_pointer("content", "paragraphs", paragraph_index)
+                        if paragraph_index is not None
+                        else None
+                    )
+                    if (
+                        paragraph_root is not None
+                        and not any(
+                            is_ancestor_or_same(paragraph_root, path)
+                            for path in canonical_paths_for_finding
+                        )
+                    ):
                         allowed_paths.append(
-                            join_pointer("content", "paragraphs", paragraph_index)
+                            paragraph_root
                         )
             finding_code = str(finding.get("code") or "")
             finding_text = " ".join(
@@ -793,13 +967,15 @@ class WorkflowRepairMixin:
                     join_pointer("content", "paragraphs", index, "novel_content_key")
                     for index, _paragraph_id in enumerate(original_paragraph_ids)
                 )
-        if producer == "P-WRITE-CONTENT" and allowed_paths:
-            allowed_paths.extend(
-                [
-                    join_pointer("content", "candidate_text"),
-                    join_pointer("content", "claim_advancement"),
-                ]
-            )
+        if producer == "P-WRITE-CONTENT" and any(
+            path.endswith("/text") for path in allowed_paths
+        ):
+            allowed_paths.append(join_pointer("content", "candidate_text"))
+        if producer == "P-WRITE-CONTENT" and any(
+            path.endswith(("/primary_claim_id", "/novel_content_key"))
+            for path in allowed_paths
+        ):
+            allowed_paths.append(join_pointer("content", "claim_advancement"))
         allowed_paths = list(dict.fromkeys(allowed_paths))
 
         overrides = {
@@ -810,11 +986,19 @@ class WorkflowRepairMixin:
             "payload.protected_paths": [],
             "payload.protected_hashes": [],
             "payload.original_input_refs": [original_ref],
+            "payload.inherited_source_catalog": (
+                self._inherited_producer_source_catalog(wf, state, producer)
+            ),
         }
         repair_id = new_id("repair")
         ledger_details = {
             "critic_prompt": critic_prompt,
             "producer_prompt": producer,
+            "finding_instance_ids": [
+                str(item.get("finding_instance_id"))
+                for item in findings
+                if item.get("finding_instance_id")
+            ],
             "finding_codes": [
                 str(item.get("code")) for item in findings if item.get("code")
             ],
@@ -825,25 +1009,158 @@ class WorkflowRepairMixin:
             repair_id=repair_id,
             details=ledger_details,
         )
+        options = state.get("options") or {}
         try:
-            envelope = self.context_builder.build(
-                "P-TARGETED-REPAIR",
-                wf["project_id"],
-                workflow_id=wf["id"],
-                workflow_state=state,
-                overrides=overrides,
+            contract_retry_limit = int(
+                options.get(
+                    "targeted_repair_contract_retry_limit",
+                    options.get("provider_retry_limit", 2),
+                )
             )
-            repaired = await self.executor.execute(
-                "P-TARGETED-REPAIR",
-                envelope,
-                project_id=wf["project_id"],
-                workflow_id=wf["id"],
-                original_environment=state.get("original_environment", "OFFLINE_LOCAL"),
+        except (TypeError, ValueError):
+            contract_retry_limit = 2
+        contract_retry_limit = max(0, min(contract_retry_limit, 5))
+        contract_retry_key = f"{attempt_key}:repair:{repair_id}:contract"
+        technical_retries_used = 0
+        repaired: dict[str, Any]
+
+        while True:
+            execution_attempt = technical_retries_used + 1
+            attempt_overrides = dict(overrides)
+            if technical_retries_used:
+                previous_failure = state.get("last_targeted_repair_failure") or {}
+                validation_errors = list(
+                    previous_failure.get("validation_errors") or []
+                )
+                attempt_overrides["payload.contract_feedback"] = {
+                    "attempt": execution_attempt,
+                    "validation_errors": validation_errors[:20]
+                    or [str(previous_failure.get("error") or "output contract failure")],
+                }
+            try:
+                envelope = self.context_builder.build(
+                    "P-TARGETED-REPAIR",
+                    wf["project_id"],
+                    workflow_id=wf["id"],
+                    workflow_state=state,
+                    overrides=attempt_overrides,
+                )
+                provider_retry = getattr(
+                    self, "_execute_prompt_with_provider_retry", None
+                )
+                if callable(provider_retry):
+                    repaired = await provider_retry(
+                        wf,
+                        state,
+                        prompt_id="P-TARGETED-REPAIR",
+                        envelope=envelope,
+                        call_key="call-repair-" + sha256_json({
+                            "workflow_id": wf["id"],
+                            "repair_id": repair_id,
+                            "execution_attempt": execution_attempt,
+                        })[:24],
+                        # Contract-shape failures need the feedback-aware loop
+                        # below. The shared provider loop owns only transient
+                        # transport/rate-limit/service recovery here.
+                        retry_categories=frozenset({
+                            FailureCategory.PROVIDER_TRANSIENT
+                        }),
+                    )
+                else:
+                    repaired = await self.executor.execute(
+                        "P-TARGETED-REPAIR",
+                        envelope,
+                        project_id=wf["project_id"],
+                        workflow_id=wf["id"],
+                        original_environment=state.get(
+                            "original_environment", "OFFLINE_LOCAL"
+                        ),
+                    )
+            except (
+                PromptExecutionError,
+                ValueError,
+                KeyError,
+                ProviderRetriesExhausted,
+            ) as exc:
+                provider_retries_used = 0
+                classified_exc: BaseException = exc
+                if isinstance(exc, ProviderRetriesExhausted):
+                    classification = exc.classification
+                    classified_exc = exc.original_exception
+                    provider_retries_used = max(
+                        0, exc.decision.completed_attempts - 1
+                    )
+                else:
+                    classification = classify_runtime_failure(exc)
+                validation_errors = list(
+                    getattr(classified_exc, "validation_errors", None) or []
+                )
+                failed_run_id = str(
+                    getattr(classified_exc, "run_id", None) or ""
+                ) or None
+                failure = {
+                    "critic_prompt": critic_prompt,
+                    "category": classification.category.value,
+                    "reason": classification.reason,
+                    "error": str(classified_exc),
+                    "validation_errors": validation_errors,
+                    "repair_id": repair_id,
+                    "repair_attempt_key": attempt_key,
+                    "run_id": failed_run_id,
+                    "execution_attempt": execution_attempt,
+                    "technical_retries_used": technical_retries_used,
+                    "provider_retries_used": provider_retries_used,
+                    "consumes_semantic_repair_budget": False,
+                    "recorded_at": utc_now(),
+                }
+                state["last_targeted_repair_failure"] = failure
+                if (
+                    classification.category is FailureCategory.OUTPUT_CONTRACT
+                ):
+                    RepairLedger.contract_rejected(
+                        state,
+                        contract_retry_key,
+                        repair_id=repair_id,
+                        run_id=failed_run_id,
+                        details={**ledger_details, **failure},
+                    )
+                if (
+                    classification.category is FailureCategory.OUTPUT_CONTRACT
+                    and technical_retries_used < contract_retry_limit
+                ):
+                    technical_retries_used = RepairLedger.technical_retry(
+                        state,
+                        contract_retry_key,
+                        repair_id=repair_id,
+                        run_id=failed_run_id,
+                        details={
+                            **ledger_details,
+                            "next_execution_attempt": execution_attempt + 1,
+                            "validation_errors": validation_errors,
+                        },
+                    )
+                    state["last_targeted_repair_failure"][
+                        "technical_retries_used"
+                    ] = technical_retries_used
+                    continue
+                state["last_targeted_repair_failure"][
+                    "technical_retries_used"
+                ] = technical_retries_used
+                return None
+            break
+
+        if technical_retries_used:
+            RepairLedger.contract_recovered(
+                state,
+                contract_retry_key,
+                repair_id=repair_id,
+                run_id=str(repaired.get("run_id") or "") or None,
+                details={
+                    **ledger_details,
+                    "technical_retries_used": technical_retries_used,
+                },
             )
-        except (PromptExecutionError, ValueError, KeyError):
-            # Provider/technical/contract failures never enter the semantic
-            # repair budget.  The CREATED event remains as an accurate audit.
-            return None
+        state.pop("last_targeted_repair_failure", None)
         run_id = str(repaired.get("run_id") or "") or None
         RepairLedger.model_returned(
             state,
@@ -855,6 +1172,16 @@ class WorkflowRepairMixin:
         output = repaired.get("output")
         result_payload = output.get("result") if isinstance(output, dict) else None
         if not isinstance(result_payload, dict):
+            state["last_targeted_repair_failure"] = {
+                "critic_prompt": critic_prompt,
+                "category": "SEMANTIC_REPAIR_REJECTED",
+                "error": "P-TARGETED-REPAIR returned no result object",
+                "repair_id": repair_id,
+                "run_id": run_id,
+                "technical_retries_used": technical_retries_used,
+                "consumes_semantic_repair_budget": False,
+                "recorded_at": utc_now(),
+            }
             return None
         RepairLedger.schema_validated(
             state,
@@ -864,6 +1191,28 @@ class WorkflowRepairMixin:
             details=ledger_details,
         )
         if repaired.get("status") != "PASS":
+            unresolved_ids = list(result_payload.get("unresolved_finding_ids") or [])
+            failure = {
+                "critic_prompt": critic_prompt,
+                "category": "SEMANTIC_REPAIR_REJECTED",
+                "error": (
+                    f"P-TARGETED-REPAIR returned {repaired.get('status')}; "
+                    f"unresolved_finding_ids={unresolved_ids}"
+                ),
+                "repair_id": repair_id,
+                "run_id": run_id,
+                "technical_retries_used": technical_retries_used,
+                "consumes_semantic_repair_budget": False,
+                "recorded_at": utc_now(),
+            }
+            state["last_targeted_repair_failure"] = failure
+            RepairLedger.repair_rejected(
+                state,
+                attempt_key,
+                repair_id=repair_id,
+                run_id=run_id,
+                details={**ledger_details, **failure},
+            )
             return None
         repaired_object = result_payload.get("repaired_object")
         restored, repaired_value = self._restore_repaired_shape(
@@ -871,6 +1220,24 @@ class WorkflowRepairMixin:
             collection_key,
         )
         if not restored or sha256_json(repaired_value) == sha256_json(original):
+            failure = {
+                "critic_prompt": critic_prompt,
+                "category": "SEMANTIC_REPAIR_REJECTED",
+                "error": "P-TARGETED-REPAIR produced no applicable semantic diff",
+                "repair_id": repair_id,
+                "run_id": run_id,
+                "technical_retries_used": technical_retries_used,
+                "consumes_semantic_repair_budget": False,
+                "recorded_at": utc_now(),
+            }
+            state["last_targeted_repair_failure"] = failure
+            RepairLedger.repair_rejected(
+                state,
+                attempt_key,
+                repair_id=repair_id,
+                run_id=run_id,
+                details={**ledger_details, **failure},
+            )
             return None
         RepairLedger.diff_validated(
             state,

@@ -183,6 +183,39 @@ class RepairLedger:
         )
 
     @classmethod
+    def contract_rejected(cls, state: dict[str, Any], key: str, **kwargs: Any) -> int:
+        return cls.record(
+            state,
+            bucket="technical_retries",
+            key=key,
+            event="CONTRACT_REJECTED",
+            increment=False,
+            **kwargs,
+        )
+
+    @classmethod
+    def contract_recovered(cls, state: dict[str, Any], key: str, **kwargs: Any) -> int:
+        return cls.record(
+            state,
+            bucket="technical_retries",
+            key=key,
+            event="CONTRACT_RECOVERED",
+            increment=False,
+            **kwargs,
+        )
+
+    @classmethod
+    def repair_rejected(cls, state: dict[str, Any], key: str, **kwargs: Any) -> int:
+        return cls.record(
+            state,
+            bucket="semantic_repairs",
+            key=key,
+            event="REPAIR_REJECTED",
+            increment=False,
+            **kwargs,
+        )
+
+    @classmethod
     def repair_created(cls, state: dict[str, Any], key: str, **kwargs: Any) -> int:
         return cls.record(
             state,

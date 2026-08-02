@@ -2,7 +2,7 @@
 
 ## 元数据
 
-- 版本：`2.0.0`
+- 版本：`3.4.0`
 - 执行角色：`Original Producer`
 - 执行环境：`SAME_AS_ORIGINAL`
 - 模型配置：`extraction`
@@ -33,8 +33,13 @@
 - `protected_paths`
 - `protected_hashes`
 - `original_input_refs`
+- `inherited_source_catalog`
 
 `allowed_paths`、`protected_paths`、`protected_hashes[].path` 和输出中的 `changed_paths`、`unchanged_protected_hashes[].path` 必须统一使用 RFC 6901 JSON Pointer，例如 `/content/paragraphs/0/text`。不得使用 `content.paragraphs[0].text`、`metadata` 等点号或括号路径。JSON Pointer 中的 `~` 和 `/` 必须分别转义为 `~0` 和 `~1`。`original_input_refs` 是结构化对象引用，不是路径数组。
+
+`inherited_source_catalog` 是原 Producer 调用时可见的只读语义实体目录。其 `source_id` 属于本轮可解析的既有实体命名空间，可按 Finding 指令写入授权字段；目录只授予“引用既有实体”的权限，不授予修改额外路径、创造新事实或改写来源内容的权限。不得因为某个 ID 未出现在 `original_object` 中，就把已经出现在 `inherited_source_catalog` 中的 ID 误判为悬空引用。
+
+`allowed_paths` 使用 JSON Pointer 祖先授权语义：某个允许路径同时授权它自身和所有后代路径。例如 `/content/paragraphs/2` 明确允许修改 `/content/paragraphs/2/function`、`/content/paragraphs/2/must_answer` 等子字段；不得把这些子字段报告为 `OUT_OF_SCOPE`。反方向不成立：只允许一个子字段时，不得修改其父对象或兄弟字段。`protected_paths` 优先于允许路径；任何受保护路径的自身、祖先或后代均不得修改。
 
 任一必需字段缺失、对象版本不一致、Hash过期或安全环境不允许时，不得继续生成正常结果。应返回 `NEED_USER_INPUT` 或 `BLOCK`，并给出字段级问题或Finding。
 
@@ -73,6 +78,8 @@ Finding必须包含严重级别、类别、目标路径、证据引用、是否�
 - 是否遵守安全环境和保护范围。
 - 是否把UNKNOWN、TO_BE_SELECTED或CONFLICTED误写成确定结论。
 - 是否在JSON之外输出了文本。
+- 是否逐字段复制了所有未授权值，仅在`allowed_paths`内产生真实差异；`changed_paths`是否与真实差异逐项对应，而不是只声称已修改。
+- 是否把最终响应重新按严格JSON解析规则自检：字符串中的双引号、反斜杠、换行和控制字符均已正确转义，数组成员与对象字段之间逗号完整，不使用Markdown代码块。
 
 ## 输入处理规则
 
@@ -108,6 +115,32 @@ Finding必须包含严重级别、类别、目标路径、证据引用、是否�
 - `source_refs`列出本次输出实际使用的来源，不得罗列未使用材料。
 - `warnings`只用于不阻断且不需要修复的说明，不能承载P0/P1问题。
 
+## Finding 实例闭环契约
+
+- `findings_to_repair[*].finding_instance_id` 是本轮 Finding 的唯一身份；即使多个 Finding 的 `code` 相同，也必须逐个处理，禁止按 `code` 去重或合并。
+- `result.resolved_finding_ids` 和 `result.unresolved_finding_ids` 始终必须同时存在。没有未解决项时也必须显式返回 `"unresolved_finding_ids": []`。
+- 两个数组不得重复或相交；二者并集必须与输入中的全部 `finding_instance_id` 完全相等，不得遗漏或引入未知 ID。
+- `PASS` 仅允许在 `unresolved_finding_ids` 为空、所有修改均位于 `allowed_paths`、且保护路径未改变时返回。
+- `repaired_object`必须是完整对象，但未授权字段必须从`original_object.content`逐字段原样保留，不得重新概括、翻译或改写。输出应保持紧凑；已经通过`resolved_finding_ids`闭环的历史Finding不得在`findings`、`warnings`或说明文字中复述。
+- 若存在 `payload.contract_feedback`，表示上一份完整响应未通过输出契约。必须依据其中的校验错误重新生成完整 JSON 对象，不得只输出缺失字段，也不得改变 Finding 身份。
+
+### 修复回执与当前问题的字段所有权
+
+- `findings_to_repair` 是修复前的问题清单；修复后的闭环回执只写入 `resolved_finding_ids` / `unresolved_finding_ids`，不得把已解决的原 Finding 复制到顶层 `findings`，也不得用“已修复”描述伪装成当前问题。
+- 顶层 `findings` 只描述 `repaired_object` 当前仍存在或本次修改新引入的问题。若所有请求 Finding 已解决且没有新问题，必须返回 `status: PASS`、`findings: []`、`unresolved_items: []`。
+- 原 Finding 的 P0/P1 严重级别在其实例被列入 `resolved_finding_ids` 后不再决定本次响应状态；不得仅因输入中曾有 P0/P1 就返回 `REVISE`。
+- `REVISE` 只能表示修复对象当前仍有可在授权路径内解决的问题；此时必须在顶层 `findings` 描述该当前问题。非阻断说明只能写入 `warnings`，不能据此返回 `REVISE`。
+
+`result` 必须完整包含以下五个字段：
+
+```text
+repaired_object
+changed_paths
+unchanged_protected_hashes
+resolved_finding_ids
+unresolved_finding_ids
+```
+
 ## 输出要求
 
-只返回符合 `schemas/prompts/targeted_repair_output.schema.json` 的 JSON 对象。`prompt_id` 必须为 `P-TARGETED-REPAIR`，`prompt_version` 必须为 `2.0.0`。不得使用Markdown代码块，不得在JSON前后添加说明。
+只返回符合 `schemas/prompts/targeted_repair_output.schema.json` 的 JSON 对象。`prompt_id` 必须为 `P-TARGETED-REPAIR`，`prompt_version` 必须为 `3.4.0`。不得使用Markdown代码块，不得在JSON前后添加说明。

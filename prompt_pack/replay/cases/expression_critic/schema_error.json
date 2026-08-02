@@ -5,7 +5,7 @@
   "description": "输入缺少prompt_id",
   "input": {
     "schema_version": "2.0",
-    "prompt_version": "3.1.0",
+    "prompt_version": "3.4.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",

@@ -324,7 +324,15 @@ class WorkflowGateMixin:
         return row["security_level"] if row else "INTERNAL"
 
     def _update(self, wf: dict[str, Any], *, status: str | None = None, current_step: int | None = None, state: dict[str, Any] | None = None) -> None:
+        next_status = status or wf["status"]
+        next_step = wf["current_step"] if current_step is None else current_step
+        next_state = state if state is not None else wf["state"]
+        updated_at = utc_now()
         self.db.execute(
             "UPDATE workflows SET status=?,current_step=?,state_json=?,updated_at=? WHERE id=?",
-            (status or wf["status"], wf["current_step"] if current_step is None else current_step, json.dumps(state if state is not None else wf["state"], ensure_ascii=False), utc_now(), wf["id"]),
+            (next_status, next_step, json.dumps(next_state, ensure_ascii=False), updated_at, wf["id"]),
         )
+        wf["status"] = next_status
+        wf["current_step"] = next_step
+        wf["state"] = next_state
+        wf["updated_at"] = updated_at

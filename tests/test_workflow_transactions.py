@@ -162,7 +162,7 @@ def test_decision_record_workflow_state_and_audit_commit_atomically(tmp_path: Pa
             "0": {"model_status": "PASS", "effective_status": "PASS"}
         }
     }
-    artifact_id = DecisionArbiter.persist(
+    artifact_id, updated_at = DecisionArbiter.persist(
         db,
         project_id="project-1",
         workflow_id="workflow-1",
@@ -180,11 +180,39 @@ def test_decision_record_workflow_state_and_audit_commit_atomically(tmp_path: Pa
     persisted_state = json.loads(workflow["state_json"])
     assert persisted_state["decision_record_ids"] == [artifact_id]
     assert state == persisted_state
+    assert db.fetchone(
+        "SELECT updated_at FROM workflows WHERE id='workflow-1'"
+    ) == {"updated_at": updated_at}
     audit = db.fetchone(
         "SELECT metadata_json FROM audit_events WHERE event_type='DECISION_RECORDED' AND object_id=?",
         (artifact_id,),
     )
     assert json.loads(audit["metadata_json"])["version"] == 1
+
+
+def test_decision_persistence_preserves_nested_checkpoint_identity(tmp_path: Path) -> None:
+    """A live section loop must keep updating the persisted state tree."""
+    from app.decision_arbiter import DecisionArbiter
+
+    db = _db(tmp_path)
+    progress = {"phase": "BLUEPRINT_CRITIC", "status": "RUNNING"}
+    state = {"section_progress": {"section-1": progress}}
+
+    DecisionArbiter.persist(
+        db,
+        project_id="project-1",
+        workflow_id="workflow-1",
+        prompt_id="P-CRITIC",
+        record=_decision_record(),
+        security_level="INTERNAL",
+        workflow_state=state,
+        workflow_status="RUNNING",
+        current_step=0,
+    )
+
+    assert state["section_progress"]["section-1"] is progress
+    progress["phase"] = "CONTENT"
+    assert state["section_progress"]["section-1"]["phase"] == "CONTENT"
 
 
 def test_decision_persistence_failure_rolls_back_artifact_state_and_audit(
@@ -231,6 +259,34 @@ class _GateEngine(WorkflowGateMixin):
             raise KeyError(workflow_id)
         row["state"] = json.loads(row.pop("state_json"))
         return row
+
+
+def test_regular_update_propagates_token_for_following_atomic_update(
+    tmp_path: Path,
+) -> None:
+    db = _db(tmp_path)
+    engine = _GateEngine(db)
+    workflow = engine.get("workflow-1")
+
+    engine._update(workflow, state={"phase": "before-repair"})
+    persisted = db.fetchone(
+        "SELECT updated_at,state_json FROM workflows WHERE id='workflow-1'"
+    )
+    assert workflow["updated_at"] == persisted["updated_at"]
+    assert workflow["state"] == json.loads(persisted["state_json"])
+
+    with db.transaction() as tx:
+        next_token = tx.update_workflow(
+            workflow_id="workflow-1",
+            status="RUNNING",
+            current_step=0,
+            state={"phase": "repair-applied"},
+            expected_updated_at=workflow["updated_at"],
+        )
+
+    assert db.fetchone(
+        "SELECT updated_at FROM workflows WHERE id='workflow-1'"
+    ) == {"updated_at": next_token}
 
 
 def _insert_open_information_gate(db: Database) -> None:

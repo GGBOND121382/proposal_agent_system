@@ -286,6 +286,7 @@ class ProposalQualityGuard:
     def observe(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
         payload = envelope.get("payload") or {}
         findings: list[QualityFinding] = []
+        observations: dict[str, Any] = {}
 
         if prompt_id in {"P-PROJECT-DEFINITION-EXTRACT", "P-PROJECT-DEFINITION-CRITIC"}:
             pd = (
@@ -354,12 +355,30 @@ class ProposalQualityGuard:
 
         elif prompt_id == "P-EXPRESSION-CRITIC":
             findings.extend(self._audit_expression_preservation(payload.get("content_candidate") or {}, payload.get("polished_candidate") or {}))
-            findings.extend(self._audit_critic_coverage(payload.get("polished_candidate") or {}, output, None))
+            findings.extend(
+                self._audit_critic_coverage(
+                    payload.get("polished_candidate") or {},
+                    output,
+                    None,
+                    require_general_quality_dimensions=False,
+                )
+            )
 
         elif prompt_id == "P-INTEGRATION-CRITIC":
-            findings.extend(self._audit_document(payload, output))
+            findings.extend(
+                self._audit_document(
+                    payload,
+                    output,
+                    observations=observations,
+                )
+            )
 
-        return self._guard_report(prompt_id, output, findings)
+        return self._guard_report(
+            prompt_id,
+            output,
+            findings,
+            observations=observations or None,
+        )
     def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
         """Return an isolated copy of the model-owned output.
 
@@ -1124,7 +1143,14 @@ class ProposalQualityGuard:
                 ))
         return findings
 
-    def _audit_critic_coverage(self, candidate: dict[str, Any], output: dict[str, Any], payload: dict[str, Any] | None = None) -> list[QualityFinding]:
+    def _audit_critic_coverage(
+        self,
+        candidate: dict[str, Any],
+        output: dict[str, Any],
+        payload: dict[str, Any] | None = None,
+        *,
+        require_general_quality_dimensions: bool = True,
+    ) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
         result = output.get("result") or {}
         expected_ids = {str(p.get("paragraph_id")) for p in candidate.get("paragraphs", []) if isinstance(p, dict) and p.get("paragraph_id")}
@@ -1142,7 +1168,7 @@ class ProposalQualityGuard:
             for item in result.get("quality_dimensions") or []
             if isinstance(item, dict) and item.get("dimension")
         }
-        if len(quality_dimensions) < 6:
+        if require_general_quality_dimensions and len(quality_dimensions) < 6:
             findings.append(QualityFinding(
                 "QG_CRITIC_DIMENSIONS_TOO_SHALLOW", "P1", "CONTENT", "WRITE_CRITIC",
                 "result.profile_acceptance_results", "正文Critic只检查结构和Trace，没有检查文种、中心命题、方法实质、创新、指标依据、基础和重复。",
@@ -1178,7 +1204,13 @@ class ProposalQualityGuard:
                 ))
         return findings
 
-    def _audit_document(self, payload: dict[str, Any], output: dict[str, Any]) -> list[QualityFinding]:
+    def _audit_document(
+        self,
+        payload: dict[str, Any],
+        output: dict[str, Any],
+        *,
+        observations: dict[str, Any] | None = None,
+    ) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
         all_sections = [
             item
@@ -1271,6 +1303,22 @@ class ProposalQualityGuard:
             ]
             for sid in ids if sid
         })
+        if observations is not None:
+            observations["main_body_redundancy_report"] = {
+                "exact_duplicate_groups": len(exact_repeated),
+                "semantic_template_groups": len(high_repeat),
+                "affected_section_ids": affected_section_ids,
+                "representative_signatures": [],
+                "duplicate_information_key_groups": len(duplicate_information),
+                "claim_overconcentration_groups": len(claim_overconcentration),
+                "template_skeleton_groups": len(template_skeletons),
+                "main_body_section_count": len(sections),
+                "excluded_appendix_section_ids": sorted(
+                    str(item.get("section_id"))
+                    for item in all_sections
+                    if item not in sections and item.get("section_id")
+                ),
+            }
         if exact_repeated or high_repeat or template_skeletons:
             findings.append(QualityFinding(
                 "QG_DOCUMENT_TEMPLATE_REPETITION", "P1", "INTEGRATION", "CANDIDATE_DOCUMENT",
@@ -1382,11 +1430,14 @@ class ProposalQualityGuard:
         prompt_id: str,
         output: dict[str, Any],
         findings: list[QualityFinding],
+        *,
+        observations: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return build_guard_report(
             prompt_id,
             output,
             [item.as_dict() for item in findings],
+            observations=observations,
             components=[{
                 "observer": type(self).__name__,
                 "finding_count": len(findings),

@@ -127,7 +127,10 @@ def test_repair_scope_accepts_generic_collection_wildcard():
                 "content.research_design_matrix[*].method_ids",
             ],
             "protected_paths": [],
-            "findings_to_repair": [{"code": "MATRIX_REFERENCE_UNKNOWN"}],
+            "findings_to_repair": [{
+                "finding_instance_id": "finding-matrix-reference-001",
+                "code": "MATRIX_REFERENCE_UNKNOWN",
+            }],
             "original_object": {"content": {"research_design_matrix": []}},
         },
         {
@@ -135,7 +138,8 @@ def test_repair_scope_accepts_generic_collection_wildcard():
                 "content.research_design_matrix[0].method_ids",
                 "content.research_design_matrix[3].method_ids",
             ],
-            "resolved_finding_codes": ["MATRIX_REFERENCE_UNKNOWN"],
+            "resolved_finding_ids": ["finding-matrix-reference-001"],
+            "unresolved_finding_ids": [],
         },
     )
 

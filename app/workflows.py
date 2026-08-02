@@ -7,6 +7,7 @@ from typing import Any
 
 from .dependency_preflight import DependencyIssue, DependencyReport
 from .executor import PromptExecutionError
+from .llm import MODEL_RESPONSE_PROTOCOL_VERSION
 from .decision_arbiter import DecisionArbiter
 from .repair_ledger import RepairLedger
 from .retry_policy import ProviderRetriesExhausted, RetryPolicy
@@ -18,7 +19,7 @@ from .runtime_failures import (
 from .quality import QualityGateBlocked, QualityLifecycleManager
 from .quality_guard import QualityGuardContractError, require_guard_report
 from .research import PublicResearchError
-from .util import new_id, utc_now
+from .util import new_id, sha256_json, utc_now
 from .workflow_authoring import WorkflowAuthoringMixin
 from .workflow_defs import CRITIC_PRODUCER, WORKFLOWS
 from .workflow_gates import WorkflowGateMixin
@@ -118,6 +119,8 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         *,
         prompt_id: str,
         envelope: dict[str, Any],
+        call_key: str | None = None,
+        retry_categories: frozenset[FailureCategory] | None = None,
     ) -> dict[str, Any]:
         """Execute one business node with a finite provider retry policy.
 
@@ -129,11 +132,66 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         """
 
         policy = RetryPolicy.from_options(state.get("options") or {})
+        section_id = str(state.get("active_section_id") or "").strip()
+        section_progress = (
+            (state.get("section_progress") or {}).get(section_id)
+            if section_id
+            else None
+        )
+        section_phase = (
+            str(section_progress.get("phase") or "").strip()
+            if isinstance(section_progress, dict)
+            else ""
+        )
         retry_key = f"{wf['current_step']}:{prompt_id}"
+        if section_id and section_phase:
+            retry_key = f"{retry_key}:{section_id}:{section_phase}"
+        input_hash = sha256_json(envelope)
+        cycles = state.setdefault("provider_call_cycles", {})
+        prior_cycle = cycles.get(retry_key) or {}
+        if (
+            prior_cycle.get("input_hash") != input_hash
+            or prior_cycle.get("protocol_version") != MODEL_RESPONSE_PROTOCOL_VERSION
+        ):
+            generation = int(prior_cycle.get("generation") or 0) + 1
+            cycle_id = sha256_json(
+                {
+                    "workflow_id": wf["id"],
+                    "retry_key": retry_key,
+                    "input_hash": input_hash,
+                    "protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
+                    "generation": generation,
+                }
+            )[:16]
+            prior_cycle = {
+                "cycle_id": cycle_id,
+                "generation": generation,
+                "input_hash": input_hash,
+                "protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
+                "created_at": utc_now(),
+            }
+            cycles[retry_key] = prior_cycle
+            # Persist before the provider call.  A crash may safely replay the
+            # same attempt, while a later retry receives a distinct attempt key.
+            self._update(wf, state=state)
+        cycle_id = str(prior_cycle["cycle_id"])
+        base_call_key = call_key or (
+            "call-provider-" + sha256_json(
+                {
+                    "workflow_id": wf["id"],
+                    "retry_key": retry_key,
+                    "input_hash": input_hash,
+                    "protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
+                }
+            )[:24]
+        )
         completed_attempts = 0
 
         while True:
             completed_attempts += 1
+            attempt_call_key = (
+                f"{base_call_key}-cycle-{cycle_id}-attempt-{completed_attempts}"
+            )
             try:
                 result = await self.executor.execute(
                     prompt_id,
@@ -141,10 +199,17 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     project_id=wf["project_id"],
                     workflow_id=wf["id"],
                     original_environment=state.get("original_environment"),
+                    call_key=attempt_call_key,
                 )
             except (PromptExecutionError, ValueError, KeyError) as exc:
                 classification = classify_runtime_failure(exc)
-                if classification.category is not FailureCategory.PROVIDER_TRANSIENT:
+                if (
+                    not classification.retryable
+                    or (
+                        retry_categories is not None
+                        and classification.category not in retry_categories
+                    )
+                ):
                     raise
 
                 failure = self._record_runtime_failure(
@@ -211,6 +276,118 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 self._update(wf, state=state)
             return result
 
+    def _block_provider_retries_exhausted(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        exc: ProviderRetriesExhausted,
+        *,
+        boundary: str,
+    ) -> dict[str, Any]:
+        """Persist one typed provider-exhaustion outcome at any node boundary."""
+
+        state["last_error"] = str(exc.original_exception)
+        state["provider_wait"] = {
+            **(state.get("provider_wait") or {}),
+            "exhausted": True,
+            "exhausted_status": exc.decision.exhausted_status,
+            "failure": exc.failure_payload,
+            "boundary": boundary,
+        }
+        state.pop("runtime_recoverable", None)
+        state.pop("runtime_failure_point", None)
+        state.pop("runtime_blocked_at", None)
+        self._update(
+            wf,
+            status=exc.decision.exhausted_status,
+            state=state,
+        )
+        self.db.audit(
+            "PROVIDER_RETRIES_EXHAUSTED",
+            project_id=wf["project_id"],
+            object_id=wf["id"],
+            metadata={
+                "boundary": boundary,
+                "prompt_id": exc.failure_payload.get("prompt_id"),
+                "category": exc.classification.category.value,
+                "failure_kind": exc.classification.failure_kind,
+                "completed_attempts": exc.decision.completed_attempts,
+                "max_retries": exc.decision.max_retries,
+                "workflow_status": exc.decision.exhausted_status,
+            },
+        )
+        return self.get(wf["id"])
+
+    def _recover_provider_block_after_protocol_upgrade(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+    ) -> bool:
+        """Resume an exhausted provider node only when its wire protocol changed.
+
+        A response-protocol deployment creates a new generation of the same
+        logical provider call.  Persisted semantic progress remains valid, but
+        the old generation's exhausted wait state must not prevent the new
+        adapter from receiving its own finite retry cycle.
+        """
+
+        if wf["status"] not in {
+            WorkflowStatus.BLOCKED_PROVIDER.value,
+            WorkflowStatus.BLOCKED_CONTRACT.value,
+        }:
+            return False
+        wait = state.get("provider_wait") or {}
+        if not wait.get("exhausted"):
+            return False
+        failure = wait.get("failure") or {}
+        if not bool(failure.get("retryable")):
+            return False
+        retry_key = str(wait.get("retry_key") or "").strip()
+        prior_cycle = (state.get("provider_call_cycles") or {}).get(retry_key) or {}
+        prior_protocol = str(prior_cycle.get("protocol_version") or "").strip()
+        if not prior_protocol or prior_protocol == MODEL_RESPONSE_PROTOCOL_VERSION:
+            return False
+
+        recovered_at = utc_now()
+        recovery = {
+            "reason": "MODEL_RESPONSE_PROTOCOL_UPGRADED",
+            "retry_key": retry_key,
+            "from_status": wf["status"],
+            "to_status": WorkflowStatus.RUNNING.value,
+            "from_protocol_version": prior_protocol,
+            "to_protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
+            "preserved_section_id": state.get("active_section_id"),
+            "preserved_phase": (
+                ((state.get("section_progress") or {}).get(
+                    str(state.get("active_section_id") or "")
+                ) or {}).get("phase")
+            ),
+            "recovered_at": recovered_at,
+        }
+        state.setdefault("checkpoint_recovery_history", []).append(recovery)
+        RepairLedger.record(
+            state,
+            bucket="provider_retries",
+            key=retry_key,
+            event="PROVIDER_PROTOCOL_UPGRADED",
+            details=recovery,
+        )
+        state["recovered_from"] = wf["status"]
+        state.pop("provider_wait", None)
+        state.pop("last_error", None)
+        self._update(
+            wf,
+            status=WorkflowStatus.RUNNING.value,
+            state=state,
+        )
+        self.db.audit(
+            "PROVIDER_PROTOCOL_CHECKPOINT_RECOVERED",
+            project_id=wf["project_id"],
+            object_id=wf["id"],
+            metadata=recovery,
+        )
+        return True
+
     def _record_decision(
         self,
         wf: dict[str, Any],
@@ -245,7 +422,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         )
         step_result["model_status"] = raw_status
         step_result["effective_status"] = effective_status
-        artifact_id = self.decision_arbiter.persist(
+        artifact_id, updated_at = self.decision_arbiter.persist(
             self.db,
             project_id=wf["project_id"],
             workflow_id=wf["id"],
@@ -255,7 +432,9 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             workflow_state=state,
             workflow_status=wf["status"],
             current_step=wf["current_step"],
+            expected_updated_at=wf.get("updated_at"),
         )
+        wf["updated_at"] = updated_at
         payload["artifact_id"] = artifact_id
         return payload, effective_status, effective_output
 
@@ -707,6 +886,9 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         if is_terminal(wf["status"]):
             return wf
         state = wf["state"]
+        if self._recover_provider_block_after_protocol_upgrade(wf, state):
+            wf = self.get(workflow_id)
+            state = wf["state"]
         if wf["status"] == WorkflowStatus.WAITING_PROVIDER.value:
             wait = state.get("provider_wait") or {}
             retry_key = str(wait.get("retry_key") or f"{wf['current_step']}:provider")
@@ -1066,6 +1248,13 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     result = await self._write_sections(wf, state)
                 except WorkflowInputRequired as exc:
                     return self._pause_for_workflow_input(wf, state, exc)
+                except ProviderRetriesExhausted as exc:
+                    return self._block_provider_retries_exhausted(
+                        wf,
+                        state,
+                        exc,
+                        boundary="WRITE_SECTIONS",
+                    )
                 except (ValueError, KeyError) as exc:
                     report = self._runtime_configuration_report(
                         exc,
@@ -1117,19 +1306,12 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             except WorkflowInputRequired as exc:
                 return self._pause_for_workflow_input(wf, state, exc)
             except ProviderRetriesExhausted as exc:
-                state["last_error"] = str(exc.original_exception)
-                state["provider_wait"] = {
-                    **(state.get("provider_wait") or {}),
-                    "exhausted": True,
-                    "exhausted_status": exc.decision.exhausted_status,
-                    "failure": exc.failure_payload,
-                }
-                self._update(
+                return self._block_provider_retries_exhausted(
                     wf,
-                    status=exc.decision.exhausted_status,
-                    state=state,
+                    state,
+                    exc,
+                    boundary=f"PROMPT:{prompt_id}",
                 )
-                return self.get(workflow_id)
             except (PromptExecutionError, ValueError, KeyError) as exc:
                 required_environment = str(
                     self.pack.entry(prompt_id).get("required_environment") or ""
@@ -1252,6 +1434,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     )
                     self._update(wf, state=state)
                     continue
+                if isinstance(state.get("last_targeted_repair_failure"), dict):
+                    state["last_error"] = self._targeted_repair_failure_message(
+                        state,
+                        prompt_id=prompt_id,
+                        fallback=f"{prompt_id} targeted repair failed",
+                    )
+                    self._update(wf, status="BLOCKED_CONTRACT", state=state)
+                    return self.get(workflow_id)
             if effective_status == "REVISE" and self._has_nonconfirmable_quality_failure(effective_output):
                 codes = [str(item.get("code")) for item in effective_output.get("findings", []) if str(item.get("code", "")).startswith("QG_")]
                 state["last_error"] = (

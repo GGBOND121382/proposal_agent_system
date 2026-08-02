@@ -8,13 +8,58 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from app.llm import LLMError, _extract_json
+from app.llm import LLMError, ProviderError, _extract_json
+from app.runtime_failures import ProviderFailureKind
 from app.runtime_gateway import BaseModelGateway
 from app.security import Route
 
 
+def _function_stream_events(output_json: str) -> list[dict]:
+    wrapper = json.dumps({"output_json": output_json})
+    split = len(wrapper) // 2
+    return [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {
+                                    "name": "submit_P-TEST",
+                                    "arguments": wrapper[:split],
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {"arguments": wrapper[split:]},
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+
+
 class _FakeStreamResponse:
     status_code = 200
+
+    def __init__(self, events: list[dict] | None = None):
+        self.events = events or _function_stream_events('{"status":"PASS"}')
 
     async def __aenter__(self):
         return self
@@ -26,18 +71,14 @@ class _FakeStreamResponse:
         return b""
 
     async def aiter_lines(self):
-        events = [
-            {"choices": [{"delta": {"content": '{"status":'}, "finish_reason": None}]},
-            {"choices": [{"delta": {"content": '{"status":"PASS"}'}, "finish_reason": None}]},
-            {"choices": [{"delta": {}, "finish_reason": "stop"}]},
-        ]
-        for event in events:
+        for event in self.events:
             yield "data: " + json.dumps(event)
         yield "data: [DONE]"
 
 
 class _FakeAsyncClient:
     captured: dict = {}
+    stream_events: list[dict] | None = None
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -50,7 +91,11 @@ class _FakeAsyncClient:
 
     def stream(self, method, url, **kwargs):
         type(self).captured = {"method": method, "url": url, **kwargs}
-        return _FakeStreamResponse()
+        return _FakeStreamResponse(type(self).stream_events)
+
+    async def post(self, url, **kwargs):
+        type(self).captured = {"method": "POST", "url": url, **kwargs}
+        return _FakePostResponse(200, tool_arguments='{"status":"PASS"}')
 
 
 class _DisconnectingStream:
@@ -64,6 +109,21 @@ class _DisconnectingStream:
 class _DisconnectingAsyncClient(_FakeAsyncClient):
     def stream(self, method, url, **kwargs):
         return _DisconnectingStream()
+
+    async def post(self, url, **kwargs):
+        raise httpx.RemoteProtocolError("server disconnected")
+
+
+class _TimingOutAsyncClient(_FakeAsyncClient):
+    def stream(self, method, url, **kwargs):
+        class _TimingOutStream:
+            async def __aenter__(self):
+                raise httpx.ReadTimeout("read timed out")
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                return False
+
+        return _TimingOutStream()
 
 
 def _route() -> Route:
@@ -88,8 +148,9 @@ def _gateway() -> BaseModelGateway:
     )
 
 
-def test_minimax_uses_json_object_streaming(monkeypatch):
+def test_minimax_uses_streamed_serialized_json_function(monkeypatch):
     monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = None
     monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
 
     result = asyncio.run(
@@ -98,28 +159,42 @@ def test_minimax_uses_json_object_streaming(monkeypatch):
             "P-TEST",
             "Return JSON.",
             {"payload": {"value": 1}},
-            {"type": "object"},
+            {
+                "type": "object",
+                "properties": {
+                    "value": {"type": ["string", "number", "boolean"]},
+                },
+            },
         )
     )
 
     sent = _FakeAsyncClient.captured["json"]
     assert sent["stream"] is True
     assert sent["reasoning_split"] is True
-    assert sent["response_format"] == {"type": "json_object"}
+    assert "response_format" not in sent
+    assert sent["tool_choice"] == "auto"
+    assert len(sent["tools"]) == 1
+    assert sent["tools"][0]["function"]["name"] == "submit_P-TEST"
+    assert sent["tools"][0]["function"]["strict"] is True
+    assert "sole `output_json` argument" in sent["messages"][0]["content"]
+    parameters = sent["tools"][0]["function"]["parameters"]
+    assert parameters["additionalProperties"] is False
+    assert parameters["required"] == ["output_json"]
+    assert parameters["properties"]["output_json"]["type"] == "string"
     assert result.output == {"status": "PASS"}
     assert result.model_id == "offline-general-primary"
-    assert result.response_contract_mode == "JSON_OBJECT_MINIMAX"
+    assert result.response_contract_mode == "FUNCTION_SERIALIZED_JSON_STREAM_MINIMAX"
+    assert result.parse_report["wire_protocol"] == "STRICT_SERIALIZED_JSON_FUNCTION"
+    assert result.parse_report["wire_wrapper_parse_report"]["repair_count"] == 0
     assert result.provider_attempts == 1
 
 
-def test_minimax_transport_error_becomes_llm_error(monkeypatch):
+def test_strict_schema_response_is_not_locally_repaired(monkeypatch):
     monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
-    monkeypatch.setattr("app.llm.httpx.AsyncClient", _DisconnectingAsyncClient)
-    async def no_sleep(_seconds):
-        return None
-    monkeypatch.setattr("app.llm.asyncio.sleep", no_sleep)
+    _FakeAsyncClient.stream_events = _function_stream_events('{"status":"PASS"')
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
 
-    with pytest.raises(LLMError, match="after 3 attempts.*RemoteProtocolError"):
+    with pytest.raises(ProviderError, match="malformed JSON") as captured:
         asyncio.run(
             _gateway()._invoke_live(
                 _route(),
@@ -130,23 +205,16 @@ def test_minimax_transport_error_becomes_llm_error(monkeypatch):
             )
         )
 
+    assert captured.value.provider_failure_kind is ProviderFailureKind.RESPONSE_PARSE
+    _FakeAsyncClient.stream_events = None
 
-def test_minimax_stream_has_total_request_deadline(monkeypatch):
+
+def test_minimax_transport_error_is_typed_for_workflow_owned_retry(monkeypatch):
     monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
-    gateway = BaseModelGateway(
-        SimpleNamespace(runtime_mode="LIVE", request_timeout_seconds=0.01),
-        SimpleNamespace(),
-    )
-
-    async def never_finishes(*_args, **_kwargs):
-        await asyncio.sleep(60)
-        return '{"status":"PASS"}'
-
-    monkeypatch.setattr(gateway, "_stream_chat_completion", never_finishes)
-
-    with pytest.raises(LLMError, match="total timeout of 0.01 seconds"):
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _DisconnectingAsyncClient)
+    with pytest.raises(ProviderError, match="RemoteProtocolError") as captured:
         asyncio.run(
-            gateway._invoke_live(
+            _gateway()._invoke_live(
                 _route(),
                 "P-TEST",
                 "Return JSON.",
@@ -154,6 +222,26 @@ def test_minimax_stream_has_total_request_deadline(monkeypatch):
                 {"type": "object"},
             )
         )
+    assert captured.value.provider_failure_kind is ProviderFailureKind.TRANSPORT
+    assert captured.value.retryable_hint is True
+
+
+def test_minimax_request_timeout_is_typed_for_workflow_owned_retry(monkeypatch):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _TimingOutAsyncClient)
+
+    with pytest.raises(ProviderError, match="ReadTimeout") as captured:
+        asyncio.run(
+            _gateway()._invoke_live(
+                _route(),
+                "P-TEST",
+                "Return JSON.",
+                {"payload": {"value": 1}},
+                {"type": "object"},
+            )
+        )
+    assert captured.value.provider_failure_kind is ProviderFailureKind.TIMEOUT
+    assert captured.value.retryable_hint is True
 
 
 def test_extract_json_repairs_missing_member_comma():
@@ -220,10 +308,30 @@ def test_extract_json_reports_every_local_syntax_repair():
 
 
 class _FakePostResponse:
-    def __init__(self, status_code: int, *, body: str = "", content: str = '{"status":"PASS"}'):
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        body: str = "",
+        content: str = '{"status":"PASS"}',
+        tool_arguments: str | None = None,
+    ):
         self.status_code = status_code
         self.text = body
-        self._payload = {"choices": [{"message": {"content": content}}]}
+        self.headers = {}
+        message = {"content": content}
+        if tool_arguments is not None:
+            message["tool_calls"] = [
+                {
+                    "id": "call-test",
+                    "type": "function",
+                    "function": {
+                        "name": "submit_P-TEST",
+                        "arguments": tool_arguments,
+                    },
+                }
+            ]
+        self._payload = {"choices": [{"message": message}]}
 
     def raise_for_status(self):
         if self.status_code >= 400:

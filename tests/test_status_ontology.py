@@ -72,7 +72,7 @@ def test_unknown_arbitrary_status_is_not_silently_guessed() -> None:
     assert any(x["code"] == "SCHEMA_ERROR" for x in validation["findings"])
 
 
-def test_prompt_output_alias_migrates_semantic_dimensions() -> None:
+def test_prompt_output_alias_does_not_synthesize_other_semantic_dimensions() -> None:
     output = {
         "status": "PASS",
         "result": {
@@ -104,8 +104,8 @@ def test_prompt_output_alias_migrates_semantic_dimensions() -> None:
     normalized = PromptExecutor._normalize_fact_output(output)
     fact = normalized["result"]["fact_candidates"][0]
     assert fact["knowledge_status"] == "CONFIRMED"
-    assert fact["claim_type"] == "PLAN"
-    assert fact["temporal_status"] == "PLANNED"
+    assert fact["claim_type"] == "FACT"
+    assert fact["temporal_status"] == "CURRENT"
 
 
 
@@ -126,7 +126,7 @@ def test_stage3_project_design_alias_uses_confirmed_human_gated_design() -> None
     assert report["normalized_count"] == 3
 
 
-def test_claim_type_project_design_drifts_independently_of_knowledge_status() -> None:
+def test_claim_type_alias_does_not_rewrite_temporal_or_knowledge_status() -> None:
     output = {
         "status": "PASS",
         "result": {
@@ -159,7 +159,7 @@ def test_claim_type_project_design_drifts_independently_of_knowledge_status() ->
     fact = normalized["result"]["fact_candidates"][0]
     assert fact["knowledge_status"] == "DOCUMENT_EXTRACTED"
     assert fact["claim_type"] == "PLAN"
-    assert fact["temporal_status"] == "PLANNED"
+    assert fact["temporal_status"] == "CURRENT"
     assert any("/claim_type: PROJECT_DESIGN->PLAN" in warning for warning in normalized["warnings"])
 
 

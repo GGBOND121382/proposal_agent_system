@@ -8,6 +8,7 @@ from collections import Counter
 from app.quality import QualityLifecycleManager
 from app.track_b import TrackBAgentPromptValidator
 from app.runtime_api import WorkflowEngine
+from app.workflow_status import WorkflowStatus, is_recoverable_block
 from tests.test_runtime import add_standard_materials, create_project, finish_workflow, runtime
 
 
@@ -144,13 +145,13 @@ def test_three_section_cross_chapter_repair_review_and_restart(runtime):
             if current["status"] == "WAITING_GATE":
                 _approve_open_gate(engine, current["id"])
                 continue
-            if current["status"] in {"BLOCKED", "COMPLETED"}:
+            if current["status"] == "COMPLETED" or is_recoverable_block(current["status"]):
                 return current
         return current
 
     checkpoint = asyncio.run(run_until_interruption())
-    assert interrupted["done"] is True
-    assert checkpoint["status"] == "BLOCKED"
+    assert interrupted["done"] is True, checkpoint["state"].get("last_error")
+    assert checkpoint["status"] == WorkflowStatus.BLOCKED_TECHNICAL.value
     assert checkpoint["state"]["runtime_recoverable"] is True
     assert checkpoint["state"]["runtime_failure_point"] == "WORKFLOW_ADVANCE"
     assert checkpoint["state"]["integration_repair_rounds"] == 1
@@ -172,7 +173,7 @@ def test_three_section_cross_chapter_repair_review_and_restart(runtime):
             if current["status"] == "WAITING_GATE":
                 _approve_open_gate(restarted, current["id"])
                 continue
-            if current["status"] in {"BLOCKED", "COMPLETED"}:
+            if current["status"] == "COMPLETED" or is_recoverable_block(current["status"]):
                 return current
         return current
 
