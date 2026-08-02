@@ -4,8 +4,10 @@ __pycache__/
 .pytest_cache/
 .env
 minimax_auth.json
+/*.zip
 data/*.sqlite3
 data/*.sqlite3-*
+data/*.bak*
 data/*.log
 data/uploads/*
 data/exports/*
