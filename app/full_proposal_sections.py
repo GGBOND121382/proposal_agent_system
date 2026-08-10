@@ -4,6 +4,7 @@ from typing import Any
 
 from .executor import PromptExecutionError
 from .workflow_input import WorkflowInputRequired
+from .workflow_status import WorkflowStatus
 
 
 class FullProposalSectionsMixin:
@@ -31,7 +32,7 @@ class FullProposalSectionsMixin:
             state["last_error"] = (
                 "单章节完整链要求精确选择一个章节；当前匹配 " + str(len(sections)) + " 个。"
             )
-            self._update(wf, status="BLOCKED", state=state)
+            self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
             return self.get(wf["id"])
 
         completed = {str(item.get("section_id") or "") for item in state.get("section_results", [])}
@@ -65,16 +66,67 @@ class FullProposalSectionsMixin:
                 if phase not in self.SECTION_PHASES:
                     return self._block_section_chain(wf, state, section, f"未知章节阶段：{phase}")
                 prompt_id, next_phase = self.SECTION_PHASES[phase]
-                try:
-                    envelope, result = await self._execute_section_prompt(
-                        wf, state, section, progress, prompt_id, role="INITIAL_REVIEW" if prompt_id.endswith("CRITIC") else "PRODUCER",
+                pending_rereview = progress.get("pending_repair_rereview")
+                is_pending_rereview = (
+                    isinstance(pending_rereview, dict)
+                    and str(pending_rereview.get("critic_prompt") or "") == prompt_id
+                )
+                if isinstance(pending_rereview, dict) and not is_pending_rereview:
+                    error = ValueError(
+                        "Persisted repair re-review checkpoint does not match "
+                        f"the current section phase: expected "
+                        f"{pending_rereview.get('critic_prompt')}, current {prompt_id}."
                     )
+                    return self._block_section_chain(
+                        wf,
+                        state,
+                        section,
+                        str(error),
+                        configuration_error=error,
+                    )
+                try:
+                    if is_pending_rereview:
+                        self._start_repair_rereview(
+                            state,
+                            pending_rereview,
+                            critic_prompt=prompt_id,
+                        )
+                        self._update(wf, state=state)
+                    envelope, result = await self._execute_section_prompt(
+                        wf,
+                        state,
+                        section,
+                        progress,
+                        prompt_id,
+                        role=(
+                            "INDEPENDENT_REVIEW"
+                            if is_pending_rereview
+                            else ("INITIAL_REVIEW" if prompt_id.endswith("CRITIC") else "PRODUCER")
+                        ),
+                    )
+                    if is_pending_rereview:
+                        self._complete_repair_rereview(
+                            state,
+                            pending_rereview,
+                            critic_prompt=prompt_id,
+                            review_run_id=str(result.get("run_id") or "") or None,
+                            status=str(result.get("status") or ""),
+                        )
+                        # Keep the checkpoint until the effective result and its
+                        # phase transition are committed together.
+                        pending_rereview["review_run_id"] = (
+                            str(result.get("run_id") or "") or None
+                        )
+                        pending_rereview["completed_status"] = str(
+                            result.get("status") or ""
+                        )
                 except WorkflowInputRequired:
                     raise
                 except (PromptExecutionError, ValueError, KeyError) as exc:
                     return self._block_section_chain(wf, state, section, str(exc), configuration_error=exc)
 
                 if result["status"] == "PASS":
+                    progress.pop("pending_repair_rereview", None)
                     progress["phase"] = next_phase
                     self._update(wf, state=state)
                     continue
@@ -88,6 +140,7 @@ class FullProposalSectionsMixin:
                         result["output"],
                     )
                 ):
+                    progress.pop("pending_repair_rereview", None)
                     self._update(wf, status="RUNNING", state=state)
                     continue
 
@@ -105,6 +158,7 @@ class FullProposalSectionsMixin:
                         result["output"],
                     )
                 ):
+                    progress.pop("pending_repair_rereview", None)
                     self._update(wf, status="RUNNING", state=state)
                     continue
 
@@ -116,90 +170,42 @@ class FullProposalSectionsMixin:
                             prompt_id,
                             result["output"],
                         ):
+                            progress.pop("pending_repair_rereview", None)
                             self._update(wf, status="RUNNING", state=state)
                             continue
+                        progress.pop("pending_repair_rereview", None)
+                        message = (
+                            f"{prompt_id} 定向修复后的独立复审返回 {result['status']}；"
+                            "禁止二次自动修复或人工改正文放行。"
+                            if is_pending_rereview
+                            else f"{prompt_id} 在一次定向修复后仍需修改；章节修复额度已耗尽。"
+                        )
                         return self._block_section_chain(
-                            wf, state, section, f"{prompt_id} 在一次定向修复后仍需修改；章节修复额度已耗尽。",
+                            wf, state, section, message,
                         )
                     repaired = await self._auto_repair(wf, prompt_id, envelope, result["output"], state)
                     if not repaired:
+                        progress.pop("pending_repair_rereview", None)
                         return self._block_section_chain(
                             wf, state, section, f"{prompt_id} 返回 REVISE，但没有可执行的局部修复或定向修复失败。",
                         )
-                    self._append_section_run(progress, repaired, prompt_id="P-TARGETED-REPAIR", role="TARGETED_REPAIR")
+                    self._append_section_run(
+                        progress,
+                        repaired,
+                        prompt_id="P-TARGETED-REPAIR",
+                        role="TARGETED_REPAIR",
+                    )
+                    progress["pending_repair_rereview"] = {
+                        **self._repair_rereview_checkpoint(repaired),
+                        "critic_prompt": prompt_id,
+                    }
                     self._update(wf, state=state)
-                    try:
-                        self._start_repair_rereview(
-                            state, repaired, critic_prompt=prompt_id
-                        )
-                        self._update(wf, state=state)
-                        _review_envelope, reviewed = await self._execute_section_prompt(
-                            wf, state, section, progress, prompt_id, role="INDEPENDENT_REVIEW",
-                        )
-                        self._complete_repair_rereview(
-                            state,
-                            repaired,
-                            critic_prompt=prompt_id,
-                            review_run_id=str(reviewed.get("run_id") or "") or None,
-                            status=str(reviewed.get("status") or ""),
-                        )
-                        self._update(wf, state=state)
-                        while (
-                            reviewed["status"] == "REVISE"
-                            and self._can_auto_repair(prompt_id, state)
-                        ):
-                            repaired = await self._auto_repair(
-                                wf, prompt_id, _review_envelope,
-                                reviewed["output"], state,
-                            )
-                            if not repaired:
-                                break
-                            self._append_section_run(
-                                progress, repaired,
-                                prompt_id="P-TARGETED-REPAIR",
-                                role="TARGETED_REPAIR",
-                            )
-                            self._start_repair_rereview(
-                                state, repaired, critic_prompt=prompt_id
-                            )
-                            self._update(wf, state=state)
-                            _review_envelope, reviewed = await self._execute_section_prompt(
-                                wf, state, section, progress, prompt_id,
-                                role="INDEPENDENT_REVIEW",
-                            )
-                            self._complete_repair_rereview(
-                                state,
-                                repaired,
-                                critic_prompt=prompt_id,
-                                review_run_id=str(reviewed.get("run_id") or "") or None,
-                                status=str(reviewed.get("status") or ""),
-                            )
-                            self._update(wf, state=state)
-                    except (PromptExecutionError, ValueError, KeyError) as exc:
-                        return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}", configuration_error=exc)
-                    if reviewed["status"] != "PASS":
-                        if (
-                            self._acceptance_regenerable_review_status(
-                                state,
-                                str(reviewed["status"]),
-                            )
-                            and self._schedule_acceptance_regeneration(
-                                state,
-                                progress,
-                                prompt_id,
-                                reviewed["output"],
-                            )
-                        ):
-                            self._update(wf, status="RUNNING", state=state)
-                            continue
-                        return self._block_section_chain(
-                            wf, state, section,
-                            f"{prompt_id} 定向修复后的独立复审返回 {reviewed['status']}；禁止二次自动修复或人工改正文放行。",
-                        )
-                    progress["phase"] = next_phase
-                    self._update(wf, state=state)
+                    # Re-enter the same Critic phase.  The persisted checkpoint
+                    # makes the next call an independent re-review and survives a
+                    # crash before or after REREVIEW_STARTED is recorded.
                     continue
 
+                progress.pop("pending_repair_rereview", None)
                 return self._block_section_chain(
                     wf, state, section, f"{prompt_id} 返回 {result['status']}；该阶段不允许跳过或人工覆盖。",
                 )

@@ -39,6 +39,7 @@ post_export_acceptance = runtime.post_export_acceptance
 dependency_preflight = runtime.dependency_preflight
 
 app = FastAPI(title="项目申请书智能体系统", version=__version__)
+app.add_event_handler("shutdown", runtime.close)
 app.mount("/static", StaticFiles(directory=settings.root_dir / "app" / "static"), name="static")
 
 

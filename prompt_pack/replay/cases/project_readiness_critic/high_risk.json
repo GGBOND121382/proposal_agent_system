@@ -552,7 +552,7 @@
     },
     "findings": [
       {
-        "code": "READINESS_MISSING_REQUIRED_INPUT",
+        "code": "FALSE_READINESS",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

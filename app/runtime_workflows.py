@@ -5,6 +5,7 @@ from typing import Any
 
 from .runtime_executor import RecoverablePromptExecutionError
 from .runtime_evidence import InjectedFailure
+from .secret_redaction import redact_secret_text
 from .util import sha256_json, utc_now
 from .workflows import WorkflowEngine as BaseWorkflowEngine
 from .workflow_status import (
@@ -43,15 +44,12 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
 
     def _recover_status(self, wf: dict[str, Any]) -> dict[str, Any]:
         state = wf["state"]
+        # WAITING_GATE is reconciled by WorkflowGateMixin.  Missing or stale
+        # Gate records are fail-closed there rather than silently reopened.
         if (
-            wf["status"] == WorkflowStatus.WAITING_GATE.value
-            and not self._open_gate(wf["id"])
-            and not state.get("waiting_on_child_workflow_ids")
+            wf["status"] == WorkflowStatus.BLOCKED_TECHNICAL.value
+            and state.get("runtime_recoverable")
         ):
-            state["recovered_from"] = "WAITING_GATE_WITHOUT_OPEN_GATE"
-            self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
-            return self.get(wf["id"])
-        if is_recoverable_block(wf["status"]) and state.get("runtime_recoverable"):
             state["recovered_from"] = state.get("runtime_failure_point") or "RECOVERABLE_BLOCK"
             state["runtime_recoverable"] = False
             state.pop("last_error", None)
@@ -97,7 +95,7 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
         except (InjectedFailure, RecoverablePromptExecutionError) as exc:
             current = self.get(workflow_id)
             state = current["state"]
-            state["last_error"] = str(exc)
+            state["last_error"] = redact_secret_text(str(exc))
             state["runtime_recoverable"] = True
             state["runtime_failure_point"] = getattr(exc, "point", "WORKFLOW_ADVANCE")
             state["runtime_blocked_at"] = utc_now()
@@ -117,7 +115,7 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
                     report,
                     source="UNEXPECTED_RUNTIME_CONFIGURATION",
                 )
-            state["last_error"] = f"UNEXPECTED_RUNTIME_ERROR: {type(exc).__name__}: {exc}"
+            state["last_error"] = redact_secret_text(f"UNEXPECTED_RUNTIME_ERROR: {type(exc).__name__}: {exc}")
             state["runtime_recoverable"] = True
             state["runtime_failure_point"] = "WORKFLOW_ADVANCE"
             state["runtime_blocked_at"] = utc_now()

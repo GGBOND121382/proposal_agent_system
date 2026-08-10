@@ -24,7 +24,7 @@ class RecoverableDocxExporter(BaseDocxExporter):
         return root
 
     def _export_key(self, project_id: str, kind: str) -> str:
-        candidates = self._candidate_runs(project_id)
+        candidate_snapshot = self.candidate_snapshot(project_id)
         gates = self.db.fetchall(
             "SELECT id,gate_type,status,updated_at FROM gates WHERE project_id=? AND gate_type IN ('FINAL_CONTENT_SECURITY_APPROVAL','FINAL_EXPORT_APPROVAL') ORDER BY updated_at",
             (project_id,),
@@ -33,7 +33,12 @@ class RecoverableDocxExporter(BaseDocxExporter):
             {
                 "project_id": project_id,
                 "kind": kind,
-                "candidate_runs": [item.get("run_id") for item in candidates],
+                "candidate_runs": [
+                    item.get("polish_run_id")
+                    for item in candidate_snapshot.get("sections") or []
+                ],
+                "candidate_set_hash": candidate_snapshot.get("candidate_set_hash"),
+                "visible_candidate_set_hash": candidate_snapshot.get("visible_candidate_set_hash"),
                 "gates": gates,
             }
         )[:32]

@@ -710,7 +710,7 @@
     },
     "findings": [
       {
-        "code": "BLUEPRINT_MISSING_PLAN_COVERAGE",
+        "code": "BLUEPRINT_GENERIC_TEMPLATE",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

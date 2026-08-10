@@ -617,7 +617,8 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/argument_architecture_critic_output.schema.json"
     },
     "trusted_source_catalog": {
       "type": "array",

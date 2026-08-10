@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -98,3 +101,21 @@ def test_retry_checkpoint_reset_refuses_changed_phase(tmp_path) -> None:
         )
     state = json.loads(db.fetchone("SELECT state_json FROM workflows WHERE id='wf-1'")["state_json"])
     assert state["technical_retry_attempts"]["5:new-abstract:BLUEPRINT_CRITIC"] == 2
+
+
+def test_retry_checkpoint_reset_script_imports_app_outside_repository(tmp_path) -> None:
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "reset_workflow_technical_retry.py"
+    )
+    completed = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "ModuleNotFoundError" not in completed.stderr

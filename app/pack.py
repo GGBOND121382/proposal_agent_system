@@ -9,6 +9,7 @@ import yaml
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
+from .prompt_contracts import finding_code_errors, protocol_semantic_errors
 from .util import expand_env, read_json
 
 
@@ -80,7 +81,32 @@ class PromptPack:
         for err in errors:
             path = "/" + "/".join(str(x) for x in err.absolute_path)
             result.append(f"{path or '/'}: {err.message}")
+        if isinstance(value, dict):
+            result.extend(self._protocol_semantic_errors(prompt_id, kind, value))
+            if kind == "output":
+                result.extend(
+                    finding_code_errors(
+                        prompt_id=prompt_id,
+                        output=value,
+                        prompt_text=self.prompt_text(prompt_id),
+                    )
+                )
         return result
+
+    def _protocol_semantic_errors(
+        self,
+        prompt_id: str,
+        kind: str,
+        value: dict[str, Any],
+    ) -> list[str]:
+        return protocol_semantic_errors(
+            prompt_id=prompt_id,
+            kind=kind,
+            value=value,
+            expected_output_schema=str(
+                self.entry(prompt_id).get("output_schema") or ""
+            ),
+        )
 
     @staticmethod
     def _structure_only_schema(node: Any, *, root: bool = False) -> Any:

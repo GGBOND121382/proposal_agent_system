@@ -642,3 +642,268 @@ def test_auto_repair_reads_migrated_application_with_explicit_workflow_id(tmp_pa
     assert repaired is not None
     assert context.workflow_ids == ["wf-1"]
     assert len(context.envelopes) == 1
+
+
+class ContractMigrationPassExecutor(ListRepairExecutor):
+    async def execute(
+        self, prompt_id: str, envelope: dict[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
+        result = await super().execute(prompt_id, envelope, **kwargs)
+        finding_ids = [
+            str(item["finding_instance_id"])
+            for item in envelope["overrides"]["payload.findings_to_repair"]
+        ]
+        result["run_id"] = "run-contract-migration-pass"
+        result["output"]["result"].update({
+            "resolved_finding_ids": finding_ids,
+            "unresolved_finding_ids": [],
+        })
+        return result
+
+
+def test_targeted_repair_contract_migration_reuses_exact_repair_checkpoint(
+    tmp_path,
+) -> None:
+    harness = RepairHarness(tmp_path)
+    harness.executor = ExhaustedContractRetryExecutor()
+    wf = harness.workflow()
+    state = {
+        "repair_attempts": {},
+        "original_environment": "OFFLINE_LOCAL",
+        "options": {"targeted_repair_contract_retry_limit": 1},
+        "active_section_id": "section-objective",
+    }
+    critic_output = {
+        "status": "REVISE",
+        "findings": [{
+            "code": "FACT_CRITIC_STATUS_UPGRADE",
+            "repairable": True,
+            "target_path_or_span": "METRIC-PROJ-001.claim_type",
+            "repair_instruction": "change the claim type",
+        }],
+    }
+
+    first = asyncio.run(
+        harness._auto_repair(wf, "P-FACT-CRITIC", {}, critic_output, state)
+    )
+    assert first is None
+    failed = copy.deepcopy(state["last_targeted_repair_failure"])
+    failed_call_key = failed["call_key"]
+    created_before = [
+        item for item in state["repair_ledger_v1"]["events"]
+        if item["event"] == "CREATED"
+    ]
+    state["contract_migration_recovery"] = {
+        "checkpoint_identity_version": 1,
+        "step": 0,
+        "section_id": "section-objective",
+        "section_phase": None,
+        "prompt_id": "P-TARGETED-REPAIR",
+        "failed_run_id": failed["run_id"],
+        "output_normalizer_version": "new-normalizer",
+    }
+    harness.executor = ContractMigrationPassExecutor()
+
+    repaired = asyncio.run(
+        harness._auto_repair(wf, "P-FACT-CRITIC", {}, critic_output, state)
+    )
+
+    assert repaired is not None
+    assert repaired["repair_id"] == failed["repair_id"]
+    assert harness.provider_retry_calls[-1]["call_key"] == failed_call_key
+    assert harness.context_builder.envelopes[-1]["overrides"][
+        "payload.contract_feedback"
+    ]["attempt"] == failed["execution_attempt"]
+    created_after = [
+        item for item in state["repair_ledger_v1"]["events"]
+        if item["event"] == "CREATED"
+    ]
+    assert len(created_after) == len(created_before) == 1
+    assert "last_targeted_repair_failure" not in state
+    assert "contract_migration_recovery" not in state
+
+
+def test_targeted_repair_contract_migration_does_not_cross_section_identity(
+    tmp_path,
+) -> None:
+    harness = RepairHarness(tmp_path)
+    harness.executor = ExhaustedContractRetryExecutor()
+    wf = harness.workflow()
+    state = {
+        "repair_attempts": {},
+        "original_environment": "OFFLINE_LOCAL",
+        "options": {"targeted_repair_contract_retry_limit": 0},
+        "active_section_id": "section-a",
+    }
+    critic_output = {
+        "status": "REVISE",
+        "findings": [{
+            "code": "FACT_CRITIC_STATUS_UPGRADE",
+            "repairable": True,
+            "target_path_or_span": "METRIC-PROJ-001.claim_type",
+            "repair_instruction": "change the claim type",
+        }],
+    }
+    assert asyncio.run(
+        harness._auto_repair(wf, "P-FACT-CRITIC", {}, critic_output, state)
+    ) is None
+    failed = copy.deepcopy(state["last_targeted_repair_failure"])
+    state["contract_migration_recovery"] = {
+        "checkpoint_identity_version": 1,
+        "step": 0,
+        "section_id": "section-a",
+        "section_phase": None,
+        "prompt_id": "P-TARGETED-REPAIR",
+        "failed_run_id": failed["run_id"],
+    }
+    state["active_section_id"] = "section-b"
+    harness.executor = ContractMigrationPassExecutor()
+
+    repaired = asyncio.run(
+        harness._auto_repair(wf, "P-FACT-CRITIC", {}, critic_output, state)
+    )
+
+    assert repaired is not None
+    assert repaired["repair_id"] != failed["repair_id"]
+    assert harness.provider_retry_calls[-1]["call_key"] != failed["call_key"]
+
+class SemanticRejectRepairExecutor(ListRepairExecutor):
+    async def execute(
+        self, prompt_id: str, envelope: dict[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
+        result = await super().execute(prompt_id, envelope, **kwargs)
+        finding_id = str(
+            envelope["overrides"]["payload.findings_to_repair"][0][
+                "finding_instance_id"
+            ]
+        )
+        result["status"] = "REVISE"
+        result["output"]["result"].update({
+            "resolved_finding_ids": [],
+            "unresolved_finding_ids": [finding_id],
+        })
+        return result
+
+
+def test_semantic_repair_rejection_persists_exact_section_checkpoint(
+    tmp_path,
+) -> None:
+    harness = RepairHarness(tmp_path)
+    harness.executor = SemanticRejectRepairExecutor()
+    wf = harness.workflow()
+    state = {
+        "repair_attempts": {},
+        "original_environment": "OFFLINE_LOCAL",
+        "options": {},
+        "active_section_id": "section-objective",
+        "section_progress": {
+            "section-objective": {"phase": "FACT_CRITIC"},
+        },
+    }
+    critic_output = {
+        "status": "REVISE",
+        "findings": [{
+            "code": "FACT_CRITIC_STATUS_UPGRADE",
+            "repairable": True,
+            "target_path_or_span": "METRIC-PROJ-001.claim_type",
+            "repair_instruction": "change the claim type",
+        }],
+    }
+
+    repaired = asyncio.run(
+        harness._auto_repair(wf, "P-FACT-CRITIC", {}, critic_output, state)
+    )
+
+    assert repaired is None
+    failure = state["last_targeted_repair_failure"]
+    assert failure["category"] == "SEMANTIC_REPAIR_REJECTED"
+    assert failure["repair_checkpoint_version"] == 1
+    assert failure["workflow_step"] == 0
+    assert failure["section_id"] == "section-objective"
+    assert failure["section_phase"] == "FACT_CRITIC"
+    assert failure["critic_prompt"] == "P-FACT-CRITIC"
+    assert failure["repair_attempt_key"] == (
+        "section:section-objective:P-FACT-CRITIC"
+    )
+
+
+class MissingOriginalContext(ListResultContext):
+    def _result(self, project_id: str, prompt_id: str, key: str | None = None) -> Any:
+        assert project_id == "project-1"
+        assert prompt_id == "P-FACT-EXTRACT"
+        assert key == "fact_candidates"
+        return None
+
+
+def test_repairable_critic_cannot_silently_skip_missing_original_object(tmp_path) -> None:
+    harness = RepairHarness(tmp_path)
+    harness.context_builder = MissingOriginalContext()
+    wf = harness.workflow()
+    state = {"repair_attempts": {}, "original_environment": "OFFLINE_LOCAL"}
+    critic_output = {
+        "status": "REVISE",
+        "findings": [{
+            "code": "FACT_CRITIC_STATUS_UPGRADE",
+            "repairable": True,
+            "target_type": "FACT_CANDIDATE",
+            "target_path_or_span": "METRIC-PROJ-001.claim_type",
+            "description": "The candidate type is wrong.",
+            "repair_instruction": "Change the claim type.",
+        }],
+    }
+
+    repaired = asyncio.run(
+        harness._auto_repair(wf, "P-FACT-CRITIC", {}, critic_output, state)
+    )
+
+    assert repaired is None
+    failure = state["last_targeted_repair_failure"]
+    assert failure["category"] == "SEMANTIC_REPAIR_REJECTED"
+    assert failure["reason_code"] == "ORIGINAL_OBJECT_UNAVAILABLE"
+    assert failure["repair_attempt_key"] == "P-FACT-CRITIC"
+    assert failure["consumes_semantic_repair_budget"] is False
+    assert harness.provider_retry_calls == []
+    assert state.get("repair_attempts", {}).get("P-FACT-CRITIC", 0) == 0
+    events = state["repair_ledger_v1"]["events"]
+    assert [item["event"] for item in events] == ["REPAIR_NOT_EXECUTABLE"]
+
+
+class UnsupportedOriginalContext(ListResultContext):
+    def _result(self, project_id: str, prompt_id: str, key: str | None = None) -> Any:
+        assert project_id == "project-1"
+        assert prompt_id == "P-FACT-EXTRACT"
+        assert key == "fact_candidates"
+        return "legacy scalar payload"
+
+
+def test_repairable_critic_rejects_unsupported_original_shape_without_budget_use(tmp_path) -> None:
+    harness = RepairHarness(tmp_path)
+    harness.context_builder = UnsupportedOriginalContext()
+    wf = harness.workflow()
+    state = {"repair_attempts": {}, "original_environment": "OFFLINE_LOCAL"}
+    critic_output = {
+        "status": "REVISE",
+        "findings": [{
+            "code": "FACT_CRITIC_STATUS_UPGRADE",
+            "repairable": True,
+            "target_type": "FACT_CANDIDATE",
+            "target_path_or_span": "METRIC-PROJ-001.claim_type",
+            "description": "The candidate type is wrong.",
+            "repair_instruction": "Change the claim type.",
+        }],
+    }
+
+    repaired = asyncio.run(
+        harness._auto_repair(wf, "P-FACT-CRITIC", {}, critic_output, state)
+    )
+
+    assert repaired is None
+    failure = state["last_targeted_repair_failure"]
+    assert failure["category"] == "SEMANTIC_REPAIR_REJECTED"
+    assert failure["reason_code"] == "ORIGINAL_OBJECT_SHAPE_UNSUPPORTED"
+    assert failure["consumes_semantic_repair_budget"] is False
+    assert harness.provider_retry_calls == []
+    assert state.get("repair_attempts", {}).get("P-FACT-CRITIC", 0) == 0
+    assert [item["event"] for item in state["repair_ledger_v1"]["events"]] == [
+        "REPAIR_NOT_EXECUTABLE"
+    ]

@@ -345,6 +345,26 @@ def test_content_rejects_inconsistent_claim_advancement_summary():
     assert "QG_CONTENT_ADVANCEMENT_SUMMARY_INCONSISTENT" in _codes(checked)
 
 
+def test_content_rejects_duplicate_or_non_contiguous_paragraph_sequence():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-WRITE-CONTENT")
+    output = sim.invoke("P-WRITE-CONTENT", env)
+    first = copy.deepcopy(output["result"]["paragraphs"][0])
+    second = copy.deepcopy(first)
+    second.update({
+        "paragraph_id": "paragraph-sequence-2",
+        "sequence": 1,
+        "text": first["text"] + " 第二段补充不同的验证内容。",
+        "novel_content_key": str(first["novel_content_key"]) + "-second",
+    })
+    output["result"]["paragraphs"] = [first, second]
+
+    checked = guard.observe("P-WRITE-CONTENT", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_SECTION_PARAGRAPH_SEQUENCE_INVALID" in _codes(checked)
+
+
 def test_integration_rejects_duplicate_information_claim_concentration_and_same_skeleton():
     pack, sim, guard = _pack_sim_guard()
     env = pack.replay_input("P-INTEGRATION-CRITIC")
@@ -412,6 +432,64 @@ def test_expression_editor_cannot_change_semantic_identity():
     checked = guard.observe("P-EXPRESSION-POLISH", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_EXPRESSION_SEMANTIC_IDENTITY_CHANGED" in _codes(checked)
+
+
+def test_expression_editor_cannot_change_paragraph_sequence():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-POLISH")
+    output = sim.invoke("P-EXPRESSION-POLISH", env)
+    output["result"]["paragraphs"][0]["sequence"] += 1
+
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_EXPRESSION_SEMANTIC_IDENTITY_CHANGED" in _codes(checked)
+
+
+def test_expression_editor_cannot_relabel_source_lineage_as_current_polish_action():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-POLISH")
+    output = sim.invoke("P-EXPRESSION-POLISH", env)
+    output["result"]["source_preservation_summary"][0]["action"] = "PRESERVED"
+
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_EXPRESSION_SOURCE_LINEAGE_CHANGED" in _codes(checked)
+
+
+def test_expression_editor_cannot_change_trace_binding_behind_same_trace_id():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-POLISH")
+    output = sim.invoke("P-EXPRESSION-POLISH", env)
+    output["result"]["trace_links"][0]["support_type"] = "INDIRECT"
+
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_EXPRESSION_TRACE_BINDING_CHANGED" in _codes(checked)
+
+
+def test_expression_editor_must_preserve_unresolved_items_and_trace_manifest():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-POLISH")
+    output = sim.invoke("P-EXPRESSION-POLISH", env)
+    output["result"]["unresolved_items"] = [{
+        "item_id": "unresolved-new",
+        "description": "new unresolved item",
+        "required_action": "confirm",
+        "owner_role": "PROJECT_OWNER",
+        "blocking": True,
+    }]
+    output["result"]["preserved_trace_ids"] = ["trace-other"]
+
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert {
+        "QG_EXPRESSION_UNRESOLVED_ITEMS_CHANGED",
+        "QG_EXPRESSION_PRESERVED_TRACE_LIST_MISMATCH",
+    }.issubset(_codes(checked))
 
 
 def test_integration_revision_findings_reach_rewrite_prompts(runtime):
@@ -813,3 +891,35 @@ def test_diagram_fallback_requires_explicit_semantic_intent():
     ))
     assert result["result"]["paragraphs"] == output["result"]["paragraphs"]
     assert "warnings" not in result
+
+
+def test_content_rejects_duplicate_paragraph_identity():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-WRITE-CONTENT")
+    output = sim.invoke("P-WRITE-CONTENT", env)
+    first = copy.deepcopy(output["result"]["paragraphs"][0])
+    second = copy.deepcopy(first)
+    second.update({
+        "sequence": 2,
+        "text": first["text"] + " 第二段补充独立的验证边界。",
+        "novel_content_key": str(first["novel_content_key"]) + "-identity-second",
+    })
+    output["result"]["paragraphs"] = [first, second]
+    output["result"]["candidate_text"] = first["text"] + "\n\n" + second["text"]
+
+    checked = guard.observe("P-WRITE-CONTENT", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_SECTION_PARAGRAPH_IDENTITY_INVALID" in _codes(checked)
+
+
+def test_content_rejects_candidate_text_paragraph_divergence():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-WRITE-CONTENT")
+    output = sim.invoke("P-WRITE-CONTENT", env)
+    output["result"]["candidate_text"] = "与结构化段落完全不同的遗留正文。"
+
+    checked = guard.observe("P-WRITE-CONTENT", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_CANDIDATE_TEXT_PARAGRAPH_DIVERGENCE" in _codes(checked)

@@ -19,7 +19,9 @@ from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_proj
 from .output_integrity import TRUSTED_SOURCE_CATALOG_VERSION, attach_trusted_source_catalog
 from .runtime_evidence import EvidenceIntegrityError, InjectedFailure, ModelCallEvidenceStore
 from .runtime_policy import CapabilityModeError, CapabilityPolicy, LIVE_ENVELOPE_REGISTRY
+from .runtime_failures import classify_runtime_failure, persistence_safe_failure_classification
 from .security import RoutingDenied
+from .secret_redaction import redact_secrets, redact_secret_text
 from .util import new_id, sha256_json, utc_now
 
 
@@ -88,6 +90,16 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "contract_registry_version": CONTRACT_REGISTRY_VERSION,
         })
 
+    def provider_request_spec_hash(self, prompt_id: str) -> str:
+        """Expose only the provider-visible request identity to retry cycles.
+
+        Local normalizer and contract-registry upgrades intentionally do not
+        create a new provider generation: an exact failed call may be replayed
+        through the upgraded deterministic consumer without another model call.
+        """
+
+        return self._model_request_spec_hash(prompt_id)
+
     def _call_key(
         self,
         *,
@@ -111,7 +123,51 @@ class RuntimePromptExecutor(BasePromptExecutor):
             )[:32]
         return new_id("call")
 
-    def _committed_result(self, call_key: str) -> dict[str, Any] | None:
+    @staticmethod
+    def _assert_persisted_call_identity(
+        *,
+        call_key: str,
+        run: dict[str, Any],
+        prompt_id: str,
+        project_id: str,
+        workflow_id: str | None,
+        input_hash: str,
+        outcome: str,
+    ) -> None:
+        expected = {
+            "prompt_id": prompt_id,
+            "project_id": project_id,
+            "workflow_id": workflow_id,
+            "input_hash": input_hash,
+        }
+        actual = {
+            "prompt_id": run.get("prompt_id"),
+            "project_id": run.get("project_id"),
+            "workflow_id": run.get("workflow_id"),
+            "input_hash": run.get("input_hash"),
+        }
+        mismatches = [
+            key for key, value in expected.items() if actual.get(key) != value
+        ]
+        if mismatches:
+            raise EvidenceIntegrityError(
+                f"Persisted {outcome} call identity mismatch for {call_key}: "
+                + ", ".join(
+                    f"{key} expected={expected[key]!r} actual={actual.get(key)!r}"
+                    for key in mismatches
+                )
+            )
+
+    def _committed_result(
+        self,
+        call_key: str,
+        *,
+        prompt_id: str,
+        project_id: str,
+        workflow_id: str | None,
+        input_hash: str,
+        model_request_spec_hash: str,
+    ) -> dict[str, Any] | None:
         event = self.db.fetchone(
             "SELECT metadata_json FROM audit_events WHERE event_type='MODEL_CALL_COMMITTED' AND object_id=? ORDER BY id DESC LIMIT 1",
             (call_key,),
@@ -119,9 +175,23 @@ class RuntimePromptExecutor(BasePromptExecutor):
         if not event:
             return None
         metadata = json.loads(event["metadata_json"])
+        persisted_spec_hash = str(metadata.get("model_request_spec_hash") or "")
+        if persisted_spec_hash and persisted_spec_hash != model_request_spec_hash:
+            raise EvidenceIntegrityError(
+                f"Persisted committed call provider request spec mismatch for {call_key}"
+            )
         run = self.db.fetchone("SELECT * FROM prompt_runs WHERE id=?", (metadata.get("run_id"),))
         if not run or not run.get("output_json"):
             raise EvidenceIntegrityError(f"Committed call {call_key} has no matching prompt run")
+        self._assert_persisted_call_identity(
+            call_key=call_key,
+            run=run,
+            prompt_id=prompt_id,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            input_hash=input_hash,
+            outcome="committed",
+        )
         output = json.loads(run["output_json"])
         input_envelope = json.loads(run.get("input_json") or "{}")
         guard_report = self._observe_guard(run["prompt_id"], input_envelope, output)
@@ -142,6 +212,78 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "reused_committed_result": True,
         }
 
+    def _persisted_failure(
+        self,
+        call_key: str,
+        *,
+        prompt_id: str,
+        project_id: str,
+        workflow_id: str | None,
+        input_hash: str,
+        model_request_spec_hash: str,
+    ) -> PromptExecutionError | None:
+        """Replay an exact failed call without invoking the provider again.
+
+        A workflow crash can occur after ``MODEL_CALL_FAILED`` is committed but
+        before the retry wrapper records the completed attempt.  Replaying that
+        checkpoint must surface the persisted failure to the wrapper; otherwise
+        the same attempt key can issue a second external request.  Deterministic
+        contract failures remain eligible for the existing migration path when
+        the execution contract has changed.
+        """
+
+        event = self.db.fetchone(
+            "SELECT metadata_json FROM audit_events WHERE event_type='MODEL_CALL_FAILED' AND object_id=? ORDER BY id DESC LIMIT 1",
+            (call_key,),
+        )
+        if not event:
+            return None
+        metadata = json.loads(event.get("metadata_json") or "{}")
+        run = self.db.fetchone(
+            "SELECT * FROM prompt_runs WHERE id=?",
+            (metadata.get("run_id"),),
+        )
+        if not run:
+            raise EvidenceIntegrityError(
+                f"Failed call {call_key} has no matching prompt run"
+            )
+        self._assert_persisted_call_identity(
+            call_key=call_key,
+            run=run,
+            prompt_id=prompt_id,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            input_hash=input_hash,
+            outcome="failed",
+        )
+        execution_contract_changed = any(
+            (metadata.get(key) or "") != current
+            for key, current in (
+                ("model_request_spec_hash", model_request_spec_hash),
+                ("output_normalizer_version", OUTPUT_NORMALIZER_VERSION),
+                ("contract_registry_version", CONTRACT_REGISTRY_VERSION),
+            )
+        )
+        if metadata.get("deterministic_recoverable") and execution_contract_changed:
+            return None
+
+        error = PromptExecutionError(
+            str(run.get("error") or metadata.get("error") or "persisted model call failed"),
+            run_id=str(run.get("id") or "") or None,
+        )
+        classification = metadata.get("failure_classification") or {}
+        failure_kind = classification.get("failure_kind")
+        if failure_kind:
+            error.provider_failure_kind = failure_kind
+            error.http_status = classification.get("http_status")
+            error.retry_after_seconds = classification.get("retry_after_seconds")
+            error.retryable_hint = classification.get("retryable")
+            details = classification.get("details") or {}
+            error.provider_phase = details.get("phase")
+        error.persisted_call_key = call_key
+        error.replayed_persisted_failure = True
+        return error
+
     @staticmethod
     def _is_deterministic_contract_failure(error: Any) -> bool:
         message = str(error or "").strip()
@@ -152,6 +294,16 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "Output provenance is not backed by the trusted input envelope",
             "Untrusted source reference in Safe Online Package output",
             "Output reference integrity validation failed",
+            # Current provider-authored contract wrappers.  These superseded
+            # the legacy messages above when response-shape failures became
+            # typed ProviderError instances.  Keep both generations so an
+            # immutable failed response can be re-consumed after a normalizer
+            # or deterministic contract migration instead of invoking the
+            # model again.
+            "Provider output contract validation failed",
+            "Provider output failed post-normalization container validation",
+            "Provider output failed strict schema validation",
+            "Provider output failed semantic contract validation",
         ))
 
     @staticmethod
@@ -199,21 +351,54 @@ class RuntimePromptExecutor(BasePromptExecutor):
         project_id: str,
         run_id: str,
     ) -> dict[str, Any]:
-        """Load machine-readable metadata for a failed run when available."""
-        rows = self.db.fetchall(
-            """SELECT metadata_json FROM audit_events
+        """Load the exact failure metadata for one immutable prompt run.
+
+        Failure history can be much larger than a fixed recent-event window.
+        Looking through only the latest N audit rows silently downgraded an old
+        checkpoint to the legacy, unbound recovery path.  Query the JSON run id
+        directly so later failures in other sections cannot hide the identity
+        record for the requested run.
+        """
+        if not run_id:
+            return {}
+        row = self.db.fetchone(
+            """SELECT object_id,metadata_json FROM audit_events
                WHERE project_id=? AND event_type='MODEL_CALL_FAILED'
-               ORDER BY id DESC LIMIT 200""",
-            (project_id,),
+                 AND json_extract(metadata_json,'$.run_id')=?
+               ORDER BY id DESC LIMIT 1""",
+            (project_id, run_id),
         )
-        for row in rows:
-            try:
-                metadata = json.loads(row.get("metadata_json") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                continue
-            if str(metadata.get("run_id") or "") == run_id:
-                return metadata
-        return {}
+        if not row:
+            return {}
+        try:
+            metadata = json.loads(row.get("metadata_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        metadata.setdefault("audit_call_key", row.get("object_id"))
+        return metadata
+
+    def _failed_run_id_for_call_key(
+        self,
+        *,
+        project_id: str,
+        call_key: str,
+    ) -> str:
+        """Return the run explicitly committed for the current call checkpoint."""
+        if not call_key:
+            return ""
+        row = self.db.fetchone(
+            """SELECT metadata_json FROM audit_events
+               WHERE project_id=? AND event_type='MODEL_CALL_FAILED' AND object_id=?
+               ORDER BY id DESC LIMIT 1""",
+            (project_id, call_key),
+        )
+        if not row:
+            return ""
+        try:
+            metadata = json.loads(row.get("metadata_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return ""
+        return str(metadata.get("run_id") or "").strip()
 
     def _recoverable_contract_output(
         self,
@@ -226,6 +411,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
         quality_context_envelope: dict[str, Any],
         project_config: dict[str, Any],
         model_request_spec_hash: str,
+        call_key: str,
+        recovery_run_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Return a prior provider object that passes the current contract.
 
@@ -237,15 +424,27 @@ class RuntimePromptExecutor(BasePromptExecutor):
         normalization, privacy handling, quality guards, and strict output
         validation all pass now.
         """
-        rows = self.db.fetchall(
+        exact_run_id = str(recovery_run_id or "").strip()
+        if not exact_run_id:
+            exact_run_id = self._failed_run_id_for_call_key(
+                project_id=project_id,
+                call_key=call_key,
+            )
+        if not exact_run_id:
+            # Contract recovery is intentionally fail-closed.  Prompt id, input
+            # hash, and workflow id are not a checkpoint identity because the
+            # same prompt can run in multiple sections and repair rounds.
+            return None
+        row = self.db.fetchone(
             """SELECT id,model_id,endpoint_id,input_hash,input_json,output_json,error,created_at
                FROM prompt_runs
-               WHERE project_id=? AND workflow_id IS ? AND prompt_id=?
-                 AND status='ERROR' AND output_json IS NOT NULL
-               ORDER BY created_at DESC
-               LIMIT 50""",
-            (project_id, workflow_id, prompt_id),
+               WHERE id=? AND project_id=? AND workflow_id IS ? AND prompt_id=?
+                 AND status='ERROR' AND output_json IS NOT NULL""",
+            (exact_run_id, project_id, workflow_id, prompt_id),
         )
+        if row is None:
+            return None
+        rows = [row]
         for row in rows:
             input_equivalence = "EXACT"
             if str(row.get("input_hash") or "") != input_hash:
@@ -268,6 +467,24 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 project_id=project_id,
                 run_id=str(row["id"]),
             )
+            checkpoint_version = int(
+                failed_metadata.get("checkpoint_identity_version") or 0
+            )
+            failed_call_key = str(
+                failed_metadata.get("checkpoint_call_key")
+                or failed_metadata.get("audit_call_key")
+                or ""
+            )
+            if (
+                checkpoint_version >= 1
+                and failed_call_key != call_key
+                and str(row.get("id") or "") != str(recovery_run_id or "")
+            ):
+                # New runtimes bind recovery to the exact persisted call
+                # checkpoint.  A workflow-supplied recovery_run_id is an
+                # equally exact binding used when a deterministic execution
+                # contract upgrade necessarily changes the derived call key.
+                continue
             metadata_recoverable = failed_metadata.get("deterministic_recoverable")
             metadata_normalizer_version = str(
                 failed_metadata.get("output_normalizer_version") or ""
@@ -370,6 +587,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         workflow_id: str | None = None,
         original_environment: str | None = None,
         call_key: str | None = None,
+        recovery_run_id: str | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
         quality_context_envelope = envelope
@@ -384,9 +602,26 @@ class RuntimePromptExecutor(BasePromptExecutor):
             input_hash=input_hash,
             requested_call_key=call_key,
         )
-        committed = self._committed_result(call_key)
+        committed = self._committed_result(
+            call_key,
+            prompt_id=prompt_id,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            input_hash=input_hash,
+            model_request_spec_hash=model_request_spec_hash,
+        )
         if committed:
             return committed
+        persisted_failure = self._persisted_failure(
+            call_key,
+            prompt_id=prompt_id,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            input_hash=input_hash,
+            model_request_spec_hash=model_request_spec_hash,
+        )
+        if persisted_failure is not None:
+            raise persisted_failure
         if self.policy.enabled and not LIVE_ENVELOPE_REGISTRY.contains_hash(sha256_json(envelope)):
             raise PromptExecutionError(
                 "Capability acceptance rejected an unattested input envelope. "
@@ -424,6 +659,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 quality_context_envelope=quality_context_envelope,
                 project_config=project_config,
                 model_request_spec_hash=model_request_spec_hash,
+                call_key=call_key,
+                recovery_run_id=recovery_run_id,
             )
             if contract_recovery is not None:
                 result = SimpleNamespace(
@@ -600,8 +837,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
             raise RecoverablePromptExecutionError(str(exc)) from exc
         except (PromptExecutionError, RoutingDenied, OutboundPrivacyError, LLMError, CapabilityModeError, EvidenceIntegrityError, KeyError, ValueError) as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
-            details = getattr(exc, "validation_errors", [])
-            error = str(exc) + ((" | " + "; ".join(details[:20])) if details else "")
+            details = [redact_secret_text(str(item)) for item in (getattr(exc, "validation_errors", []) or [])]
+            error = redact_secret_text(str(exc) + ((" | " + "; ".join(details[:20])) if details else ""))
+            failure_classification = classify_runtime_failure(exc).to_dict()
             persistence_error = self._commit_error(
                 run_id=run_id,
                 call_key=call_key,
@@ -622,6 +860,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
                 evidence=getattr(result, "evidence", {}) if result else {},
+                failure_classification=failure_classification,
             )
             if persistence_error:
                 error += " | ERROR_EVIDENCE_PERSISTENCE_FAILED: " + persistence_error
@@ -816,7 +1055,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                         sha256_json(kwargs["provider_output"]) if kwargs.get("provider_output") is not None else None,
                         json.dumps(kwargs["model_envelope"], ensure_ascii=False),
                         json.dumps(kwargs["provider_output"], ensure_ascii=False) if kwargs.get("provider_output") is not None else None,
-                        kwargs["error"], kwargs["duration_ms"], utc_now(),
+                        redact_secret_text(kwargs["error"]), kwargs["duration_ms"], utc_now(),
                     ),
                 )
                 trace = self._trace_payload(
@@ -840,11 +1079,14 @@ class RuntimePromptExecutor(BasePromptExecutor):
                         json.dumps({
                             "run_id": kwargs["run_id"],
                             "prompt_id": kwargs["prompt_id"],
-                            "error": kwargs["error"],
+                            "error": redact_secret_text(kwargs["error"]),
+                            "checkpoint_identity_version": 1,
+                            "checkpoint_call_key": kwargs["call_key"],
                             "deterministic_recoverable": self._is_deterministic_contract_failure(kwargs["error"]),
                             "model_request_spec_hash": kwargs.get("model_request_spec_hash"),
                             "output_normalizer_version": OUTPUT_NORMALIZER_VERSION,
                             "contract_registry_version": CONTRACT_REGISTRY_VERSION,
+                            "failure_classification": persistence_safe_failure_classification(kwargs.get("failure_classification") or {}),
                         }, ensure_ascii=False),
                         utc_now(),
                     ),
@@ -854,6 +1096,6 @@ class RuntimePromptExecutor(BasePromptExecutor):
             # discarding a failed error record makes deterministic recovery
             # impossible. Surface a bounded secondary diagnostic without
             # manufacturing a successful run or replacing the primary error.
-            detail = f"{type(evidence_exc).__name__}: {evidence_exc}"
+            detail = redact_secret_text(f"{type(evidence_exc).__name__}: {evidence_exc}")
             return detail[:1000]
         return None

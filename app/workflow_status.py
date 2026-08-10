@@ -33,6 +33,64 @@ class WorkflowStatusClass(str, Enum):
     TERMINAL = "TERMINAL"
 
 
+
+
+_LEGACY_PROVIDER_ERROR_MARKERS = (
+    "transport failed",
+    "connecterror",
+    "connection reset",
+    "connection refused",
+    "timeout",
+    "timed out",
+    "stream completed without message content",
+    "empty stream",
+    "rate limit",
+    "too many requests",
+    "http 429",
+    "http 500",
+    "http 502",
+    "http 503",
+    "http 504",
+)
+
+_LEGACY_CONTRACT_ERROR_MARKERS = (
+    "schema validation",
+    "unresolved schema scaffold",
+    "output schema",
+    "output container",
+    "contract",
+    "not of type",
+    "required property",
+    "token limit",
+    "output token",
+    "json parse",
+)
+
+_LEGACY_CONFIGURATION_ERROR_MARKERS = (
+    "configuration",
+    "missing endpoint",
+    "missing model",
+    "api key",
+    "base_url",
+    "运行依赖未满足",
+)
+
+_TERMINAL_RUNTIME_TRANSIENT_KEYS = (
+    "runtime_recoverable",
+    "runtime_failure_point",
+    "runtime_blocked_at",
+)
+
+
+_LEGACY_STATUS_ALIASES: dict[str, WorkflowStatus] = {
+    # File-bridged Stage tools historically persisted WAITING_MODEL in the
+    # shared workflows table.  The canonical runtime state is
+    # WAITING_PROVIDER; keep the alias readable so old checkpoints can be
+    # migrated without teaching every caller about a second waiting state.
+    "WAITING_MODEL": WorkflowStatus.WAITING_PROVIDER,
+}
+
+
 _STATUS_CLASS: dict[WorkflowStatus, WorkflowStatusClass] = {
     WorkflowStatus.RUNNING: WorkflowStatusClass.ACTIVE,
     WorkflowStatus.WAITING_GATE: WorkflowStatusClass.WAITING,
@@ -81,8 +139,14 @@ _ALLOWED_TRANSITIONS: dict[WorkflowStatusClass, frozenset[WorkflowStatusClass]] 
 
 
 def coerce_workflow_status(value: WorkflowStatus | str) -> WorkflowStatus:
+    if isinstance(value, WorkflowStatus):
+        return value
+    raw = str(value)
+    aliased = _LEGACY_STATUS_ALIASES.get(raw)
+    if aliased is not None:
+        return aliased
     try:
-        return value if isinstance(value, WorkflowStatus) else WorkflowStatus(str(value))
+        return WorkflowStatus(raw)
     except ValueError as exc:
         raise ValueError(f"unknown workflow status: {value!r}") from exc
 
@@ -105,6 +169,20 @@ def is_recoverable_block(value: WorkflowStatus | str) -> bool:
 
 def is_terminal(value: WorkflowStatus | str) -> bool:
     return status_class(value) is WorkflowStatusClass.TERMINAL
+
+
+def should_pause_automatic_advancement(value: WorkflowStatus | str) -> bool:
+    """Whether a driver loop must stop calling ``advance`` automatically.
+
+    Gate-aware drivers may handle ``WAITING_GATE`` before calling this helper.
+    Every other waiting state requires an external dependency, recoverable
+    blocks require an explicit recovery decision, and terminal states cannot
+    advance.  Centralising the boundary prevents callers from recognising only
+    the historical generic ``BLOCKED`` value and then spinning until their
+    arbitrary maximum-step limit hides the real workflow error.
+    """
+
+    return is_waiting(value) or is_recoverable_block(value) or is_terminal(value)
 
 
 def occupies_workflow_slot(value: WorkflowStatus | str) -> bool:
@@ -184,3 +262,40 @@ def aggregate_workflow_statuses(
         if candidate in statuses:
             return candidate
     raise AssertionError(f"unclassified workflow statuses: {statuses!r}")
+
+
+def classify_legacy_blocked_error(error: str | None) -> WorkflowStatus:
+    """Classify a pre-ontology generic BLOCKED error without retrying it.
+
+    Historical databases stored unrelated provider, contract, configuration,
+    and technical failures under one ``BLOCKED`` value.  Migration must first
+    recover the failure category from persisted evidence; only the resulting
+    canonical state may decide whether automatic recovery is allowed.
+    """
+
+    lowered = str(error or "").lower()
+    if any(marker in lowered for marker in _LEGACY_PROVIDER_ERROR_MARKERS):
+        return WorkflowStatus.WAITING_PROVIDER
+    if any(marker in lowered for marker in _LEGACY_CONTRACT_ERROR_MARKERS):
+        return WorkflowStatus.BLOCKED_CONTRACT
+    if any(marker in lowered for marker in _LEGACY_CONFIGURATION_ERROR_MARKERS):
+        return WorkflowStatus.WAITING_CONFIGURATION
+    return WorkflowStatus.BLOCKED_TECHNICAL
+
+
+def clear_terminal_runtime_transients(
+    state: dict,
+    status: WorkflowStatus | str,
+) -> dict:
+    """Remove crash-resume flags when a workflow becomes terminal.
+
+    The caller-owned state object is updated in place so nested workflow
+    checkpoints keep their established identity.  Diagnostic history remains
+    available in audit events; only flags that could mislead a future recovery
+    path are removed.
+    """
+
+    if is_terminal(status):
+        for key in _TERMINAL_RUNTIME_TRANSIENT_KEYS:
+            state.pop(key, None)
+    return state

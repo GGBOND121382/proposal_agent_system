@@ -115,6 +115,12 @@ def test_dry_run_and_apply_share_deterministic_plan_and_inherit_security(tmp_pat
             "human_resolutions.P-TEST[0]",
             "human_input_overrides.P-TEST.payload.extra",
         }
+        assert {payload["scope_key"] for payload in human_payloads} == {
+            "section:section-1:P-TEST"
+        }
+        assert {payload["migration"]["schema_version"] for payload in human_payloads} == {
+            "2.1.0"
+        }
         repair_row = next(
             row for row in artifacts if row["artifact_type"] == "REPAIR_APPLICATION"
         )
@@ -128,7 +134,9 @@ def test_dry_run_and_apply_share_deterministic_plan_and_inherit_security(tmp_pat
         )
         assert "human_resolutions" not in state
         assert "human_input_overrides" not in state
-        assert len(state["human_resolution_artifact_ids"]["P-TEST"]) == 2
+        assert len(
+            state["human_resolution_artifact_ids"]["section:section-1:P-TEST"]
+        ) == 2
         assert len(
             state["repair_application_artifact_ids"][
                 "section:section-1:P-WRITE-BLUEPRINT"

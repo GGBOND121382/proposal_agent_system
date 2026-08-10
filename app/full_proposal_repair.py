@@ -4,6 +4,7 @@ from typing import Any
 
 from .util import sha256_text
 from .workflow_input import CURRENT_PROPOSAL_INPUT, WorkflowInputRequired, material_input_questions
+from .workflow_status import WorkflowStatus
 
 
 class FullProposalRepairMixin:
@@ -64,7 +65,7 @@ class FullProposalRepairMixin:
             rounds = int(state.get("integration_argument_rounds", 0))
             if rounds >= 1:
                 state["last_error"] = "全篇审查在一次论证架构重构后仍发现上游论证缺陷，需要补充事实或由项目负责人调整中心命题。"
-                self._update(wf, status="BLOCKED", state=state)
+                self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
                 return "EXHAUSTED"
             state["integration_argument_rounds"] = rounds + 1
             state["argument_revision_findings"] = argument_findings
@@ -87,7 +88,7 @@ class FullProposalRepairMixin:
             rounds = int(state.get("integration_planning_rounds", 0))
             if rounds >= 1:
                 state["last_error"] = "全篇审查在一次章节合同重构后仍发现命题或信息归属冲突，需要人工调整论证架构。"
-                self._update(wf, status="BLOCKED", state=state)
+                self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
                 return "EXHAUSTED"
             state["integration_planning_rounds"] = rounds + 1
             state["planning_revision_findings"] = planning_findings
@@ -130,7 +131,7 @@ class FullProposalRepairMixin:
         rounds = int(state.get("integration_repair_rounds", 0))
         if rounds >= 2:
             state["last_error"] = "全篇质量审查在两轮章节重写后仍未通过；需要修改论证架构或补充事实证据。"
-            self._update(wf, status="BLOCKED", state=state)
+            self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
             return "EXHAUSTED"
         state["integration_repair_rounds"] = rounds + 1
         state["integration_repair_section_ids"] = sorted(affected)

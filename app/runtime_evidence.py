@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .private_storage import secure_private_directory, secure_private_file, secure_private_tree
 from .util import canonical_json, sha256_json, sha256_text, utc_now
 
 
@@ -26,14 +27,20 @@ def _safe_key(value: str) -> str:
     return clean[:180] or "call"
 
 
+def _secure_directory(path: Path) -> None:
+    secure_private_directory(path)
+
+
 def _atomic_write_bytes(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _secure_directory(path.parent)
     temp = path.with_name(path.name + f".tmp-{os.getpid()}")
     with temp.open("wb") as handle:
+        secure_private_file(temp)
         handle.write(content)
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temp, path)
+    secure_private_file(path)
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -114,9 +121,11 @@ class ModelCallEvidenceStore:
         self.requests_dir = self.root / "requests"
         self.responses_dir = self.root / "responses"
         self.commits_dir = self.root / "commits"
-        self.requests_dir.mkdir(parents=True, exist_ok=True)
-        self.responses_dir.mkdir(parents=True, exist_ok=True)
-        self.commits_dir.mkdir(parents=True, exist_ok=True)
+        _secure_directory(self.root)
+        _secure_directory(self.requests_dir)
+        _secure_directory(self.responses_dir)
+        _secure_directory(self.commits_dir)
+        secure_private_tree(self.root)
         self.faults = FaultInjector(self.root)
 
     def request_paths(self, call_key: str) -> tuple[Path, Path]:

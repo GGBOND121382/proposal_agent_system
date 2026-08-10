@@ -706,7 +706,7 @@
     },
     "findings": [
       {
-        "code": "BLUEPRINT_CRITIC_PLAN_GAP",
+        "code": "BLUEPRINT_PARAGRAPH_UNCHECKED",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

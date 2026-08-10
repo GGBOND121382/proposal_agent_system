@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from .human_gate_bridge import workflow_gate_scope_ids
+from .private_storage import secure_private_directory, secure_private_file, secure_private_tree
+from .secret_redaction import redact_secret_text, redact_secrets
 from .util import utc_now
 
 
@@ -19,14 +21,24 @@ def _safe_name(value: str) -> str:
     return normalized[:120] or "portable-run"
 
 
+def _secure_directory(path: Path) -> None:
+    secure_private_directory(path)
+
+
+def _secure_file(path: Path) -> None:
+    secure_private_file(path)
+
+
 def _atomic_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _secure_directory(path.parent)
     tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
     tmp.write_text(
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    _secure_file(tmp)
     os.replace(tmp, path)
+    _secure_file(path)
 
 
 def _sha256_file(path: Path) -> str:
@@ -56,11 +68,11 @@ class PortableRunTrace:
         options: dict[str, Any],
     ) -> None:
         self.run_dir = Path(run_dir).resolve()
-        self.run_dir.mkdir(parents=True, exist_ok=True)
+        secure_private_tree(self.run_dir)
         self.project_id = str(project_id)
         self.workflow_type = str(workflow_type)
         self.idempotency_key = str(idempotency_key)
-        self.options = options
+        self.options = redact_secrets(options)
         self.workflow_id: str | None = None
         self._event_index = self._existing_event_count()
         metadata_path = self.run_dir / "RUN_METADATA.json"
@@ -93,22 +105,25 @@ class PortableRunTrace:
 
     def _append_event(self, event: dict[str, Any]) -> None:
         self._event_index += 1
-        record = {"index": self._event_index, "recorded_at": utc_now(), **event}
+        record = redact_secrets({"index": self._event_index, "recorded_at": utc_now(), **event})
         path = self.run_dir / "events.jsonl"
+        _secure_directory(path.parent)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+        _secure_file(path)
 
     @staticmethod
     def _backup_database(source: Path, destination: Path) -> None:
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        _secure_directory(destination.parent)
         tmp = destination.with_name(destination.name + f".tmp-{os.getpid()}")
         if tmp.exists():
             tmp.unlink()
         with sqlite3.connect(source) as src, sqlite3.connect(tmp) as dst:
             src.backup(dst)
         os.replace(tmp, destination)
+        _secure_file(destination)
 
     @staticmethod
     def _decode_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -139,7 +154,7 @@ class PortableRunTrace:
         scope_ids = sorted(workflow_gate_scope_ids(engine, self.workflow_id))
         checkpoint_name = f"{self._event_index + 1:04d}_{_safe_name(phase)}"
         checkpoint_dir = self.run_dir / "checkpoints" / checkpoint_name
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        _secure_directory(checkpoint_dir)
         self._backup_database(Path(engine.db.path), checkpoint_dir / "proposal_agents.sqlite3")
 
         placeholders = ",".join("?" for _ in scope_ids) or "''"
@@ -176,7 +191,7 @@ class PortableRunTrace:
             "schema_version": "1.0",
             "phase": phase,
             "note": note,
-            "error": error,
+            "error": redact_secret_text(error) if error else None,
             "project": self._decode_rows([project] if project else []),
             "documents": self._decode_rows(documents),
             "workflow_scope_ids": scope_ids,
@@ -199,7 +214,7 @@ class PortableRunTrace:
                 "current_step": workflow.get("current_step"),
                 "checkpoint_dir": str(checkpoint_dir),
                 "note": note,
-                "error": error,
+                "error": redact_secret_text(error) if error else None,
             }
         )
         return checkpoint_dir
@@ -210,12 +225,12 @@ class PortableRunTrace:
                 "event_type": "PREFLIGHT_FAILURE",
                 "phase": "PREFLIGHT_FAILED",
                 "error_type": type(error).__name__,
-                "error": str(error),
+                "error": redact_secret_text(str(error)),
             }
         )
         _atomic_json(
             self.run_dir / "FAILURE.json",
-            {"phase": "PREFLIGHT_FAILED", "error_type": type(error).__name__, "error": str(error), "recorded_at": utc_now()},
+            {"phase": "PREFLIGHT_FAILED", "error_type": type(error).__name__, "error": redact_secret_text(str(error)), "recorded_at": utc_now()},
         )
 
     def _collect_external_tree(self, source: Path | None, label: str) -> None:
@@ -230,7 +245,7 @@ class PortableRunTrace:
         if source.is_dir():
             shutil.copytree(source, destination, dirs_exist_ok=True)
         else:
-            destination.parent.mkdir(parents=True, exist_ok=True)
+            _secure_directory(destination.parent)
             shutil.copy2(source, destination)
 
     def finalize(
@@ -256,7 +271,7 @@ class PortableRunTrace:
                         "event_type": "FINAL_SNAPSHOT_FAILURE",
                         "phase": f"FINAL_{status}",
                         "error_type": type(snapshot_error).__name__,
-                        "error": str(snapshot_error),
+                        "error": redact_secret_text(str(snapshot_error)),
                     }
                 )
         for label, path in (external_paths or {}).items():
@@ -266,7 +281,7 @@ class PortableRunTrace:
             "project_id": self.project_id,
             "workflow_id": workflow_id or self.workflow_id,
             "error_type": type(error).__name__ if error else None,
-            "error": str(error) if error else None,
+            "error": redact_secret_text(str(error)) if error else None,
             "finished_at": utc_now(),
         }
         _atomic_json(self.run_dir / "RUN_RESULT.json", final_record)
@@ -298,9 +313,13 @@ class PortableRunTrace:
         tmp_bundle = bundle_path.with_name(bundle_path.name + f".tmp-{os.getpid()}")
         if tmp_bundle.exists():
             tmp_bundle.unlink()
+        tmp_bundle.touch(mode=0o600)
+        _secure_file(tmp_bundle)
         with zipfile.ZipFile(tmp_bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(self.run_dir.rglob("*")):
                 if path.is_file():
                     archive.write(path, arcname=path.relative_to(self.run_dir.parent).as_posix())
+        _secure_file(tmp_bundle)
         os.replace(tmp_bundle, bundle_path)
+        _secure_file(bundle_path)
         return bundle_path

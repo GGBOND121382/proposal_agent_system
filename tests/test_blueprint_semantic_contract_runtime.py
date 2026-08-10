@@ -179,3 +179,88 @@ def test_foundation_narrative_contract_separates_task_claims_from_team_evidence(
         & set(contract["must_use_evidence_ids"])
     )
 
+
+
+def test_simulated_unknown_profile_follows_section_contract_roles() -> None:
+    payload = _foundation_payload()
+    payload["source_section"] = {"section_id": "section-need", "title": "需求分析"}
+    payload["section_profile"] = {"profile_id": "NEED_ANALYSIS"}
+    payload["section_contract"] = {
+        "section_contract_id": "contract-need",
+        "argument_function": "把需求问题收束为研究问题",
+        "required_argument_roles": ["PROBLEM", "EVIDENCE", "GAP", "RESEARCH_QUESTION"],
+        "must_advance_claim_ids": ["claim-foundation-capability"],
+        "must_use_evidence_ids": [],
+        "unique_information_keys": ["need-analysis"],
+        "must_not_repeat_section_ids": [],
+        "word_budget": 600,
+    }
+
+    output = SimulatedLLM(object())._handle_write_blueprint(
+        {"status": "PASS", "result": {"blueprint": {}}, "findings": []},
+        {"payload": payload},
+    )
+
+    roles = {
+        str(paragraph.get("argument_role"))
+        for paragraph in output["result"]["blueprint"]["paragraphs"]
+    }
+    assert set(payload["section_contract"]["required_argument_roles"]) <= roles
+
+
+def test_simulated_blueprint_revise_keeps_dynamic_reference_identity(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    import app.simulated_llm as simulated_llm_module
+
+    payload = _foundation_payload()
+    violation = SimpleNamespace(
+        code="QG_BLUEPRINT_REQUIRED_ROLES_MISSING",
+        category="BLUEPRINT",
+        target_path="paragraphs",
+        description="缺少合同要求的论证角色。",
+        repair_instruction="补齐合同要求的论证角色。",
+        blocking=True,
+    )
+    monkeypatch.setattr(
+        simulated_llm_module,
+        "check_blueprint_semantics",
+        lambda *_args, **_kwargs: (violation,),
+    )
+
+    output = SimulatedLLM(object())._handle_write_blueprint(
+        {
+            "status": "PASS",
+            "result": {
+                "blueprint": {},
+                "plan_task_coverage": [
+                    {"revision_task_id": "stale-task", "paragraph_ids": ["bp-p-001"]}
+                ],
+                "input_usage_summary": [
+                    {"source_id": "stale-source", "used_in_paragraph_ids": ["bp-p-001"]}
+                ],
+            },
+            "findings": [],
+        },
+        {"payload": payload},
+    )
+
+    assert output["status"] == "REVISE"
+    assert {finding["code"] for finding in output["findings"]} == {
+        "SECTION_PROFILE_MISMATCH"
+    }
+    paragraph_ids = {
+        paragraph["paragraph_id"]
+        for paragraph in output["result"]["blueprint"]["paragraphs"]
+    }
+    assert paragraph_ids
+    assert all(
+        set(item.get("paragraph_ids") or []) <= paragraph_ids
+        for item in output["result"].get("plan_task_coverage") or []
+    )
+    assert all(
+        set(item.get("used_in_paragraph_ids") or []) <= paragraph_ids
+        for item in output["result"].get("input_usage_summary") or []
+    )

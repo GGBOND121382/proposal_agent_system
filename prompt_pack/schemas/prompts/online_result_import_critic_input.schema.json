@@ -240,7 +240,8 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/online_result_import_critic_output.schema.json"
     },
     "trusted_source_catalog": {
       "type": "array",

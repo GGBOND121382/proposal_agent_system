@@ -14,9 +14,22 @@ SCHEMA = 'https://json-schema.org/draft/2020-12/schema'
 SEC_LEVELS = ['PUBLIC','INTERNAL','SENSITIVE','CLASSIFIED']
 STATUSES = ['PASS','REVISE','NEED_USER_INPUT','BLOCK']
 PROMPT_VERSIONS = {
+    'P-PUBLIC-RESEARCH-PLAN': '2.1.0',
+    'P-PROJECT-DEFINITION-EXTRACT': '3.0.0',
+    'P-PROJECT-DEFINITION-CRITIC': '3.0.0',
+    'P-PROJECT-READINESS-CRITIC': '3.0.0',
+    'P-TEMPLATE-EXTRACT': '3.0.1',
+    'P-TEMPLATE-CRITIC': '3.0.0',
+    'P-REVISION-PLAN': '3.0.0',
+    'P-REVISION-PLAN-CRITIC': '3.0.0',
     'P-WRITE-BLUEPRINT': '3.1.0',
     'P-WRITE-BLUEPRINT-CRITIC': '3.1.0',
     'P-WRITE-CONTENT': '3.2.0',
+    'P-WRITE-CRITIC': '3.0.0',
+    'P-INTEGRATION-CRITIC': '3.0.0',
+    'P-ARGUMENT-ARCHITECTURE': '3.1.0',
+    'P-ARGUMENT-ARCHITECTURE-CRITIC': '3.1.0',
+    'P-EXPRESSION-POLISH': '3.1.0',
     'P-EXPRESSION-CRITIC': '3.4.0',
     'P-TARGETED-REPAIR': '3.4.0',
 }
@@ -266,20 +279,20 @@ D={
 'P-PUBLIC-RESEARCH-CRITIC':('审查公开研究计划或综合结果的来源质量、范围和结论支持度。',['research_plan','synthesis_candidate','retrieved_sources','safe_online_package'],['核验来源权威与时效','检查结论是否由来源直接支持','检查是否遗漏相反证据','检查是否越过安全包范围','输出导入建议'],['PUBLIC_CRITIC_WEAK_SOURCE','PUBLIC_CRITIC_UNSUPPORTED_CLAIM','PUBLIC_CRITIC_SCOPE_VIOLATION']),
 'P-SCHEME-EXTRACT':('从正式指南、通知和模板中抽取可执行的申报规则包。',['guide_documents','document_structure','existing_profile','extraction_scope'],['区分强制条款、建议和示例','抽取指南方向、周期、预算和指标','记录章节和篇幅限制','记录排除范围与合规要求','逐规则绑定来源'],['SCHEME_MISSING_MANDATORY_RULE','SCHEME_EXAMPLE_AS_REQUIREMENT','SCHEME_UNSOURCED_RULE']),
 'P-SCHEME-CRITIC':('独立审查申报规则候选的完整性、准确性和来源支持。',['scheme_candidate','guide_documents','deterministic_findings'],['逐条回查来源','检查强制与建议混淆','检查数值、周期、范围和附件要求','检查遗漏排除条款','输出确认或退回建议'],['SCHEME_CRITIC_OMISSION','SCHEME_CRITIC_MISINTERPRETATION','SCHEME_CRITIC_NUMERIC_ERROR']),
-    'P-PROJECT-DEFINITION-EXTRACT':('从项目材料中抽取类型化项目对象和关系，明确未知、冲突和待选择项。',['source_documents','scheme_profile','existing_project_definition','extraction_scope','security_constraints'],['按十二领域逐项抽取','区分需求、差距、问题、目标、任务、方法、成果和指标','识别主体与成熟度','构建允许矩阵内的关系候选','保留UNKNOWN和TO_BE_SELECTED，不补造','输出最小充分图谱：每个核心领域保留一至三个代表对象，总对象不超过三十个、关系不超过四十五条，每个对象最多两个来源引用'],['PD_WRONG_ITEM_TYPE','PD_INVALID_RELATION','PD_REFERENCE_FACT_POLLUTION','PD_UNSUPPORTED_ITEM']),
-'P-PROJECT-DEFINITION-CRITIC':('审查项目定义对象与关系是否忠于来源、类型正确并保持主体和状态。',['project_definition_candidate','source_documents','scheme_profile','relation_matrix','deterministic_findings'],['核对对象类型','核对关系方向','区分科学问题、技术瓶颈和工程任务','检查参考申请书污染','检查计划和完成状态'],['PD_CRITIC_TYPE_ERROR','PD_CRITIC_RELATION_ERROR','PD_CRITIC_STATUS_UPGRADE','PD_CRITIC_SUBJECT_MISMATCH']),
-'P-PROJECT-READINESS-CRITIC':('计算指定章节或任务的输入准备度，并提出具体、可回答的问题。',['project_definition','fact_package','scheme_profile','section_profile','task_instruction','open_conflicts'],['读取章节必需输入矩阵','检查完整度、确认度、证据度和冲突','区分可写、带警告可写和阻断','生成字段级缺口问题','不得用模型推断代替缺口'],['READINESS_MISSING_REQUIRED_INPUT','READINESS_CONFLICT','READINESS_LOW_EVIDENCE','READINESS_WRONG_MODE']),
+    'P-PROJECT-DEFINITION-EXTRACT':('从项目材料中抽取类型化项目对象和关系，明确未知、冲突和待选择项。',['source_documents','scheme_profile','existing_project_definition','extraction_scope','security_constraints'],['按十二领域逐项抽取','区分需求、差距、问题、目标、任务、方法、成果和指标','识别主体与成熟度','构建允许矩阵内的关系候选','保留UNKNOWN和TO_BE_SELECTED，不补造','输出最小充分图谱：每个核心领域保留一至三个代表对象，总对象不超过三十个、关系不超过四十五条，每个对象最多两个来源引用'],['PROJECT_GRAPH_INCOMPLETE','DOCUMENT_TYPE_UNKNOWN','CONFIRMED_ITEM_WITHOUT_SOURCE','ENGINEERING_OBJECTIVE_ONLY']),
+'P-PROJECT-DEFINITION-CRITIC':('审查项目定义对象与关系是否忠于来源、类型正确并保持主体和状态。',['project_definition_candidate','source_documents','scheme_profile','relation_matrix','deterministic_findings'],['核对对象类型','核对关系方向','区分科学问题、技术瓶颈和工程任务','检查参考申请书污染','检查计划和完成状态'],['PROJECT_GRAPH_INCOMPLETE','ARGUMENT_SEED_UNSUPPORTED','CONTRACT_MISMATCH','SOURCE_ID_UNKNOWN']),
+'P-PROJECT-READINESS-CRITIC':('计算指定章节或任务的输入准备度，并提出具体、可回答的问题。',['project_definition','fact_package','scheme_profile','section_profile','task_instruction','open_conflicts'],['读取章节必需输入矩阵','检查完整度、确认度、证据度和冲突','区分可写、带警告可写和阻断','生成字段级缺口问题','不得用模型推断代替缺口'],['FALSE_READINESS','CORE_PROFILE_BLOCKED','EVIDENCE_GAP','OPEN_CONFLICT']),
 'P-FACT-EXTRACT':('从来源Span中抽取最小事实命题，保留主体、时间、数字、否定和限定词。',['source_spans','existing_facts','locked_facts','authority_rules','security_constraints'],['按单一可判真命题拆分','分类FACT、PLAN、EXPECTED_RESULT等','识别主体和时间状态','绑定数字对象、单位和条件','记录原始Span和冲突候选','输出代表性最小事实包，fact_candidates最多24项，禁止逐段转录全部材料'],['FACT_NOT_ATOMIC','FACT_STATUS_CONFUSION','FACT_SUBJECT_MISSING','FACT_NUMERIC_BINDING_MISSING']),
 'P-FACT-CRITIC':('审查事实候选是否被提升、错配、丢失限定或与锁定事实冲突。',['fact_candidates','source_spans','existing_facts','locked_facts','authority_rules'],['逐命题核对原文','检查计划与完成混淆','检查主体归属','检查数字单位和测试条件','检查否定与限定词','检查冲突与替代关系'],['FACT_CRITIC_STATUS_UPGRADE','FACT_CRITIC_SUBJECT_MISMATCH','FACT_CRITIC_UNSOURCED_NUMBER','FACT_CRITIC_QUALIFIER_LOSS']),
-'P-TEMPLATE-EXTRACT':('从参考申请书提取可复用论证结构，而非复制其项目事实。',['reference_document','section_tree','style_summary','extraction_scope','security_constraints'],['识别全文论证主线','描述章节功能和输入输出','抽取段落角色与顺序模式','抽取图表公式和格式规则','剔除项目名称、成果、技术和数字'],['TEMPLATE_FACT_CONTAMINATION','TEMPLATE_OVER_COPY','TEMPLATE_MISSING_SECTION_FUNCTION']),
-'P-TEMPLATE-CRITIC':('审查模板候选是否忠于结构、可复用且未携带参考项目事实。',['template_candidate','reference_document','deterministic_findings'],['对照章节树','检查模式是否过度具体','检查具体实体和数字污染','检查遗漏图表公式模式','判断适用范围'],['TEMPLATE_CRITIC_FACT_LEAK','TEMPLATE_CRITIC_OVERGENERALIZATION','TEMPLATE_CRITIC_OMISSION']),
-'P-REVISION-PLAN':('针对选定写作模式形成有证据、最小范围、可验收的修改或起草计划。',['writing_mode','task_instruction','scheme_profile','project_subgraph','fact_context','source_section','linked_sections','template_context','section_profile','security_constraints'],['识别原文问题并绑定证据','确定目标、只读和保护范围','将问题分解为原子任务','检查技术与指标准备度','定义任务依赖和验收条件','提出必须由用户回答的问题'],['PLAN_UNSUPPORTED_ISSUE','PLAN_SCOPE_EXCESS','PLAN_MISSING_DEPENDENCY','PLAN_REQUIRES_INVENTION']),
-'P-REVISION-PLAN-CRITIC':('审查计划是否真实响应任务、范围最小且不会要求后续模型补造信息。',['revision_plan_candidate','task_instruction','scheme_profile','project_subgraph','fact_context','source_section','section_profile','deterministic_findings'],['核对每个Issue的证据','核对任务与Issue覆盖','检查范围和保护区','检查技术指标缺口','检查验收条件是否可判断'],['PLAN_CRITIC_UNSUPPORTED_ISSUE','PLAN_CRITIC_SCOPE_EXCESS','PLAN_CRITIC_UNRESOLVED_INPUT']),
-'P-WRITE-BLUEPRINT':('把确认计划转换为段落级写作蓝图，显式指定每段功能、证据槽位和禁止内容。',['confirmed_plan','section_profile','template_context','project_subgraph','confirmed_facts','technical_inputs','metric_inputs','source_section','security_constraints','proposal_contract','argument_graph','narrative_architecture','section_contract','prior_section_digest','revision_findings'],['确定章节目标和论证链','逐段定义功能与必答问题','按共享语义合同计算命题覆盖并分配证据','定义保留、替换和新增策略','记录段落间衔接和禁止内容','未解析槽位必须显式标记'],['BLUEPRINT_MISSING_PLAN_COVERAGE','BLUEPRINT_UNRESOLVED_SLOT','BLUEPRINT_UNSUPPORTED_SLOT']),
+'P-TEMPLATE-EXTRACT':('从参考申请书提取可复用论证结构，而非复制其项目事实。',['reference_document','section_tree','style_summary','extraction_scope','security_constraints'],['识别全文论证主线','描述章节功能和输入输出','抽取段落角色与顺序模式','抽取图表公式和格式规则','剔除项目名称、成果、技术和数字'],['TEMPLATE_ARGUMENT_PATTERN_MISSING','EXPRESSION_PATTERN_MISSING','REFERENCE_FACT_CONTAMINATION','ANTI_PATTERN_MISSING']),
+'P-TEMPLATE-CRITIC':('审查模板候选是否忠于结构、可复用且未携带参考项目事实。',['template_candidate','reference_document','deterministic_findings'],['对照章节树','检查模式是否过度具体','检查具体实体和数字污染','检查遗漏图表公式模式','判断适用范围'],['TEMPLATE_ONLY_FORMAT','TEMPLATE_VOLUME_PROXY','REFERENCE_FACT_CONTAMINATION','TEMPLATE_EVIDENCE_MISSING']),
+'P-REVISION-PLAN':('针对选定写作模式形成有证据、最小范围、可验收的修改或起草计划。',['writing_mode','task_instruction','scheme_profile','project_subgraph','fact_context','source_section','linked_sections','template_context','section_profile','security_constraints'],['识别原文问题并绑定证据','确定目标、只读和保护范围','将问题分解为原子任务','检查技术与指标准备度','定义任务依赖和验收条件','提出必须由用户回答的问题'],['NARRATIVE_ARCHITECTURE_MISSING','PAGE_BUDGET_EXCEEDED','SECTION_CONTRACT_GENERIC','MAIN_ATTACHMENT_BOUNDARY_MISSING','TASK_INPUT_UNKNOWN']),
+'P-REVISION-PLAN-CRITIC':('审查计划是否真实响应任务、范围最小且不会要求后续模型补造信息。',['revision_plan_candidate','task_instruction','scheme_profile','project_subgraph','fact_context','source_section','section_profile','deterministic_findings'],['核对每个Issue的证据','核对任务与Issue覆盖','检查范围和保护区','检查技术指标缺口','检查验收条件是否可判断'],['PLAN_TASK_UNCHECKED','ARCHITECTURE_CHAIN_BROKEN','SECTION_PROFILE_MISMATCH','TASK_TEMPLATE_CLONED','PAGE_BUDGET_UNJUSTIFIED']),
+'P-WRITE-BLUEPRINT':('把确认计划转换为段落级写作蓝图，显式指定每段功能、证据槽位和禁止内容。',['confirmed_plan','section_profile','template_context','project_subgraph','confirmed_facts','technical_inputs','metric_inputs','source_section','security_constraints','proposal_contract','argument_graph','narrative_architecture','section_contract','prior_section_digest','revision_findings'],['确定章节目标和论证链','逐段定义功能与必答问题','按共享语义合同计算命题覆盖并分配证据','定义保留、替换和新增策略','记录段落间衔接和禁止内容','未解析槽位必须显式标记'],['BLUEPRINT_GENERIC_TEMPLATE','CLAIM_ID_UNKNOWN','EVIDENCE_SLOT_EMPTY','NOVEL_CONTENT_KEY_DUPLICATE','SECTION_PROFILE_MISMATCH']),
 'P-WRITE-BLUEPRINT-CRITIC':('独立审查蓝图的论证质量，不重复执行确定性Guard规则。',['blueprint_candidate','confirmed_plan','section_profile','project_subgraph','confirmed_facts','technical_inputs','metric_inputs','proposal_contract','argument_graph','narrative_architecture','section_contract','source_section','prior_section_digest'],['逐段检查章节功能','判断命题推进是否形成实质论证','判断合法证据是否足以支撑结论','检查段落关系、重复和论证跳跃','检查是否退化为通用模板'],['BLUEPRINT_PARAGRAPH_UNCHECKED','BLUEPRINT_SECTION_FUNCTION_WEAK','BLUEPRINT_ARGUMENT_CHAIN_WEAK','BLUEPRINT_EVIDENCE_INSUFFICIENT','BLUEPRINT_PARAGRAPH_RELATION_WEAK','BLUEPRINT_GENERIC_TEMPLATE','CROSS_SECTION_REPETITION_RISK']),
-'P-WRITE-CONTENT':('依据已通过审查的蓝图生成段落级、可追踪、范围受控的正式正文候选。',['approved_blueprint','source_section','project_subgraph','confirmed_facts','technical_inputs','metric_inputs','read_only_context','template_context','section_profile','security_constraints'],['按蓝图顺序逐段生成','COPY_EDIT_ONLY时保持所有业务命题不变','实质修改只使用确认对象','每个实质性句子建立Trace Link','保持主体、时间、数字、否定和限定词','存在关键空槽时停止并提问','输出结构化段落而非仅全文'],['WRITE_BLUEPRINT_DEVIATION','WRITE_UNSOURCED_CLAIM','WRITE_STATUS_UPGRADE','WRITE_SCOPE_VIOLATION','WRITE_UNRESOLVED_PLACEHOLDER']),
-'P-WRITE-CRITIC':('独立审查正文候选的计划覆盖、事实准确、章节功能、范围和可追踪性。',['content_candidate','approved_blueprint','source_section','project_subgraph','confirmed_facts','technical_inputs','metric_inputs','section_profile','task_instruction','security_constraints'],['逐段对照蓝图','逐句核对Trace Link','检查主体时间数字限定词','检查无来源技术和成果','检查模式与修改范围','检查章节Profile验收规则'],['WRITE_CRITIC_UNSOURCED_CLAIM','WRITE_CRITIC_STATUS_UPGRADE','WRITE_CRITIC_SCOPE_VIOLATION','WRITE_CRITIC_PROFILE_FAILURE']),
-'P-INTEGRATION-CRITIC':('审查多章节候选与项目知识之间的事实、术语、数字和映射一致性。',['candidate_sections','document_section_map','project_definition','fact_package','scheme_profile','terminology','security_policy'],['检查同一实体称谓','检查重复数字及条件','检查目标到任务到路线到成果指标映射','检查前文定义与后文使用','检查章节重复和矛盾','将问题路由到正确角色'],['INTEGRATION_TERM_CONFLICT','INTEGRATION_NUMERIC_CONFLICT','INTEGRATION_MAPPING_GAP','INTEGRATION_CROSS_SECTION_CONTRADICTION']),
+'P-WRITE-CONTENT':('依据已通过审查的蓝图生成段落级、可追踪、范围受控的正式正文候选。',['approved_blueprint','source_section','project_subgraph','confirmed_facts','technical_inputs','metric_inputs','read_only_context','template_context','section_profile','security_constraints'],['按蓝图顺序逐段生成','COPY_EDIT_ONLY时保持所有业务命题不变','实质修改只使用确认对象','每个实质性句子建立Trace Link','保持主体、时间、数字、否定和限定词','存在关键空槽时停止并提问','输出结构化段落而非仅全文'],['CONTENT_UNSUPPORTED_CLAIM','TRACE_SOURCE_UNKNOWN','METHOD_ONLY_LABELS','INNOVATION_NO_BASELINE','METRIC_NO_BASIS','FOUNDATION_NO_EVIDENCE']),
+'P-WRITE-CRITIC':('独立审查正文候选的计划覆盖、事实准确、章节功能、范围和可追踪性。',['content_candidate','approved_blueprint','source_section','project_subgraph','confirmed_facts','technical_inputs','metric_inputs','section_profile','task_instruction','security_constraints'],['逐段对照蓝图','逐句核对Trace Link','检查主体时间数字限定词','检查无来源技术和成果','检查模式与修改范围','检查章节Profile验收规则'],['PARAGRAPH_UNCHECKED','TRACE_SOURCE_UNKNOWN','BLUEPRINT_DEVIATION','DOCUMENT_TYPE_DRIFT','SECTION_REPETITION','QUALITY_DIMENSION_FAILED']),
+'P-INTEGRATION-CRITIC':('审查多章节候选与项目知识之间的事实、术语、数字和映射一致性。',['candidate_sections','document_section_map','project_definition','fact_package','scheme_profile','terminology','security_policy'],['检查同一实体称谓','检查重复数字及条件','检查目标到任务到路线到成果指标映射','检查前文定义与后文使用','检查章节重复和矛盾','将问题路由到正确角色'],['CANDIDATE_SET_INCOMPLETE','CENTRAL_PROPOSITION_NOT_COVERED','ARGUMENT_CHAIN_INCOMPLETE','MAPPING_ID_UNKNOWN','DOCUMENT_TYPE_DRIFT','DOCUMENT_TEMPLATE_REPETITION','PAGE_BUDGET_EXCEEDED']),
 'P-TARGETED-REPAIR':('仅在指定路径修复指定Finding，保持所有保护字段和未授权内容不变。',['original_object','original_producer','findings_to_repair','allowed_paths','protected_paths','protected_hashes','original_input_refs','inherited_source_catalog'],['验证Finding可修复','只读取原始输入和指定Finding','生成最小修改','列出changed_paths','证明protected_paths未变','无法局部修复时返回BLOCK'],['REPAIR_SCOPE_EXCESS','REPAIR_PROTECTED_FIELD_CHANGED','REPAIR_NEW_UNSUPPORTED_CONTENT']),
 }
 
@@ -331,7 +344,7 @@ FIELD_SCHEMAS={
 # V3 writing inputs are shared common contracts rather than ad-hoc prompt-local copies.
 FIELD_SCHEMAS['proposal_contract']=ref('../common/proposal_contract.schema.json')
 FIELD_SCHEMAS['argument_graph']=ref('../common/argument_graph.schema.json')
-FIELD_SCHEMAS['narrative_architecture']={'type':'object','minProperties':5}
+FIELD_SCHEMAS['narrative_architecture']={'type':'object','minProperties':5,'additionalProperties':True}
 FIELD_SCHEMAS['section_contract']=ref('../common/section_contract.schema.json')
 FIELD_SCHEMAS['prior_section_digest']=arr(ref('../common/prior_section_digest.schema.json'))
 FIELD_SCHEMAS['revision_findings']={**arr(finding_ref),'description':'来自上一轮全篇质量审查、且明确指向当前章节的结构化修订意见；首次生成时为空数组。'}
@@ -341,7 +354,7 @@ FIELD_SCHEMAS['human_resolutions']=arr(ref('../common/human_resolution.schema.js
 FIELD_SCHEMAS['candidate_sections']=arr(obj({'section_id':idstr(),'candidate':FIELD_SCHEMAS['content_candidate']}),1)
 FIELD_SCHEMAS['document_section_map']=arr(obj({'section_id':idstr(),'title':s(),'level':{'type':'integer','minimum':0},'candidate_id':nullable(idstr())}))
 FIELD_SCHEMAS['terminology']=arr(obj({'canonical_term':s(),'aliases':arr(s()),'definition':s()}))
-FIELD_SCHEMAS['original_object']=obj({'object_type':s(),'object_id':idstr(),'object_hash':hashstr(),'content':{'type':'object'}})
+FIELD_SCHEMAS['original_object']=obj({'object_type':s(),'object_id':idstr(),'object_hash':hashstr(),'content':{'type':'object','additionalProperties':True}})
 
 # result schemas per prompt
 R={
@@ -370,7 +383,7 @@ R={
 'P-WRITE-CONTENT':obj({'candidate_id':idstr(),'candidate_text':s(),'paragraphs':arr(ref('../common/paragraph.schema.json'),1),'trace_links':arr(trace_ref,1),'term_usage':arr(obj({'term':s(),'canonical_term':s(),'paragraph_ids':arr(idstr(),1)})),'unresolved_items':arr(unresolved_ref),'source_preservation_summary':arr(obj({'source_span':s(),'action':enum(['PRESERVED','REPHRASED','REPLACED','REMOVED']),'paragraph_id':idstr()}))}),
 'P-WRITE-CRITIC':obj({'verdict':enum(['ACCEPT','REVISE','BLOCK']),'checked_paragraph_ids':arr(idstr()),'unsupported_trace_ids':arr(idstr()),'blueprint_deviation_paragraph_ids':arr(idstr()),'scope_violations':arr(s()),'profile_acceptance_results':arr(obj({'rule':s(),'passed':bools(),'evidence':s()}))}),
 'P-INTEGRATION-CRITIC':obj({'verdict':enum(['ACCEPT','REVISE','BLOCK']),'terminology_checks':arr(obj({'term':s(),'consistent':bools(),'sections':arr(idstr())})),'numeric_checks':arr(obj({'value_key':s(),'consistent':bools(),'occurrences':arr(s())})),'mapping_checks':arr(obj({'mapping_type':enum(['OBJECTIVE_TO_WORK_PACKAGE','WORK_PACKAGE_TO_METHOD','WORK_PACKAGE_TO_DELIVERABLE','DELIVERABLE_TO_METRIC']),'source_id':idstr(),'target_ids':arr(idstr()),'complete':bools()})),'routing_actions':arr(obj({'finding_code':s(),'route':enum(['PROJECT_KNOWLEDGE_AGENT','SECURITY_REVIEW_AGENT','PLANNING_AGENT','WRITING_AGENT','USER','BLOCK']),'reason':s()}))}),
-'P-TARGETED-REPAIR':obj({'repaired_object':{'type':'object','description':'Complete repaired object. Values outside allowed_paths must be copied exactly from original_object.content; runtime computes the real JSON diff and rejects unauthorized changes.'},'changed_paths':{**arr(json_pointer(),1),'description':'RFC 6901 paths that truthfully cover every real difference between original_object.content and repaired_object, with no path that lacks a corresponding object diff.'},'unchanged_protected_hashes':arr(obj({'path':json_pointer(),'hash':hashstr()})),'resolved_finding_ids':arr(idstr(),1,True),'unresolved_finding_ids':arr(idstr(),0,True)}),
+'P-TARGETED-REPAIR':obj({'repaired_object':{'type':'object','additionalProperties':True,'description':'Complete repaired object. Values outside allowed_paths must be copied exactly from original_object.content; runtime computes the real JSON diff and rejects unauthorized changes.'},'changed_paths':{**arr(json_pointer(),1),'description':'RFC 6901 paths that truthfully cover every real difference between original_object.content and repaired_object, with no path that lacks a corresponding object diff.'},'unchanged_protected_hashes':arr(obj({'path':json_pointer(),'hash':hashstr()})),'resolved_finding_ids':arr(idstr(),1,True),'unresolved_finding_ids':arr(idstr(),0,True)}),
 }
 
 # shared input envelope fields
@@ -386,7 +399,7 @@ def input_schema(prompt_id, fields):
         'schema_version':{'const':'2.0'},'prompt_id':{'const':prompt_id},'prompt_version':{'const':prompt_version(prompt_id)},
         'task':obj({'task_id':idstr(),'workflow_type':enum(workflow_types),'current_step':s(),'attempt':{'type':'integer','minimum':1,'maximum':2},'writing_mode':nullable(enum(['COPY_EDIT_ONLY','SUBSTANTIVE_REVISION','DRAFT_FROM_PROJECT_DEFINITION']))}),
         'security_context':ref('../common/security_context.schema.json'),'scope':obj({'project_id':idstr(),'target_object_ids':arr(idstr()),'read_only_object_ids':arr(idstr()),'protected_object_ids':arr(idstr())}),
-        'freshness':ref('../common/freshness.schema.json'),'payload':obj(payload_props, required=fields),'expected_output_schema':s()
+        'freshness':ref('../common/freshness.schema.json'),'payload':obj(payload_props, required=fields),'expected_output_schema':{'type':'string','const':f'schemas/prompts/{slug(prompt_id)}_output.schema.json'}
     })}
 
 def output_schema(prompt_id):
@@ -598,6 +611,13 @@ def minimal_result(pid, case_type):
         status='BLOCK'; findings=[{'code':D[pid][3][0],'severity':'P0','category':'SECURITY' if pid.startswith('P-SEC') or 'CONFIDENTIALITY' in pid or 'ONLINE' in pid else 'SYSTEM','target_type':'INPUT','target_path_or_span':'payload','description':'高风险场景触发阻断规则','evidence_refs':['src-001'],'repairable':False,'repair_instruction':None,'suggested_route':'BLOCK','blocking':True}]
     elif case_type=='need_user_input':
         status='NEED_USER_INPUT'; unresolved=[{'item_id':'unres-002','type':'UNCERTAIN','description':'关键事实尚未确认','target_paths':['/payload'],'required_action':'用户确认','blocking':True}]; questions=[{'question_id':'q-002','question_type':'CONFIRMATION','question':'请确认关键事实。','reason':'事实状态未知','target_paths':['/payload'],'answer_schema':{'type':'BOOLEAN','allowed_values':[True,False]},'blocking':True,'priority':'P1'}]
+    if isinstance(normal, dict) and 'verdict' in normal:
+        normal['verdict'] = {
+            'PASS': normal['verdict'],
+            'REVISE': 'REVISE',
+            'NEED_USER_INPUT': 'REVISE',
+            'BLOCK': 'BLOCK',
+        }[status]
     return {'schema_version':'2.0','prompt_id':pid,'prompt_version':prompt_version(pid),'status':status,'result':normal,'findings':findings,'unresolved_items':unresolved,'user_questions':questions,'source_refs':[],'warnings':warnings}
 
 for pid,p in PROMPTS.items():
@@ -647,10 +667,10 @@ write(ROOT/'prompts/shared/source_authority.md', '''# 来源权威顺序 V2
 8. 模型推断。
 
 低权威来源不得覆盖高权威来源。模型推断不得成为正式事实来源。冲突无法解决时必须进入人工Gate。''')
-write(ROOT/'prompts/shared/output_protocol.md', '''# 统一输出协议 V2
+write(ROOT/'prompts/shared/output_protocol.md', '''# 统一输出协议
 
 - 只输出JSON对象，不得输出Markdown代码块或解释。
-- `schema_version`固定为`2.0`，`prompt_version`固定为`2.0.0`。
+- `prompt_id`、`prompt_version`和`schema_version`必须与本次运行时协议身份及强制输出Schema中的`const`完全一致；不得沿用其他Prompt、Replay或历史版本中的值。
 - `status`只能是PASS、REVISE、NEED_USER_INPUT、BLOCK。
 - Finding必须定位到具体路径或Span，并给出证据、严重级别、修复边界和路由。
 - NEED_USER_INPUT必须生成具体、可回答的问题，禁止只写“请补充信息”。
@@ -664,13 +684,13 @@ readme=f'''# 项目申请书智能系统 Prompt 开发交接包 V2
 
 ## 已完成
 
-- 26个顶层Prompt，均为2.0.0详细执行版；
-- 26个严格输入Schema与26个严格输出Schema；
+- {len(PROMPTS)}个顶层Prompt，均绑定注册表版本；
+- {len(PROMPTS)}个严格输入Schema与{len(PROMPTS)}个严格输出Schema；
 - 6类核心输入包Schema；
 - {len(ITEM_TYPES)}类项目定义对象及{len(RELATIONS)}类允许关系；
 - 8个章节Profile；
 - 离线/在线模型端点、模型、Prompt Profile和默认拒绝路由配置；
-- 130组实际Replay文件；
+- {len(PROMPTS) * 5}组实际Replay文件；
 - 构建校验脚本和报告。
 
 ## 仍需部署方填写
@@ -685,18 +705,18 @@ readme=f'''# 项目申请书智能系统 Prompt 开发交接包 V2
 V2证明文件、Schema和Replay在静态层面一致；不等于真实模型质量、真实保密审批或生产部署已经通过。真实模型上线前必须执行Prompt回归和安全红队测试。
 '''
 write(ROOT/'README.md',readme)
-write(ROOT/'DEVELOPMENT_CHECKLIST.md','''# 开发检查清单 V2
+write(ROOT/'DEVELOPMENT_CHECKLIST.md',f'''# 开发检查清单 V2
 
-- [x] 26个Prompt正文
-- [x] 52个Prompt输入输出Schema
+- [x] {len(PROMPTS)}个Prompt正文
+- [x] {len(PROMPTS) * 2}个Prompt输入输出Schema
 - [x] 6类核心输入包Schema
 - [x] 项目对象和关系矩阵
 - [x] 8个章节Profile
-- [x] 130组Replay文件
+- [x] {len(PROMPTS) * 5}组Replay文件
 - [x] 模型端点和路由配置
 - [x] 静态完整性与Schema校验
 - [ ] 配置真实离线模型端点
-- [ ] 对26个Prompt运行真实模型Replay
+- [ ] 对{len(PROMPTS)}个Prompt运行真实模型Replay
 - [ ] 安全审查人员确认本单位密级映射和审批规则
 - [ ] 开发Model Gateway与Context Builder
 - [ ] 完成端到端工作流代码和DOCX验证
@@ -713,8 +733,8 @@ if (ROOT/'replay/smoke').exists(): shutil.rmtree(ROOT/'replay/smoke')
 # Unified strict envelope is a oneOf across all prompt-specific schemas.
 input_refs=[{'$ref':f'../prompts/{slug(p["prompt_id"])}_input.schema.json'} for p in registry['prompts']]
 output_refs=[{'$ref':f'../prompts/{slug(p["prompt_id"])}_output.schema.json'} for p in registry['prompts']]
-dump_json(common_dir/'prompt_input_envelope.schema.json',{'$schema':SCHEMA,'$id':'prompt_input_envelope.schema.json','title':'统一Prompt输入Envelope；具体payload由26个Prompt Schema严格约束','oneOf':input_refs})
-dump_json(common_dir/'prompt_output_envelope.schema.json',{'$schema':SCHEMA,'$id':'prompt_output_envelope.schema.json','title':'统一Prompt输出Envelope；具体result由26个Prompt Schema严格约束','oneOf':output_refs})
+dump_json(common_dir/'prompt_input_envelope.schema.json',{'$schema':SCHEMA,'$id':'prompt_input_envelope.schema.json','title':f'统一Prompt输入Envelope；具体payload由{len(PROMPTS)}个Prompt Schema严格约束','oneOf':input_refs})
+dump_json(common_dir/'prompt_output_envelope.schema.json',{'$schema':SCHEMA,'$id':'prompt_output_envelope.schema.json','title':f'统一Prompt输出Envelope；具体result由{len(PROMPTS)}个Prompt Schema严格约束','oneOf':output_refs})
 
 GATE_TYPES=['SCHEME_CONFIRMATION','PROJECT_DEFINITION_CONFIRMATION','PROJECT_GAP_RESOLUTION','FACT_CONFIRMATION','FACT_CONFLICT_RESOLUTION','TEMPLATE_CONFIRMATION','TECHNICAL_OR_METRIC_INFORMATION','PLAN_CONFIRMATION','CANDIDATE_REVIEW','OUTBOUND_SECURITY_APPROVAL','ONLINE_RESULT_IMPORT_APPROVAL','FINAL_CONTENT_SECURITY_APPROVAL','FINAL_EXPORT_APPROVAL']
 ROLES=['PROJECT_OWNER','CONTENT_OPERATOR','SECURITY_REVIEWER','EXPORT_APPROVER','SYSTEM_ADMIN']
@@ -731,9 +751,9 @@ dump_yaml(ROOT/'policies/security_label_propagation.yaml',{'version':'2.0','leve
 dump_yaml(ROOT/'policies/source_authority.yaml',{'version':'2.0','priority':[{'rank':100,'source_type':'USER_CONFIRMATION'},{'rank':90,'source_type':'APPLICATION_GUIDE_TASK_BOOK_CONTRACT'},{'rank':80,'source_type':'LOCKED_FACT'},{'rank':70,'source_type':'CURRENT_PROPOSAL'},{'rank':60,'source_type':'CURRENT_TECHNICAL_OR_EVIDENCE_MATERIAL'},{'rank':40,'source_type':'HISTORICAL_MATERIAL'},{'rank':20,'source_type':'REFERENCE_PROPOSAL'},{'rank':0,'source_type':'MODEL_INFERENCE'}],'rules':{'lower_cannot_silently_override_higher':True,'same_rank_conflict_requires_gate':True,'reference_proposal_structure_only':True,'model_inference_cannot_be_formal_fact':True,'public_claim_cannot_prove_internal_achievement':True}})
 
 # Replay docs
-write(ROOT/'replay/README.md','''# Replay回归集 V2
+write(ROOT/'replay/README.md',f'''# Replay回归集 V2
 
-`replay/cases/`已包含26个Prompt各5类实际文件，共130组：
+`replay/cases/`已包含{len(PROMPTS)}个Prompt各5类实际文件，共{len(PROMPTS) * 5}组：
 
 - `normal`：正常业务输入；
 - `missing_input`：Schema合法但业务信息不足，应返回NEED_USER_INPUT；
@@ -783,7 +803,7 @@ write(ROOT/'catalog/input_packages.md','''# 六类核心输入包 V2
 5. `Task Instruction`：模式、目标、修改范围、保留项、禁止项和验收偏好。
 6. `Security and Handling Profile`：联网、模型端点、外发、导入、正文和导出规则。''')
 
-write(ROOT/'MODEL_CONFIGURATION.md','''# 模型调用配置 V2
+write(ROOT/'MODEL_CONFIGURATION.md',f'''# 模型调用配置 V2
 
 ## 必填环境变量
 
@@ -804,7 +824,7 @@ write(ROOT/'MODEL_CONFIGURATION.md','''# 模型调用配置 V2
 - `config/model_endpoints.yaml`：端点环境、安全等级、数据和网络政策；
 - `config/models.yaml`：模型实例和能力；
 - `config/prompt_model_profiles.yaml`：抽取、Critic、规划、写作等参数；
-- `config/prompt_registry.json`：26个Prompt到文件、Schema和Profile的映射；
+- `config/prompt_registry.json`：{len(PROMPTS)}个Prompt到文件、Schema和Profile的映射；
 - `policies/model_routing.yaml`：默认拒绝的模型路由。
 
 离线模型失败时不得自动切换在线模型。CI应使用Mock或Replay，禁止默认真实API调用。''')

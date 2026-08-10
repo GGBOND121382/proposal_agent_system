@@ -239,7 +239,8 @@
               "pattern": "^[a-f0-9]{64}$"
             },
             "content": {
-              "type": "object"
+              "type": "object",
+              "additionalProperties": true
             }
           },
           "additionalProperties": false,
@@ -276,7 +277,8 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/security_classify_critic_output.schema.json"
     },
     "trusted_source_catalog": {
       "type": "array",

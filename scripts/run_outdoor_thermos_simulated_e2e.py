@@ -26,6 +26,7 @@ from app.research import PublicResearchService
 from app.security import SecurityRouter
 from app.util import new_id, utc_now, write_json
 from app.runtime_api import WorkflowEngine
+from app.workflow_status import should_pause_automatic_advancement
 
 WORKFLOWS = [
     "WF-1_PROJECT_INTAKE",
@@ -37,7 +38,7 @@ WORKFLOWS = [
 
 
 def build_runtime(output_dir: Path):
-    os.environ["MODEL_RUNTIME_MODE"] = "REPLAY"
+    os.environ["MODEL_RUNTIME_MODE"] = "SIMULATED"
     os.environ["APP_DATA_DIR"] = str(output_dir)
     os.environ["PROMPT_PACK_DIR"] = str(ROOT / "prompt_pack")
     settings = Settings.load()
@@ -79,14 +80,55 @@ def add_draft(settings: Settings, db: Database, project_id: str, fixture: dict) 
     markdown = "# 全文\n用于驱动逐章编制。\n\n" + "\n\n".join(
         f"# {title}\n请根据已确认材料编写本章。" for title in fixture["sections"]
     ) + "\n"
-    raw = markdown.encode("utf-8")
-    parsed = parse_document("outdoor_thermos_draft.md", raw, "CURRENT_PROPOSAL", "INTERNAL")
-    path = settings.uploads_dir / "outdoor_thermos_draft.md"
-    path.write_bytes(raw)
-    db.execute(
-        "INSERT INTO documents(id,project_id,filename,role,security_level,document_hash,file_path,parsed_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        (parsed["document_id"], project_id, path.name, "CURRENT_PROPOSAL", "INTERNAL", parsed["document_hash"], str(path), json.dumps(parsed, ensure_ascii=False), utc_now()),
-    )
+    materials = [
+        ("outdoor_thermos_draft.md", "CURRENT_PROPOSAL", markdown),
+        (
+            "outdoor_thermos_evidence.md",
+            "EVIDENCE_MATERIAL",
+            "# 前期基础\n团队已完成保温结构样机、温降测试数据和便携结构验证记录，可支撑本项目方案设计与试验验证。\n",
+        ),
+    ]
+    for filename, role, text in materials:
+        raw = text.encode("utf-8")
+        parsed = parse_document(filename, raw, role, "INTERNAL")
+        path = settings.uploads_dir / filename
+        path.write_bytes(raw)
+        db.execute(
+            "INSERT INTO documents(id,project_id,filename,role,security_level,document_hash,file_path,parsed_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (parsed["document_id"], project_id, path.name, role, "INTERNAL", parsed["document_hash"], str(path), json.dumps(parsed, ensure_ascii=False), utc_now()),
+        )
+
+
+def _simulated_answer(question: dict) -> object:
+    schema = question.get("answer_schema") if isinstance(question.get("answer_schema"), dict) else {}
+    answer_type = str(schema.get("type") or question.get("answer_type") or "STRING").upper()
+    allowed = schema.get("allowed_values")
+    if not isinstance(allowed, list):
+        allowed = question.get("options") if isinstance(question.get("options"), list) else []
+    if allowed:
+        return allowed[0]
+    if answer_type in {"STRING", "LONG_TEXT"}:
+        return "模拟人工已补充与当前课题直接相关的前期成果、原型、数据和验证记录。"
+    if answer_type == "BOOLEAN":
+        return True
+    if answer_type == "NUMBER":
+        return 1
+    if answer_type == "ARRAY":
+        return ["SIMULATED_CONFIRMED_INPUT"]
+    if answer_type == "OBJECT":
+        return {"status": "SIMULATED_CONFIRMED_INPUT"}
+    return "SIMULATED_CONFIRMED_INPUT"
+
+
+def _gate_answers(gate: dict) -> list[dict]:
+    return [
+        {
+            "question_id": str(question.get("question_id") or question.get("id") or f"question-{index}"),
+            "value": _simulated_answer(question),
+        }
+        for index, question in enumerate(gate.get("questions") or [])
+        if isinstance(question, dict)
+    ]
 
 
 async def finish(engine: WorkflowEngine, project_id: str, workflow_type: str) -> dict:
@@ -95,12 +137,28 @@ async def finish(engine: WorkflowEngine, project_id: str, workflow_type: str) ->
         workflow = await engine.advance(workflow["id"])
         if workflow["status"] == "WAITING_GATE":
             gate = next(item for item in engine.list_gates(workflow_id=workflow["id"]) if item["status"] == "OPEN")
-            action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
-            engine.decide_gate(gate["id"], action=action, decided_by="simulated-e2e", decided_role=gate["required_role"])
+            answers = _gate_answers(gate)
+            if answers and "PROVIDE_INFORMATION" in gate["allowed_actions"]:
+                action = "PROVIDE_INFORMATION"
+            else:
+                action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
+            engine.decide_gate(
+                gate["id"],
+                action=action,
+                decided_by="simulated-e2e",
+                decided_role=gate["required_role"],
+                answers=answers,
+            )
             continue
-        break
+        if should_pause_automatic_advancement(workflow["status"]):
+            break
+    else:
+        raise RuntimeError(f"{workflow_type} exceeded the 100-step execution limit")
     if workflow["status"] != "COMPLETED":
-        raise RuntimeError(f"{workflow_type} failed: {workflow['state'].get('last_error')}")
+        raise RuntimeError(
+            f"{workflow_type} paused at {workflow['status']}: "
+            f"{workflow.get('state', {}).get('last_error')}"
+        )
     return workflow
 
 

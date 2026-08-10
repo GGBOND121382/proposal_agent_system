@@ -888,7 +888,7 @@ class SimulatedLLM:
         ]
         base["result"]["architecture_checks"] = self._dimension_checks(["CENTRAL_PROPOSITION", "QUESTION_COUNT", "WORK_PACKAGE_COUNT", "SECTION_PROFILE_MAPPING", "PAGE_BUDGET", "MAIN_BODY_ATTACHMENT_BOUNDARY", "CLAIM_COVERAGE", "REDUNDANCY_PREVENTION"], passed)
         base["status"] = "PASS" if passed else "REVISE"
-        base["findings"] = [] if passed else [{"code": "PLAN_SIMULATED_REPAIR", "severity": "P1", "category": "CONTENT", "target_type": "REVISION_PLAN", "target_path_or_span": "issues", "description": "计划中包含模拟缺陷标记。", "evidence_refs": [], "repairable": True, "repair_instruction": "删除标记并保持叙事架构不变。", "suggested_route": "ORIGINAL_PRODUCER", "blocking": True}]
+        base["findings"] = [] if passed else [{"code": "PLAN_TASK_UNCHECKED", "severity": "P1", "category": "CONTENT", "target_type": "REVISION_PLAN", "target_path_or_span": "issues", "description": "计划中包含模拟缺陷标记。", "evidence_refs": [], "repairable": True, "repair_instruction": "删除标记并保持叙事架构不变。", "suggested_route": "ORIGINAL_PRODUCER", "blocking": True}]
         return base
 
     def _handle_targeted_repair(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -939,7 +939,12 @@ class SimulatedLLM:
             "REFERENCES": [("EVIDENCE", "列出正文实际使用且可核验的来源")],
             "APPENDIX": [("CONTEXT", "说明附件与主文的边界"), ("METHOD", "记录实现、接口或部署细节")],
         }
-        role_specs = roles_by_profile.get(profile.get("profile_id"), [("PROBLEM", "本章节要解决的具体问题"), ("EVIDENCE", "支撑问题与命题的证据"), ("METHOD", "本项目方法或任务"), ("EVALUATION", "验证方式")])
+        contract_roles = [str(role) for role in contract.get("required_argument_roles") or [] if str(role)]
+        role_specs = roles_by_profile.get(profile.get("profile_id"))
+        if role_specs is None and contract_roles:
+            role_specs = [(role, f"完成章节合同要求的{role}论证功能") for role in contract_roles]
+        if role_specs is None:
+            role_specs = [("PROBLEM", "本章节要解决的具体问题"), ("EVIDENCE", "支撑问题与命题的证据"), ("METHOD", "本项目方法或任务"), ("EVALUATION", "验证方式")]
 
         contract_claims = list(contract.get("must_advance_claim_ids") or [proposition_id])
         contract_claim_set = {str(value) for value in contract_claims if value}
@@ -1196,11 +1201,28 @@ class SimulatedLLM:
 
         bp = base["result"]["blueprint"]
         bp.update({"blueprint_id": new_id("blueprint"), "section_objective": contract.get("argument_function", f"推进《{title}》的独有论证"), "paragraphs": paragraphs, "unresolved_slot_ids": [], "section_profile_id": profile.get("profile_id"), "section_contract_id": contract.get("section_contract_id")})
+        plan = payload.get("confirmed_plan") or {}
+        tasks = plan.get("tasks") or []
+        matching = next((t for t in tasks if set(t.get("required_input_ids") or []) & set(contract_claims + contract_evidence)), None)
+        task_id = (matching or (tasks[0] if tasks else {})).get("revision_task_id", "revision-001")
+        base["result"]["plan_task_coverage"] = [{"revision_task_id": task_id, "paragraph_ids": [p["paragraph_id"] for p in paragraphs]}]
+        used_ids = sorted({eid for p in paragraphs for eid in p["required_evidence_ids"]})
+        base["result"]["input_usage_summary"] = [{"source_id": sid, "used_in_paragraph_ids": [p["paragraph_id"] for p in paragraphs if sid in p["required_evidence_ids"]]} for sid in used_ids]
         violations = check_blueprint_semantics(bp, payload)
         if violations:
+            finding_code_map = {
+                "QG_BLUEPRINT_DUPLICATE_INFORMATION_KEYS": "NOVEL_CONTENT_KEY_DUPLICATE",
+                "QG_BLUEPRINT_REUSES_PRIOR_INFORMATION": "NOVEL_CONTENT_KEY_DUPLICATE",
+                "QG_BLUEPRINT_REQUIRED_EVIDENCE_MISSING": "EVIDENCE_SLOT_EMPTY",
+                "QG_BLUEPRINT_SELF_EVIDENCE": "EVIDENCE_SLOT_EMPTY",
+                "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING": "CLAIM_ID_UNKNOWN",
+                "QG_BLUEPRINT_REQUIRED_ROLES_MISSING": "SECTION_PROFILE_MISMATCH",
+                "QG_BLUEPRINT_INFORMATION_KEY_OUTSIDE_CONTRACT": "SECTION_PROFILE_MISMATCH",
+                "QG_BLUEPRINT_MISSING_INFORMATION_IDENTITY": "SECTION_PROFILE_MISMATCH",
+            }
             base["status"] = "REVISE"
             base["findings"] = [{
-                "code": violation.code,
+                "code": finding_code_map.get(violation.code, "SECTION_PROFILE_MISMATCH"),
                 "severity": "P1",
                 "category": violation.category,
                 "target_type": "BLUEPRINT",
@@ -1213,13 +1235,6 @@ class SimulatedLLM:
                 "blocking": violation.blocking,
             } for violation in violations]
             return base
-        plan = payload.get("confirmed_plan") or {}
-        tasks = plan.get("tasks") or []
-        matching = next((t for t in tasks if set(t.get("required_input_ids") or []) & set(contract_claims + contract_evidence)), None)
-        task_id = (matching or (tasks[0] if tasks else {})).get("revision_task_id", "revision-001")
-        base["result"]["plan_task_coverage"] = [{"revision_task_id": task_id, "paragraph_ids": [p["paragraph_id"] for p in paragraphs]}]
-        used_ids = sorted({eid for p in paragraphs for eid in p["required_evidence_ids"]})
-        base["result"]["input_usage_summary"] = [{"source_id": sid, "used_in_paragraph_ids": [p["paragraph_id"] for p in paragraphs if sid in p["required_evidence_ids"]]} for sid in used_ids]
         base["status"] = "PASS"; base["findings"] = []
         return base
 
@@ -1789,7 +1804,7 @@ class SimulatedLLM:
         else:
             base["status"] = "NEED_USER_INPUT"
             base["findings"] = [{
-                "code": "ARGUMENT_FOUNDATION_EVIDENCE_MISSING", "severity": "P1", "category": "SOURCE",
+                "code": "FOUNDATION_EVIDENCE_MISSING", "severity": "P1", "category": "SOURCE",
                 "target_type": "ARGUMENT_GRAPH", "target_path_or_span": "argument_architecture.nodes[foundation-001]",
                 "description": "研究基础没有可定位的前期成果或技术材料。", "evidence_refs": [],
                 "repairable": False, "repair_instruction": "上传成果、原型、数据或预实验材料后重新构建论证架构。",
@@ -1850,12 +1865,35 @@ class SimulatedLLM:
         }
         base["status"] = "PASS" if candidate_ready else "NEED_USER_INPUT"
         base["findings"] = [] if candidate_ready else [{
-            "code": "ARGUMENT_FOUNDATION_EVIDENCE_MISSING", "severity": "P1", "category": "SOURCE",
+            "code": "FALSE_ARGUMENT_READINESS", "severity": "P1", "category": "SOURCE",
             "target_type": "ARGUMENT_GRAPH", "target_path_or_span": "argument_architecture.nodes",
             "description": "研究基础节点缺少可定位前期证据。", "evidence_refs": [],
             "repairable": False, "repair_instruction": "补充前期成果材料后重新运行。",
             "suggested_route": "USER", "blocking": True,
         }]
+        if candidate_ready:
+            base["unresolved_items"] = []
+            base["user_questions"] = []
+        else:
+            base["result"]["verdict"] = "REVISE"
+            base["unresolved_items"] = [{
+                "item_id": "unresolved-foundation-critic-001",
+                "type": "MISSING",
+                "description": "研究基础节点缺少可定位前期证据。",
+                "target_paths": ["/payload/architecture_candidate/argument_architecture/nodes"],
+                "required_action": "补充并确认前期成果材料。",
+                "blocking": True,
+            }]
+            base["user_questions"] = [{
+                "question_id": "question-foundation-critic-001",
+                "question_type": "MISSING_INFORMATION",
+                "question": "请提供与本课题直接相关的前期成果材料，并说明其支撑关系。",
+                "reason": "最终论证架构的研究基础节点必须由可定位证据支撑。",
+                "target_paths": ["/payload/architecture_candidate/argument_architecture/nodes"],
+                "answer_schema": {"type": "STRING"},
+                "blocking": True,
+                "priority": "P1",
+            }]
         return base
 
     @staticmethod

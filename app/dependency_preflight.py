@@ -822,7 +822,10 @@ class RuntimeDependencyPreflight:
                         required_settings=("options.run_root",),
                     )
                 )
-            if run_root.exists() and any(run_root.iterdir()):
+            ignored_names = {".proposal_agent_workflow_owner.json"}
+            if run_root.exists() and any(
+                item.name not in ignored_names for item in run_root.iterdir()
+            ):
                 report.issues.append(
                     DependencyIssue(
                         code="STAGED_RUN_ROOT_NOT_EMPTY",

@@ -948,7 +948,7 @@
         }
       }
     },
-    "expected_output_schema": "schemas/prompts/write_critic_output.schema.json"
+    "expected_output_schema": "schemas/prompts/expression_critic_output.schema.json"
   },
   "expected_output": null,
   "expected_validation": {

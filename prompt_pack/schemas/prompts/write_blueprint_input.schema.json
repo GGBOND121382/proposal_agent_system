@@ -556,7 +556,8 @@
         },
         "narrative_architecture": {
           "type": "object",
-          "minProperties": 5
+          "minProperties": 5,
+          "additionalProperties": true
         },
         "section_contract": {
           "$ref": "../common/section_contract.schema.json"
@@ -602,7 +603,8 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/write_blueprint_output.schema.json"
     },
     "trusted_source_catalog": {
       "type": "array",

@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-INTEGRATION-CRITIC",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -619,7 +619,7 @@
     "prompt_version": "3.0.0",
     "status": "BLOCK",
     "result": {
-      "verdict": "ACCEPT",
+      "verdict": "BLOCK",
       "terminology_checks": [
         {
           "term": "本项目",
@@ -851,7 +851,7 @@
     },
     "findings": [
       {
-        "code": "INTEGRATION_TERM_CONFLICT",
+        "code": "CANDIDATE_SET_INCOMPLETE",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +49,18 @@ class MermaidRenderSkill:
         self._reader_thread: threading.Thread | None = None
         self._worker_request_count = 0
         self._max_requests_per_worker = 10
-        atexit.register(self.close)
+        # Do not let atexit keep every discarded runtime stack alive through a
+        # bound-method reference.  The callback retains only a weak reference;
+        # live instances still receive best-effort process cleanup at exit.
+        self_ref = weakref.ref(self)
+
+        def _close_at_exit(ref=self_ref) -> None:
+            instance = ref()
+            if instance is not None:
+                instance.close()
+
+        self._atexit_callback = _close_at_exit
+        atexit.register(_close_at_exit)
 
     def run(self, payload: dict[str, Any], context: SkillContext) -> SkillResult:
         if not self.mermaid_js.is_file():
@@ -256,29 +268,38 @@ class MermaidRenderSkill:
 
     def _terminate_worker(self) -> None:
         process = self._worker
+        reader = self._reader_thread
         self._worker = None
+        self._reader_thread = None
         self._worker_request_count = 0
-        if process is None:
-            return
-        if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=3)
-            except (ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
+        if process is not None:
+            if process.poll() is None:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    os.killpg(process.pid, signal.SIGTERM)
                     process.wait(timeout=3)
                 except (ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
                     try:
-                        process.kill()
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait(timeout=3)
+                    except (ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
+                        try:
+                            process.kill()
+                        except OSError:
+                            pass
+            for stream in (process.stdin, process.stdout):
+                if stream:
+                    try:
+                        stream.close()
                     except OSError:
                         pass
-        for stream in (process.stdin, process.stdout):
-            if stream:
-                try:
-                    stream.close()
-                except OSError:
-                    pass
+        if (
+            reader is not None
+            and reader is not threading.current_thread()
+            and reader.is_alive()
+        ):
+            # stdout closure makes the daemon reader leave its line iterator.
+            # Joining it here keeps repeated runtime lifecycles deterministic.
+            reader.join(timeout=1)
 
     def close(self) -> None:
         with self._worker_lock:

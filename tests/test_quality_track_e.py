@@ -468,3 +468,59 @@ def test_quality_matrix_is_auditable_and_append_only(tmp_path: Path):
     rows = db.fetchall("SELECT version,status FROM artifacts WHERE artifact_type='QUALITY_FINDING' ORDER BY version")
     assert [row["version"] for row in rows] == [1, 2]
     assert [row["status"] for row in rows] == ["OPEN", "REPAIR_RECORDED"]
+
+
+def test_targeted_repair_and_rereview_bind_same_code_to_exact_finding_path(tmp_path: Path):
+    db, project_id, workflow_id = _db(tmp_path)
+    manager = QualityLifecycleManager(db)
+    finding_a = _finding()
+    finding_a["target_path_or_span"] = "/result/section_contracts/0/title"
+    finding_a["description"] = "First title is invalid."
+    finding_b = _finding()
+    finding_b["target_path_or_span"] = "/result/section_contracts/1/title"
+    finding_b["description"] = "Second title is invalid."
+
+    opened = manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id="critic-open-same-code",
+        status="REVISE",
+        output={"findings": [finding_a, finding_b]},
+    )
+    assert len(opened) == 2
+
+    manager.record_targeted_repair(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        repair_run_id="repair-only-first-path",
+        finding_codes=[finding_a["code"]],
+        finding_instances=[finding_a],
+        critic_prompt_id="P-REVISION-PLAN-CRITIC",
+        workflow_state={},
+    )
+
+    by_path = {
+        item["finding"]["target_path_or_span"]: item
+        for item in manager.list_findings(project_id)
+    }
+    assert by_path[finding_a["target_path_or_span"]]["lifecycle"]["state"] == "REPAIR_RECORDED"
+    assert by_path[finding_b["target_path_or_span"]]["lifecycle"]["state"] == "OPEN"
+
+    manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id="critic-review-same-code",
+        status="REVISE",
+        output={"findings": [finding_b]},
+    )
+
+    by_path = {
+        item["finding"]["target_path_or_span"]: item
+        for item in manager.list_findings(project_id)
+    }
+    assert by_path[finding_a["target_path_or_span"]]["lifecycle"]["state"] == "VERIFIED"
+    assert by_path[finding_b["target_path_or_span"]]["lifecycle"]["state"] == "OPEN"
+    assert by_path[finding_a["target_path_or_span"]]["lifecycle"]["repair_evidence"][0]["run_id"] == "repair-only-first-path"
+    assert by_path[finding_b["target_path_or_span"]]["lifecycle"]["repair_evidence"] == []

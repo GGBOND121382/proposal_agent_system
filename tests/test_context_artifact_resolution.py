@@ -56,12 +56,17 @@ def _insert_resolution(
     prompt_id: str,
     version: int,
     resolution: dict[str, Any],
+    scope_key: str | None = None,
+    section_id: str | None = None,
 ) -> None:
     payload = {
         "schema_version": "1.0.0",
         "gate_id": "gate-1",
         "workflow_id": workflow_id,
         "prompt_id": prompt_id,
+        "scope_key": scope_key,
+        "section_id": section_id,
+        "workflow_step": 0,
         "resolution": resolution,
         "authority": "HUMAN_GATE_DECISION",
         "supersedes_state_override": True,
@@ -83,6 +88,40 @@ def _insert_resolution(
             utc_now(),
         ),
     )
+
+
+def test_section_scoped_human_resolution_cannot_leak_to_another_section(
+    tmp_path: Path,
+) -> None:
+    db, builder = _runtime(tmp_path)
+    _insert_resolution(
+        db,
+        artifact_id="artifact-section-a",
+        workflow_id="workflow-1",
+        prompt_id="P-TEST",
+        version=1,
+        resolution=_resolution(
+            resolution_id="resolution-section-a",
+            answer="answer-a",
+            target_paths=["payload.target"],
+        ),
+        scope_key="section:section-a:P-TEST",
+        section_id="section-a",
+    )
+    state = {
+        "active_section_id": "section-a",
+        "human_resolution_artifact_ids": {
+            "section:section-a:P-TEST": ["artifact-section-a"]
+        },
+    }
+    assert builder._human_resolutions_for_prompt(
+        state, "P-TEST", "workflow-1"
+    )[0]["answer"] == "answer-a"
+
+    state["active_section_id"] = "section-b"
+    assert builder._human_resolutions_for_prompt(
+        state, "P-TEST", "workflow-1"
+    ) == []
 
 
 def test_latest_applied_human_resolution_wins_per_target_path(tmp_path: Path) -> None:
@@ -521,3 +560,69 @@ def test_repair_application_lookup_uses_explicit_workflow_outside_build_scope(
         "P-WRITE-BLUEPRINT",
         workflow_id="workflow-2",
     ) == {"blueprint_id": "BP-WF2", "value": "workflow-2"}
+
+
+def test_retargeted_question_supersedes_its_old_target_path(tmp_path: Path) -> None:
+    db, builder = _runtime(tmp_path)
+    _insert_resolution(
+        db,
+        artifact_id="artifact-old-target",
+        workflow_id="workflow-1",
+        prompt_id="P-TEST",
+        version=1,
+        resolution=_resolution(
+            resolution_id="resolution-old-target",
+            answer="old",
+            target_paths=["payload.old_target"],
+            question_id="same-question",
+        ),
+        scope_key="step:0:P-TEST",
+    )
+    _insert_resolution(
+        db,
+        artifact_id="artifact-new-target",
+        workflow_id="workflow-1",
+        prompt_id="P-TEST",
+        version=2,
+        resolution=_resolution(
+            resolution_id="resolution-new-target",
+            answer="new",
+            target_paths=["payload.new_target"],
+            question_id="same-question",
+        ),
+        scope_key="step:0:P-TEST",
+    )
+    state = {
+        "human_resolution_artifact_ids": {
+            "step:0:P-TEST": ["artifact-old-target", "artifact-new-target"]
+        }
+    }
+
+    resolutions = builder._human_resolutions_for_prompt(
+        state, "P-TEST", "workflow-1"
+    )
+
+    assert [(item["target_paths"], item["answer"]) for item in resolutions] == [
+        (["/payload/new_target"], "new")
+    ]
+
+
+def test_authoritative_artifact_index_blocks_legacy_state_fallback(
+    tmp_path: Path,
+) -> None:
+    _, builder = _runtime(tmp_path)
+    legacy = _resolution(
+        resolution_id="resolution-legacy",
+        answer="legacy-must-not-resurrect",
+        target_paths=["payload.target"],
+    )
+    state = {
+        "human_resolution_artifact_ids": {
+            "step:0:P-TEST": ["missing-or-rolled-back-artifact"]
+        },
+        "human_resolutions": {"P-TEST": [legacy]},
+    }
+
+    assert builder._human_resolutions_for_prompt(
+        state, "P-TEST", "workflow-1"
+    ) == []

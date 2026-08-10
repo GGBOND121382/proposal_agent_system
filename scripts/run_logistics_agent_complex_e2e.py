@@ -36,6 +36,7 @@ from app.research import PublicResearchService
 from app.security import SecurityRouter
 from app.util import new_id, sha256_bytes, utc_now, write_json
 from app.runtime_api import WorkflowEngine
+from app.workflow_status import should_pause_automatic_advancement
 from app.logistics_application_content import SECTION_TITLES, REF_CATALOG
 
 WORKFLOWS = ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION", "WF-3_HYBRID_ONLINE_ASSIST", "WF-4_PROPOSAL_AUTHORING", "WF-5_SECURITY_REVIEW_AND_EXPORT"]
@@ -106,7 +107,7 @@ async def finish(engine: WorkflowEngine, project_id: str, workflow_type: str) ->
             action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
             engine.decide_gate(gate["id"], action=action, decided_by="complex-e2e", decided_role=gate["required_role"], comment="确定性端到端测试自动批准")
             continue
-        if workflow["status"] in {"COMPLETED", "BLOCKED", "WAITING_CONFIGURATION", "WAITING_PREREQUISITE", "CANCELLED"}:
+        if should_pause_automatic_advancement(workflow["status"]):
             break
     if workflow["status"] != "COMPLETED":
         raise RuntimeError(f"{workflow_type} failed: {workflow['state'].get('last_error')}")

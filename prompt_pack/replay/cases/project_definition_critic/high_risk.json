@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-PROJECT-DEFINITION-CRITIC",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -505,7 +505,7 @@
     "prompt_version": "3.0.0",
     "status": "BLOCK",
     "result": {
-      "verdict": "ACCEPT",
+      "verdict": "BLOCK",
       "checked_item_ids": [
         "item-001"
       ],
@@ -565,7 +565,7 @@
     },
     "findings": [
       {
-        "code": "PD_CRITIC_TYPE_ERROR",
+        "code": "PROJECT_GRAPH_INCOMPLETE",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

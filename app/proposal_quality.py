@@ -7,6 +7,12 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .candidate_integrity import candidate_text_divergence, paragraph_identity_error
+from .paragraph_order import (
+    canonical_candidate_text,
+    ordered_paragraphs,
+    paragraph_sequence_error,
+)
 from .quality_guard import build_guard_report
 from .contracts.semantic_checks import check_blueprint_semantics
 from .util import sha256_text
@@ -197,10 +203,7 @@ def _template_skeleton(text: str) -> str:
     return value
 
 def _content_text(candidate: dict[str, Any]) -> str:
-    text = str(candidate.get("candidate_text") or "")
-    if text:
-        return text
-    return "\n".join(str(item.get("text") or "") for item in candidate.get("paragraphs", []) if isinstance(item, dict))
+    return canonical_candidate_text(candidate, separator="\n")
 
 
 def _section_title(payload: dict[str, Any]) -> str:
@@ -746,9 +749,55 @@ class ProposalQualityGuard:
             findings.append(QualityFinding("QG_EXPRESSION_PARAGRAPH_ID_CHANGED", "P1", "EXPRESSION", "POLISHED_CANDIDATE", "paragraphs", "表达编辑改变了段落集合或段落ID，无法证明仅修改表达。", "恢复原段落ID；实质性增删必须返回写作阶段。", "EXPRESSION_EDITOR_AGENT"))
         if original_traces != polished_traces:
             findings.append(QualityFinding("QG_EXPRESSION_TRACE_CHANGED", "P1", "SOURCE", "POLISHED_CANDIDATE", "trace_links", "表达编辑新增或丢失了来源关系。", "保持输入输出Trace集合完全一致；需要新增证据时返回项目知识阶段。", "EXPRESSION_EDITOR_AGENT"))
+        elif {
+            str(item.get("trace_id")): item
+            for item in original.get("trace_links", [])
+            if isinstance(item, dict) and item.get("trace_id")
+        } != {
+            str(item.get("trace_id")): item
+            for item in polished.get("trace_links", [])
+            if isinstance(item, dict) and item.get("trace_id")
+        }:
+            findings.append(QualityFinding(
+                "QG_EXPRESSION_TRACE_BINDING_CHANGED", "P1", "SOURCE", "POLISHED_CANDIDATE",
+                "trace_links",
+                "表达编辑保留了Trace ID，但改变了Trace的目标路径、来源、支持类型或来源哈希。",
+                "逐项恢复输入中的完整Trace对象；需要改变来源绑定时退回证据写作阶段。",
+                "EXPRESSION_EDITOR_AGENT",
+            ))
+        preserved_trace_ids = {
+            str(trace_id)
+            for trace_id in polished.get("preserved_trace_ids", [])
+            if trace_id
+        }
+        if preserved_trace_ids != original_traces:
+            findings.append(QualityFinding(
+                "QG_EXPRESSION_PRESERVED_TRACE_LIST_MISMATCH", "P1", "SOURCE", "POLISHED_CANDIDATE",
+                "preserved_trace_ids",
+                "表达编辑输出的Trace保存清单与输入Trace集合不一致。",
+                "令preserved_trace_ids精确列出输入候选中的全部且仅有Trace ID。",
+                "EXPRESSION_EDITOR_AGENT",
+            ))
+        if original.get("source_preservation_summary") != polished.get("source_preservation_summary"):
+            findings.append(QualityFinding(
+                "QG_EXPRESSION_SOURCE_LINEAGE_CHANGED", "P1", "SOURCE", "POLISHED_CANDIDATE",
+                "source_preservation_summary",
+                "表达编辑改变了写作阶段已经确定的来源保留/改写沿革。",
+                "原样复制输入的source_preservation_summary；本轮语言修改只记录在edit_log中。",
+                "EXPRESSION_EDITOR_AGENT",
+            ))
+        if original.get("unresolved_items") != polished.get("unresolved_items"):
+            findings.append(QualityFinding(
+                "QG_EXPRESSION_UNRESOLVED_ITEMS_CHANGED", "P1", "EXPRESSION", "POLISHED_CANDIDATE",
+                "unresolved_items",
+                "表达编辑新增、删除或改写了未决事项，已经越过语言润色边界。",
+                "原样保留输入中的unresolved_items；需要解决未决事实时返回相应上游阶段。",
+                "EXPRESSION_EDITOR_AGENT",
+            ))
         original_by_id = {str(p.get("paragraph_id")): p for p in original.get("paragraphs", []) if isinstance(p, dict) and p.get("paragraph_id")}
         polished_by_id = {str(p.get("paragraph_id")): p for p in polished.get("paragraphs", []) if isinstance(p, dict) and p.get("paragraph_id")}
         immutable_fields = (
+            "sequence",
             "blueprint_paragraph_id", "paragraph_role", "primary_claim_id",
             "novel_content_key", "section_contract_id",
         )
@@ -961,13 +1010,37 @@ class ProposalQualityGuard:
 
     def _audit_section_content(self, candidate: dict[str, Any], payload: dict[str, Any]) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
-        paragraphs = [p for p in candidate.get("paragraphs", []) if isinstance(p, dict)]
+        paragraphs = ordered_paragraphs(candidate.get("paragraphs"))
         text = _content_text(candidate)
         if not text:
             return [QualityFinding(
                 "QG_EMPTY_SECTION", "P1", "CONTENT", "SECTION_CANDIDATE", "candidate_text",
                 "章节正文为空。", "重新生成正文。", "WRITING_AGENT",
             )]
+        sequence_error = paragraph_sequence_error(candidate.get("paragraphs"))
+        if sequence_error:
+            findings.append(QualityFinding(
+                "QG_SECTION_PARAGRAPH_SEQUENCE_INVALID", "P1", "CONTENT", "SECTION_CANDIDATE",
+                "paragraphs[*].sequence", sequence_error,
+                "令段落sequence唯一、连续且从1开始；数组顺序可以任意，确定性消费者将按sequence排序。",
+                "WRITING_AGENT",
+            ))
+        identity_error = paragraph_identity_error(candidate.get("paragraphs"))
+        if identity_error:
+            findings.append(QualityFinding(
+                "QG_SECTION_PARAGRAPH_IDENTITY_INVALID", "P1", "CONTENT", "SECTION_CANDIDATE",
+                "paragraphs[*].paragraph_id", identity_error,
+                "令paragraph_id非空且在章节内唯一，保证Critic、修复指令和Trace都能精确指向一个段落。",
+                "WRITING_AGENT",
+            ))
+        representation_error = candidate_text_divergence(candidate)
+        if representation_error:
+            findings.append(QualityFinding(
+                "QG_CANDIDATE_TEXT_PARAGRAPH_DIVERGENCE", "P1", "CONTENT", "SECTION_CANDIDATE",
+                "candidate_text,paragraphs", representation_error,
+                "以按sequence排序的paragraphs为唯一正文来源，并重新生成完全一致的candidate_text镜像。",
+                "WRITING_AGENT",
+            ))
         paragraph_texts = [str(p.get("text") or "").strip() for p in paragraphs]
         duplicate_count = sum(count - 1 for text, count in collections.Counter(paragraph_texts).items() if count > 1 and len(text) >= 20)
         sentence_counts = collections.Counter(_normalized_sentences(text))
@@ -1263,9 +1336,7 @@ class ProposalQualityGuard:
             for claim_id in advancement.get("advanced_claim_ids") or []:
                 if claim_id:
                     claim_locations[str(claim_id)].add(section_id)
-            for paragraph in candidate.get("paragraphs", []):
-                if not isinstance(paragraph, dict):
-                    continue
+            for paragraph in ordered_paragraphs(candidate.get("paragraphs")):
                 paragraph_text = str(paragraph.get("text") or "").strip()
                 if not paragraph_text:
                     continue

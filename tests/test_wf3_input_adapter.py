@@ -197,7 +197,9 @@ def test_wf3_missing_question_creates_user_input_gate_without_model_run(wf3_runt
     assert updated["status"] == "RUNNING"
     assert updated["current_step"] == 0
     assert updated["state"]["options"]["research_need"]["question"].startswith("公开研究")
-    artifact_ids = updated["state"]["human_resolution_artifact_ids"]["P-SAFE-ONLINE-PACKAGE"]
+    artifact_ids = updated["state"]["human_resolution_artifact_ids"][
+        "step:0:P-SAFE-ONLINE-PACKAGE"
+    ]
     assert artifact_ids
     stored_artifact = db.fetchone(
         "SELECT content_json FROM artifacts WHERE id=?", (artifact_ids[0],)
@@ -264,7 +266,7 @@ def test_wf3_input_gate_rejects_empty_answer_and_remains_open(wf3_runtime):
     workflow = asyncio.run(engine.advance(workflow["id"]))
     gate = next(item for item in engine.list_gates(workflow_id=workflow["id"]) if item["status"] == "OPEN")
 
-    with pytest.raises(ValueError, match="必须填写"):
+    with pytest.raises(ValueError, match="必须(填写|回答)"):
         engine.decide_gate(
             gate["id"],
             action="PROVIDE_INFORMATION",

@@ -114,7 +114,7 @@
     "prompt_version": "2.0.0",
     "status": "NEED_USER_INPUT",
     "result": {
-      "verdict": "ACCEPT",
+      "verdict": "REVISE",
       "accepted_claim_ids": [
         "fact-001"
       ],

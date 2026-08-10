@@ -20,6 +20,7 @@ from app.workflow_input import (
     REFERENCE_TEMPLATE_INPUT,
     WorkflowInputRequired,
 )
+from app.workflow_status import should_pause_automatic_advancement
 
 
 class NeverExecutor:
@@ -620,7 +621,7 @@ def test_generic_information_gate_reruns_same_prompt_and_injects_answer(live_run
 
     engine.decide_gate(
         gate_id,
-        action="PROVIDE_INFORMATION",
+        action="CONFIRM",
         decided_by="pytest",
         decided_role="PROJECT_OWNER",
         answers=[{"question_id": "research-question", "value": "公开可核验基线有哪些？"}],
@@ -629,6 +630,10 @@ def test_generic_information_gate_reruns_same_prompt_and_injects_answer(live_run
     assert updated["status"] == "RUNNING"
     assert updated["current_step"] == 0
     assert "0" not in updated["state"]["step_results"]
+    assert updated["state"].get("repair_attempts", {}) == {}
+    assert updated["state"]["human_input_reruns"][
+        "step:0:P-SAFE-ONLINE-PACKAGE"
+    ] == 1
 
     envelope = builder.build(
         "P-SAFE-ONLINE-PACKAGE",
@@ -744,7 +749,7 @@ def test_strict_live_context_completes_full_workflow_with_simulated_provider(tmp
                     decided_role=gate["required_role"],
                 )
                 continue
-            if workflow["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+            if should_pause_automatic_advancement(workflow["status"]):
                 return workflow
         return workflow
 
@@ -760,3 +765,124 @@ def test_strict_live_context_completes_full_workflow_with_simulated_provider(tmp
             assert workflow["status"] == "COMPLETED", workflow["state"].get("last_error")
 
     asyncio.run(run_all())
+
+
+def test_human_answer_bundle_rejects_duplicate_and_stale_question_ids() -> None:
+    from app.workflow_input import build_human_resolutions
+
+    questions = [
+        {
+            "question_id": "current-question",
+            "question": "请提供当前值",
+            "target_paths": ["payload.target"],
+            "answer_schema": {"type": "STRING"},
+            "blocking": True,
+        }
+    ]
+    with pytest.raises(ValueError, match="多个回答"):
+        build_human_resolutions(
+            gate_id="gate-test",
+            prompt_id="P-TEST",
+            questions=questions,
+            answers=[
+                {"question_id": "current-question", "value": "first"},
+                {"question_id": "current-question", "value": "second"},
+            ],
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )
+    with pytest.raises(ValueError, match="不属于当前 Gate"):
+        build_human_resolutions(
+            gate_id="gate-test",
+            prompt_id="P-TEST",
+            questions=questions,
+            answers=[
+                {"question_id": "current-question", "value": "current"},
+                {"question_id": "stale-question", "value": "stale"},
+            ],
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )
+
+
+def test_human_gate_rejects_duplicate_question_identity() -> None:
+    from app.workflow_input import build_human_resolutions
+
+    questions = [
+        {
+            "question_id": "duplicate",
+            "question": "第一个问题",
+            "target_paths": ["payload.first"],
+            "answer_schema": {"type": "STRING"},
+            "blocking": True,
+        },
+        {
+            "question_id": "duplicate",
+            "question": "第二个问题",
+            "target_paths": ["payload.second"],
+            "answer_schema": {"type": "STRING"},
+            "blocking": True,
+        },
+    ]
+    with pytest.raises(ValueError, match="question_id 重复"):
+        build_human_resolutions(
+            gate_id="gate-test",
+            prompt_id="P-TEST",
+            questions=questions,
+            answers=[{"question_id": "duplicate", "value": "answer"}],
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )
+
+
+def test_enum_human_answer_preserves_boolean_and_numeric_allowed_values() -> None:
+    from app.workflow_input import build_human_resolutions
+
+    for answer, allowed in ((False, [True, False]), (0, [0, 1])):
+        resolutions = build_human_resolutions(
+            gate_id=f"gate-{answer!r}",
+            prompt_id="P-TEST",
+            questions=[
+                {
+                    "question_id": "choice",
+                    "question": "请选择",
+                    "target_paths": ["payload.choice"],
+                    "answer_schema": {
+                        "type": "ENUM",
+                        "allowed_values": allowed,
+                    },
+                    "blocking": True,
+                }
+            ],
+            answers=[{"question_id": "choice", "value": answer}],
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )
+        assert resolutions[0]["answer"] is answer or resolutions[0]["answer"] == answer
+        assert type(resolutions[0]["answer"]) is type(answer)
+
+
+def test_human_answer_cannot_use_both_question_id_and_field_path_aliases() -> None:
+    from app.workflow_input import build_human_resolutions
+
+    with pytest.raises(ValueError, match="同时通过 question_id 和 field_path"):
+        build_human_resolutions(
+            gate_id="gate-test",
+            prompt_id="P-TEST",
+            questions=[
+                {
+                    "question_id": "question-1",
+                    "field_path": "target",
+                    "question": "请提供值",
+                    "target_paths": ["payload.target"],
+                    "answer_schema": {"type": "STRING"},
+                    "blocking": True,
+                }
+            ],
+            answers=[
+                {"question_id": "question-1", "value": "first"},
+                {"field_path": "target", "value": "second"},
+            ],
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )

@@ -216,7 +216,11 @@ class QualityLifecycleManager:
         state = workflow_state or {}
         scope_key = self._scope_key(prompt_id, state)
         findings = [item for item in output.get("findings", []) if isinstance(item, dict)]
-        current_codes = {str(item.get("code")) for item in findings if item.get("code")}
+        current_identities = {
+            self._identity(item, scope_key)
+            for item in findings
+            if item.get("code")
+        }
 
         # A later producer/repair candidate may supply code-specific repair
         # evidence even when unrelated findings keep the overall run in REVISE
@@ -240,7 +244,7 @@ class QualityLifecycleManager:
             reviewer_prompt_id=prompt_id,
             review_run_id=run_id,
             scope_key=scope_key,
-            current_codes=current_codes,
+            current_identities=current_identities,
         )
 
         records: list[dict[str, Any]] = []
@@ -265,13 +269,27 @@ class QualityLifecycleManager:
         workflow_id: str | None,
         repair_run_id: str,
         finding_codes: Iterable[str],
+        finding_instances: Iterable[dict[str, Any]] | None = None,
+        critic_prompt_id: str | None = None,
         workflow_state: dict[str, Any] | None = None,
     ) -> None:
         codes = {str(code) for code in finding_codes if code}
-        if not codes:
+        state = workflow_state or {}
+        exact_identities: set[str] = set()
+        if finding_instances is not None and critic_prompt_id:
+            scope_key = self._scope_key(critic_prompt_id, state)
+            exact_identities = {
+                self._identity(item, scope_key)
+                for item in finding_instances
+                if isinstance(item, dict) and item.get("code")
+            }
+        if not exact_identities and not codes:
             return
         for record in self.open_blockers(project_id, workflow_id=workflow_id):
-            if record.get("finding", {}).get("code") not in codes:
+            if exact_identities:
+                if str(record.get("identity_hash") or "") not in exact_identities:
+                    continue
+            elif record.get("finding", {}).get("code") not in codes:
                 continue
             self._append_repair(record, prompt_id="P-TARGETED-REPAIR", run_id=repair_run_id)
 
@@ -454,13 +472,13 @@ class QualityLifecycleManager:
         reviewer_prompt_id: str,
         review_run_id: str,
         scope_key: str,
-        current_codes: set[str],
+        current_identities: set[str],
     ) -> None:
         for record in self.open_blockers(project_id, workflow_id=workflow_id):
             route = record.get("responsibility") or {}
             if route.get("reviewer_prompt_id") != reviewer_prompt_id:
                 continue
-            if record.get("finding", {}).get("code") in current_codes:
+            if str(record.get("identity_hash") or "") in current_identities:
                 continue
             if not self._scope_matches(str(record.get("scope_key") or "document"), scope_key):
                 continue

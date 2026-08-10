@@ -26,6 +26,7 @@ from app.research import PublicResearchService
 from app.security import SecurityRouter
 from app.util import new_id, sha256_bytes, utc_now, write_json
 from app.runtime_api import WorkflowEngine
+from app.workflow_status import should_pause_automatic_advancement
 
 
 SECTION_TITLES = [
@@ -171,7 +172,7 @@ async def _finish(engine: WorkflowEngine, project_id: str, workflow_type: str, o
         if workflow["status"] == "WAITING_GATE":
             _approve_open_gate(engine, workflow["id"])
             continue
-        if workflow["status"] in {"COMPLETED", "BLOCKED", "WAITING_CONFIGURATION", "WAITING_PREREQUISITE", "CANCELLED"}:
+        if should_pause_automatic_advancement(workflow["status"]):
             return workflow
     return workflow
 

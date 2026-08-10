@@ -10,6 +10,7 @@ from .executor import PromptExecutionError
 from .util import new_id, sha256_json, utc_now
 from .repair_ledger import RepairLedger
 from .runtime_failures import FailureCategory, classify_runtime_failure
+from .secret_redaction import redact_secret_text
 from .retry_policy import ProviderRetriesExhausted
 from .json_pointer import (
     JsonPointerError,
@@ -177,6 +178,36 @@ class WorkflowRepairMixin:
             item["finding_instance_id"] = f"finding-{digest[:32]}"
             identified.append(item)
         return identified
+
+    @classmethod
+    def _record_nonexecutable_repair_failure(
+        cls,
+        state: dict[str, Any],
+        *,
+        critic_prompt: str,
+        reason_code: str,
+        error: str,
+        finding_instance_ids: list[str] | None = None,
+    ) -> None:
+        attempt_key = cls._repair_state_key(critic_prompt, state)
+        failure = {
+            "critic_prompt": critic_prompt,
+            "category": "SEMANTIC_REPAIR_REJECTED",
+            "reason_code": reason_code,
+            "error": error,
+            "repair_attempt_key": attempt_key,
+            "finding_instance_ids": list(finding_instance_ids or []),
+            "technical_retries_used": 0,
+            "provider_retries_used": 0,
+            "consumes_semantic_repair_budget": False,
+            "recorded_at": utc_now(),
+        }
+        state["last_targeted_repair_failure"] = failure
+        RepairLedger.repair_not_executable(
+            state,
+            attempt_key,
+            details=failure,
+        )
 
     @staticmethod
     def _targeted_repair_failure_message(
@@ -697,6 +728,57 @@ class WorkflowRepairMixin:
             raise ValueError("Applied repair is missing lifecycle identity")
         return repair_id, attempt_key, artifact_id
 
+    @staticmethod
+    def _workflow_repair_rereview_checkpoint(
+        state: dict[str, Any],
+        prompt_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the only valid workflow-level pending re-review checkpoint.
+
+        Generic workflows are sequential.  A pending re-review for another
+        Prompt therefore proves that the workflow step and persisted repair
+        lifecycle diverged; silently ignoring it could complete a workflow
+        without independent verification.
+        """
+
+        pending = state.get("pending_repair_rereviews")
+        if pending is None:
+            return None
+        if not isinstance(pending, dict):
+            raise ValueError("pending_repair_rereviews must be an object")
+        if not pending:
+            return None
+        unexpected = sorted(str(key) for key in pending if str(key) != prompt_id)
+        if unexpected:
+            raise ValueError(
+                "Persisted workflow repair re-review checkpoint belongs to "
+                f"another Prompt: {unexpected}; current {prompt_id}."
+            )
+        checkpoint = pending.get(prompt_id)
+        if not isinstance(checkpoint, dict):
+            raise ValueError(
+                f"Persisted repair re-review checkpoint for {prompt_id} is invalid."
+            )
+        checkpoint_prompt = str(checkpoint.get("critic_prompt") or "")
+        if checkpoint_prompt and checkpoint_prompt != prompt_id:
+            raise ValueError(
+                "Persisted repair re-review checkpoint Prompt identity does not "
+                f"match: expected {checkpoint_prompt}, current {prompt_id}."
+            )
+        return checkpoint
+
+    @staticmethod
+    def _clear_workflow_repair_rereview(
+        state: dict[str, Any],
+        prompt_id: str,
+    ) -> None:
+        pending = state.get("pending_repair_rereviews")
+        if not isinstance(pending, dict):
+            return
+        pending.pop(prompt_id, None)
+        if not pending:
+            state.pop("pending_repair_rereviews", None)
+
     @classmethod
     def _repair_rereview_checkpoint(
         cls,
@@ -795,14 +877,36 @@ class WorkflowRepairMixin:
                 workflow_id=wf["id"],
                 exact_workflow=True,
             )
+        finding_instance_ids = [
+            str(item.get("finding_instance_id") or "")
+            for item in findings
+            if str(item.get("finding_instance_id") or "").strip()
+        ]
         if original is None:
+            self._record_nonexecutable_repair_failure(
+                state,
+                critic_prompt=critic_prompt,
+                reason_code="ORIGINAL_OBJECT_UNAVAILABLE",
+                error=(
+                    f"{critic_prompt} returned repairable findings, but the exact "
+                    f"{producer} producer object is unavailable at the current checkpoint."
+                ),
+                finding_instance_ids=finding_instance_ids,
+            )
             return None
         try:
             repair_content, collection_key = self._repair_content_adapter(
                 original,
                 result_key,
             )
-        except TypeError:
+        except TypeError as exc:
+            self._record_nonexecutable_repair_failure(
+                state,
+                critic_prompt=critic_prompt,
+                reason_code="ORIGINAL_OBJECT_SHAPE_UNSUPPORTED",
+                error=str(exc),
+                finding_instance_ids=finding_instance_ids,
+            )
             return None
 
         attempt_key = self._repair_state_key(critic_prompt, state)
@@ -990,7 +1094,83 @@ class WorkflowRepairMixin:
                 self._inherited_producer_source_catalog(wf, state, producer)
             ),
         }
-        repair_id = new_id("repair")
+        active_section_id = str(state.get("active_section_id") or "")
+        active_progress = (
+            (state.get("section_progress") or {}).get(active_section_id)
+            if active_section_id
+            else None
+        )
+        checkpoint_identity = {
+            "workflow_step": int(wf.get("current_step") or 0),
+            "section_id": active_section_id or None,
+            "section_phase": (
+                str(active_progress.get("phase") or "") or None
+                if isinstance(active_progress, dict)
+                else None
+            ),
+            "critic_prompt": critic_prompt,
+            "repair_attempt_key": attempt_key,
+            "original_object_hash": original_object["object_hash"],
+            "findings_hash": sha256_json(findings),
+            "allowed_paths_hash": sha256_json(allowed_paths),
+        }
+        previous_failure = state.get("last_targeted_repair_failure")
+        migration = state.get("contract_migration_recovery")
+        resume_checkpoint = (
+            isinstance(previous_failure, dict)
+            and isinstance(migration, dict)
+            and int(migration.get("checkpoint_identity_version") or 0) >= 1
+            and int(migration["step"] if migration.get("step") is not None else -1)
+            == int(checkpoint_identity["workflow_step"])
+            and str(migration.get("section_id") or "")
+            == str(checkpoint_identity["section_id"] or "")
+            and str(migration.get("section_phase") or "")
+            == str(checkpoint_identity["section_phase"] or "")
+            and str(migration.get("prompt_id") or "") == "P-TARGETED-REPAIR"
+            and str(migration.get("failed_run_id") or "")
+            == str(previous_failure.get("run_id") or "")
+            and str(previous_failure.get("category") or "")
+            == FailureCategory.OUTPUT_CONTRACT.value
+            and str(previous_failure.get("critic_prompt") or "") == critic_prompt
+            and str(previous_failure.get("repair_attempt_key") or "") == attempt_key
+            and bool(str(previous_failure.get("repair_id") or "").strip())
+        )
+        if resume_checkpoint:
+            checkpoint_version = int(
+                previous_failure.get("repair_checkpoint_version") or 0
+            )
+            if checkpoint_version >= 1:
+                resume_checkpoint = all(
+                    previous_failure.get(key) == value
+                    for key, value in checkpoint_identity.items()
+                )
+            else:
+                # Legacy repairs can be upgraded in place only when their
+                # already-persisted section-scoped attempt key exactly matches
+                # the current repair subject.  Bare legacy failures are not
+                # attributable and therefore receive no implicit resume.
+                resume_checkpoint = (
+                    str(previous_failure.get("repair_attempt_key") or "")
+                    == attempt_key
+                    and not previous_failure.get("section_id")
+                    and previous_failure.get("workflow_step") is None
+                )
+                if resume_checkpoint:
+                    previous_failure.update({
+                        "repair_checkpoint_version": 1,
+                        **checkpoint_identity,
+                    })
+        if resume_checkpoint:
+            repair_id = str(previous_failure["repair_id"])
+            technical_retries_used = max(
+                0, int(previous_failure.get("technical_retries_used") or 0)
+            )
+            resumed_call_key = str(previous_failure.get("call_key") or "").strip()
+        else:
+            repair_id = new_id("repair")
+            technical_retries_used = 0
+            resumed_call_key = ""
+            state.pop("contract_migration_recovery", None)
         ledger_details = {
             "critic_prompt": critic_prompt,
             "producer_prompt": producer,
@@ -1003,12 +1183,13 @@ class WorkflowRepairMixin:
                 str(item.get("code")) for item in findings if item.get("code")
             ],
         }
-        RepairLedger.repair_created(
-            state,
-            attempt_key,
-            repair_id=repair_id,
-            details=ledger_details,
-        )
+        if not resume_checkpoint:
+            RepairLedger.repair_created(
+                state,
+                attempt_key,
+                repair_id=repair_id,
+                details=ledger_details,
+            )
         options = state.get("options") or {}
         try:
             contract_retry_limit = int(
@@ -1021,11 +1202,22 @@ class WorkflowRepairMixin:
             contract_retry_limit = 2
         contract_retry_limit = max(0, min(contract_retry_limit, 5))
         contract_retry_key = f"{attempt_key}:repair:{repair_id}:contract"
-        technical_retries_used = 0
         repaired: dict[str, Any]
 
         while True:
             execution_attempt = technical_retries_used + 1
+            attempt_call_key = (
+                resumed_call_key
+                if resume_checkpoint
+                and execution_attempt
+                == int(previous_failure.get("execution_attempt") or 0)
+                and resumed_call_key
+                else "call-repair-" + sha256_json({
+                    "workflow_id": wf["id"],
+                    "repair_id": repair_id,
+                    "execution_attempt": execution_attempt,
+                })[:24]
+            )
             attempt_overrides = dict(overrides)
             if technical_retries_used:
                 previous_failure = state.get("last_targeted_repair_failure") or {}
@@ -1054,11 +1246,7 @@ class WorkflowRepairMixin:
                         state,
                         prompt_id="P-TARGETED-REPAIR",
                         envelope=envelope,
-                        call_key="call-repair-" + sha256_json({
-                            "workflow_id": wf["id"],
-                            "repair_id": repair_id,
-                            "execution_attempt": execution_attempt,
-                        })[:24],
+                        call_key=attempt_call_key,
                         # Contract-shape failures need the feedback-aware loop
                         # below. The shared provider loop owns only transient
                         # transport/rate-limit/service recovery here.
@@ -1102,7 +1290,7 @@ class WorkflowRepairMixin:
                     "critic_prompt": critic_prompt,
                     "category": classification.category.value,
                     "reason": classification.reason,
-                    "error": str(classified_exc),
+                    "error": redact_secret_text(str(classified_exc)),
                     "validation_errors": validation_errors,
                     "repair_id": repair_id,
                     "repair_attempt_key": attempt_key,
@@ -1111,6 +1299,9 @@ class WorkflowRepairMixin:
                     "technical_retries_used": technical_retries_used,
                     "provider_retries_used": provider_retries_used,
                     "consumes_semantic_repair_budget": False,
+                    "repair_checkpoint_version": 1,
+                    **checkpoint_identity,
+                    "call_key": attempt_call_key,
                     "recorded_at": utc_now(),
                 }
                 state["last_targeted_repair_failure"] = failure
@@ -1161,6 +1352,7 @@ class WorkflowRepairMixin:
                 },
             )
         state.pop("last_targeted_repair_failure", None)
+        state.pop("contract_migration_recovery", None)
         run_id = str(repaired.get("run_id") or "") or None
         RepairLedger.model_returned(
             state,
@@ -1180,6 +1372,8 @@ class WorkflowRepairMixin:
                 "run_id": run_id,
                 "technical_retries_used": technical_retries_used,
                 "consumes_semantic_repair_budget": False,
+                "repair_checkpoint_version": 1,
+                **checkpoint_identity,
                 "recorded_at": utc_now(),
             }
             return None
@@ -1203,6 +1397,8 @@ class WorkflowRepairMixin:
                 "run_id": run_id,
                 "technical_retries_used": technical_retries_used,
                 "consumes_semantic_repair_budget": False,
+                "repair_checkpoint_version": 1,
+                **checkpoint_identity,
                 "recorded_at": utc_now(),
             }
             state["last_targeted_repair_failure"] = failure
@@ -1228,6 +1424,8 @@ class WorkflowRepairMixin:
                 "run_id": run_id,
                 "technical_retries_used": technical_retries_used,
                 "consumes_semantic_repair_budget": False,
+                "repair_checkpoint_version": 1,
+                **checkpoint_identity,
                 "recorded_at": utc_now(),
             }
             state["last_targeted_repair_failure"] = failure
@@ -1276,6 +1474,8 @@ class WorkflowRepairMixin:
             workflow_id=str(state.get("quality_parent_workflow_id") or wf["id"]),
             repair_run_id=repaired["run_id"],
             finding_codes=[str(item.get("code")) for item in findings if item.get("code")],
+            finding_instances=findings,
+            critic_prompt_id=critic_prompt,
             workflow_state=state,
         )
         RepairLedger.applied(

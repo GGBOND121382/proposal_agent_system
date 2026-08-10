@@ -592,7 +592,7 @@
     },
     "findings": [
       {
-        "code": "WRITE_BLUEPRINT_DEVIATION",
+        "code": "CONTENT_UNSUPPORTED_CLAIM",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

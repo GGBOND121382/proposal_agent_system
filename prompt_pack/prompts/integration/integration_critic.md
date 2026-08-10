@@ -78,6 +78,7 @@
 - `MAPPING_ID_UNKNOWN`：发现对应问题时生成可定位Finding，并根据严重程度改变status。
 - `DOCUMENT_TYPE_DRIFT`：发现对应问题时生成可定位Finding，并根据严重程度改变status。
 - `DOCUMENT_TEMPLATE_REPETITION`：发现对应问题时生成可定位Finding，并根据严重程度改变status。
+- `CROSS_SECTION_CONSISTENCY_CONFLICT`：跨章节术语、定义、对象、数值口径或中心命题不一致时生成，并定位责任章节。
 - `PAGE_BUDGET_EXCEEDED`：发现对应问题时生成可定位Finding，并根据严重程度改变status。
 
 Finding必须包含严重级别、类别、目标对象与路径、具体证据、是否可修复、最小修改指令和建议路由。不得只写“内容不够深入”“建议完善”等无法执行的评价。

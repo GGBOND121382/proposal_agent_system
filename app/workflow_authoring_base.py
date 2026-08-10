@@ -4,8 +4,10 @@ from typing import Any
 
 from .executor import PromptExecutionError
 from .llm import MODEL_RESPONSE_PROTOCOL_VERSION
+from .runtime_failures import FailureCategory
 from .util import sha256_json, sha256_text
 from .workflow_input import CURRENT_PROPOSAL_INPUT, WorkflowInputRequired, material_input_questions
+from .workflow_status import WorkflowStatus
 
 THREE_SECTION_PROFILE_ORDER = (
     "BACKGROUND_AND_SIGNIFICANCE",
@@ -23,10 +25,15 @@ class WorkflowAuthoringMixin:
         "POLISH": ("P-EXPRESSION-POLISH", "EXPRESSION_CRITIC"),
         "EXPRESSION_CRITIC": ("P-EXPRESSION-CRITIC", "DONE"),
     }
-    SECTION_REPAIR_CRITICS = {"P-WRITE-BLUEPRINT-CRITIC", "P-WRITE-CRITIC"}
+    SECTION_REPAIR_CRITICS = {
+        "P-WRITE-BLUEPRINT-CRITIC",
+        "P-WRITE-CRITIC",
+        "P-EXPRESSION-CRITIC",
+    }
     SECTION_CRITIC_PRODUCERS = {
         "P-WRITE-BLUEPRINT-CRITIC": ("P-WRITE-BLUEPRINT", "BLUEPRINT"),
         "P-WRITE-CRITIC": ("P-WRITE-CONTENT", "CONTENT"),
+        "P-EXPRESSION-CRITIC": ("P-EXPRESSION-POLISH", "POLISH"),
     }
     SECTION_PRODUCER_PHASES = {
         "P-WRITE-BLUEPRINT": "BLUEPRINT",
@@ -142,6 +149,14 @@ class WorkflowAuthoringMixin:
                 ),
                 fallback=message,
             )
+            if (
+                configuration_error is None
+                and str(repair_failure.get("category") or "")
+                == FailureCategory.CONFIGURATION.value
+            ):
+                configuration_error = str(
+                    repair_failure.get("error") or message
+                )
         section_id = str(section.get("section_id") or "")
         progress = state.setdefault("section_progress", {}).setdefault(section_id, {})
         report = (
@@ -161,11 +176,47 @@ class WorkflowAuthoringMixin:
                 report,
                 source=f"SECTION_CHAIN_RUNTIME:{section_id or 'UNKNOWN'}",
             )
-        progress["status"] = "BLOCKED"
+        if isinstance(repair_failure, dict):
+            blocked_status = self._targeted_repair_block_status(state)
+        elif configuration_error is not None:
+            blocked_status = WorkflowStatus.BLOCKED_TECHNICAL.value
+        else:
+            blocked_status = WorkflowStatus.BLOCKED_CONTENT.value
+        progress["status"] = blocked_status
         progress["last_error"] = message
         state["last_error"] = f"{section.get('title')}: {message}"
-        self._update(wf, status="BLOCKED", state=state)
+        self._update(wf, status=blocked_status, state=state)
         return self.get(wf["id"])
+
+    @staticmethod
+    def _targeted_repair_block_status(state: dict[str, Any]) -> str:
+        """Preserve the actual targeted-repair failure category.
+
+        A failed repair used to be flattened into the historical generic
+        ``BLOCKED`` state.  That hid whether the repair provider, output
+        contract, runtime, or semantic content was responsible and prevented
+        the contract-migration path from selecting the saved repair output.
+        """
+
+        failure = state.get("last_targeted_repair_failure")
+        if not isinstance(failure, dict):
+            return WorkflowStatus.BLOCKED_TECHNICAL.value
+        category = str(failure.get("category") or "")
+        mapping = {
+            FailureCategory.OUTPUT_CONTRACT.value: WorkflowStatus.BLOCKED_CONTRACT.value,
+            FailureCategory.PROVIDER_TRANSIENT.value: WorkflowStatus.BLOCKED_PROVIDER.value,
+            FailureCategory.TECHNICAL.value: WorkflowStatus.BLOCKED_TECHNICAL.value,
+            FailureCategory.SEMANTIC_REVISE.value: WorkflowStatus.BLOCKED_CONTENT.value,
+            # If dependency preflight can identify the missing configuration,
+            # _block_section_chain converts it to WAITING_CONFIGURATION before
+            # this fallback.  Without such a report, keep the workflow paused
+            # instead of auto-resuming an unqualified waiting state.
+            FailureCategory.CONFIGURATION.value: WorkflowStatus.BLOCKED_TECHNICAL.value,
+            "SEMANTIC_REPAIR_REJECTED": WorkflowStatus.BLOCKED_CONTENT.value,
+        }
+        return mapping.get(category, WorkflowStatus.BLOCKED_TECHNICAL.value)
+
+    _section_block_status = _targeted_repair_block_status
 
     async def _execute_section_prompt(
         self,
@@ -376,7 +427,8 @@ class WorkflowAuthoringMixin:
         The chain is:
         Blueprint -> Blueprint Critic -> bounded Targeted Repair -> re-review
         -> Content -> Content Critic -> bounded Targeted Repair -> re-review
-        -> Expression Polish -> Expression Critic.
+        -> Expression Polish -> Expression Critic -> bounded Targeted Repair
+        -> re-review.
 
         Progress is persisted after every model run.  A restart re-enters the same
         phase; the Track-A deterministic call key then reuses an already committed
@@ -389,7 +441,7 @@ class WorkflowAuthoringMixin:
             state["last_error"] = (
                 "单章节完整链要求精确选择一个章节；当前匹配 " + str(len(sections)) + " 个。"
             )
-            self._update(wf, status="BLOCKED", state=state)
+            self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
             return self.get(wf["id"])
 
         completed = {str(item.get("section_id") or "") for item in state.get("section_results", [])}
@@ -421,23 +473,82 @@ class WorkflowAuthoringMixin:
             while progress["phase"] != "DONE":
                 phase = str(progress["phase"])
                 if phase not in self.SECTION_PHASES:
-                    return self._block_section_chain(wf, state, section, f"未知章节阶段：{phase}")
-                prompt_id, next_phase = self.SECTION_PHASES[phase]
-                try:
-                    envelope, result = await self._execute_section_prompt(
-                        wf, state, section, progress, prompt_id, role="INITIAL_REVIEW" if prompt_id.endswith("CRITIC") else "PRODUCER",
+                    error = ValueError(f"未知章节阶段：{phase}")
+                    return self._block_section_chain(
+                        wf,
+                        state,
+                        section,
+                        str(error),
+                        configuration_error=error,
                     )
+                prompt_id, next_phase = self.SECTION_PHASES[phase]
+                pending_rereview = progress.get("pending_repair_rereview")
+                is_pending_rereview = (
+                    isinstance(pending_rereview, dict)
+                    and str(pending_rereview.get("critic_prompt") or "") == prompt_id
+                )
+                if isinstance(pending_rereview, dict) and not is_pending_rereview:
+                    error = ValueError(
+                        "Persisted repair re-review checkpoint does not match "
+                        f"the current section phase: expected "
+                        f"{pending_rereview.get('critic_prompt')}, current {prompt_id}."
+                    )
+                    return self._block_section_chain(
+                        wf,
+                        state,
+                        section,
+                        str(error),
+                        configuration_error=error,
+                    )
+                try:
+                    if is_pending_rereview:
+                        self._start_repair_rereview(
+                            state,
+                            pending_rereview,
+                            critic_prompt=prompt_id,
+                        )
+                        self._update(wf, state=state)
+                    envelope, result = await self._execute_section_prompt(
+                        wf,
+                        state,
+                        section,
+                        progress,
+                        prompt_id,
+                        role=(
+                            "INDEPENDENT_REVIEW"
+                            if is_pending_rereview
+                            else ("INITIAL_REVIEW" if prompt_id.endswith("CRITIC") else "PRODUCER")
+                        ),
+                    )
+                    if is_pending_rereview:
+                        self._complete_repair_rereview(
+                            state,
+                            pending_rereview,
+                            critic_prompt=prompt_id,
+                            review_run_id=str(result.get("run_id") or "") or None,
+                            status=str(result.get("status") or ""),
+                        )
+                        # Keep the checkpoint until the effective result and its
+                        # phase transition are committed together.
+                        pending_rereview["review_run_id"] = (
+                            str(result.get("run_id") or "") or None
+                        )
+                        pending_rereview["completed_status"] = str(
+                            result.get("status") or ""
+                        )
                 except WorkflowInputRequired:
                     raise
                 except (PromptExecutionError, ValueError, KeyError) as exc:
                     return self._block_section_chain(wf, state, section, str(exc), configuration_error=exc)
 
                 if result["status"] == "PASS":
+                    progress.pop("pending_repair_rereview", None)
                     progress["phase"] = next_phase
                     self._update(wf, state=state)
                     continue
 
                 if result["status"] == "NEED_USER_INPUT":
+                    progress.pop("pending_repair_rereview", None)
                     progress["status"] = "WAITING_GATE"
                     state["section_input_gate"] = {
                         "section_id": section_id,
@@ -468,6 +579,7 @@ class WorkflowAuthoringMixin:
                         result["output"],
                     )
                 ):
+                    progress.pop("pending_repair_rereview", None)
                     self._update(wf, status="RUNNING", state=state)
                     continue
 
@@ -485,6 +597,7 @@ class WorkflowAuthoringMixin:
                         result["output"],
                     )
                 ):
+                    progress.pop("pending_repair_rereview", None)
                     self._update(wf, status="RUNNING", state=state)
                     continue
 
@@ -496,90 +609,42 @@ class WorkflowAuthoringMixin:
                             prompt_id,
                             result["output"],
                         ):
+                            progress.pop("pending_repair_rereview", None)
                             self._update(wf, status="RUNNING", state=state)
                             continue
+                        progress.pop("pending_repair_rereview", None)
+                        message = (
+                            f"{prompt_id} 定向修复后的独立复审返回 {result['status']}；"
+                            "禁止二次自动修复或人工改正文放行。"
+                            if is_pending_rereview
+                            else f"{prompt_id} 在一次定向修复后仍需修改；章节修复额度已耗尽。"
+                        )
                         return self._block_section_chain(
-                            wf, state, section, f"{prompt_id} 在一次定向修复后仍需修改；章节修复额度已耗尽。",
+                            wf, state, section, message,
                         )
                     repaired = await self._auto_repair(wf, prompt_id, envelope, result["output"], state)
                     if not repaired:
+                        progress.pop("pending_repair_rereview", None)
                         return self._block_section_chain(
                             wf, state, section, f"{prompt_id} 返回 REVISE，但没有可执行的局部修复或定向修复失败。",
                         )
-                    self._append_section_run(progress, repaired, prompt_id="P-TARGETED-REPAIR", role="TARGETED_REPAIR")
+                    self._append_section_run(
+                        progress,
+                        repaired,
+                        prompt_id="P-TARGETED-REPAIR",
+                        role="TARGETED_REPAIR",
+                    )
+                    progress["pending_repair_rereview"] = {
+                        **self._repair_rereview_checkpoint(repaired),
+                        "critic_prompt": prompt_id,
+                    }
                     self._update(wf, state=state)
-                    try:
-                        self._start_repair_rereview(
-                            state, repaired, critic_prompt=prompt_id
-                        )
-                        self._update(wf, state=state)
-                        _review_envelope, reviewed = await self._execute_section_prompt(
-                            wf, state, section, progress, prompt_id, role="INDEPENDENT_REVIEW",
-                        )
-                        self._complete_repair_rereview(
-                            state,
-                            repaired,
-                            critic_prompt=prompt_id,
-                            review_run_id=str(reviewed.get("run_id") or "") or None,
-                            status=str(reviewed.get("status") or ""),
-                        )
-                        self._update(wf, state=state)
-                        while (
-                            reviewed["status"] == "REVISE"
-                            and self._can_auto_repair(prompt_id, state)
-                        ):
-                            repaired = await self._auto_repair(
-                                wf, prompt_id, _review_envelope,
-                                reviewed["output"], state,
-                            )
-                            if not repaired:
-                                break
-                            self._append_section_run(
-                                progress, repaired,
-                                prompt_id="P-TARGETED-REPAIR",
-                                role="TARGETED_REPAIR",
-                            )
-                            self._start_repair_rereview(
-                                state, repaired, critic_prompt=prompt_id
-                            )
-                            self._update(wf, state=state)
-                            _review_envelope, reviewed = await self._execute_section_prompt(
-                                wf, state, section, progress, prompt_id,
-                                role="INDEPENDENT_REVIEW",
-                            )
-                            self._complete_repair_rereview(
-                                state,
-                                repaired,
-                                critic_prompt=prompt_id,
-                                review_run_id=str(reviewed.get("run_id") or "") or None,
-                                status=str(reviewed.get("status") or ""),
-                            )
-                            self._update(wf, state=state)
-                    except (PromptExecutionError, ValueError, KeyError) as exc:
-                        return self._block_section_chain(wf, state, section, f"定向修复后的独立复审失败：{exc}", configuration_error=exc)
-                    if reviewed["status"] != "PASS":
-                        if (
-                            self._acceptance_regenerable_review_status(
-                                state,
-                                str(reviewed["status"]),
-                            )
-                            and self._schedule_acceptance_regeneration(
-                                state,
-                                progress,
-                                prompt_id,
-                                reviewed["output"],
-                            )
-                        ):
-                            self._update(wf, status="RUNNING", state=state)
-                            continue
-                        return self._block_section_chain(
-                            wf, state, section,
-                            f"{prompt_id} 定向修复后的独立复审返回 {reviewed['status']}；禁止二次自动修复或人工改正文放行。",
-                        )
-                    progress["phase"] = next_phase
-                    self._update(wf, state=state)
+                    # Re-enter the same Critic phase.  The persisted checkpoint
+                    # makes the next call an independent re-review and survives a
+                    # crash before or after REREVIEW_STARTED is recorded.
                     continue
 
+                progress.pop("pending_repair_rereview", None)
                 return self._block_section_chain(
                     wf, state, section, f"{prompt_id} 返回 {result['status']}；该阶段不允许跳过或人工覆盖。",
                 )
@@ -756,7 +821,7 @@ class WorkflowAuthoringMixin:
             rounds = int(state.get("integration_argument_rounds", 0))
             if rounds >= 1:
                 state["last_error"] = "全篇审查在一次论证架构重构后仍发现上游论证缺陷，需要补充事实或由项目负责人调整中心命题。"
-                self._update(wf, status="BLOCKED", state=state)
+                self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
                 return "EXHAUSTED"
             state["integration_argument_rounds"] = rounds + 1
             state["argument_revision_findings"] = argument_findings
@@ -776,7 +841,7 @@ class WorkflowAuthoringMixin:
             rounds = int(state.get("integration_planning_rounds", 0))
             if rounds >= 1:
                 state["last_error"] = "全篇审查在一次章节合同重构后仍发现命题或信息归属冲突，需要人工调整论证架构。"
-                self._update(wf, status="BLOCKED", state=state)
+                self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
                 return "EXHAUSTED"
             state["integration_planning_rounds"] = rounds + 1
             state["planning_revision_findings"] = planning_findings
@@ -814,7 +879,7 @@ class WorkflowAuthoringMixin:
         rounds = int(state.get("integration_repair_rounds", 0))
         if rounds >= 2:
             state["last_error"] = "全篇质量审查在两轮章节重写后仍未通过；需要修改论证架构或补充事实证据。"
-            self._update(wf, status="BLOCKED", state=state)
+            self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
             return "EXHAUSTED"
         state["integration_repair_rounds"] = rounds + 1
         state["integration_repair_section_ids"] = sorted(affected)

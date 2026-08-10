@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import copy
+
+import pytest
 from collections import defaultdict
 from typing import Any
 
@@ -339,7 +341,7 @@ def test_second_revise_after_targeted_repair_blocks_without_second_repair():
         {"P-WRITE-BLUEPRINT-CRITIC": ["REVISE", "REVISE"]},
     )
     result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == "BLOCKED_CONTENT"
     sequence = [item["prompt_id"] for item in harness.executor.calls]
     assert sequence == [
         "P-WRITE-BLUEPRINT",
@@ -548,19 +550,32 @@ def test_test_acceptance_can_regenerate_fully_repairable_critic_block():
     assert "P-TARGETED-REPAIR" not in sequence
 
 
-def test_expression_critic_revise_blocks_and_never_rewrites_polish():
-    harness = ChainHarness([SECTION], {"P-EXPRESSION-CRITIC": ["REVISE"]})
+def test_expression_critic_revise_gets_targeted_repair_and_independent_rereview():
+    harness = ChainHarness(
+        [SECTION],
+        {"P-EXPRESSION-CRITIC": ["REVISE", "PASS"]},
+    )
     result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == "WAITING_GATE"
     sequence = [item["prompt_id"] for item in harness.executor.calls]
-    assert sequence[-1] == "P-EXPRESSION-CRITIC"
-    assert "P-TARGETED-REPAIR" not in sequence
+    assert sequence[-3:] == [
+        "P-EXPRESSION-CRITIC",
+        "P-TARGETED-REPAIR",
+        "P-EXPRESSION-CRITIC",
+    ]
+    assert (
+        harness.wf["state"]["repair_attempts"][
+            "section:section-1:P-EXPRESSION-CRITIC"
+        ]
+        == 1
+    )
+    assert harness.context_builder.envelopes[-1]["payload"]["candidate"]["repaired"] is True
 
 
 def test_single_section_mode_rejects_ambiguous_multi_section_selection():
     harness = ChainHarness([SECTION, {"section_id": "section-2", "title": "技术路线"}])
     result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
-    assert result["status"] == "BLOCKED"
+    assert result["status"] == "BLOCKED_CONTENT"
     assert harness.executor.calls == []
     assert "精确选择一个章节" in harness.wf["state"]["last_error"]
 
@@ -578,3 +593,132 @@ def test_repair_budget_and_override_are_scoped_per_section():
     assert attempts["section:section-1:P-WRITE-BLUEPRINT-CRITIC"] == 1
     assert attempts["section:section-2:P-WRITE-BLUEPRINT-CRITIC"] == 1
     assert len([call for call in harness.executor.calls if call["prompt_id"] == "P-TARGETED-REPAIR"]) == 2
+
+
+class SimulatedRereviewCrash(RuntimeError):
+    pass
+
+
+class CrashAfterRereviewStartHarness(ChainHarness):
+    def __init__(self, sections, statuses=None):
+        super().__init__(sections, statuses)
+        self.crash_after_rereview_start = True
+        self._crashed = False
+
+    def _update(self, wf: dict[str, Any], **updates: Any) -> None:
+        super()._update(wf, **updates)
+        events = (
+            self.wf["state"].get("repair_ledger_v1", {}).get("events", [])
+        )
+        if (
+            self.crash_after_rereview_start
+            and not self._crashed
+            and events
+            and events[-1].get("event") == "REREVIEW_STARTED"
+        ):
+            self._crashed = True
+            raise SimulatedRereviewCrash("crash after rereview checkpoint")
+
+
+def test_section_rereview_checkpoint_survives_crash_and_completes_audit_lifecycle():
+    harness = CrashAfterRereviewStartHarness(
+        [SECTION],
+        {"P-WRITE-BLUEPRINT-CRITIC": ["REVISE", "PASS"]},
+    )
+
+    with pytest.raises(SimulatedRereviewCrash):
+        asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    assert harness.wf["state"]["section_progress"]["section-1"][
+        "pending_repair_rereview"
+    ]["critic_prompt"] == "P-WRITE-BLUEPRINT-CRITIC"
+    harness.crash_after_rereview_start = False
+
+    result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    assert result["status"] == "WAITING_GATE"
+    ledger_events = [
+        item["event"]
+        for item in harness.wf["state"]["repair_ledger_v1"]["events"]
+    ]
+    assert ledger_events.count("REREVIEW_STARTED") == 1
+    assert ledger_events.count("REREVIEW_PASS") == 1
+    section_runs = harness.wf["state"]["section_results"][0]["runs"]
+    critic_roles = [
+        item.get("role")
+        for item in section_runs
+        if item.get("prompt_id") == "P-WRITE-BLUEPRINT-CRITIC"
+    ]
+    assert critic_roles == ["INITIAL_REVIEW", "INDEPENDENT_REVIEW"]
+    assert "pending_repair_rereview" not in harness.wf["state"][
+        "section_progress"
+    ]["section-1"]
+
+
+def test_mismatched_persisted_rereview_checkpoint_fails_closed_before_new_prompt():
+    harness = ChainHarness([SECTION])
+    harness._runtime_configuration_report = lambda *_args, **_kwargs: None
+    harness.wf["state"]["section_progress"] = {
+        "section-1": {
+            "section_id": "section-1",
+            "title": "研究内容",
+            "phase": "CONTENT",
+            "status": "RUNNING",
+            "runs": [],
+            "pending_repair_rereview": {
+                "critic_prompt": "P-WRITE-BLUEPRINT-CRITIC",
+                "repair_id": "repair-stale",
+                "repair_attempt_key": "section:section-1:P-WRITE-BLUEPRINT-CRITIC",
+                "repair_application_artifact_id": "artifact-stale",
+            },
+        }
+    }
+
+    result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    assert result["status"] == "BLOCKED_TECHNICAL"
+    assert harness.executor.calls == []
+    assert "does not match the current section phase" in harness.wf["state"]["last_error"]
+
+
+class CrashAfterRereviewCompletionHarness(ChainHarness):
+    def __init__(self, sections, statuses=None):
+        super().__init__(sections, statuses)
+        self.crash_after_completion = True
+        self._completion_crashed = False
+
+    def _complete_repair_rereview(self, *args: Any, **kwargs: Any) -> int:
+        count = super()._complete_repair_rereview(*args, **kwargs)
+        if self.crash_after_completion and not self._completion_crashed:
+            self._completion_crashed = True
+            raise SimulatedRereviewCrash("crash after rereview completion before phase commit")
+        return count
+
+
+def test_section_rereview_checkpoint_is_not_cleared_before_phase_commit():
+    harness = CrashAfterRereviewCompletionHarness(
+        [SECTION],
+        {"P-WRITE-BLUEPRINT-CRITIC": ["REVISE", "PASS"]},
+    )
+
+    with pytest.raises(SimulatedRereviewCrash):
+        asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    persisted = harness.wf["state"]["section_progress"]["section-1"]
+    assert persisted["pending_repair_rereview"]["critic_prompt"] == (
+        "P-WRITE-BLUEPRINT-CRITIC"
+    )
+    persisted_events = harness.wf["state"]["repair_ledger_v1"]["events"]
+    assert [item["event"] for item in persisted_events].count("REREVIEW_STARTED") == 1
+    assert [item["event"] for item in persisted_events].count("REREVIEW_PASS") == 1
+
+    harness.crash_after_completion = False
+    result = asyncio.run(harness._write_sections(harness.wf, harness.wf["state"]))
+
+    assert result["status"] == "WAITING_GATE"
+    events = harness.wf["state"]["repair_ledger_v1"]["events"]
+    assert [item["event"] for item in events].count("REREVIEW_STARTED") == 1
+    assert [item["event"] for item in events].count("REREVIEW_PASS") == 1
+    assert "pending_repair_rereview" not in harness.wf["state"][
+        "section_progress"
+    ]["section-1"]

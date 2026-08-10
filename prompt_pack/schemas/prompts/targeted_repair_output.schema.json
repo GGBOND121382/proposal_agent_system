@@ -27,7 +27,8 @@
       "properties": {
         "repaired_object": {
           "description": "Complete repaired object. Values outside allowed_paths must be copied exactly from original_object.content; runtime computes the real JSON diff and rejects unauthorized changes.",
-          "type": "object"
+          "type": "object",
+          "additionalProperties": true
         },
         "changed_paths": {
           "description": "RFC 6901 paths that truthfully cover every real difference between original_object.content and repaired_object, with no path that lacks a corresponding object diff.",

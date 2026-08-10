@@ -8,7 +8,7 @@
 - Prompt 注册项：30；
 - Prompt Pack Schema：91；Stage Schema：34；
 - Replay 用例：150；
-- pytest 收集用例：465。
+- pytest 收集用例：883。
 
 以上统计由 `scripts/sync_project_metadata.py` 从代码与测试自动生成；历史版本章节中的旧数字仅描述当时版本。
 <!-- END GENERATED BUILD STATS -->
@@ -119,7 +119,7 @@ python scripts/run_outdoor_thermos_simulated_e2e.py \
   --output-dir data/outdoor_thermos_simulated_e2e
 ```
 
-该脚本以 REPLAY 模型边界运行五条工作流和模板定义的全部章节逐章编制，用于验证编排、门禁、候选聚合和导出。隐私替换与在线调用阻断由自动化测试覆盖；本脚本不等同于真实大模型语义能力测评。
+该脚本是 v0.3 的历史 12 章节回归夹具，当前使用上下文感知的 `SIMULATED` 模型边界；它用于暴露旧夹具在当前合同与质量门禁下的兼容问题，不再作为 v0.6 的“必须全程通过”基线。当前完整五工作流、14 章节质量与 DOCX 导出的全通过基线请运行 `python scripts/run_v06_quality_e2e.py`。两类脚本均不等同于真实大模型语义能力测评。
 
 ## v0.2.0 完整申请书编制修复
 
@@ -264,7 +264,7 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 bash scripts/validate.sh
 ```
 
-当前 pytest 收集用例共465项，覆盖：
+当前 pytest 收集用例共883项，覆盖：
 
 - 30 个已注册 Prompt 的正常 Replay 输入/输出；
 - 材料解析与 Context Builder；

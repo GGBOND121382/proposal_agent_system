@@ -32,6 +32,32 @@ class RuntimeStack:
     post_export_acceptance: PostExportAcceptanceManager
     dependency_preflight: RuntimeDependencyPreflight
 
+    def close(self) -> None:
+        """Release long-lived runtime resources in dependency-safe order."""
+        errors: list[Exception] = []
+
+        # Stop accepting/submitting renderer work before terminating the skill
+        # process it may call.  Shutdown is best-effort: one failing component
+        # must not prevent the remaining resources from being released.
+        try:
+            self.diagram_enrichment.close()
+        except Exception as exc:  # pragma: no cover - defensive shutdown path
+            errors.append(exc)
+
+        close_skills = getattr(self.skill_executor, "close", None)
+        if callable(close_skills):
+            try:
+                close_skills()
+            except Exception as exc:  # pragma: no cover - defensive shutdown path
+                errors.append(exc)
+
+
+        if errors:
+            raise RuntimeError(
+                "failed to close one or more runtime resources: "
+                + "; ".join(f"{type(exc).__name__}: {exc}" for exc in errors)
+            )
+
 
 def build_runtime_stack(settings, pack, db) -> RuntimeStack:
     """Build the production runtime explicitly, without import-time class replacement."""

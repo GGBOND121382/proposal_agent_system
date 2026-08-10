@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-REVISION-PLAN-CRITIC",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -508,7 +508,7 @@
     "prompt_version": "3.0.0",
     "status": "BLOCK",
     "result": {
-      "verdict": "ACCEPT",
+      "verdict": "BLOCK",
       "checked_issue_ids": [
         "issue-001"
       ],
@@ -570,7 +570,7 @@
     },
     "findings": [
       {
-        "code": "PLAN_CRITIC_UNSUPPORTED_ISSUE",
+        "code": "PLAN_TASK_UNCHECKED",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

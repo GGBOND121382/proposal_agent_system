@@ -196,7 +196,8 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/fact_extract_output.schema.json"
     },
     "trusted_source_catalog": {
       "type": "array",

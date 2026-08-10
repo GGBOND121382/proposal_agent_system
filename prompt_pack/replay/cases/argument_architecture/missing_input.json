@@ -622,7 +622,7 @@
       },
       "revision_findings": []
     },
-    "expected_output_schema": "schemas/prompts/revision_plan_output.schema.json"
+    "expected_output_schema": "schemas/prompts/argument_architecture_output.schema.json"
   },
   "expected_output": {
     "schema_version": "2.0",
@@ -1041,8 +1041,35 @@
       }
     },
     "findings": [],
-    "unresolved_items": [],
-    "user_questions": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-protocol-001",
+        "type": "MISSING",
+        "description": "缺少继续执行当前Prompt所需的权威信息。",
+        "target_paths": [
+          "/payload"
+        ],
+        "required_action": "由用户补充或确认输入。",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-protocol-001",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请提供继续执行当前任务所缺少的必需信息。",
+        "reason": "当前输入缺少完成本Prompt所需的权威信息。",
+        "target_paths": [
+          "/payload"
+        ],
+        "answer_schema": {
+          "type": "OBJECT",
+          "allowed_values": []
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
     "source_refs": [],
     "warnings": []
   },

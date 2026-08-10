@@ -227,6 +227,17 @@ class RepairLedger:
         )
 
     @classmethod
+    def repair_not_executable(cls, state: dict[str, Any], key: str, **kwargs: Any) -> int:
+        return cls.record(
+            state,
+            bucket="semantic_repairs",
+            key=key,
+            event="REPAIR_NOT_EXECUTABLE",
+            increment=False,
+            **kwargs,
+        )
+
+    @classmethod
     def model_returned(cls, state: dict[str, Any], key: str, **kwargs: Any) -> int:
         return cls.record(
             state,
@@ -312,7 +323,12 @@ class RepairLedger:
             raise ValueError(
                 "Independent re-review completion requires REREVIEW_STARTED"
             )
-        event = "REREVIEW_PASS" if normalized == "PASS" else "REREVIEW_REVISE"
+        event = {
+            "PASS": "REREVIEW_PASS",
+            "REVISE": "REREVIEW_REVISE",
+            "NEED_USER_INPUT": "REREVIEW_NEED_USER_INPUT",
+            "BLOCK": "REREVIEW_BLOCK",
+        }.get(normalized, "REREVIEW_ERROR")
         return cls.record(
             state,
             bucket="semantic_repairs",

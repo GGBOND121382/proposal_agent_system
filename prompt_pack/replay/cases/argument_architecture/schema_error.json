@@ -621,7 +621,7 @@
       },
       "revision_findings": []
     },
-    "expected_output_schema": "schemas/prompts/revision_plan_output.schema.json"
+    "expected_output_schema": "schemas/prompts/argument_architecture_output.schema.json"
   },
   "expected_output": null,
   "expected_validation": {

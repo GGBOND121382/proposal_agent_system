@@ -650,28 +650,86 @@ def page_locations(pdf_path: Path, chapter_titles: list[str] | None = None) -> d
     }
 
 
+def export_final(
+    md_path: Path,
+    out_dir: Path,
+    *,
+    output_stem: str | None = None,
+    workflow_id: str | None = None,
+    project_id: str | None = None,
+) -> dict:
+    input_arg = md_path.expanduser()
+    if input_arg.is_symlink():
+        raise RuntimeError(f"Refusing symlinked Stage 8 input: {input_arg}")
+    source = input_arg.resolve(strict=True)
+    if not source.is_file():
+        raise RuntimeError(f"Stage 8 input is not a regular file: {source}")
+
+    output_arg = out_dir.expanduser()
+    if output_arg.exists() and output_arg.is_symlink():
+        raise RuntimeError(f"Refusing symlinked Stage 8 output directory: {output_arg}")
+    target = output_arg.resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    if any(target.iterdir()):
+        raise RuntimeError(f"Stage 8 output directory must be empty: {target}")
+
+    # Freeze the exact source bytes used for rendering.  The coordinator later
+    # compares this digest with the live Stage 7 source before publishing.
+    source_bytes = source.read_bytes()
+    input_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    with tempfile.TemporaryDirectory(prefix=".stage8-source-", dir=str(target)) as frozen_dir:
+        frozen_input = Path(frozen_dir) / source.name
+        frozen_input.write_bytes(source_bytes)
+        title, blocks = parse_markdown(frozen_input)
+        chapter_titles = [
+            value for kind, value in blocks if kind == "h1" and value != "参考文献"
+        ]
+        stem = safe_output_stem(output_stem or title)
+        docx_path = target / f"{stem}_申请书.docx"
+        pdf_path = target / f"{stem}_申请书.pdf"
+        metadata = build_docx(frozen_input, docx_path, target / "assets")
+        metadata.update(convert_pdf(docx_path, pdf_path))
+        metadata.update(page_locations(pdf_path, chapter_titles))
+
+    metadata.update(
+        {
+            "metadata_version": "2.0",
+            "output_stem": stem,
+            "docx_file": docx_path.name,
+            "pdf_file": pdf_path.name,
+            "input_sha256": input_sha256,
+            "input_size": len(source_bytes),
+            "input_file": str(source),
+        }
+    )
+    if workflow_id:
+        metadata["workflow_id"] = workflow_id
+    if project_id:
+        metadata["project_id"] = project_id
+    metadata_path = target / "stage8_export_metadata.json"
+    temporary = target / ".stage8_export_metadata.tmp"
+    temporary.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(metadata_path)
+    return metadata
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--output-stem")
+    ap.add_argument("--workflow-id")
+    ap.add_argument("--project-id")
     args = ap.parse_args()
-    md_path = Path(args.input).resolve()
-    out_dir = Path(args.out_dir).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    title, blocks = parse_markdown(md_path)
-    chapter_titles = [value for kind, value in blocks if kind == "h1" and value != "参考文献"]
-    stem = safe_output_stem(args.output_stem or title)
-    docx_path = out_dir / f"{stem}_申请书.docx"
-    pdf_path = out_dir / f"{stem}_申请书.pdf"
-    metadata = build_docx(md_path, docx_path, out_dir / "assets")
-    metadata.update(convert_pdf(docx_path, pdf_path))
-    metadata.update(page_locations(pdf_path, chapter_titles))
-    metadata["output_stem"] = stem
-    metadata["input_sha256"] = sha256(md_path)
-    metadata["input_file"] = str(md_path)
-    (out_dir / "stage8_export_metadata.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    metadata = export_final(
+        Path(args.input),
+        Path(args.out_dir),
+        output_stem=args.output_stem,
+        workflow_id=args.workflow_id,
+        project_id=args.project_id,
     )
     print(json.dumps(metadata, ensure_ascii=False, indent=2))
 

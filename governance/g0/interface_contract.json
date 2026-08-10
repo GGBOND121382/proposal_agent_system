@@ -1,5 +1,5 @@
 {
-    "contract_version":  "1.3.0",
+    "contract_version":  "1.3.1",
     "baseline_commit":  "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
     "prompt_registry":  {
                             "version":  "2.0",
@@ -359,6 +359,20 @@
                          ],
     "approved_changes":  [
                              {
+                                 "path":  "prompt_pack/prompts/integration/integration_critic.md",
+                                 "blob_sha":  "0f7c42d732f4b20ec6ca015698dd934ff610c15b",
+                                 "owner":  "Proposal Agent Audit Maintainers",
+                                 "reason":  "Approved audited patch contract hardening for integration review status and repair boundaries.",
+                                 "approval_reference":  "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/prompts/shared/output_protocol.md",
+                                 "blob_sha":  "53946ec84ab140f946169b7aaf58e077c1f56fd6",
+                                 "owner":  "Proposal Agent Audit Maintainers",
+                                 "reason":  "Approved audited patch update to the shared output protocol.",
+                                 "approval_reference":  "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+                             },
+                             {
                                  "path":  "app/api_models.py",
                                  "blob_sha":  "dcd3d70a52e87cd1cd1ad901fe28984d75fbdd01",
                                  "owner":  "Runtime and Contract Maintainers",
@@ -367,14 +381,14 @@
                              },
                              {
                                  "path":  "app/db.py",
-                                 "blob_sha":  "b0045f13e6773cba7ea0a6a925460583851e7f27",
+                                 "blob_sha":  "80d3d30f700c1e481b5b8434bf5e11da4a7db982",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "app/executor.py",
-                                 "blob_sha":  "7cfdd0070e9f0e9eb2956fdb2d1ceb05e8df256e",
+                                 "blob_sha":  "bf6142c263cfdcddbdfe1f6320485c06b3da35f2",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -514,21 +528,21 @@
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/argument_architecture_critic_input.schema.json",
-                                 "blob_sha":  "af52e6b669b960feb412f46266e035065e14aa75",
+                                 "blob_sha":  "a7873ddb58adcdde54010f9018da5b2ec05a26de",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/argument_architecture_input.schema.json",
-                                 "blob_sha":  "225bb59242228751f6bd8a12887a9e6f154c498c",
+                                 "blob_sha":  "483d3578205109d8ef7e43772d604624d00682bb",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/expression_critic_input.schema.json",
-                                 "blob_sha":  "5f69849ed04bf03fab868168c866f46455446641",
+                                 "blob_sha":  "4b04c91707b3287a8689a4fba79b9eb89a86834d",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause repair: Expression Critic 3.2 uses a compact role-specific output contract while deterministic Guard retains structure and Trace ownership.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -549,35 +563,35 @@
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/expression_polish_input.schema.json",
-                                 "blob_sha":  "60afc6f5ac2f42c16d3a2b5e0e13f7675090b7c0",
+                                 "blob_sha":  "e33d288440a61ed8026967821f0bd36ed886f39e",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/fact_critic_input.schema.json",
-                                 "blob_sha":  "5cb624ea9ce56145f39ac743eb29ff97a154efb6",
+                                 "blob_sha":  "ad8c240ad4913ecd3a6ab1214e6ea9dfbb82c8f0",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/fact_extract_input.schema.json",
-                                 "blob_sha":  "4313481f2eaa92fe37d9a918951606dd44d62b97",
+                                 "blob_sha":  "ccf916abacbd6b4244b27aa213e76cbfa66d8136",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/final_confidentiality_review_input.schema.json",
-                                 "blob_sha":  "459bf35afa5788f9d6084e91ab86d016c5b67bb6",
+                                 "blob_sha":  "c5e4c75e0039c24a1cdc3566ee08d392becf1019",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/integration_critic_input.schema.json",
-                                 "blob_sha":  "4c2d2bbca4a3df13e347aaa47c8ab10ee9358931",
+                                 "blob_sha":  "daa9f49e24b6365a52129255d8f1ce9386fed068",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -591,42 +605,42 @@
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
-                                 "blob_sha":  "f141da130665ebedc97ec6c083f2a911c917ca6f",
+                                 "blob_sha":  "e3b799b80b38686a357f3cf19536777a727fabf4",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/project_definition_critic_input.schema.json",
-                                 "blob_sha":  "d47fca1c669dace92b2946f00aa06003d99118e0",
+                                 "blob_sha":  "d07ed9ec51a2f62053ba8b56a3289ba6e742925b",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/project_definition_extract_input.schema.json",
-                                 "blob_sha":  "2ecc512af0208a8d2ef5c607edc32f050a1beffd",
+                                 "blob_sha":  "e3c592af40e8f257f658f46dc440ab8ebf098f01",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/project_readiness_critic_input.schema.json",
-                                 "blob_sha":  "164910473ea9c1044d63f299fda6d27e3d0457c6",
+                                 "blob_sha":  "fd80ce462cbad248fac73fa521eb060b78984602",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/public_research_critic_input.schema.json",
-                                 "blob_sha":  "9ddddd94fbe8575e784d97a2aa7b18e3d0a81df0",
+                                 "blob_sha":  "4b5009099d366198d49ad731a073f4938ba6f53e",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/public_research_plan_input.schema.json",
-                                 "blob_sha":  "7a52486cfbeef78d8cdb655a25e5a72fe097102a",
+                                 "blob_sha":  "2dbcb2ee9c10bc10221141ad5f98799015861056",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -640,91 +654,91 @@
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/public_research_synthesis_input.schema.json",
-                                 "blob_sha":  "86b517d1d6ae580ad2a9c1e4d0b51c14a5cbb1e2",
+                                 "blob_sha":  "72cedfcfa519feb9583abd8bf5c3200744e0f69a",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/revision_plan_critic_input.schema.json",
-                                 "blob_sha":  "0a1c83da2061942058eaa95b7d46c59280d96c04",
+                                 "blob_sha":  "57b54251a2d700ccfe3a03d752d009d688d79d13",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/revision_plan_input.schema.json",
-                                 "blob_sha":  "48cbe01e275146f739bf537c34194860a5c638ce",
+                                 "blob_sha":  "092f2d1395fab0f4ae2ccb9675fa6dae57b66312",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
-                                 "blob_sha":  "0b05147af604547a05e2e6b289cc2216aee0ce8f",
+                                 "blob_sha":  "2511780ea4110dc32bed2163748e9ab44d489bb7",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
-                                 "blob_sha":  "3f8341ac01e0baebd1570164993d6d3d6cffc807",
+                                 "blob_sha":  "b1e886fcf205c5b1bd7974e50c676d57a6aecac6",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/scheme_critic_input.schema.json",
-                                 "blob_sha":  "3002ab48ab2cdf562e62db9870926f51d15d877d",
+                                 "blob_sha":  "c2af8f7247947e0aa6bd133ed2a3c7279d316229",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/scheme_extract_input.schema.json",
-                                 "blob_sha":  "4d14414fb874d3417b84bc859ac4bda42ff3d420",
+                                 "blob_sha":  "4ee6b984f0d098f664e97c07fc09356fa09ee16b",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/security_classify_critic_input.schema.json",
-                                 "blob_sha":  "ac51096f3422a4942aea16032fbeb06debb44c69",
+                                 "blob_sha":  "40cd3a9337d40cfc5bf0e22a527fb971cd45e4aa",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/security_classify_input.schema.json",
-                                 "blob_sha":  "1495c7b1471ce6e2e92578e6c3eeeb8a8827f8e6",
+                                 "blob_sha":  "2db417ba4fefe4c6f7c4b72a81a99ef9ab83b0b4",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/targeted_repair_input.schema.json",
-                                 "blob_sha":  "5757d876a5e1bc77ab8b3b7d48746dfea08c1a5f",
+                                 "blob_sha":  "8a73390d97cf31d8b00468b37c5e86884f2dc062",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/targeted_repair_output.schema.json",
-                                 "blob_sha":  "a29dfa9fb04899fd557d545c7c3ccb4d1471cf5c",
+                                 "blob_sha":  "eb07da5cd1ef88ffe2eea3f0a0a975b1bd6b0155",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/template_critic_input.schema.json",
-                                 "blob_sha":  "bee290314af9a6448ec99f67cc4fbfa2c487bf3c",
+                                 "blob_sha":  "451264d2670cdcc7d5bfc0cfb049a6022da46302",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/template_extract_input.schema.json",
-                                 "blob_sha":  "f0f8b2596a3dbc9e857256ea50254dbea1be6fde",
+                                 "blob_sha":  "4b4304135fb33c3577c69101376c5b409d5f9ae4",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -738,7 +752,7 @@
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/write_blueprint_critic_input.schema.json",
-                                 "blob_sha":  "16d8c13ace0d75cbcea6938dc06f749da8924c0f",
+                                 "blob_sha":  "49adc6bd1c46ad18a12ad645bd1403076652e7e1",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -752,7 +766,7 @@
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/write_blueprint_input.schema.json",
-                                 "blob_sha":  "38caa1ad6fbfe68d4d7e2ace2fdfd672ac750090",
+                                 "blob_sha":  "b25ddcf5e30be51050551106794eb16271b40cbd",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -766,7 +780,7 @@
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/write_content_input.schema.json",
-                                 "blob_sha":  "399f5c4875b3d1bee3b611f90851e44ab5f747f2",
+                                 "blob_sha":  "e93d6059724002f47980c5532c3d80f30e529457",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -780,7 +794,7 @@
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/write_critic_input.schema.json",
-                                 "blob_sha":  "539d9cf2d5183708b8aec44fc115ac06a8949f07",
+                                 "blob_sha":  "781a18e3a8184ce43595cc82fde6df447892e8f1",
                                  "owner":  "Runtime and Contract Maintainers",
                                  "reason":  "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"

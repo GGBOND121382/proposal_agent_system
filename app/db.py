@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from .private_storage import secure_private_directory, secure_private_file
+from .secret_redaction import redact_secrets
 from .util import utc_now
 
 
@@ -157,7 +159,7 @@ class DatabaseTransaction:
                 project_id,
                 event_type,
                 object_id,
-                json.dumps(metadata or {}, ensure_ascii=False),
+                json.dumps(redact_secrets(metadata or {}), ensure_ascii=False),
                 utc_now(),
             ),
         )
@@ -216,9 +218,17 @@ class DatabaseTransaction:
 class Database:
     def __init__(self, path: Path):
         self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        secure_private_directory(self.path.parent)
         with self.connection() as conn:
             conn.executescript(SCHEMA)
+        for database_file in (
+            self.path,
+            Path(f"{self.path}-wal"),
+            Path(f"{self.path}-shm"),
+            Path(f"{self.path}-journal"),
+        ):
+            if database_file.is_file():
+                secure_private_file(database_file)
 
     def _open_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30.0)
@@ -276,5 +286,5 @@ class Database:
     def audit(self, event_type: str, *, project_id: str | None = None, object_id: str | None = None, metadata: dict[str, Any] | None = None) -> None:
         self.execute(
             "INSERT INTO audit_events(project_id,event_type,object_id,metadata_json,created_at) VALUES(?,?,?,?,?)",
-            (project_id, event_type, object_id, json.dumps(metadata or {}, ensure_ascii=False), utc_now()),
+            (project_id, event_type, object_id, json.dumps(redact_secrets(metadata or {}), ensure_ascii=False), utc_now()),
         )

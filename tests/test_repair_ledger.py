@@ -135,3 +135,87 @@ def test_rereview_cannot_consume_budget_before_application() -> None:
         assert "APPLIED" in str(exc)
     else:
         raise AssertionError("unapplied repair consumed semantic budget")
+
+
+def test_workflow_pending_rereview_requires_current_prompt_identity() -> None:
+    from app.workflow_repair import WorkflowRepairMixin
+
+    state = {
+        "pending_repair_rereviews": {
+            "P-SCHEME-CRITIC": {
+                "critic_prompt": "P-SCHEME-CRITIC",
+                "repair_id": "repair-1",
+                "repair_attempt_key": "P-SCHEME-CRITIC",
+                "repair_application_artifact_id": "artifact-1",
+            }
+        }
+    }
+    checkpoint = WorkflowRepairMixin._workflow_repair_rereview_checkpoint(
+        state, "P-SCHEME-CRITIC"
+    )
+    assert checkpoint is state["pending_repair_rereviews"]["P-SCHEME-CRITIC"]
+
+    try:
+        WorkflowRepairMixin._workflow_repair_rereview_checkpoint(
+            state, "P-PROJECT-DEFINITION-EXTRACT"
+        )
+    except ValueError as exc:
+        assert "another Prompt" in str(exc)
+    else:
+        raise AssertionError("stale workflow re-review checkpoint was ignored")
+
+
+def test_generic_workflow_records_rereview_after_effective_decision_status() -> None:
+    import inspect
+    from app.workflows import WorkflowEngine
+
+    source = inspect.getsource(WorkflowEngine.advance)
+    decision_index = source.index("decision, effective_status, effective_output")
+    completion_index = source.index("self._complete_repair_rereview(")
+    assert decision_index < completion_index
+    completion_slice = source[completion_index : completion_index + 500]
+    assert "status=effective_status" in completion_slice
+    assert 'status=str(result.get("status")' not in completion_slice
+
+
+def test_rereview_completion_preserves_blocking_status_in_audit_event() -> None:
+    for status, expected_event in (
+        ("BLOCK", "REREVIEW_BLOCK"),
+        ("NEED_USER_INPUT", "REREVIEW_NEED_USER_INPUT"),
+        ("ERROR", "REREVIEW_ERROR"),
+    ):
+        state: dict = {}
+        key = f"P-TEST-CRITIC:{status}"
+        repair_id = f"repair-{status.lower()}"
+        artifact_id = f"artifact-{status.lower()}"
+        RepairLedger.applied(
+            state,
+            key,
+            repair_id=repair_id,
+            application_artifact_id=artifact_id,
+        )
+        RepairLedger.rereview_started(
+            state,
+            key,
+            repair_id=repair_id,
+            application_artifact_id=artifact_id,
+        )
+        RepairLedger.rereview_completed(
+            state,
+            key,
+            repair_id=repair_id,
+            application_artifact_id=artifact_id,
+            status=status,
+        )
+        assert RepairLedger.events(state, repair_id=repair_id)[-1]["event"] == expected_event
+
+
+def test_full_integration_review_history_uses_effective_guard_result() -> None:
+    import inspect
+    from app.workflows import WorkflowEngine
+
+    source = inspect.getsource(WorkflowEngine.advance)
+    assert "self._record_full_integration_review(\n                        wf, state, observed_result" in source
+    cross_section = source[source.index('state.setdefault("cross_section_review_history"') :]
+    cross_section = cross_section[:1200]
+    assert 'for item in effective_output.get("findings")' in cross_section

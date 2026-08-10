@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .candidate_integrity import visible_candidate_snapshot
 from .util import sha256_bytes, sha256_json, sha256_text, utc_now
 
 
@@ -40,6 +41,7 @@ class ExportManifestMixin:
             for candidate in candidates
         ]
         candidate_core = {"section_count": len(candidate_records), "sections": candidate_records}
+        visible = visible_candidate_snapshot(candidates)
         return {
             "schema_version": "1.1",
             "project_id": project["id"],
@@ -52,7 +54,11 @@ class ExportManifestMixin:
             "source_run_ids": [candidate["run_id"] for candidate in candidates],
             "expression_critic_run_ids": [candidate["expression_critic_run_id"] for candidate in candidates],
             "candidate_ids": [candidate["candidate_id"] for candidate in candidates],
-            "candidate_snapshot": {**candidate_core, "candidate_set_hash": sha256_json(candidate_core)},
+            "candidate_snapshot": {
+                **candidate_core,
+                "candidate_set_hash": sha256_json(candidate_core),
+                "visible_candidate_set_hash": visible["visible_candidate_set_hash"],
+            },
             "integrity_mode": integrity["mode"],
             "delivery_pipeline": {
                 "docx": "GENERATED",

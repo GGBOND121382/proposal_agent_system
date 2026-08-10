@@ -23,6 +23,62 @@ MATERIAL_INPUT_GATE_TYPES = {
 }
 
 
+def human_resolution_scope_key(
+    prompt_id: str,
+    *,
+    section_id: str | None = None,
+    workflow_step: int | str | None = None,
+) -> str:
+    """Return the immutable visibility scope for one human resolution.
+
+    Authoring prompts are reused across many proposal sections.  Indexing a
+    resolution by ``prompt_id`` alone therefore lets an answer from one
+    section leak into another.  Section identity takes precedence; non-section
+    prompts are isolated by workflow step.  The raw prompt id is deliberately
+    not returned for new writes and remains a read-only migration format.
+    """
+
+    normalized_prompt = str(prompt_id or "").strip()
+    if not normalized_prompt:
+        raise ValueError("human resolution prompt_id cannot be empty")
+    normalized_section = str(section_id or "").strip()
+    if normalized_section:
+        return f"section:{normalized_section}:{normalized_prompt}"
+    if workflow_step is None or str(workflow_step).strip() == "":
+        raise ValueError("human resolution workflow_step cannot be empty")
+    return f"step:{workflow_step}:{normalized_prompt}"
+
+
+def section_id_for_run(state: dict[str, Any], run_id: str | None) -> str | None:
+    """Infer the owning section only from persisted workflow checkpoints."""
+
+    target = str(run_id or "").strip()
+    if not target:
+        return None
+    gate = state.get("section_input_gate")
+    if isinstance(gate, dict) and str(gate.get("run_id") or "") == target:
+        section_id = str(gate.get("section_id") or "").strip()
+        if section_id:
+            return section_id
+
+    for section_id, progress in (state.get("section_progress") or {}).items():
+        if not isinstance(progress, dict):
+            continue
+        for item in progress.get("runs") or []:
+            if isinstance(item, dict) and str(item.get("run_id") or "") == target:
+                return str(section_id)
+
+    for section in state.get("section_results") or []:
+        if not isinstance(section, dict):
+            continue
+        for item in section.get("runs") or []:
+            if isinstance(item, dict) and str(item.get("run_id") or "") == target:
+                section_id = str(section.get("section_id") or "").strip()
+                if section_id:
+                    return section_id
+    return None
+
+
 _POINTER_ROOTS = {"payload", "scope", "task", "security_context"}
 _LEGACY_PATH_TOKEN = re.compile(r"[^.\[\]]+|\[(0|[1-9][0-9]*)\]")
 
@@ -150,12 +206,19 @@ def material_input_questions(gate_type: str) -> list[dict[str, Any]]:
 
 def _answer_map(answers: list[dict[str, Any]] | None) -> dict[str, Any]:
     mapped: dict[str, Any] = {}
-    for item in answers or []:
+    for index, item in enumerate(answers or []):
         if not isinstance(item, dict):
-            continue
-        key = str(item.get("question_id") or item.get("field_path") or item.get("id") or "").strip()
+            raise ValueError(f"第{index + 1}个回答必须是对象。")
+        key = str(
+            item.get("question_id")
+            or item.get("field_path")
+            or item.get("id")
+            or ""
+        ).strip()
         if not key:
-            continue
+            raise ValueError(f"第{index + 1}个回答缺少 question_id 或 field_path。")
+        if key in mapped:
+            raise ValueError(f"同一问题不能提交多个回答：{key}")
         mapped[key] = item.get("value", item.get("answer"))
     return mapped
 
@@ -163,14 +226,30 @@ def _answer_map(answers: list[dict[str, Any]] | None) -> dict[str, Any]:
 def _coerce_answer(value: Any, question: dict[str, Any]) -> Any:
     schema = question.get("answer_schema") if isinstance(question.get("answer_schema"), dict) else {}
     answer_type = str(schema.get("type") or question.get("answer_type") or "STRING").upper()
-    if answer_type in {"STRING", "LONG_TEXT", "SELECT", "ENUM"}:
-        normalized = str(value or "").strip()
+    if answer_type in {"STRING", "LONG_TEXT"}:
+        return "" if value is None else str(value).strip()
+    if answer_type in {"SELECT", "ENUM"}:
+        normalized = "" if value is None else str(value).strip()
         allowed = schema.get("allowed_values")
         if not isinstance(allowed, list):
-            allowed = question.get("options") if isinstance(question.get("options"), list) else None
-        if answer_type in {"SELECT", "ENUM"} and allowed is not None and normalized not in {str(item) for item in allowed}:
-            raise ValueError(f"回答不在允许范围内：{value!r}")
-        return normalized
+            allowed = (
+                question.get("options")
+                if isinstance(question.get("options"), list)
+                else None
+            )
+        if allowed is None:
+            return normalized
+        exact_matches = [
+            item
+            for item in allowed
+            if type(item) is type(value) and item == value
+        ]
+        if exact_matches:
+            return copy.deepcopy(exact_matches[0])
+        textual_matches = [item for item in allowed if str(item) == normalized]
+        if len(textual_matches) != 1:
+            raise ValueError(f"回答不在允许范围内或存在歧义：{value!r}")
+        return copy.deepcopy(textual_matches[0])
     if answer_type == "BOOLEAN":
         if isinstance(value, bool):
             return value
@@ -211,9 +290,13 @@ def build_human_resolutions(
     answers: list[dict[str, Any]] | None,
     decided_by: str,
     decided_role: str,
+    require_any_answer: bool = False,
 ) -> list[dict[str, Any]]:
     values = _answer_map(answers)
     resolutions: list[dict[str, Any]] = []
+    recognized_answer_keys: set[str] = set()
+    seen_question_ids: set[str] = set()
+    seen_answer_aliases: set[str] = set()
     for index, raw_question in enumerate(questions):
         if isinstance(raw_question, str):
             question = {
@@ -226,8 +309,26 @@ def build_human_resolutions(
             question = raw_question
         else:
             continue
-        question_id = str(question.get("question_id") or question.get("id") or f"question-{index}").strip()
+        question_id = str(
+            question.get("question_id")
+            or question.get("id")
+            or f"question-{index}"
+        ).strip()
+        if question_id in seen_question_ids:
+            raise ValueError(f"Gate 问题 question_id 重复：{question_id}")
+        seen_question_ids.add(question_id)
         field_path = str(question.get("field_path") or "").strip()
+        aliases = [question_id] + ([field_path] if field_path else [])
+        for alias in dict.fromkeys(aliases):
+            if alias in seen_answer_aliases:
+                raise ValueError(f"Gate 问题回答标识重复：{alias}")
+            seen_answer_aliases.add(alias)
+            recognized_answer_keys.add(alias)
+        provided_aliases = [alias for alias in dict.fromkeys(aliases) if alias in values]
+        if len(provided_aliases) > 1:
+            raise ValueError(
+                f"同一问题不能同时通过 question_id 和 field_path 提交回答：{question_id}"
+            )
         value = values.get(question_id, values.get(field_path))
         required = bool(question.get("required") or question.get("blocking"))
         if value is None and required:
@@ -262,6 +363,28 @@ def build_human_resolutions(
             "decided_role": decided_role,
         }
         resolutions.append(resolution)
+    unknown_answer_keys = sorted(set(values) - recognized_answer_keys)
+    if unknown_answer_keys:
+        raise ValueError(
+            "回答不属于当前 Gate 的问题列表：" + "、".join(unknown_answer_keys)
+        )
+    if require_any_answer:
+        substantive = any(
+            not (
+                resolution.get("answer") is None
+                or (
+                    isinstance(resolution.get("answer"), str)
+                    and not resolution.get("answer").strip()
+                )
+                or (
+                    isinstance(resolution.get("answer"), (list, dict))
+                    and not resolution.get("answer")
+                )
+            )
+            for resolution in resolutions
+        )
+        if not substantive:
+            raise ValueError("当前 NEED_USER_INPUT 检查点必须至少提交一个有效回答。")
     return resolutions
 
 

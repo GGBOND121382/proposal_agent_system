@@ -10,10 +10,10 @@ from typing import Any, Callable
 
 
 MIGRATION_NAME = "runtime_semantics_v1"
-MIGRATION_SCHEMA_VERSION = "2.0.0"
+MIGRATION_SCHEMA_VERSION = "2.1.0"
 _REQUIRED_COLUMNS = {
     "projects": {"id", "security_level"},
-    "workflows": {"id", "project_id", "state_json", "updated_at"},
+    "workflows": {"id", "project_id", "current_step", "state_json", "updated_at"},
     "artifacts": {
         "id",
         "project_id",
@@ -131,12 +131,23 @@ def _plan_human_resolutions(
         source_path: str,
         authority: str,
     ) -> None:
+        section_id = str(
+            resolution.get("section_id") or state.get("active_section_id") or ""
+        ).strip() or None
+        scope_key = str(resolution.get("scope_key") or "").strip()
+        if not scope_key:
+            scope_key = (
+                f"section:{section_id}:{prompt_id}"
+                if section_id
+                else f"step:{workflow['current_step']}:{prompt_id}"
+            )
         source_key = str(resolution.get("resolution_id") or digest(resolution))
         artifact_id = stable_id(
             "artifact",
             MIGRATION_NAME,
             workflow["id"],
             "HUMAN_RESOLUTION",
+            scope_key,
             prompt_id,
             source_key,
         )
@@ -144,6 +155,9 @@ def _plan_human_resolutions(
             "schema_version": "1.0.0",
             "workflow_id": workflow["id"],
             "prompt_id": prompt_id,
+            "scope_key": scope_key,
+            "section_id": section_id,
+            "workflow_step": int(workflow["current_step"]),
             "resolution": resolution,
             "authority": authority,
             "supersedes_state_override": True,
@@ -176,8 +190,8 @@ def _plan_human_resolutions(
                 "source_key": source_key,
             }
         )
-        artifact_ids.setdefault(prompt_id, []).append(artifact_id)
-        covered_paths.setdefault(prompt_id, set()).update(
+        artifact_ids.setdefault(scope_key, []).append(artifact_id)
+        covered_paths.setdefault(scope_key, set()).update(
             str(item).strip()
             for item in resolution.get("target_paths") or []
             if str(item).strip()
@@ -208,7 +222,13 @@ def _plan_human_resolutions(
                 f"workflow {workflow['id']} human_input_overrides[{prompt_id}] must be an object"
             )
         for target_path in sorted(str(key) for key in values):
-            if target_path in covered_paths.get(prompt_id, set()):
+            section_id = str(state.get("active_section_id") or "").strip() or None
+            scope_key = (
+                f"section:{section_id}:{prompt_id}"
+                if section_id
+                else f"step:{workflow['current_step']}:{prompt_id}"
+            )
+            if target_path in covered_paths.get(scope_key, set()):
                 continue
             answer = values[target_path]
             resolution = {
@@ -322,7 +342,7 @@ def build_plan(conn: sqlite3.Connection, database: Path) -> dict[str, Any]:
     workflow_updates: list[dict[str, Any]] = []
 
     rows = conn.execute(
-        "SELECT id,project_id,state_json,updated_at FROM workflows ORDER BY id"
+        "SELECT id,project_id,current_step,state_json,updated_at FROM workflows ORDER BY id"
     ).fetchall()
     for workflow in rows:
         state = json.loads(workflow["state_json"] or "{}")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .candidate_integrity import canonical_candidate
 from .util import sha256_json, utc_now
 
 
@@ -91,7 +92,7 @@ class FullIntegrationCriticMixin:
         children = state.get("full_proposal_children") or {}
         child_ids = [str(item) for item in state.get("authoring_child_workflow_ids") or [] if item]
         expected_groups = {
-            str(group.get("group_id")): {str(s) for s in group.get("section_ids") or []}
+            str(group.get("group_id")): [str(s) for s in group.get("section_ids") or []]
             for group in contract.get("groups") or []
             if isinstance(group, dict) and group.get("section_ids")
         }
@@ -102,6 +103,28 @@ class FullIntegrationCriticMixin:
                 "全文 Integration Critic 的并发组与冻结合同不一致；"
                 f"expected={sorted(expected_groups)}, actual={sorted(children)}"
             )
+        bound_child_ids = [
+            str((children.get(group_id) or {}).get("workflow_id") or "")
+            for group_id in expected_groups
+        ]
+        if (
+            any(not item for item in bound_child_ids)
+            or len(bound_child_ids) != len(set(bound_child_ids))
+            or set(child_ids) != set(bound_child_ids)
+        ):
+            raise ValueError(
+                "全文 Integration Critic 的子工作流集合与并发组绑定不一致；"
+                f"registered={sorted(child_ids)}, bound={sorted(bound_child_ids)}"
+            )
+
+        expected_parent_id = str(
+            state.get("current_workflow_id")
+            or (envelope.get("scope") or {}).get("workflow_id")
+            or ""
+        )
+        expected_project_id = str((envelope.get("scope") or {}).get("project_id") or "")
+        if not expected_parent_id or not expected_project_id:
+            raise ValueError("全文 Integration Critic 缺少父工作流或项目身份。")
 
         section_owner: dict[str, str] = {}
         for group_id, expected_sections in expected_groups.items():
@@ -116,16 +139,32 @@ class FullIntegrationCriticMixin:
                 for item in child_state.get("section_results") or []
                 if isinstance(item, dict) and item.get("section_id")
             ]
-            actual_sections = {str(item.get("section_id")) for item in section_results}
+            actual_sections = [str(item.get("section_id")) for item in section_results]
+            snapshot_errors: list[str] = []
+            if child.get("status") != "COMPLETED":
+                snapshot_errors.append(f"status={child.get('status')}")
+            if str(child.get("project_id") or "") != expected_project_id:
+                snapshot_errors.append("child project differs from parent project")
+            if str(child_state.get("parent_workflow_id") or "") != expected_parent_id:
+                snapshot_errors.append("child parent_workflow_id differs from the current parent")
+            if str(child_state.get("quality_parent_workflow_id") or "") != expected_parent_id:
+                snapshot_errors.append("child quality_parent_workflow_id differs from the current parent")
+            if str(child_state.get("full_proposal_group_id") or "") != group_id:
+                snapshot_errors.append("child group id differs from the parent group record")
+            if str(child_state.get("full_proposal_contract_hash") or "") != contract_hash:
+                snapshot_errors.append("child contract hash differs from the frozen contract")
             if (
-                child.get("status") != "COMPLETED"
-                or str(child_state.get("parent_workflow_id") or "") == ""
-                or str(child_state.get("full_proposal_contract_hash") or "") != contract_hash
-                or actual_sections != expected_sections
+                len(actual_sections) != len(expected_sections)
+                or len(actual_sections) != len(set(actual_sections))
+                or set(actual_sections) != set(expected_sections)
             ):
+                snapshot_errors.append(
+                    f"expected sections={expected_sections}, actual sections={actual_sections}"
+                )
+            if snapshot_errors:
                 raise ValueError(
-                    f"并发组 {group_id} 尚未形成与冻结合同一致的完成快照；"
-                    f"status={child.get('status')}, expected={sorted(expected_sections)}, actual={sorted(actual_sections)}"
+                    f"并发组 {group_id} 尚未形成与冻结合同一致的完成快照："
+                    + "；".join(snapshot_errors)
                 )
             allowed_lineage = {
                 workflow_id,
@@ -185,7 +224,7 @@ class FullIntegrationCriticMixin:
                 "section_id": section_id,
                 "title": str((map_by_section.get(section_id) or {}).get("title") or ""),
                 "candidate_id": candidate_id,
-                "candidate_hash": sha256_json(candidate),
+                "candidate_hash": sha256_json(canonical_candidate(candidate)),
                 "producer_workflow_id": owner_id,
                 **provenance,
             })

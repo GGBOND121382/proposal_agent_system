@@ -23,8 +23,9 @@ from app.security import RoutingDenied, SecurityRouter
 from app.simulated_llm import SimulatedLLM
 from app.util import new_id, sha256_json, utc_now
 from app.runtime_api import WorkflowEngine
-from app.workflow_status import is_recoverable_block
+from app.workflow_status import should_pause_automatic_advancement
 from app.agent_prompt_kernel import _substantive_numeric_tokens
+from app.output_integrity import attach_trusted_source_catalog
 from app.workflow_input import APPLICATION_GUIDE_INPUT, WorkflowInputRequired
 
 
@@ -97,9 +98,7 @@ async def finish_workflow(engine: WorkflowEngine, project_id: str, workflow_type
             action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
             engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
             continue
-        if wf["status"] in {"COMPLETED", "CANCELLED"} or is_recoverable_block(
-            wf["status"]
-        ):
+        if should_pause_automatic_advancement(wf["status"]):
             break
     return wf
 
@@ -378,7 +377,7 @@ def test_scheme_output_does_not_fabricate_rule_when_model_reports_missing_rules(
     )
 
 
-def test_approved_need_user_input_gate_advances_accepted_step(runtime):
+def test_need_user_input_gate_without_questions_rejects_empty_confirmation(runtime):
     _, _, _, _, _, _, engine, _ = runtime
     project_id = create_project(engine.db)
     workflow = engine.start(project_id, "WF-1_PROJECT_INTAKE")
@@ -395,16 +394,19 @@ def test_approved_need_user_input_gate_advances_accepted_step(runtime):
         questions=[],
     )
 
-    engine.decide_gate(
-        gate_id,
-        action="CONFIRM",
-        decided_by="pytest",
-        decided_role="PROJECT_OWNER",
-    )
+    with pytest.raises(ValueError, match="没有可回答的问题"):
+        engine.decide_gate(
+            gate_id,
+            action="CONFIRM",
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )
 
     updated = engine.get(workflow["id"])
-    assert updated["current_step"] == 1
-    assert updated["state"]["accepted_step_results"]["0"]["run_id"] == "run-accepted-test"
+    assert updated["current_step"] == 0
+    assert updated["state"]["step_results"]["0"]["run_id"] == "run-accepted-test"
+    assert "superseded_step_results" not in updated["state"]
+    assert engine._gate(gate_id)["status"] == "OPEN"
 
 
 def test_stage_completion_accepts_gated_model_findings_but_not_qg(runtime):
@@ -496,6 +498,50 @@ def test_normalizer_does_not_guess_unregistered_source_preservation_alias(runtim
 
     assert normalized["result"]["source_preservation_summary"][0]["action"] == "DISTRIBUTED"
     errors = pack.validate("P-WRITE-CONTENT", "output", normalized)
+    assert any(
+        error.startswith("/result/source_preservation_summary/0/action:")
+        for error in errors
+    )
+
+
+def test_expression_normalizer_restores_polished_lineage_action_from_input(runtime):
+    _, pack, _, _, _, executor, _, _ = runtime
+    envelope = pack.replay_input("P-EXPRESSION-POLISH")
+    output = pack.replay_output("P-EXPRESSION-POLISH", "normal")
+    envelope["payload"]["content_candidate"]["source_preservation_summary"][0][
+        "action"
+    ] = "PRESERVED"
+    output["result"]["source_preservation_summary"][0]["action"] = "POLISHED"
+
+    normalized = executor._normalize_output(
+        "P-EXPRESSION-POLISH",
+        output,
+        envelope,
+    )
+
+    assert normalized["result"]["source_preservation_summary"][0]["action"] == "PRESERVED"
+    assert any(
+        warning.startswith("SYSTEM_EXPRESSION_SOURCE_LINEAGE_ACTION_NORMALIZATION:")
+        for warning in normalized["warnings"]
+    )
+    assert pack.validate("P-EXPRESSION-POLISH", "output", normalized) == []
+
+
+def test_expression_normalizer_refuses_polished_action_when_lineage_identity_differs(runtime):
+    _, pack, _, _, _, executor, _, _ = runtime
+    envelope = pack.replay_input("P-EXPRESSION-POLISH")
+    output = pack.replay_output("P-EXPRESSION-POLISH", "normal")
+    output["result"]["source_preservation_summary"][0]["action"] = "POLISHED"
+    output["result"]["source_preservation_summary"][0]["paragraph_id"] = "p-other"
+
+    normalized = executor._normalize_output(
+        "P-EXPRESSION-POLISH",
+        output,
+        envelope,
+    )
+
+    assert normalized["result"]["source_preservation_summary"][0]["action"] == "POLISHED"
+    errors = pack.validate("P-EXPRESSION-POLISH", "output", normalized)
     assert any(
         error.startswith("/result/source_preservation_summary/0/action:")
         for error in errors
@@ -627,7 +673,7 @@ def test_revision_plan_normalizer_preserves_model_authored_evidence_refs(runtime
     _, pack, _, _, _, executor, _, _ = runtime
     output = pack.replay_output("P-REVISION-PLAN", "normal")
     output["findings"] = [{
-        "code": "PLAN_TEST_FINDING",
+        "code": "SECTION_CONTRACT_GENERIC",
         "severity": "P2",
         "category": "PLAN",
         "target_type": "PROPOSAL_CONTRACT",
@@ -661,7 +707,7 @@ def test_content_normalizer_preserves_explicit_nonblocking_test_deferrals(runtim
     )
     output["findings"] = [
         {
-            "code": "QUALITY_DIMENSION_FAILED",
+            "code": "CONTENT_UNSUPPORTED_CLAIM",
             "severity": "P2",
             "category": "CONTENT",
             "target_type": "PARAGRAPH",
@@ -674,7 +720,7 @@ def test_content_normalizer_preserves_explicit_nonblocking_test_deferrals(runtim
             "blocking": False,
         },
         {
-            "code": "REPAIR_RECEIPT",
+            "code": "TRACE_SOURCE_UNKNOWN",
             "severity": "P3",
             "category": "CONTENT",
             "target_type": "PARAGRAPH",
@@ -908,7 +954,7 @@ def test_write_critic_normalizer_preserves_deferred_test_decision(runtime):
     )
     output["findings"] = [
         {
-            "code": "TEST_PLACEHOLDER_DEFERRED",
+            "code": "QUALITY_DIMENSION_FAILED",
             "severity": "P3",
             "category": "CONTENT",
             "target_type": "PARAGRAPH",
@@ -1359,6 +1405,7 @@ def test_runtime_renormalizes_prior_enum_only_failure_without_model_call(runtime
             envelope,
             project_id=project_id,
             workflow_id=workflow_id,
+            recovery_run_id=failed_run_id,
         )
     )
 
@@ -1367,6 +1414,254 @@ def test_runtime_renormalizes_prior_enum_only_failure_without_model_call(runtime
     assert result["output"]["result"]["domain_scores"][0]["missing_item_types"] == [
         "EXISTING_APPROACH"
     ]
+
+
+def test_runtime_recovers_expression_polish_action_collision_without_model_call(runtime, monkeypatch):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-EXPRESSION-POLISH"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    provider_output = pack.replay_output(prompt_id)
+    provider_output["result"]["source_preservation_summary"][0]["action"] = "POLISHED"
+
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    model_envelope = attach_trusted_source_catalog(model_envelope)
+    failed_run_id = new_id("run")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id,
+            project_id,
+            workflow_id,
+            prompt_id,
+            "ERROR",
+            "offline-general-primary",
+            "offline-primary",
+            sha256_json(model_envelope),
+            sha256_json(provider_output),
+            json.dumps(model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Provider output failed strict schema validation | "
+            "/result/source_preservation_summary/0/action: "
+            "'POLISHED' is not one of ['PRESERVED', 'REPHRASED', 'REPLACED', 'REMOVED']",
+            100,
+            utc_now(),
+        ),
+    )
+    db.audit(
+        "MODEL_CALL_FAILED",
+        project_id=project_id,
+        object_id="call-expression-polish-old-normalizer",
+        metadata={
+            "run_id": failed_run_id,
+            "prompt_id": prompt_id,
+            "deterministic_recoverable": False,
+            "model_request_spec_hash": executor._model_request_spec_hash(prompt_id),
+            "output_normalizer_version": "2026-07-31.v43-colon-reference-path-aliases",
+        },
+    )
+
+    async def model_must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("the prior expression-polish response must be normalized locally")
+
+    monkeypatch.setattr(executor.gateway, "invoke", model_must_not_be_called)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            recovery_run_id=failed_run_id,
+        )
+    )
+
+    assert result["contract_recovered_from_run_id"] == failed_run_id
+    assert result["output"]["result"]["source_preservation_summary"][0]["action"] == "REPHRASED"
+    assert any(
+        warning.startswith("SYSTEM_EXPRESSION_SOURCE_LINEAGE_ACTION_NORMALIZATION:")
+        for warning in result["output"]["warnings"]
+    )
+    assert pack.validate(prompt_id, "output", result["output"]) == []
+
+
+def test_runtime_does_not_recover_failed_output_from_another_call_checkpoint(
+    runtime,
+    monkeypatch,
+):
+    """A section-level failure cannot be replayed at another call checkpoint."""
+
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-EXPRESSION-POLISH"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    provider_output = pack.replay_output(prompt_id)
+    provider_output["result"]["source_preservation_summary"][0]["action"] = "POLISHED"
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    model_envelope = attach_trusted_source_catalog(model_envelope)
+    failed_run_id = new_id("run")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id,
+            project_id,
+            workflow_id,
+            prompt_id,
+            "ERROR",
+            "offline-general-primary",
+            "offline-primary",
+            sha256_json(model_envelope),
+            sha256_json(provider_output),
+            json.dumps(model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Provider output failed strict schema validation | action drift",
+            100,
+            utc_now(),
+        ),
+    )
+    db.audit(
+        "MODEL_CALL_FAILED",
+        project_id=project_id,
+        object_id="call-section-a",
+        metadata={
+            "run_id": failed_run_id,
+            "prompt_id": prompt_id,
+            "deterministic_recoverable": True,
+            "model_request_spec_hash": executor._model_request_spec_hash(prompt_id),
+            "output_normalizer_version": "older-normalizer",
+            "checkpoint_identity_version": 1,
+            "checkpoint_call_key": "call-section-a",
+        },
+    )
+    calls = {"count": 0}
+
+    async def fresh_model(*_args, **_kwargs):
+        calls["count"] += 1
+        output = pack.replay_output(prompt_id)
+        return LLMResult(
+            output=output,
+            raw_text=json.dumps(output, ensure_ascii=False),
+            model_id="offline-general-primary",
+            endpoint_id="offline-primary",
+        )
+
+    monkeypatch.setattr(executor.gateway, "invoke", fresh_model)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            call_key="call-section-b",
+        )
+    )
+
+    assert calls["count"] == 1
+    assert result["contract_recovered_from_run_id"] is None
+
+
+@pytest.mark.parametrize(
+    ("prompt_id", "missing_fields"),
+    [
+        ("P-TARGETED-REPAIR", ("unresolved_finding_ids",)),
+        (
+            "P-WRITE-BLUEPRINT-CRITIC",
+            (
+                "uncovered_revision_task_ids",
+                "invalid_slot_refs",
+                "critical_unresolved_slot_ids",
+            ),
+        ),
+    ],
+)
+def test_runtime_recovers_missing_deterministic_receipts_without_model_call(
+    runtime,
+    monkeypatch,
+    prompt_id,
+    missing_fields,
+):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    provider_output = pack.replay_output(prompt_id)
+    for field in missing_fields:
+        provider_output["result"].pop(field)
+
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    model_envelope = attach_trusted_source_catalog(model_envelope)
+    failed_run_id = new_id("run")
+    missing_message = ", ".join(missing_fields)
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id,
+            project_id,
+            workflow_id,
+            prompt_id,
+            "ERROR",
+            "offline-general-primary",
+            "offline-primary",
+            sha256_json(model_envelope),
+            sha256_json(provider_output),
+            json.dumps(model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            f"Provider output failed strict schema validation | missing {missing_message}",
+            100,
+            utc_now(),
+        ),
+    )
+    db.audit(
+        "MODEL_CALL_FAILED",
+        project_id=project_id,
+        object_id=f"call-old-{prompt_id}",
+        metadata={
+            "run_id": failed_run_id,
+            "prompt_id": prompt_id,
+            "deterministic_recoverable": False,
+            "model_request_spec_hash": executor._model_request_spec_hash(prompt_id),
+            "output_normalizer_version": "2026-08-03.v44-expression-source-lineage-action",
+        },
+    )
+
+    async def model_must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("the persisted provider response must be normalized locally")
+
+    monkeypatch.setattr(executor.gateway, "invoke", model_must_not_be_called)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            original_environment=(
+                "OFFLINE_LOCAL" if prompt_id == "P-TARGETED-REPAIR" else None
+            ),
+            recovery_run_id=failed_run_id,
+        )
+    )
+
+    assert result["contract_recovered_from_run_id"] == failed_run_id
+    for field in missing_fields:
+        assert result["output"]["result"][field] == []
+    assert any(
+        warning.startswith("SYSTEM_PROTOCOL_RECEIPT_COMPLETION:")
+        for warning in result["output"].get("warnings", [])
+    )
+    assert pack.validate(prompt_id, "output", result["output"]) == []
 
 
 def test_runtime_recovers_prior_field_ownership_failure_without_model_call(runtime, monkeypatch):
@@ -1420,6 +1715,7 @@ def test_runtime_recovers_prior_field_ownership_failure_without_model_call(runti
             envelope,
             project_id=project_id,
             workflow_id=workflow_id,
+            recovery_run_id=failed_run_id,
         )
     )
 
@@ -1504,6 +1800,7 @@ def test_runtime_recovers_safe_package_scalar_source_ref_drift_without_model_cal
             envelope,
             project_id=project_id,
             workflow_id=workflow_id,
+            recovery_run_id=failed_run_id,
         )
     )
 
@@ -1719,7 +2016,7 @@ def test_project_intake_pauses_at_expected_gate(runtime):
     asyncio.run(run())
 
 
-def test_technical_block_can_retry_same_uncommitted_step(runtime):
+def test_legacy_generic_contract_block_does_not_retry_uncommitted_step(runtime):
     settings, _, db, _, _, _, engine, _ = runtime
     project_id = create_project(db)
     add_standard_materials(settings, db, project_id)
@@ -1730,12 +2027,12 @@ def test_technical_block_can_retry_same_uncommitted_step(runtime):
 
     resumed = asyncio.run(engine.advance(workflow["id"]))
 
-    assert resumed["status"] == "WAITING_GATE"
-    assert resumed["current_step"] == 4
-    assert resumed["state"]["technical_retry_attempts"]["0"] == 1
+    assert resumed["status"] == "BLOCKED_CONTRACT"
+    assert resumed["current_step"] == 0
+    assert not resumed["state"].get("technical_retry_attempts")
 
 
-def test_acceptance_run_allows_additional_technical_recovery(runtime):
+def test_acceptance_run_does_not_expand_unclassified_legacy_retry_budget(runtime):
     settings, _, db, _, _, _, engine, _ = runtime
     project_id = create_project(db)
     add_standard_materials(settings, db, project_id)
@@ -1751,11 +2048,11 @@ def test_acceptance_run_allows_additional_technical_recovery(runtime):
 
     resumed = asyncio.run(engine.advance(workflow["id"]))
 
-    assert resumed["status"] == "WAITING_GATE"
-    assert resumed["state"]["technical_retry_attempts"]["0"] == 5
+    assert resumed["status"] == "BLOCKED_TECHNICAL"
+    assert resumed["state"]["technical_retry_attempts"]["0"] == 4
 
 
-def test_deterministic_quality_block_retries_and_supersedes_step_result(runtime):
+def test_deterministic_quality_block_is_classified_before_recheck(runtime):
     settings, _, db, _, _, _, engine, _ = runtime
     project_id = create_project(db)
     add_standard_materials(settings, db, project_id)
@@ -1796,9 +2093,158 @@ def test_deterministic_quality_block_retries_and_supersedes_step_result(runtime)
 
     resumed = asyncio.run(engine.advance(workflow["id"]))
 
-    assert resumed["status"] == "WAITING_GATE", json.dumps(resumed, ensure_ascii=False)
-    assert resumed["state"]["technical_retry_attempts"]["0"] == 1
-    assert resumed["state"]["superseded_step_results"]["0"][0]["run_id"] == "run-superseded"
+    assert resumed["status"] == "BLOCKED_CONTENT", json.dumps(resumed, ensure_ascii=False)
+    assert not resumed["state"].get("technical_retry_attempts")
+    assert resumed["state"]["step_results"]["0"]["run_id"] == "run-superseded"
+
+
+def test_legacy_contract_block_is_classified_before_any_technical_retry(runtime):
+    _settings, _pack, db, _router, _builder, _executor, engine, _exporter = runtime
+    project_id = create_project(db)
+    workflow = engine.start(project_id, "WF-1_PROJECT_INTAKE")
+    state = workflow["state"]
+    state["last_error"] = "Output schema validation failed"
+    engine._update(workflow, status="BLOCKED", state=state)
+
+    migrated = asyncio.run(engine.advance(workflow["id"]))
+
+    assert migrated["status"] == "BLOCKED_CONTRACT"
+    assert not migrated["state"].get("technical_retry_attempts")
+    assert migrated["state"]["legacy_blocked_status_migration"]["to"] == "BLOCKED_CONTRACT"
+
+
+def test_legacy_provider_block_is_classified_without_calling_provider(runtime, monkeypatch):
+    _settings, _pack, db, _router, _builder, executor, engine, _exporter = runtime
+    project_id = create_project(db)
+    workflow = engine.start(project_id, "WF-1_PROJECT_INTAKE")
+    state = workflow["state"]
+    state["last_error"] = "LLM stream completed without message content"
+    engine._update(workflow, status="BLOCKED", state=state)
+    calls = {"count": 0}
+
+    async def forbidden(*_args, **_kwargs):
+        calls["count"] += 1
+        raise AssertionError("legacy classification must not call the provider")
+
+    monkeypatch.setattr(executor, "execute", forbidden)
+    migrated = asyncio.run(engine.advance(workflow["id"]))
+
+    assert migrated["status"] == "WAITING_PROVIDER"
+    assert calls["count"] == 0
+    assert not migrated["state"].get("technical_retry_attempts")
+
+
+def test_legacy_revise_block_is_classified_as_content(runtime):
+    _settings, _pack, db, _router, _builder, _executor, engine, _exporter = runtime
+    project_id = create_project(db)
+    workflow = engine.start(project_id, "WF-1_PROJECT_INTAKE")
+    state = workflow["state"]
+    state["step_results"]["0"] = {
+        "prompt_id": "P-SECURITY-CLASSIFY",
+        "run_id": "run-revise",
+        "status": "REVISE",
+    }
+    state["technical_retry_attempts"] = {"0": 1}
+    engine._update(workflow, status="BLOCKED", state=state)
+
+    migrated = asyncio.run(engine.advance(workflow["id"]))
+
+    assert migrated["status"] == "BLOCKED_CONTENT"
+    assert migrated["state"]["technical_retry_attempts"]["0"] == 1
+    assert migrated["state"]["legacy_blocked_status_migration"]["result_status"] == "REVISE"
+
+
+@pytest.mark.parametrize(
+    "persisted_prompt_id",
+    ["P-SECURITY-CLASSIFY", "P-REMOVED-LEGACY"],
+)
+def test_legacy_human_input_block_recreates_exact_gate(
+    runtime,
+    persisted_prompt_id,
+):
+    _settings, pack, db, _router, _builder, _executor, engine, _exporter = runtime
+    project_id = create_project(db)
+    workflow = engine.start(project_id, "WF-1_PROJECT_INTAKE")
+    run_id = "run-human-input"
+    output = pack.replay_output("P-SECURITY-CLASSIFY")
+    output["status"] = "NEED_USER_INPUT"
+    output["user_questions"] = [
+        {
+            "question_id": "q-1",
+            "question": "请补充材料密级。",
+            "target_paths": ["payload.existing_labels"],
+            "answer_schema": {"type": "STRING"},
+            "blocking": True,
+        }
+    ]
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            run_id, project_id, workflow["id"], persisted_prompt_id,
+            "PASS", "legacy-model", "legacy-endpoint", "input-hash",
+            sha256_json(output), "{}", json.dumps(output, ensure_ascii=False),
+            None, 1, utc_now(),
+        ),
+    )
+    state = workflow["state"]
+    state["step_results"]["0"] = {
+        "prompt_id": persisted_prompt_id,
+        "run_id": run_id,
+        "status": "NEED_USER_INPUT",
+    }
+    engine._update(workflow, status="BLOCKED", state=state)
+
+    migrated = asyncio.run(engine.advance(workflow["id"]))
+    gates = [
+        gate for gate in engine.list_gates(workflow_id=workflow["id"])
+        if gate["status"] == "OPEN"
+    ]
+
+    assert migrated["status"] == "WAITING_GATE"
+    assert len(gates) == 1
+    assert gates[0]["target_id"] == run_id
+    assert gates[0]["questions"][0]["question_id"] == "q-1"
+    if persisted_prompt_id == "P-REMOVED-LEGACY":
+        assert gates[0]["gate_type"] == "PROJECT_GAP_RESOLUTION"
+
+
+def test_waiting_gate_without_open_gate_fails_closed(runtime):
+    _settings, _pack, db, _router, _builder, _executor, engine, _exporter = runtime
+    project_id = create_project(db)
+    workflow = engine.start(project_id, "WF-1_PROJECT_INTAKE")
+    engine._update(workflow, status="WAITING_GATE", state=workflow["state"])
+
+    blocked = asyncio.run(engine.advance(workflow["id"]))
+
+    assert blocked["status"] == "BLOCKED_TECHNICAL"
+    assert blocked["state"]["gate_reconciliation_failure"]["code"] == "WAITING_GATE_WITHOUT_OPEN_GATE"
+    assert db.fetchone(
+        "SELECT COUNT(*) AS n FROM audit_events WHERE object_id=? AND event_type='WORKFLOW_GATE_RECONCILIATION_FAILED'",
+        (workflow["id"],),
+    )["n"] == 1
+
+
+def test_terminal_transition_clears_runtime_resume_flags(runtime):
+    _settings, _pack, _db, _router, _builder, _executor, engine, _exporter = runtime
+    project_id = create_project(_db)
+    workflow = engine.start(project_id, "WF-1_PROJECT_INTAKE")
+    state = workflow["state"]
+    state.update({
+        "runtime_recoverable": True,
+        "runtime_failure_point": "after_db_transaction",
+        "runtime_blocked_at": utc_now(),
+    })
+
+    engine._update(workflow, status="COMPLETED", state=state)
+    completed = engine.get(workflow["id"])
+
+    assert completed["status"] == "COMPLETED"
+    assert "runtime_recoverable" not in completed["state"]
+    assert "runtime_failure_point" not in completed["state"]
+    assert "runtime_blocked_at" not in completed["state"]
 
 
 def test_all_workflows_and_docx_export(runtime):
@@ -2033,13 +2479,14 @@ def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, m
     engine._update(workflow, status="BLOCKED", current_step=0, state=state)
 
     provider_output = pack.replay_output("P-TEMPLATE-EXTRACT")
+    failed_run_id = new_id("run")
     db.execute(
         """INSERT INTO prompt_runs(
                id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
                input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
-            new_id("run"),
+            failed_run_id,
             project_id,
             workflow["id"],
             "P-TEMPLATE-EXTRACT",
@@ -2054,6 +2501,15 @@ def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, m
             1,
             utc_now(),
         ),
+    )
+    db.audit(
+        "MODEL_CALL_FAILED",
+        project_id=project_id,
+        object_id="call-old-contract",
+        metadata={
+            "run_id": failed_run_id,
+            "output_normalizer_version": "normalizer-v1",
+        },
     )
 
     def build(prompt_id, project_id_arg, **_kwargs):
@@ -2092,6 +2548,9 @@ def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, m
     monkeypatch.setattr(builder, "build", build)
     monkeypatch.setattr(executor, "execute", execute)
 
+    advanced = asyncio.run(engine.advance(workflow["id"]))
+    assert advanced["status"] == "BLOCKED_CONTRACT"
+    assert calls == []
     advanced = asyncio.run(engine.advance(workflow["id"]))
 
     assert calls[:2] == ["P-TEMPLATE-EXTRACT", "P-TEMPLATE-CRITIC"], advanced["state"].get("last_error")
@@ -2133,7 +2592,7 @@ def test_runtime_surfaces_secondary_error_evidence_persistence_failure(runtime, 
         )
 
     message = str(captured.value)
-    assert message.startswith("Output schema validation failed")
+    assert message.startswith("Provider output failed strict schema validation")
     assert "ERROR_EVIDENCE_PERSISTENCE_FAILED" in message
     assert "simulated disk full" in message
 
@@ -2228,6 +2687,7 @@ def test_runtime_recovers_safe_package_source_prefix_alias_without_model_call(
             envelope,
             project_id=project_id,
             workflow_id=workflow_id,
+            recovery_run_id=failed_run_id,
         )
     )
 
@@ -2314,6 +2774,7 @@ def test_runtime_recovers_safe_package_critic_object_path_sources_without_model_
             envelope,
             project_id=project_id,
             workflow_id=workflow_id,
+            recovery_run_id=failed_run_id,
         )
     )
 
@@ -2353,3 +2814,234 @@ def test_context_replacement_validates_target_field_without_full_envelope(runtim
         {"not": "an identifier"},
     )
     assert envelope["scope"]["project_id"] == original_project_id
+
+
+def test_targeted_repair_normalizer_derives_missing_unresolved_receipt(runtime):
+    _, pack, _, _, _, executor, _, _ = runtime
+    envelope = pack.replay_input("P-TARGETED-REPAIR")
+    output = pack.replay_output("P-TARGETED-REPAIR", "normal")
+    envelope["payload"]["findings_to_repair"].append({
+        "finding_instance_id": "finding-replay-002",
+        "code": "WRITE_SCOPE_DRIFT",
+        "severity": "P1",
+        "category": "CONTENT",
+        "target_type": "WRITING_CANDIDATE",
+        "target_path_or_span": "/content/text",
+        "description": "A second requested repair remains unresolved.",
+        "evidence_refs": [],
+        "repairable": True,
+        "repair_instruction": "Keep this finding unresolved in this attempt.",
+        "suggested_route": "ORIGINAL_PRODUCER",
+        "blocking": True,
+    })
+    output["result"].pop("unresolved_finding_ids")
+
+    normalized = executor._normalize_output("P-TARGETED-REPAIR", output, envelope)
+
+    assert normalized["result"]["unresolved_finding_ids"] == ["finding-replay-002"]
+    assert any(
+        warning.startswith("SYSTEM_PROTOCOL_RECEIPT_COMPLETION:")
+        for warning in normalized.get("warnings", [])
+    )
+    assert pack.validate("P-TARGETED-REPAIR", "output", normalized) == []
+
+
+def test_targeted_repair_normalizer_does_not_overwrite_present_invalid_receipt(runtime):
+    _, pack, _, _, _, executor, _, _ = runtime
+    envelope = pack.replay_input("P-TARGETED-REPAIR")
+    output = pack.replay_output("P-TARGETED-REPAIR", "normal")
+    output["result"]["unresolved_finding_ids"] = None
+
+    with pytest.raises(PromptExecutionError, match="Required output container is null"):
+        executor._normalize_output("P-TARGETED-REPAIR", output, envelope)
+
+
+def test_blueprint_critic_normalizer_completes_guard_owned_empty_receipts(runtime):
+    _, pack, _, _, _, executor, _, _ = runtime
+    output = pack.replay_output("P-WRITE-BLUEPRINT-CRITIC", "normal")
+    fields = (
+        "uncovered_revision_task_ids",
+        "invalid_slot_refs",
+        "critical_unresolved_slot_ids",
+    )
+    for field in fields:
+        output["result"].pop(field)
+
+    normalized = executor._normalize_output("P-WRITE-BLUEPRINT-CRITIC", output)
+
+    assert {field: normalized["result"][field] for field in fields} == {
+        field: [] for field in fields
+    }
+    assert pack.validate("P-WRITE-BLUEPRINT-CRITIC", "output", normalized) == []
+
+
+def test_advance_restores_waiting_gate_when_gate_commit_preceded_status_commit(runtime):
+    _, _, _, _, _, _, engine, _ = runtime
+    project_id = create_project(engine.db)
+    workflow = engine.start(project_id, "WF-1_PROJECT_INTAKE")
+    gate_id = engine._create_gate(
+        workflow,
+        "PROJECT_GAP_RESOLUTION",
+        target_id="run-crash-window",
+        questions=[],
+    )
+    assert engine.get(workflow["id"])["status"] == "RUNNING"
+
+    recovered = asyncio.run(engine.advance(workflow["id"]))
+
+    assert recovered["status"] == "WAITING_GATE"
+    assert engine._open_gate(workflow["id"])["id"] == gate_id
+
+
+def test_runtime_does_not_downgrade_old_checkpoint_when_failure_audit_is_older_than_window(
+    runtime,
+    monkeypatch,
+):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-EXPRESSION-POLISH"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    provider_output = pack.replay_output(prompt_id)
+    provider_output["result"]["source_preservation_summary"][0]["action"] = "POLISHED"
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    model_envelope = attach_trusted_source_catalog(model_envelope)
+    failed_run_id = new_id("run")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id, project_id, workflow_id, prompt_id, "ERROR",
+            "offline-general-primary", "offline-primary",
+            sha256_json(model_envelope), sha256_json(provider_output),
+            json.dumps(model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Provider output failed strict schema validation | action drift",
+            1, "2026-01-01T00:00:00+00:00",
+        ),
+    )
+    db.audit(
+        "MODEL_CALL_FAILED",
+        project_id=project_id,
+        object_id="call-section-a",
+        metadata={
+            "run_id": failed_run_id,
+            "prompt_id": prompt_id,
+            "deterministic_recoverable": True,
+            "model_request_spec_hash": executor._model_request_spec_hash(prompt_id),
+            "output_normalizer_version": "older-normalizer",
+            "checkpoint_identity_version": 1,
+            "checkpoint_call_key": "call-section-a",
+        },
+    )
+    for index in range(205):
+        db.audit(
+            "MODEL_CALL_FAILED",
+            project_id=project_id,
+            object_id=f"call-unrelated-{index}",
+            metadata={"run_id": f"run-unrelated-{index}"},
+        )
+    calls = {"count": 0}
+
+    async def fresh_model(*_args, **_kwargs):
+        calls["count"] += 1
+        output = pack.replay_output(prompt_id)
+        return LLMResult(
+            output=output,
+            raw_text=json.dumps(output, ensure_ascii=False),
+            model_id="offline-general-primary",
+            endpoint_id="offline-primary",
+        )
+
+    monkeypatch.setattr(executor.gateway, "invoke", fresh_model)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            call_key="call-section-b",
+        )
+    )
+
+    assert calls["count"] == 1
+    assert result["contract_recovered_from_run_id"] is None
+
+
+def test_runtime_exact_recovery_run_is_not_hidden_by_fifty_newer_failures(
+    runtime,
+    monkeypatch,
+):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-EXPRESSION-POLISH"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    provider_output = pack.replay_output(prompt_id)
+    provider_output["result"]["source_preservation_summary"][0]["action"] = "POLISHED"
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    model_envelope = attach_trusted_source_catalog(model_envelope)
+    target_run_id = "run-exact-old-target"
+
+    def insert_failure(run_id: str, created_at: str, call_key: str) -> None:
+        db.execute(
+            """INSERT INTO prompt_runs(
+                   id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+                   input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                run_id, project_id, workflow_id, prompt_id, "ERROR",
+                "offline-general-primary", "offline-primary",
+                sha256_json(model_envelope), sha256_json(provider_output),
+                json.dumps(model_envelope, ensure_ascii=False),
+                json.dumps(provider_output, ensure_ascii=False),
+                "Provider output failed strict schema validation | action drift",
+                1, created_at,
+            ),
+        )
+        db.audit(
+            "MODEL_CALL_FAILED",
+            project_id=project_id,
+            object_id=call_key,
+            metadata={
+                "run_id": run_id,
+                "prompt_id": prompt_id,
+                "deterministic_recoverable": True,
+                "model_request_spec_hash": executor._model_request_spec_hash(prompt_id),
+                "output_normalizer_version": "older-normalizer",
+                "checkpoint_identity_version": 1,
+                "checkpoint_call_key": call_key,
+            },
+        )
+
+    insert_failure(target_run_id, "2026-01-01T00:00:00+00:00", "call-old-target")
+    for index in range(60):
+        insert_failure(
+            f"run-newer-{index}",
+            f"2026-02-{(index % 28) + 1:02d}T00:{index % 60:02d}:00+00:00",
+            f"call-newer-{index}",
+        )
+
+    async def model_must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("the exact failed run must be revalidated locally")
+
+    monkeypatch.setattr(executor.gateway, "invoke", model_must_not_be_called)
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            call_key="call-current-migration",
+            recovery_run_id=target_run_id,
+        )
+    )
+
+    assert result["contract_recovered_from_run_id"] == target_run_id
+    assert result["output"]["result"]["source_preservation_summary"][0][
+        "action"
+    ] == "REPHRASED"

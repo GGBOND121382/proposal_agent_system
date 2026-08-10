@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-PROJECT-DEFINITION-EXTRACT",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -404,7 +404,7 @@
     },
     "findings": [
       {
-        "code": "PD_WRONG_ITEM_TYPE",
+        "code": "PROJECT_GRAPH_INCOMPLETE",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

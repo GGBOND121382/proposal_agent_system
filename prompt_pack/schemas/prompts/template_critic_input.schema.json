@@ -10,7 +10,7 @@
       "const": "P-TEMPLATE-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "task": {
       "type": "object",
@@ -346,7 +346,8 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/template_critic_output.schema.json"
     },
     "trusted_source_catalog": {
       "type": "array",

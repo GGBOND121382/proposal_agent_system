@@ -8,6 +8,12 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from .candidate_integrity import (
+    candidate_text_divergence,
+    paragraph_identity_error,
+    visible_candidate_snapshot,
+)
+from .paragraph_order import canonical_candidate_text, ordered_paragraphs, paragraph_sequence_error
 from .privacy import find_sensitive_values
 from .proposal_quality import SECTION_FUNCTION_ROLE_ALIASES
 from .workflow_repair import repair_override_key
@@ -26,8 +32,10 @@ from .workflow_input import (
     REFERENCE_TEMPLATE_INPUT,
     build_human_resolutions,
     canonicalize_human_resolution,
+    human_resolution_scope_key,
     material_input_questions,
     resolution_overrides,
+    section_id_for_run,
 )
 
 HASH_PLACEHOLDER = "a" * 64
@@ -259,6 +267,82 @@ class ContextBuilder:
             latest_by_section[section_id] = {"run_id": row["id"], "prompt_id": row.get("prompt_id"), "section": section, "candidate": candidate}
         return list(latest_by_section.values())
 
+    def _bound_authoring_section_results(
+        self,
+        project_id: str,
+        state: dict[str, Any],
+    ) -> tuple[str, list[dict[str, Any]]]:
+        bindings = state.get("prerequisite_workflow_ids") or {}
+        authoring_id = str(bindings.get("WF-4_PROPOSAL_AUTHORING") or "").strip()
+        if not authoring_id:
+            raise ValueError("Final confidentiality review has no frozen WF-4 prerequisite binding.")
+        row = self.db.fetchone(
+            "SELECT project_id,workflow_type,status,state_json FROM workflows WHERE id=?",
+            (authoring_id,),
+        )
+        if not row:
+            raise ValueError(f"Frozen authoring workflow does not exist: {authoring_id}")
+        if str(row.get("project_id") or "") != project_id:
+            raise ValueError("Frozen authoring workflow belongs to another project.")
+        if row.get("workflow_type") != "WF-4_PROPOSAL_AUTHORING":
+            raise ValueError("Frozen prerequisite is not a WF-4 authoring workflow.")
+        authoring_state = json.loads(row.get("state_json") or "{}")
+        if authoring_state.get("parent_workflow_id"):
+            raise ValueError("Final confidentiality review must bind the top-level WF-4 workflow, not a child worker.")
+        if row.get("status") != "COMPLETED":
+            raise ValueError("Frozen WF-4 authoring workflow is not completed.")
+        section_results = [
+            item for item in authoring_state.get("section_results") or []
+            if isinstance(item, dict)
+        ]
+        if not section_results:
+            raise ValueError("Frozen WF-4 authoring workflow has no section-result index.")
+        return authoring_id, section_results
+
+    @staticmethod
+    def _assert_final_candidate_integrity(candidates: list[dict[str, Any]]) -> None:
+        for item in candidates:
+            section_id = str((item.get("section") or {}).get("section_id") or "<unknown-section>")
+            candidate = item.get("candidate") or {}
+            errors = [
+                paragraph_sequence_error(candidate.get("paragraphs")),
+                paragraph_identity_error(candidate.get("paragraphs")),
+                candidate_text_divergence(candidate),
+            ]
+            errors = [error for error in errors if error]
+            if errors:
+                raise ValueError(
+                    f"Frozen candidate {section_id} violates the canonical paragraph contract: "
+                    + "; ".join(errors)
+                )
+
+    def final_review_candidate_set_snapshot(
+        self,
+        project_id: str,
+        state: dict[str, Any],
+        *,
+        document_section_map: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Bind the final review to exact WF-4 candidate and paragraph identities."""
+
+        authoring_id, section_results = self._bound_authoring_section_results(project_id, state)
+        candidates = self._content_candidates(
+            project_id,
+            authoring_id,
+            section_results=section_results,
+        )
+        self._assert_final_candidate_integrity(candidates)
+        snapshot = visible_candidate_snapshot(
+            candidates,
+            document_section_map=document_section_map,
+        )
+        if snapshot.get("section_count") != len(section_results):
+            raise ValueError(
+                "Frozen WF-4 candidate identity is incomplete: "
+                f"expected {len(section_results)} sections, got {snapshot.get('section_count')}"
+            )
+        return snapshot
+
 
     @staticmethod
     def _prior_section_digest(candidates: list[dict[str, Any]], current_section_id: str | None = None) -> list[dict[str, Any]]:
@@ -269,7 +353,7 @@ class ContextBuilder:
                 continue
             candidate = item.get("candidate") or {}
             advancement = candidate.get("claim_advancement") or {}
-            paragraphs = [p for p in candidate.get("paragraphs", []) if isinstance(p, dict)]
+            paragraphs = ordered_paragraphs(candidate.get("paragraphs"))
             signatures: list[str] = []
             for paragraph in paragraphs:
                 text = "".join(str(paragraph.get("text") or "").split())
@@ -288,14 +372,25 @@ class ContextBuilder:
     @staticmethod
     def _integration_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         allowed = ["candidate_id", "candidate_text", "paragraphs", "trace_links", "term_usage", "unresolved_items", "claim_advancement"]
-        return {key: candidate.get(key, [] if key in {"paragraphs", "trace_links", "term_usage", "unresolved_items"} else ({} if key == "claim_advancement" else "")) for key in allowed}
+        result = {
+            key: candidate.get(
+                key,
+                [] if key in {"paragraphs", "trace_links", "term_usage", "unresolved_items"}
+                else ({} if key == "claim_advancement" else ""),
+            )
+            for key in allowed
+        }
+        result["paragraphs"] = ordered_paragraphs(candidate.get("paragraphs"))
+        result["candidate_text"] = canonical_candidate_text(candidate)
+        return result
 
     def _candidate_document(self, project: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:
         sections = []
         for item in candidates:
             source = item["section"]
             candidate = item["candidate"]
-            text = candidate.get("candidate_text", "")
+            paragraphs = ordered_paragraphs(candidate.get("paragraphs"))
+            text = canonical_candidate_text(candidate)
             sections.append(
                 {
                     "section_id": source["section_id"],
@@ -304,8 +399,8 @@ class ContextBuilder:
                     "level": source.get("level", 1),
                     "text": text,
                     "text_hash": sha256_json({"section_id": source["section_id"], "text": text}),
-                    "block_ids": [paragraph.get("paragraph_id") for paragraph in candidate.get("paragraphs", []) if paragraph.get("paragraph_id")],
-                    "contains_table": any(paragraph.get("text", "").startswith("[[TABLE]]") for paragraph in candidate.get("paragraphs", [])),
+                    "block_ids": [paragraph.get("paragraph_id") for paragraph in paragraphs if paragraph.get("paragraph_id")],
+                    "contains_table": any(paragraph.get("text", "").startswith("[[TABLE]]") for paragraph in paragraphs),
                     "contains_formula": False,
                     "contains_image": False,
                     "contains_comment": False,
@@ -1463,8 +1558,30 @@ class ContextBuilder:
         if not workflow_id:
             return []
 
-        indexed_ids = (state.get("human_resolution_artifact_ids") or {}).get(prompt_id)
-        indexed_ids = [str(item) for item in indexed_ids or [] if str(item).strip()]
+        section_id = str(state.get("active_section_id") or "").strip() or None
+        workflow_row = self.db.fetchone(
+            "SELECT current_step FROM workflows WHERE id=?",
+            (workflow_id,),
+        )
+        workflow_step = int((workflow_row or {}).get("current_step") or 0)
+        scope_key = human_resolution_scope_key(
+            prompt_id,
+            section_id=section_id,
+            workflow_step=workflow_step,
+        )
+        index = state.get("human_resolution_artifact_ids") or {}
+        indexed_ids = [
+            str(item)
+            for item in (index.get(scope_key) or [])
+            if str(item).strip()
+        ]
+        # Read-only migration visibility.  Section prompts accept legacy
+        # prompt-only artifacts only when their Gate target can be proven to
+        # belong to the current section below.
+        for item in index.get(prompt_id) or []:
+            normalized = str(item).strip()
+            if normalized and normalized not in indexed_ids:
+                indexed_ids.append(normalized)
         if not indexed_ids:
             # The workflow-state index is the visibility boundary for immutable
             # resolution artifacts.  Querying the project-wide artifact table
@@ -1490,7 +1607,7 @@ class ContextBuilder:
             tuple(params),
         )
 
-        latest_by_target: dict[tuple[str, ...], tuple[int, dict[str, Any]]] = {}
+        selected: list[tuple[int, dict[str, Any], str, frozenset[str]]] = []
         for row in rows:
             try:
                 payload = json.loads(row.get("content_json") or "{}")
@@ -1500,6 +1617,27 @@ class ContextBuilder:
                 continue
             if str(payload.get("prompt_id") or prompt_id) != prompt_id:
                 continue
+            payload_scope = str(payload.get("scope_key") or "").strip()
+            payload_section = str(payload.get("section_id") or "").strip() or None
+            if payload_scope:
+                if payload_scope != scope_key:
+                    continue
+            elif section_id:
+                if payload_section != section_id:
+                    gate = self.db.fetchone(
+                        "SELECT target_id FROM gates WHERE id=? AND workflow_id=?",
+                        (str(payload.get("gate_id") or ""), workflow_id),
+                    )
+                    inferred = section_id_for_run(
+                        state,
+                        str((gate or {}).get("target_id") or payload.get("target_run_id") or ""),
+                    )
+                    if inferred != section_id:
+                        continue
+            elif payload_section:
+                # A section-bound legacy artifact must not be exposed to a
+                # workflow-step prompt merely because the prompt id matches.
+                continue
             resolution = payload.get("resolution")
             if not isinstance(resolution, dict):
                 continue
@@ -1507,20 +1645,39 @@ class ContextBuilder:
                 resolution = canonicalize_human_resolution(resolution)
             except ValueError:
                 continue
-            targets = tuple(
-                sorted(
-                    str(item).strip()
-                    for item in resolution.get("target_paths") or []
-                    if str(item).strip()
+            targets = frozenset(
+                str(item).strip()
+                for item in resolution.get("target_paths") or []
+                if str(item).strip()
+            )
+            question_id = str(
+                resolution.get("question_id")
+                or resolution.get("resolution_id")
+                or ""
+            ).strip()
+            # A later answer supersedes an earlier one when either the logical
+            # question identity is reused or the resolved field overlaps.  This
+            # prevents a revised Gate from injecting both the old target and the
+            # retargeted answer for the same question.
+            selected = [
+                item
+                for item in selected
+                if item[2] != question_id
+                and not (targets and item[3] and targets.intersection(item[3]))
+            ]
+            selected.append(
+                (
+                    int(row.get("version") or 0),
+                    copy.deepcopy(resolution),
+                    question_id,
+                    targets,
                 )
             )
-            scope_key = targets or (f"question:{resolution.get('question_id') or resolution.get('resolution_id')}",)
-            latest_by_target[scope_key] = (int(row.get("version") or 0), copy.deepcopy(resolution))
 
         return [
             resolution
-            for _, resolution in sorted(
-                latest_by_target.values(),
+            for _, resolution, _, _ in sorted(
+                selected,
                 key=lambda item: (item[0], str(item[1].get("resolution_id") or "")),
             )
         ][-50:]
@@ -1530,20 +1687,54 @@ class ContextBuilder:
         prompt_id: str,
         workflow_id: str | None,
     ) -> list[dict[str, Any]]:
+        section_id = str(state.get("active_section_id") or "").strip() or None
+        workflow_row = (
+            self.db.fetchone("SELECT current_step FROM workflows WHERE id=?", (workflow_id,))
+            if workflow_id
+            else None
+        )
+        workflow_step = int((workflow_row or {}).get("current_step") or 0)
+        scope_key = human_resolution_scope_key(
+            prompt_id,
+            section_id=section_id,
+            workflow_step=workflow_step,
+        )
+        artifact_index = state.get("human_resolution_artifact_ids") or {}
+        indexed_authority_exists = bool(
+            artifact_index.get(scope_key) or artifact_index.get(prompt_id)
+        )
         artifact_resolutions = self._human_resolution_artifacts_for_prompt(
             state=state,
             prompt_id=prompt_id,
             workflow_id=workflow_id,
         )
-        if artifact_resolutions:
+        if artifact_resolutions or indexed_authority_exists:
+            # Once an immutable Artifact index exists, invalid, stale, or
+            # cross-scope artifacts must fail closed.  Falling back to mutable
+            # legacy state would silently resurrect an answer that the current
+            # scoped Artifact set did not authorize.
             return artifact_resolutions
 
         # Migration-only fallback. New Gate decisions are persisted as immutable
         # HUMAN_RESOLUTION artifacts and must not repopulate workflow state.
-        records = (state.get("human_resolutions") or {}).get(prompt_id) or []
+        legacy_index = state.get("human_resolutions") or {}
+        records = list(legacy_index.get(scope_key) or [])
+        for item in legacy_index.get(prompt_id) or []:
+            if item not in records:
+                records.append(item)
         resolved: list[dict[str, Any]] = []
         for item in records[-50:]:
             if not isinstance(item, dict):
+                continue
+            item_scope = str(item.get("scope_key") or "").strip()
+            item_section = str(item.get("section_id") or "").strip() or None
+            if item_scope and item_scope != scope_key:
+                continue
+            if section_id and not item_scope and item_section != section_id:
+                # Unscoped prompt-only state is ambiguous across proposal
+                # sections and is intentionally not injected.
+                continue
+            if not section_id and item_section:
                 continue
             try:
                 resolved.append(canonicalize_human_resolution(item))
@@ -2064,13 +2255,20 @@ class ContextBuilder:
         blueprint = self._repair_override(state, "P-WRITE-BLUEPRINT", workflow_id=workflow_id)
         if blueprint is None:
             blueprint = self._result(project["id"], "P-WRITE-BLUEPRINT", "blueprint")
+        candidate_workflow_id = workflow_id if prompt_id == "P-INTEGRATION-CRITIC" else None
+        candidate_section_results = (state.get("section_results") or []) if prompt_id == "P-INTEGRATION-CRITIC" else None
+        if prompt_id == "P-FINAL-CONFIDENTIALITY-REVIEW":
+            candidate_workflow_id, candidate_section_results = self._bound_authoring_section_results(
+                project["id"],
+                state,
+            )
         content_candidates = self._content_candidates(
             project["id"],
-            workflow_id if prompt_id == "P-INTEGRATION-CRITIC" else None,
-            section_results=(state.get("section_results") or [])
-            if prompt_id == "P-INTEGRATION-CRITIC"
-            else None,
+            candidate_workflow_id,
+            section_results=candidate_section_results,
         )
+        if prompt_id == "P-FINAL-CONFIDENTIALITY-REVIEW":
+            self._assert_final_candidate_integrity(content_candidates)
         content = content_candidates[-1]["candidate"] if content_candidates else (self._result(project["id"], "P-EXPRESSION-POLISH") or self._result(project["id"], "P-WRITE-CONTENT"))
         safe_package = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE")
         research_synthesis = self._result(project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS")

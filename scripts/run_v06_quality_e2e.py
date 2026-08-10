@@ -25,6 +25,7 @@ from app.research import PublicResearchService
 from app.security import SecurityRouter
 from app.util import new_id, utc_now
 from app.runtime_api import WorkflowEngine
+from app.workflow_status import should_pause_automatic_advancement
 
 
 def _add_document(settings: Settings, db: Database, project_id: str, filename: str, role: str, text: str) -> None:
@@ -108,7 +109,7 @@ async def _finish(engine: WorkflowEngine, project_id: str, workflow_type: str, m
             action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
             engine.decide_gate(gate["id"], action=action, decided_by="v06-e2e", decided_role=gate["required_role"])
             continue
-        if workflow["status"] in {"COMPLETED", "BLOCKED", "WAITING_CONFIGURATION", "WAITING_PREREQUISITE", "CANCELLED"}:
+        if should_pause_automatic_advancement(workflow["status"]):
             return workflow
     raise RuntimeError(f"{workflow_type} exceeded {max_steps} steps")
 

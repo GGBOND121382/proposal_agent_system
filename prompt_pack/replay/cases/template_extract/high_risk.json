@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-TEMPLATE-EXTRACT",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.1",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -268,7 +268,7 @@
     },
     "findings": [
       {
-        "code": "TEMPLATE_FACT_CONTAMINATION",
+        "code": "TEMPLATE_ARGUMENT_PATTERN_MISSING",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

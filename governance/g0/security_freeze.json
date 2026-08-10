@@ -1,5 +1,5 @@
 {
-    "contract_version":  "1.1.0",
+    "contract_version":  "1.2.0",
     "baseline_commit":  "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
     "scope":  "Security classification, security-level mapping, outbound package protection, model routing, approval gates, and the security steps in WF-1/WF-3/WF-5.",
     "security_levels":  [
@@ -37,6 +37,7 @@
                                          "repair_environment":  "SAME_AS_ORIGINAL"
                                      },
     "frozen_pathspecs":  [
+                             "app/private_storage.py",
                              "app/security.py",
                              "app/privacy.py",
                              "app/llm.py",
@@ -60,8 +61,29 @@
                          ],
     "approved_changes":  [
                              {
+                                 "path":  "app/privacy.py",
+                                 "blob_sha":  "1c05b256151b76a46533734b07c33faeb3aad60f",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved audited patch hardening for outbound credential and security-label protection.",
+                                 "approval_reference":  "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+                             },
+                             {
+                                 "path":  "app/private_storage.py",
+                                 "blob_sha":  "54ddd0956a3783a3afa7a1654f4052f2a9e3cdde",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved cross-platform private-storage enforcement using POSIX modes and protected Windows DACLs.",
+                                 "approval_reference":  "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+                             },
+                             {
+                                 "path":  "app/security.py",
+                                 "blob_sha":  "47aef1644f37d00e56c893b5a76de31041921bc6",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved audited patch hardening for explicit outbound endpoint authorization.",
+                                 "approval_reference":  "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+                             },
+                             {
                                  "path":  "app/llm.py",
-                                 "blob_sha":  "594ebd3fb3752dad6576200d4e8d57b0b03ec9ae",
+                                 "blob_sha":  "d756f7061a6aad6dccd1169c9c22f1055d514081",
                                  "owner":  "Security Runtime Maintainers",
                                  "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -75,7 +97,7 @@
                              },
                              {
                                  "path":  "app/workflow_gates.py",
-                                 "blob_sha":  "ebb399666be11a66ac80832d7e5d1eb0f1756e16",
+                                 "blob_sha":  "2eeda796049a8d668500b94ee9004adcdadbf65f",
                                  "owner":  "Security Runtime Maintainers",
                                  "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
@@ -89,42 +111,42 @@
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/final_confidentiality_review_input.schema.json",
-                                 "blob_sha":  "459bf35afa5788f9d6084e91ab86d016c5b67bb6",
+                                 "blob_sha":  "c5e4c75e0039c24a1cdc3566ee08d392becf1019",
                                  "owner":  "Security Runtime Maintainers",
                                  "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
-                                 "blob_sha":  "f141da130665ebedc97ec6c083f2a911c917ca6f",
+                                 "blob_sha":  "e3b799b80b38686a357f3cf19536777a727fabf4",
                                  "owner":  "Security Runtime Maintainers",
                                  "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
-                                 "blob_sha":  "0b05147af604547a05e2e6b289cc2216aee0ce8f",
+                                 "blob_sha":  "2511780ea4110dc32bed2163748e9ab44d489bb7",
                                  "owner":  "Security Runtime Maintainers",
                                  "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
-                                 "blob_sha":  "3f8341ac01e0baebd1570164993d6d3d6cffc807",
+                                 "blob_sha":  "b1e886fcf205c5b1bd7974e50c676d57a6aecac6",
                                  "owner":  "Security Runtime Maintainers",
                                  "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/security_classify_critic_input.schema.json",
-                                 "blob_sha":  "ac51096f3422a4942aea16032fbeb06debb44c69",
+                                 "blob_sha":  "40cd3a9337d40cfc5bf0e22a527fb971cd45e4aa",
                                  "owner":  "Security Runtime Maintainers",
                                  "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
                              },
                              {
                                  "path":  "prompt_pack/schemas/prompts/security_classify_input.schema.json",
-                                 "blob_sha":  "1495c7b1471ce6e2e92578e6c3eeeb8a8827f8e6",
+                                 "blob_sha":  "2db417ba4fefe4c6f7c4b72a81a99ef9ab83b0b4",
                                  "owner":  "Security Runtime Maintainers",
                                  "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"

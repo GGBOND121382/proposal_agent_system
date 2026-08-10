@@ -39,13 +39,16 @@ class SecurityRouter:
         ctx = envelope.get("security_context", {})
         level = ctx.get("input_max_security_level") or ctx.get("project_security_level") or "INTERNAL"
         approval = ctx.get("online_transfer_approval_status", "NOT_REQUIRED")
-        allowed_endpoints = set(ctx.get("allowed_model_endpoint_ids") or [])
+        allowed_endpoint_values = ctx.get("allowed_model_endpoint_ids")
+        allowed_endpoints = set(allowed_endpoint_values or [])
 
         if required == "ONLINE_PUBLIC":
             if level != "PUBLIC":
                 raise RoutingDenied(f"Online execution only accepts PUBLIC input, got {level}")
-            if approval not in {"APPROVED", "NOT_REQUIRED"}:
+            if approval != "APPROVED":
                 raise RoutingDenied("Online transfer approval is missing")
+            if not allowed_endpoints:
+                raise RoutingDenied("Online execution has no explicitly allowed endpoint")
         elif required == "OFFLINE_LOCAL":
             pass
         else:
@@ -70,7 +73,7 @@ class SecurityRouter:
             if level not in endpoint.get("allowed_security_levels", []):
                 reasons.append(f"{model_id}: security level denied")
                 continue
-            if allowed_endpoints and endpoint["endpoint_id"] not in allowed_endpoints:
+            if allowed_endpoint_values is not None and endpoint["endpoint_id"] not in allowed_endpoints:
                 reasons.append(f"{model_id}: not in allowed endpoint list")
                 continue
             provider_name = str(model.get("provider_model_name") or "").strip()

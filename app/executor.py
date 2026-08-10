@@ -29,6 +29,7 @@ from .output_integrity import (
 )
 from .proposal_quality import ProposalQualityGuard, SECTION_FUNCTION_ROLE_ALIASES
 from .runtime_failures import ProviderFailureKind
+from .secret_redaction import redact_secret_text
 from .quality_guard import (
     QualityGuardContractError,
     QualityGuardObserver,
@@ -63,7 +64,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-07-31.v43-colon-reference-path-aliases"
+OUTPUT_NORMALIZER_VERSION = "2026-08-03.v45-protocol-receipt-completion"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -1010,6 +1011,17 @@ class PromptExecutor:
                 "SYSTEM_PROTOCOL_CONSTANT_NORMALIZATION: " + ", ".join(protocol_changes)
             )
 
+        receipt_changes = self._complete_deterministic_protocol_receipts(
+            prompt_id,
+            normalized,
+            envelope,
+        )
+        if receipt_changes:
+            normalized.setdefault("warnings", []).append(
+                "SYSTEM_PROTOCOL_RECEIPT_COMPLETION: "
+                + "; ".join(receipt_changes[:20])
+            )
+
         normalized = self._normalize_semantic_enum_tree(normalized)
         normalized, enum_alias_report = normalize_registered_enum_aliases_against_schema(
             normalized,
@@ -1031,6 +1043,17 @@ class PromptExecutor:
                     for item in (enum_alias_report.get("changes") or [])[:20]
                 )
             )
+
+        if prompt_id == "P-EXPRESSION-POLISH" and envelope:
+            lineage_changes = self._normalize_expression_source_lineage_actions(
+                normalized,
+                envelope,
+            )
+            if lineage_changes:
+                normalized.setdefault("warnings", []).append(
+                    "SYSTEM_EXPRESSION_SOURCE_LINEAGE_ACTION_NORMALIZATION: "
+                    + "; ".join(lineage_changes[:20])
+                )
 
         removed_instance_schema_keywords = 0
         source_alias_changes = 0
@@ -1107,6 +1130,148 @@ class PromptExecutor:
                     validation_errors=reference_errors,
                 )
         return normalized
+
+    @staticmethod
+    def _complete_deterministic_protocol_receipts(
+        prompt_id: str,
+        output: dict[str, Any],
+        envelope: dict[str, Any] | None,
+    ) -> list[str]:
+        """Complete only guard-owned or input-derived protocol receipts.
+
+        These fields are not business content.  They either mirror a complete
+        partition that can be derived from the immutable request, or are
+        compatibility placeholders whose schema explicitly requires an empty
+        list because the deterministic guard owns the corresponding findings.
+
+        Existing values, including ``null`` and malformed containers, are
+        never overwritten; strict schema validation must still reject those.
+        """
+
+        result = output.get("result")
+        if not isinstance(result, dict):
+            return []
+
+        changes: list[str] = []
+        if prompt_id == "P-TARGETED-REPAIR":
+            if "unresolved_finding_ids" in result or not isinstance(envelope, dict):
+                return changes
+            payload = envelope.get("payload")
+            findings = (
+                payload.get("findings_to_repair")
+                if isinstance(payload, dict)
+                else None
+            )
+            resolved = result.get("resolved_finding_ids")
+            if not isinstance(findings, list) or not isinstance(resolved, list):
+                return changes
+
+            requested_ids: list[str] = []
+            for item in findings:
+                if not isinstance(item, dict):
+                    return changes
+                finding_id = item.get("finding_instance_id")
+                if not isinstance(finding_id, str) or not finding_id.strip():
+                    return changes
+                requested_ids.append(finding_id.strip())
+            if not requested_ids or len(set(requested_ids)) != len(requested_ids):
+                return changes
+
+            resolved_ids: list[str] = []
+            for finding_id in resolved:
+                if not isinstance(finding_id, str) or not finding_id.strip():
+                    return changes
+                resolved_ids.append(finding_id.strip())
+            if len(set(resolved_ids)) != len(resolved_ids):
+                return changes
+            requested_set = set(requested_ids)
+            if any(finding_id not in requested_set for finding_id in resolved_ids):
+                return changes
+
+            resolved_set = set(resolved_ids)
+            result["unresolved_finding_ids"] = [
+                finding_id
+                for finding_id in requested_ids
+                if finding_id not in resolved_set
+            ]
+            changes.append(
+                "$/result/unresolved_finding_ids derived from "
+                "$/payload/findings_to_repair minus $/result/resolved_finding_ids"
+            )
+            return changes
+
+        if prompt_id == "P-WRITE-BLUEPRINT-CRITIC":
+            guard_owned_placeholders = (
+                "uncovered_revision_task_ids",
+                "invalid_slot_refs",
+                "critical_unresolved_slot_ids",
+            )
+            for field in guard_owned_placeholders:
+                if field not in result:
+                    result[field] = []
+                    changes.append(f"$/result/{field}=[]")
+        return changes
+
+    @staticmethod
+    def _normalize_expression_source_lineage_actions(
+        output: dict[str, Any],
+        envelope: dict[str, Any],
+    ) -> list[str]:
+        """Restore an unambiguous Stage-6 vocabulary collision.
+
+        ``source_preservation_summary[*].action`` records the lineage action
+        already established by ``P-WRITE-CONTENT``.  It is immutable during
+        expression polishing.  The separate Stage-6A--6D file pipeline uses
+        the same field name ``action`` for the *current editing operation* and
+        allows ``POLISHED``.  A model can therefore emit ``POLISHED`` here even
+        though that token is not part of the source-lineage contract.
+
+        Only that one foreign token is repaired, and only when the emitted
+        entry can be paired by both ``source_span`` and ``paragraph_id`` with
+        the authoritative input entry.  Valid-but-different lineage actions and
+        every other unknown token remain untouched for the quality guard or
+        strict schema validator to reject.
+        """
+
+        payload = envelope.get("payload")
+        if not isinstance(payload, dict):
+            return []
+        content_candidate = payload.get("content_candidate")
+        result = output.get("result")
+        if not isinstance(content_candidate, dict) or not isinstance(result, dict):
+            return []
+        authoritative = content_candidate.get("source_preservation_summary")
+        emitted = result.get("source_preservation_summary")
+        if not isinstance(authoritative, list) or not isinstance(emitted, list):
+            return []
+        if len(authoritative) != len(emitted):
+            return []
+
+        allowed_lineage_actions = {
+            "PRESERVED",
+            "REPHRASED",
+            "REPLACED",
+            "REMOVED",
+        }
+        changes: list[str] = []
+        for index, (source_item, output_item) in enumerate(zip(authoritative, emitted)):
+            if not isinstance(source_item, dict) or not isinstance(output_item, dict):
+                continue
+            if (
+                source_item.get("source_span") != output_item.get("source_span")
+                or source_item.get("paragraph_id") != output_item.get("paragraph_id")
+            ):
+                continue
+            before = str(output_item.get("action") or "").strip()
+            source_action = str(source_item.get("action") or "").strip()
+            if before.upper() != "POLISHED" or source_action not in allowed_lineage_actions:
+                continue
+            output_item["action"] = source_action
+            changes.append(
+                f"$/result/source_preservation_summary/{index}/action:"
+                f"{before}->{source_action}"
+            )
+        return changes
 
     @staticmethod
     def _targeted_repair_diff_paths(
@@ -1404,8 +1569,8 @@ class PromptExecutor:
             }
         except (PromptExecutionError, RoutingDenied, OutboundPrivacyError, LLMError, KeyError, ValueError) as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
-            details = getattr(exc, "validation_errors", [])
-            error = str(exc) + ((" | " + "; ".join(details[:20])) if details else "")
+            details = [redact_secret_text(str(item)) for item in (getattr(exc, "validation_errors", []) or [])]
+            error = redact_secret_text(str(exc) + ((" | " + "; ".join(details[:20])) if details else ""))
             self._save_run(run_id, project_id, workflow_id, prompt_id, "ERROR", route.model_id if route else None, route.endpoint_id if route else None, input_hash, model_envelope, output, error, duration_ms)
             self._save_trace(
                 project_id, workflow_id, prompt_id, model_envelope, system_prompt,
@@ -1425,7 +1590,7 @@ class PromptExecutor:
             # processing defect.  Persist it as an explicit workflow error
             # instead of allowing an untracked exception to escape.
             duration_ms = int((time.perf_counter() - started) * 1000)
-            error = (
+            error = redact_secret_text(
                 "INTERNAL_OUTPUT_CONTRACT_PROCESSING_ERROR: "
                 f"{type(exc).__name__}: {exc}"
             )
@@ -1781,8 +1946,30 @@ class PromptExecutor:
         output_schema: dict[str, Any],
         envelope: dict[str, Any] | None = None,
     ) -> str:
+        entry = self.pack.entry(prompt_id) if hasattr(self.pack, "entry") else {}
+        schema_properties = output_schema.get("properties") or {}
+        prompt_version = str(
+            ((schema_properties.get("prompt_version") or {}).get("const"))
+            or entry.get("prompt_version")
+            or ((envelope or {}).get("prompt_version"))
+            or ""
+        )
+        schema_version = str(
+            ((schema_properties.get("schema_version") or {}).get("const"))
+            or ((envelope or {}).get("schema_version"))
+            or ""
+        )
+        protocol_identity = (
+            "# 本次运行时协议身份\n"
+            f"- `prompt_id`固定为`{prompt_id}`。\n"
+            f"- `prompt_version`固定为`{prompt_version}`。\n"
+            f"- `schema_version`固定为`{schema_version}`。\n"
+            "以上三项必须与输入Envelope和强制输出Schema完全一致。"
+        )
         base_prompt = (
             self.pack.shared_prompt
+            + "\n\n"
+            + protocol_identity
             + "\n\n"
             + self.pack.prompt_text(prompt_id)
         )

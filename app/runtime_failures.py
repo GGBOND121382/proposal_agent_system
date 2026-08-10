@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Iterable
 
+from .secret_redaction import redact_secret_text, redact_secrets
 from .workflow_status import WorkflowStatus
 
 
@@ -135,7 +136,7 @@ def _exception_chain(exc: BaseException, *, limit: int = 12) -> tuple[BaseExcept
 
 
 def _chain_labels(chain: Iterable[BaseException]) -> tuple[str, ...]:
-    return tuple(f"{type(item).__name__}: {item}" for item in chain)
+    return tuple(redact_secret_text(f"{type(item).__name__}: {item}") for item in chain)
 
 
 def _provider_metadata(chain: Iterable[BaseException]) -> dict[str, Any] | None:
@@ -155,7 +156,7 @@ def _provider_metadata(chain: Iterable[BaseException]) -> dict[str, Any] | None:
             "http_status": getattr(item, "http_status", None),
             "retry_after_seconds": getattr(item, "retry_after_seconds", None),
             "phase": getattr(item, "provider_phase", None),
-            "response_excerpt": getattr(item, "response_excerpt", None),
+            "response_excerpt": (redact_secret_text(str(getattr(item, "response_excerpt", ""))) if getattr(item, "response_excerpt", None) is not None else None),
             "retryable_hint": getattr(item, "retryable_hint", None),
         }
     return None
@@ -278,6 +279,40 @@ def _classification_from_provider(
         details,
     )
 
+
+
+def persistence_safe_failure_classification(
+    value: FailureClassification | dict[str, Any],
+) -> dict[str, Any]:
+    """Return the minimum failure metadata needed for recovery and triage.
+
+    Raw provider excerpts and exception-chain messages belong in the security-
+    labelled Prompt Trace / model-call evidence, not in workflow state or the
+    generic audit-event table.
+    """
+
+    payload = value.to_dict() if isinstance(value, FailureClassification) else dict(value)
+    allowed = {
+        "category",
+        "workflow_status",
+        "retryable",
+        "consumes_semantic_repair_budget",
+        "reason",
+        "failure_kind",
+        "http_status",
+        "retry_after_seconds",
+    }
+    result = {key: payload.get(key) for key in allowed if key in payload}
+    details = payload.get("details")
+    if isinstance(details, dict):
+        safe_details = {
+            key: details.get(key)
+            for key in ("phase", "restored_from_checkpoint")
+            if details.get(key) is not None
+        }
+        if safe_details:
+            result["details"] = safe_details
+    return redact_secrets(result)
 
 def classify_runtime_failure(exc: BaseException) -> FailureClassification:
     chain = _exception_chain(exc)

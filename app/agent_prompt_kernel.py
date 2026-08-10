@@ -79,6 +79,26 @@ STRUCTURAL_BLOCK_RE = re.compile(
 NUMBER_RE = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?%?")
 CITATION_RE = re.compile(r"\[(?:\d+(?:\s*[-,，]\s*\d+)*)\]")
 
+
+def _guard_content_text(candidate: dict[str, Any]) -> str:
+    """Expose every persisted text representation to fail-closed guards.
+
+    ``canonical_candidate_text`` intentionally prefers ordered paragraph text
+    because that is what review and export consume.  Older records and some
+    provider outputs may nevertheless retain a separate ``candidate_text``.
+    A stale or mutated legacy representation must not become invisible to
+    structural-preservation or main-body boundary checks merely because valid
+    paragraphs are also present.
+    """
+
+    canonical = _content_text(candidate)
+    legacy = str(candidate.get("candidate_text") or "").strip()
+    if not legacy or legacy == canonical.strip():
+        return canonical
+    if not canonical:
+        return legacy
+    return f"{canonical}\n{legacy}"
+
 # Number-like tokens used only as structural identifiers must not be treated as
 # quantitative claims.  The fact ledger requires object/unit/condition binding
 # for substantive quantities (for example, “2个原型”, “2027年” and “100%”),
@@ -796,8 +816,8 @@ class AgentPromptKernelValidator:
         polished: dict[str, Any],
     ) -> list[TrackBFinding]:
         findings: list[TrackBFinding] = []
-        source_text = _content_text(source)
-        polished_text = _content_text(polished)
+        source_text = _guard_content_text(source)
+        polished_text = _guard_content_text(polished)
         source_blocks = [re.sub(r"\s+", " ", item).strip() for item in STRUCTURAL_BLOCK_RE.findall(source_text)]
         polished_blocks = [re.sub(r"\s+", " ", item).strip() for item in STRUCTURAL_BLOCK_RE.findall(polished_text)]
         if source_blocks != polished_blocks:
@@ -1019,7 +1039,7 @@ class AgentPromptKernelValidator:
             section_id = str(item.get("section_id") or "")
             if placements.get(section_id, "MAIN_BODY") != "MAIN_BODY":
                 continue
-            text = _content_text(item.get("candidate") or {})
+            text = _guard_content_text(item.get("candidate") or {})
             hits = sorted(term for term in forbidden_terms if term and term in text)
             if hits:
                 findings.append(_finding(
