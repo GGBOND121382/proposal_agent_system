@@ -62,17 +62,55 @@ class RuntimePromptExecutor(BasePromptExecutor):
 
         This deliberately excludes local normalizer versions.  A failed
         provider object may be re-consumed after a normalizer upgrade only when
-        the prompt text, model profile, registry entry, and output schema that
-        produced it are unchanged.
+        the prompt text, model/profile selection, provider-model capability,
+        endpoint identity, registry entry, and output schema that produced it
+        are unchanged.
         """
         try:
             entry = self.pack.entry(prompt_id)
             profile_name = entry.get("model_profile")
             profiles = self.pack.profiles.get("profiles") or self.pack.profiles
+            profile = profiles.get(profile_name) or {}
+            model_by_id = {
+                str(item.get("model_id")): item
+                for item in self.pack.models.get("models", [])
+                if isinstance(item, dict)
+            }
+            endpoint_by_id = {
+                str(item.get("endpoint_id")): item
+                for item in self.pack.endpoints.get("endpoints", [])
+                if isinstance(item, dict)
+            }
+            candidate_ids = list(profile.get("preferred_models") or []) + list(
+                profile.get("fallback_models") or []
+            )
+            candidate_models: list[dict[str, Any]] = []
+            for model_id in candidate_ids:
+                model = model_by_id.get(str(model_id)) or {}
+                provider_name = str(model.get("provider_model_name") or "").strip()
+                endpoint_id = str(model.get("endpoint_id") or "")
+                endpoint = endpoint_by_id.get(endpoint_id) or {}
+                capability = None
+                if provider_name:
+                    try:
+                        capability = self.pack.model_capability(provider_name)
+                    except (AttributeError, KeyError, TypeError, ValueError):
+                        capability = None
+                candidate_models.append(
+                    {
+                        "model_id": str(model_id),
+                        "provider_model_name": provider_name,
+                        "endpoint_id": endpoint_id,
+                        "endpoint_provider": endpoint.get("provider"),
+                        "endpoint_base_url": endpoint.get("base_url"),
+                        "model_capability": capability,
+                    }
+                )
             return {
                 "prompt_text": self.pack.prompt_text(prompt_id),
                 "prompt_entry": entry,
-                "model_profile": profiles.get(profile_name),
+                "model_profile": profile,
+                "candidate_models": candidate_models,
                 "output_schema": self.pack.inlined_schema(prompt_id, "output"),
                 "trusted_source_catalog_contract_version": TRUSTED_SOURCE_CATALOG_VERSION,
                 "model_response_protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,

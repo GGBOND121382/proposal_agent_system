@@ -24,6 +24,15 @@
 
 V2证明文件、Schema和Replay在静态层面一致；不等于真实模型质量、真实保密审批或生产部署已经通过。真实模型上线前必须执行Prompt回归和安全红队测试。
 
+## 2.2.1 Provider模型Token预算
+
+- `.env`只选择模型，不重复维护token上限；
+- Provider模型上下文与输出能力由`config/models.yaml/provider_capabilities`统一登记；
+- Prompt Profile改用`desired_output_tokens`表达任务期望预算；
+- Runtime按模型硬上限、实际输入估算和上下文安全余量计算本次有效输出上限；
+- MiniMax OpenAI-compatible请求使用`max_completion_tokens`；
+- 模型或模型能力变化进入Provider Request Spec Hash，避免复用旧模型生成结果。
+
 ## 2.2.0 论证质量协议
 
 - Prompt注册项由26个扩展为30个；

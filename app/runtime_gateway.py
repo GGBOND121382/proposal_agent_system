@@ -64,6 +64,13 @@ class AuditedModelGateway(BaseModelGateway):
             "input_sha256": sha256_json(envelope),
             "model_response_protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
         }
+        if str(self.settings.runtime_mode or "").upper() == "LIVE":
+            request_payload["token_budget"] = self._resolve_output_token_budget(
+                route,
+                system_prompt,
+                envelope,
+                output_schema,
+            )
         self.evidence_store.faults.hit("before_request_persist", call_key, prompt_id=prompt_id)
         request_meta = self.evidence_store.write_request(call_key, request_payload)
         self.evidence_store.faults.hit("after_request_persist", call_key, prompt_id=prompt_id)

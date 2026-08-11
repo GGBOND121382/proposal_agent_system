@@ -321,3 +321,59 @@ class PromptPack:
     def model_profile(self, prompt_id: str) -> dict[str, Any]:
         profile_id = self.entry(prompt_id)["model_profile"]
         return self.profiles["profiles"][profile_id]
+
+    def model_capability(self, provider_model_name: str) -> dict[str, Any]:
+        """Return the provider-model token capability registered by exact model name.
+
+        ``.env`` chooses the provider model name; token limits deliberately do not
+        live in environment variables or endpoint slots.  Unknown provider models
+        fail closed in LIVE MiniMax routing instead of inheriting a stale ceiling
+        from whichever logical model slot happens to reference them.
+        """
+
+        name = str(provider_model_name or "").strip()
+        registry = self.models.get("provider_capabilities") or {}
+        capability = registry.get(name)
+        if capability is None and name:
+            folded = name.casefold()
+            for registered_name, registered in registry.items():
+                if str(registered_name).casefold() == folded:
+                    capability = registered
+                    break
+        if not isinstance(capability, dict):
+            raise KeyError(f"No provider capability registered for model {name!r}")
+
+        required = (
+            "context_window_tokens",
+            "recommended_output_tokens",
+            "hard_max_output_tokens",
+            "output_parameter",
+        )
+        missing = [key for key in required if key not in capability]
+        if missing:
+            raise ValueError(
+                f"Provider capability for {name!r} is missing: {', '.join(missing)}"
+            )
+
+        normalized = copy.deepcopy(capability)
+        for key in (
+            "context_window_tokens",
+            "recommended_output_tokens",
+            "hard_max_output_tokens",
+        ):
+            value = int(normalized[key])
+            if value <= 0:
+                raise ValueError(
+                    f"Provider capability {name!r}.{key} must be positive"
+                )
+            normalized[key] = value
+        if normalized["hard_max_output_tokens"] > normalized["context_window_tokens"]:
+            raise ValueError(
+                f"Provider capability {name!r} output hard max exceeds context window"
+            )
+        normalized["output_parameter"] = str(normalized["output_parameter"]).strip()
+        if not normalized["output_parameter"]:
+            raise ValueError(
+                f"Provider capability {name!r}.output_parameter must be non-empty"
+            )
+        return normalized

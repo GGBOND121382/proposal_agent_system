@@ -35,8 +35,6 @@ endpoints:
     read_timeout_seconds: 180
     total_timeout_seconds: 600
     max_concurrency: 2
-    max_input_tokens: 64000
-    max_output_tokens: 32000
 - endpoint_id: online-public-primary
   environment: ONLINE_PUBLIC
   provider: openai-compatible
@@ -63,5 +61,3 @@ endpoints:
     read_timeout_seconds: 180
     total_timeout_seconds: 240
     max_concurrency: 4
-    max_input_tokens: 32000
-    max_output_tokens: 24000

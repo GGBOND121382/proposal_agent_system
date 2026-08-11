@@ -24,7 +24,7 @@ def _executor() -> PromptExecutor:
 def test_every_schema_reference_field_is_contract_annotated() -> None:
     pack = PromptPack(ROOT / "prompt_pack")
     contract = get_semantic_contract()
-    assert contract.version == "2.3.0"
+    assert contract.version == "2.4.1"
     assert contract.rule_registry_version == "1.3.0"
     assert len(contract.reference_field_semantics) >= 90
     # PromptPack construction performs the complete inlined-schema coverage and

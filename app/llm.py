@@ -15,8 +15,9 @@ from .simulated_llm import SimulatedLLM
 
 JSON_PARSER_VERSION = "2026-07-29.v1-audited-local-repairs"
 MODEL_RESPONSE_PROTOCOL_VERSION = (
-    "2026-08-11.v5-minimax-compact-tool-or-json"
+    "2026-08-11.v7-minimax-model-bound-budget-tool-or-json"
 )
+TOKEN_BUDGET_RESOLVER_VERSION = "2026-08-11.v1-model-capability-context-headroom"
 
 
 class LLMError(RuntimeError):
@@ -307,6 +308,133 @@ class ModelGateway:
         return await self._invoke_live(route, prompt_id, system_prompt, envelope, output_schema)
 
     @staticmethod
+    def _estimate_text_tokens(text: str) -> int:
+        """Conservatively estimate mixed Chinese/ASCII prompt tokens.
+
+        MiniMax does not expose a local tokenizer in this project.  Treat each
+        non-ASCII code point as one token and every four ASCII characters as one
+        token.  The estimate is intentionally conservative and is used only to
+        protect the context window; provider-reported usage remains authoritative.
+        """
+
+        value = str(text or "")
+        if not value:
+            return 0
+        ascii_count = sum(1 for ch in value if ord(ch) < 128)
+        non_ascii_count = len(value) - ascii_count
+        return ((ascii_count + 3) // 4) + non_ascii_count
+
+    def _resolve_output_token_budget(
+        self,
+        route: Route,
+        system_prompt: str,
+        envelope: dict[str, Any],
+        output_schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve the provider-visible output ceiling for one concrete call.
+
+        Prompt profiles express business demand via ``desired_output_tokens``.
+        For MiniMax, provider-model capabilities own context and hard output
+        limits.  The runtime also reserves context headroom based on an estimate
+        of the actual request.  This prevents model swaps in ``.env`` from
+        inheriting stale endpoint/profile ceilings.
+        """
+
+        profile = route.profile or {}
+        desired_raw = profile.get(
+            "desired_output_tokens",
+            profile.get("max_output_tokens"),
+        )
+
+        base_url = str((route.endpoint or {}).get("base_url") or "")
+        is_minimax = self._is_minimax(base_url, route.provider_model_name)
+        if not is_minimax:
+            desired = int(desired_raw or 7000)
+            if desired <= 0:
+                raise LLMError("desired_output_tokens must be positive")
+            return {
+                "resolver_version": TOKEN_BUDGET_RESOLVER_VERSION,
+                "provider_model_name": route.provider_model_name,
+                "output_parameter": "max_tokens",
+                "desired_output_tokens": desired,
+                "effective_output_tokens": desired,
+                "model_capability_bound": False,
+            }
+
+        capability_lookup = getattr(self.pack, "model_capability", None)
+        if not callable(capability_lookup):
+            raise LLMError(
+                "MiniMax LIVE routing requires a provider-model capability registry"
+            )
+        try:
+            capability = capability_lookup(route.provider_model_name)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LLMError(
+                f"MiniMax model capability is not registered for "
+                f"{route.provider_model_name!r}: {exc}"
+            ) from exc
+
+        context_window = int(capability["context_window_tokens"])
+        recommended = int(capability["recommended_output_tokens"])
+        hard_max = int(capability["hard_max_output_tokens"])
+        desired = int(desired_raw or recommended)
+        if desired <= 0:
+            raise LLMError("desired_output_tokens must be positive")
+
+        compact_envelope = json.dumps(
+            envelope,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        compact_schema = json.dumps(
+            output_schema,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        estimated_input = self._estimate_text_tokens(system_prompt)
+        estimated_input += self._estimate_text_tokens(compact_envelope)
+        # Structured-output schemas are provider-visible either directly or via
+        # the runtime prompt contract. Counting them here may double-count some
+        # MiniMax paths, but that conservatism is preferable to context overflow.
+        estimated_input += self._estimate_text_tokens(compact_schema)
+
+        reserve = max(4096, min(32768, context_window // 20))
+        available_output = context_window - estimated_input - reserve
+        if available_output <= 0:
+            raise LLMError(
+                "Estimated request consumes the model context window before output: "
+                f"model={route.provider_model_name}, context={context_window}, "
+                f"estimated_input={estimated_input}, reserve={reserve}"
+            )
+
+        effective = min(desired, hard_max, available_output)
+        minimum_viable = min(desired, 4096)
+        if effective < minimum_viable:
+            raise LLMError(
+                "Insufficient model context headroom for a viable structured output: "
+                f"model={route.provider_model_name}, desired={desired}, "
+                f"effective={effective}, estimated_input={estimated_input}"
+            )
+
+        return {
+            "resolver_version": TOKEN_BUDGET_RESOLVER_VERSION,
+            "provider_model_name": route.provider_model_name,
+            "output_parameter": str(capability["output_parameter"]),
+            "context_window_tokens": context_window,
+            "recommended_output_tokens": recommended,
+            "hard_max_output_tokens": hard_max,
+            "desired_output_tokens": desired,
+            "estimated_input_tokens": estimated_input,
+            "context_safety_reserve_tokens": reserve,
+            "available_output_tokens": available_output,
+            "effective_output_tokens": effective,
+            "exceeds_recommended": desired > recommended,
+            "clamped_by_hard_max": effective < desired and hard_max <= available_output,
+            "clamped_by_context": effective < desired and available_output < hard_max,
+            "model_capability_bound": True,
+        }
+
+    @staticmethod
     def _is_structured_output_rejection(status_code: int, body: str) -> bool:
         """Return whether an endpoint rejected the structured-output feature.
 
@@ -347,6 +475,14 @@ class ModelGateway:
         if not route.provider_model_name:
             raise LLMError(f"Model {route.model_id} provider_model_name is empty")
 
+        is_minimax = self._is_minimax(base_url, route.provider_model_name)
+        token_budget = self._resolve_output_token_budget(
+            route,
+            system_prompt,
+            envelope,
+            output_schema,
+        )
+        output_parameter = str(token_budget["output_parameter"])
         request = {
             "model": route.provider_model_name,
             "messages": [
@@ -354,7 +490,7 @@ class ModelGateway:
                 {"role": "user", "content": json.dumps(envelope, ensure_ascii=False)},
             ],
             "temperature": route.profile.get("temperature", 0.0),
-            "max_tokens": route.profile.get("max_output_tokens", 7000),
+            output_parameter: int(token_budget["effective_output_tokens"]),
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -369,7 +505,6 @@ class ModelGateway:
             headers["Authorization"] = f"Bearer {api_key}"
 
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
-        is_minimax = self._is_minimax(base_url, route.provider_model_name)
         response_contract_mode = "JSON_SCHEMA_STRICT"
         fallback_reason: str | None = None
         provider_attempts = 0
@@ -546,6 +681,10 @@ class ModelGateway:
                 "wire_protocol": "STRICT_MINIMAX_TOOL_OR_JSON",
                 "wire_wrapper_parse_report": wire_report,
             }
+        parse_report = {
+            **parse_report,
+            "token_budget": token_budget,
+        }
         return LLMResult(
             output=output,
             raw_text=str(content),

@@ -174,26 +174,112 @@ class _TimingOutAsyncClient(_FakeAsyncClient):
         return _TimingOutStream()
 
 
-def _route() -> Route:
+def _route(
+    provider_model_name: str = "MiniMax-M3",
+    desired_output_tokens: int = 4096,
+) -> Route:
     return Route(
         prompt_id="P-TEST",
         environment="OFFLINE_LOCAL",
         model_id="offline-general-primary",
         endpoint_id="offline-primary",
-        provider_model_name="MiniMax-M3",
+        provider_model_name=provider_model_name,
         endpoint={
             "base_url": "https://api.minimaxi.com/v1",
             "api_key_secret": "TEST_MINIMAX_API_KEY",
         },
-        profile={"temperature": 0.0, "max_output_tokens": 4096},
+        profile={
+            "temperature": 0.0,
+            "desired_output_tokens": desired_output_tokens,
+        },
     )
 
 
 def _gateway() -> BaseModelGateway:
+    capabilities = {
+        "MiniMax-M3": {
+            "context_window_tokens": 1_000_000,
+            "recommended_output_tokens": 131_072,
+            "hard_max_output_tokens": 524_288,
+            "output_parameter": "max_completion_tokens",
+        },
+        "MiniMax-M2.7-highspeed": {
+            "context_window_tokens": 204_800,
+            "recommended_output_tokens": 65_536,
+            "hard_max_output_tokens": 204_800,
+            "output_parameter": "max_completion_tokens",
+        },
+    }
+
+    def model_capability(name: str):
+        if name not in capabilities:
+            raise KeyError(name)
+        return copy.deepcopy(capabilities[name])
+
     return BaseModelGateway(
         SimpleNamespace(runtime_mode="LIVE", request_timeout_seconds=240),
-        SimpleNamespace(),
+        SimpleNamespace(model_capability=model_capability),
     )
+
+
+
+def test_minimax_m3_planning_budget_uses_model_capability_not_endpoint_ceiling():
+    gateway = _gateway()
+    report = gateway._resolve_output_token_budget(
+        _route(desired_output_tokens=131_072),
+        "Return one JSON object.",
+        {"payload": {"value": 1}},
+        {"type": "object"},
+    )
+
+    assert report["context_window_tokens"] == 1_000_000
+    assert report["recommended_output_tokens"] == 131_072
+    assert report["hard_max_output_tokens"] == 524_288
+    assert report["desired_output_tokens"] == 131_072
+    assert report["effective_output_tokens"] == 131_072
+    assert report["output_parameter"] == "max_completion_tokens"
+
+
+def test_minimax_m27_highspeed_uses_its_own_model_capability():
+    gateway = _gateway()
+    report = gateway._resolve_output_token_budget(
+        _route("MiniMax-M2.7-highspeed", desired_output_tokens=65_536),
+        "Return one JSON object.",
+        {"payload": {"value": 1}},
+        {"type": "object"},
+    )
+
+    assert report["context_window_tokens"] == 204_800
+    assert report["recommended_output_tokens"] == 65_536
+    assert report["effective_output_tokens"] == 65_536
+
+
+
+def test_minimax_context_headroom_clamps_task_budget_before_provider_call():
+    gateway = _gateway()
+    report = gateway._resolve_output_token_budget(
+        _route("MiniMax-M2.7-highspeed", desired_output_tokens=65_536),
+        "研" * 150_000,
+        {"payload": {"value": 1}},
+        {"type": "object"},
+    )
+
+    assert 4096 <= report["effective_output_tokens"] < 65_536
+    assert report["clamped_by_context"] is True
+    assert report["estimated_input_tokens"] >= 150_000
+
+
+
+def test_minimax_unknown_provider_model_fails_closed_before_live_call():
+    gateway = _gateway()
+    with pytest.raises(LLMError, match="capability is not registered"):
+        gateway._resolve_output_token_budget(
+            _route("MiniMax-M4", desired_output_tokens=65_536),
+            "Return one JSON object.",
+            {"payload": {"value": 1}},
+            {"type": "object"},
+        )
+
 
 
 def test_minimax_uses_streamed_serialized_json_function(monkeypatch):
@@ -217,6 +303,8 @@ def test_minimax_uses_streamed_serialized_json_function(monkeypatch):
     )
 
     sent = _FakeAsyncClient.captured["json"]
+    assert sent["max_completion_tokens"] == 4096
+    assert "max_tokens" not in sent
     assert sent["stream"] is True
     assert sent["reasoning_split"] is True
     assert "response_format" not in sent
@@ -513,7 +601,7 @@ def _generic_route() -> Route:
             "base_url": "https://example.test/v1",
             "api_key_secret": "TEST_GENERIC_API_KEY",
         },
-        profile={"temperature": 0.0, "max_output_tokens": 4096},
+        profile={"temperature": 0.0, "desired_output_tokens": 4096},
     )
 
 

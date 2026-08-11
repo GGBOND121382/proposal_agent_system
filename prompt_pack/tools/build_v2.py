@@ -499,20 +499,28 @@ dump_yaml(ROOT/'knowledge/relation_matrix.yaml',{'version':'2.0','allowed_relati
 dump_yaml(ROOT/'knowledge/readiness_matrix.yaml',{'version':'2.0','profiles':{v['profile_id']:{'required_item_types':v['required_item_types'],'readiness':v['readiness']} for v in profiles.values()}})
 
 # model configs actual, env-based
+# Endpoint limits describe transport only. Context/output token ceilings are
+# provider-model capabilities so changing *_MODEL in .env changes the runtime
+# ceiling without carrying stale endpoint/profile limits.
 model_endpoints={'version':'2.0','endpoints':[{
-    'endpoint_id':'offline-primary','environment':'OFFLINE_LOCAL','provider':'openai-compatible','base_url':'${OFFLINE_LLM_BASE_URL}','api_key_secret':'OFFLINE_LLM_API_KEY','enabled':'${OFFLINE_LLM_ENABLED:true}','allowed_security_levels':SEC_LEVELS,'allowed_task_types':['SECURITY_CLASSIFICATION','SCHEME_EXTRACTION','PROJECT_DEFINITION','FACT_EXTRACTION','TEMPLATE_EXTRACTION','REVISION_PLANNING','BLUEPRINT_WRITING','CONTENT_WRITING','CRITIC','INTEGRATION','TARGETED_REPAIR'],'data_policy':{'retention':'NONE','training_usage':'DISALLOWED','request_logging':'METADATA_ONLY','response_logging':'METADATA_ONLY'},'network_policy':{'internet_access':False},'limits':{'connect_timeout_seconds':10,'read_timeout_seconds':180,'total_timeout_seconds':600,'max_concurrency':2,'max_input_tokens':64000,'max_output_tokens':32000}},
-{'endpoint_id':'online-public-primary','environment':'ONLINE_PUBLIC','provider':'openai-compatible','base_url':'${ONLINE_LLM_BASE_URL}','api_key_secret':'ONLINE_LLM_API_KEY','enabled':'${ONLINE_LLM_ENABLED:false}','allowed_security_levels':['PUBLIC'],'allowed_task_types':['PUBLIC_RESEARCH_PLAN','PUBLIC_RESEARCH_SYNTHESIS','PUBLIC_RESEARCH_CRITIC','PUBLIC_TEMPLATE_ANALYSIS','GENERIC_LANGUAGE_ASSIST'],'data_policy':{'retention':'PROVIDER_CONFIGURED','training_usage':'DISALLOWED','request_logging':'REDACTED','response_logging':'REDACTED'},'network_policy':{'internet_access':True},'limits':{'connect_timeout_seconds':15,'read_timeout_seconds':180,'total_timeout_seconds':240,'max_concurrency':4,'max_input_tokens':32000,'max_output_tokens':8000}}]}
+    'endpoint_id':'offline-primary','environment':'OFFLINE_LOCAL','provider':'openai-compatible','base_url':'${OFFLINE_LLM_BASE_URL}','api_key_secret':'OFFLINE_LLM_API_KEY','enabled':'${OFFLINE_LLM_ENABLED:true}','allowed_security_levels':SEC_LEVELS,'allowed_task_types':['SECURITY_CLASSIFICATION','SCHEME_EXTRACTION','PROJECT_DEFINITION','FACT_EXTRACTION','TEMPLATE_EXTRACTION','REVISION_PLANNING','BLUEPRINT_WRITING','CONTENT_WRITING','CRITIC','INTEGRATION','TARGETED_REPAIR'],'data_policy':{'retention':'NONE','training_usage':'DISALLOWED','request_logging':'METADATA_ONLY','response_logging':'METADATA_ONLY'},'network_policy':{'internet_access':False},'limits':{'connect_timeout_seconds':10,'read_timeout_seconds':180,'total_timeout_seconds':600,'max_concurrency':2}},
+{'endpoint_id':'online-public-primary','environment':'ONLINE_PUBLIC','provider':'openai-compatible','base_url':'${ONLINE_LLM_BASE_URL}','api_key_secret':'ONLINE_LLM_API_KEY','enabled':'${ONLINE_LLM_ENABLED:false}','allowed_security_levels':['PUBLIC'],'allowed_task_types':['PUBLIC_RESEARCH_PLAN','PUBLIC_RESEARCH_SYNTHESIS','PUBLIC_RESEARCH_CRITIC','PUBLIC_TEMPLATE_ANALYSIS','GENERIC_LANGUAGE_ASSIST'],'data_policy':{'retention':'PROVIDER_CONFIGURED','training_usage':'DISALLOWED','request_logging':'REDACTED','response_logging':'REDACTED'},'network_policy':{'internet_access':True},'limits':{'connect_timeout_seconds':15,'read_timeout_seconds':180,'total_timeout_seconds':240,'max_concurrency':4}}]}
 dump_yaml(ROOT/'config/model_endpoints.yaml',model_endpoints)
-models={'version':'2.0','models':[{'model_id':'offline-general-primary','endpoint_id':'offline-primary','provider_model_name':'${OFFLINE_GENERAL_MODEL}','enabled':True,'capabilities':{'structured_output':True,'strict_json_schema':'PROVIDER_NEGOTIATED','json_object_fallback':True,'long_context':True,'chinese_writing':True,'document_analysis':True},'defaults':{'temperature':0.1,'top_p':0.9,'max_output_tokens':32000}}, {'model_id':'offline-critic-primary','endpoint_id':'offline-primary','provider_model_name':'${OFFLINE_CRITIC_MODEL}','enabled':True,'capabilities':{'structured_output':True,'strict_json_schema':'PROVIDER_NEGOTIATED','json_object_fallback':True,'long_context':True,'chinese_writing':True,'document_analysis':True},'defaults':{'temperature':0.0,'top_p':1.0,'max_output_tokens':16000}}, {'model_id':'online-public-primary','endpoint_id':'online-public-primary','provider_model_name':'${ONLINE_PUBLIC_MODEL}','enabled':'${ONLINE_LLM_ENABLED:false}','capabilities':{'structured_output':True,'strict_json_schema':'PROVIDER_NEGOTIATED','json_object_fallback':True,'long_context':True},'defaults':{'temperature':0.1,'top_p':0.9,'max_output_tokens':8000}}]}
+models={'version':'2.1',
+'provider_capabilities':{
+    'MiniMax-M3':{'context_window_tokens':1000000,'recommended_output_tokens':131072,'hard_max_output_tokens':524288,'output_parameter':'max_completion_tokens'},
+    'MiniMax-M2.7':{'context_window_tokens':204800,'recommended_output_tokens':65536,'hard_max_output_tokens':204800,'output_parameter':'max_completion_tokens'},
+    'MiniMax-M2.7-highspeed':{'context_window_tokens':204800,'recommended_output_tokens':65536,'hard_max_output_tokens':204800,'output_parameter':'max_completion_tokens'}},
+'models':[{'model_id':'offline-general-primary','endpoint_id':'offline-primary','provider_model_name':'${OFFLINE_GENERAL_MODEL}','enabled':True,'capabilities':{'structured_output':True,'strict_json_schema':'PROVIDER_NEGOTIATED','json_object_fallback':True,'long_context':True,'chinese_writing':True,'document_analysis':True},'defaults':{'temperature':0.1,'top_p':0.9}}, {'model_id':'offline-critic-primary','endpoint_id':'offline-primary','provider_model_name':'${OFFLINE_CRITIC_MODEL}','enabled':True,'capabilities':{'structured_output':True,'strict_json_schema':'PROVIDER_NEGOTIATED','json_object_fallback':True,'long_context':True,'chinese_writing':True,'document_analysis':True},'defaults':{'temperature':0.0,'top_p':1.0}}, {'model_id':'online-public-primary','endpoint_id':'online-public-primary','provider_model_name':'${ONLINE_PUBLIC_MODEL}','enabled':'${ONLINE_LLM_ENABLED:false}','capabilities':{'structured_output':True,'strict_json_schema':'PROVIDER_NEGOTIATED','json_object_fallback':True,'long_context':True},'defaults':{'temperature':0.1,'top_p':0.9}}]}
 dump_yaml(ROOT/'config/models.yaml',models)
-# update profiles to model IDs
-pm={'version':'2.0','profiles':{
-'extraction':{'preferred_models':['offline-general-primary'],'temperature':0.0,'max_output_tokens':32000,'response_format':'JSON_SCHEMA','fallback_models':[]},
-'critic':{'preferred_models':['offline-critic-primary'],'temperature':0.0,'max_output_tokens':16000,'response_format':'JSON_SCHEMA','fallback_models':['offline-general-primary']},
-'planning':{'preferred_models':['offline-general-primary'],'temperature':0.1,'max_output_tokens':24000,'response_format':'JSON_SCHEMA','fallback_models':[]},
-'formal_writing':{'preferred_models':['offline-general-primary'],'temperature':0.2,'max_output_tokens':12000,'response_format':'JSON_SCHEMA','fallback_models':[]},
-'public_research':{'preferred_models':['online-public-primary'],'temperature':0.1,'max_output_tokens':8000,'response_format':'JSON_SCHEMA','fallback_models':[]},
-'security_review':{'preferred_models':['offline-critic-primary'],'temperature':0.0,'max_output_tokens':16000,'response_format':'JSON_SCHEMA','fallback_models':['offline-general-primary']}}}
+# Prompt profiles describe task demand, not provider capability.
+pm={'version':'2.1','profiles':{
+'extraction':{'preferred_models':['offline-general-primary'],'temperature':0.0,'desired_output_tokens':65536,'response_format':'JSON_SCHEMA','fallback_models':[]},
+'critic':{'preferred_models':['offline-critic-primary'],'temperature':0.0,'desired_output_tokens':65536,'response_format':'JSON_SCHEMA','fallback_models':['offline-general-primary']},
+'planning':{'preferred_models':['offline-general-primary'],'temperature':0.1,'desired_output_tokens':131072,'response_format':'JSON_SCHEMA','fallback_models':[]},
+'formal_writing':{'preferred_models':['offline-general-primary'],'temperature':0.2,'desired_output_tokens':131072,'response_format':'JSON_SCHEMA','fallback_models':[]},
+'public_research':{'preferred_models':['online-public-primary'],'temperature':0.1,'desired_output_tokens':65536,'response_format':'JSON_SCHEMA','fallback_models':[]},
+'security_review':{'preferred_models':['offline-critic-primary'],'temperature':0.0,'desired_output_tokens':32768,'response_format':'JSON_SCHEMA','fallback_models':['offline-general-primary']}}}
 dump_yaml(ROOT/'config/prompt_model_profiles.yaml',pm)
 dump_yaml(ROOT/'policies/model_routing.yaml',{'version':'2.0','default':{'deny':True},'rules':[{'rule_id':'sensitive-offline-only','priority':100,'when':{'security_level':['INTERNAL','SENSITIVE','CLASSIFIED']},'require':{'environment':'OFFLINE_LOCAL'}},{'rule_id':'approved-public-online','priority':90,'when':{'security_level':['PUBLIC'],'transfer_approval_status':['APPROVED'],'task_type':['PUBLIC_RESEARCH_PLAN','PUBLIC_RESEARCH_SYNTHESIS','PUBLIC_RESEARCH_CRITIC','PUBLIC_TEMPLATE_ANALYSIS','GENERIC_LANGUAGE_ASSIST']},'allow':{'environment':['ONLINE_PUBLIC']}},{'rule_id':'public-offline-default','priority':10,'when':{'security_level':['PUBLIC']},'allow':{'environment':['OFFLINE_LOCAL']}}],'prohibitions':['不得从OFFLINE_LOCAL自动Fallback到ONLINE_PUBLIC','ONLINE_PUBLIC只允许APPROVED安全任务包']})
 
@@ -819,11 +827,22 @@ write(ROOT/'MODEL_CONFIGURATION.md',f'''# 模型调用配置 V2
 - `ONLINE_LLM_API_KEY`
 - `ONLINE_PUBLIC_MODEL`
 
+`.env`只选择端点和Provider模型，不再重复配置token上限。
+
+## Token预算分层
+
+- `config/models.yaml`中的`provider_capabilities`：按真实Provider模型名登记上下文窗口、推荐输出、硬输出上限和API参数名；
+- `config/prompt_model_profiles.yaml`中的`desired_output_tokens`：描述任务期望输出预算；
+- Runtime结合实际模型、输入估算和上下文安全余量计算本次有效上限；
+- `config/model_endpoints.yaml`只承担端点环境、安全、网络、超时和并发。
+
+未知MiniMax模型在LIVE调用前fail-closed，必须先登记Provider能力。
+
 ## 权威配置
 
 - `config/model_endpoints.yaml`：端点环境、安全等级、数据和网络政策；
-- `config/models.yaml`：模型实例和能力；
-- `config/prompt_model_profiles.yaml`：抽取、Critic、规划、写作等参数；
+- `config/models.yaml`：逻辑模型实例与Provider模型能力；
+- `config/prompt_model_profiles.yaml`：抽取、Critic、规划、写作等任务参数；
 - `config/prompt_registry.json`：{len(PROMPTS)}个Prompt到文件、Schema和Profile的映射；
 - `policies/model_routing.yaml`：默认拒绝的模型路由。
 

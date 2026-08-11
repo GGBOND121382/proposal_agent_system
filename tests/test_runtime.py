@@ -534,17 +534,17 @@ def test_expression_normalizer_refuses_polished_action_when_lineage_identity_dif
     output["result"]["source_preservation_summary"][0]["action"] = "POLISHED"
     output["result"]["source_preservation_summary"][0]["paragraph_id"] = "p-other"
 
-    normalized = executor._normalize_output(
-        "P-EXPRESSION-POLISH",
-        output,
-        envelope,
-    )
+    with pytest.raises(PromptExecutionError) as exc_info:
+        executor._normalize_output(
+            "P-EXPRESSION-POLISH",
+            output,
+            envelope,
+        )
 
-    assert normalized["result"]["source_preservation_summary"][0]["action"] == "POLISHED"
-    errors = pack.validate("P-EXPRESSION-POLISH", "output", normalized)
     assert any(
-        error.startswith("/result/source_preservation_summary/0/action:")
-        for error in errors
+        error.startswith("/result/source_preservation_summary/0/paragraph_id:")
+        and "p-other" in error
+        for error in exc_info.value.validation_errors
     )
 
 
@@ -1137,8 +1137,8 @@ def test_argument_normalizer_does_not_restore_entities_from_free_text(runtime):
     _, pack, _, _, _, executor, *_ = runtime
     output = pack.replay_output("P-ARGUMENT-ARCHITECTURE", "normal")
     envelope = pack.replay_input("P-ARGUMENT-ARCHITECTURE")
-    output["result"]["research_design_matrix"][0]["research_question_id"] = "RQ-002"
-    output["result"]["research_design_matrix"][0]["rq_ids"] = ["RQ-002"]
+    output["result"]["research_design_matrix"][0]["research_question_id"] = "rq-002"
+    output["result"]["research_design_matrix"][0]["rq_ids"] = ["rq-002"]
     envelope["payload"]["current_sections"] = [{
         "section_id": "section-loop-test",
         "text": "`RC-2` dynamic teaming package\n`BASE-2` available software remains UNKNOWN",
@@ -1163,7 +1163,7 @@ def test_argument_normalizer_does_not_restore_entities_from_free_text(runtime):
     }
     assert normalized_node_ids == original_node_ids
     assert {"RC-002", "BASE-002", "method-RC-002"}.isdisjoint(normalized_node_ids)
-    assert normalized["result"]["research_design_matrix"][0]["rq_ids"] == ["RQ-002"]
+    assert normalized["result"]["research_design_matrix"][0]["rq_ids"] == ["rq-002"]
     errors = pack.validate("P-ARGUMENT-ARCHITECTURE", "output", normalized)
     assert any("rq_ids" in error for error in errors)
 
@@ -1333,10 +1333,40 @@ def test_runtime_call_key_changes_when_execution_spec_changes(runtime):
     }
     first = executor._call_key(**args)
     profiles = pack.profiles.get("profiles") or pack.profiles
-    profiles["critic"]["max_output_tokens"] += 1
+    profiles["critic"]["desired_output_tokens"] += 1
     second = executor._call_key(**args)
 
     assert first != second
+
+
+
+def test_runtime_call_key_changes_when_provider_model_or_capability_changes(runtime):
+    _, pack, _, _, _, executor, _, _ = runtime
+    args = {
+        "prompt_id": "P-PROJECT-DEFINITION-CRITIC",
+        "project_id": "project-test",
+        "workflow_id": "workflow-test",
+        "input_hash": "c" * 64,
+        "requested_call_key": None,
+    }
+    model = next(
+        item
+        for item in pack.models["models"]
+        if item["model_id"] == "offline-critic-primary"
+    )
+
+    model["provider_model_name"] = "MiniMax-M3"
+    first = executor._call_key(**args)
+
+    model["provider_model_name"] = "MiniMax-M2.7-highspeed"
+    second = executor._call_key(**args)
+    assert second != first
+
+    model["provider_model_name"] = "MiniMax-M3"
+    pack.models["provider_capabilities"]["MiniMax-M3"]["hard_max_output_tokens"] -= 1
+    third = executor._call_key(**args)
+    assert third != first
+
 
 
 def test_runtime_call_key_changes_when_contract_registry_changes(runtime, monkeypatch):

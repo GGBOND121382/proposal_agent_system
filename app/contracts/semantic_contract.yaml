@@ -1,4 +1,4 @@
-version: 2.3.0
+version: 2.4.1
 rule_registry_version: 1.3.0
 rules:
   SC-ARGUMENT-ROLE-COMPATIBILITY:
@@ -143,9 +143,92 @@ rules:
         unresolved_slot_ids:
         - UNKNOWN
         - ABSENT-FACT
+      path_overrides:
+        P-SECURITY-CLASSIFY:
+          ENTITY_REF:
+          - result/object_id
+        P-ARGUMENT-ARCHITECTURE:
+          ENTITY_REF:
+          - result/research_design_matrix/*/research_question_id
+          - result/argument_architecture/edges/*/source_id
+          - result/argument_architecture/edges/*/target_id
+        P-ARGUMENT-ARCHITECTURE-CRITIC:
+          ENTITY_REF:
+          - result/design_matrix_checks/*/research_question_id
+          - result/evidence_checks/*/node_id
+        P-SCHEME-CRITIC:
+          ENTITY_REF:
+          - result/numeric_checks/*/rule_id
+          SOURCE_REF:
+          - result/missing_rule_candidates/*/source_ref/source_id
+        P-PROJECT-DEFINITION-EXTRACT:
+          ENTITY_REF:
+          - result/project_definition/relations/*/source_item_id
+          - result/project_definition/relations/*/target_item_id
+          - result/argument_graph_seed/edges/*/source_id
+          - result/argument_graph_seed/edges/*/target_id
+        P-PROJECT-READINESS-CRITIC:
+          PROTOCOL_REF:
+          - result/chapter_readiness/*/profile_id
+        P-FACT-EXTRACT:
+          ENTITY_REF:
+          - result/coverage/*/span_id
+        P-TEMPLATE-EXTRACT:
+          ENTITY_REF:
+          - result/coverage/*/section_id
+        P-FINAL-CONFIDENTIALITY-REVIEW:
+          ENTITY_REF:
+          - result/sensitive_spans/*/section_id
+        P-REVISION-PLAN:
+          ENTITY_REF:
+          - result/revision_plan/dependencies/*/predecessor_task_id
+          - result/revision_plan/dependencies/*/successor_task_id
+          - result/revision_plan/narrative_architecture/central_proposition_id
+          - result/revision_plan/narrative_architecture/section_contracts/*/section_id
+          - result/readiness_summary/*/task_id
+          PROTOCOL_REF:
+          - result/revision_plan/narrative_architecture/section_contracts/*/profile_id
+        P-WRITE-BLUEPRINT:
+          ENTITY_REF:
+          - result/blueprint/section_profile_id
+          - result/blueprint/section_contract_id
+          - result/plan_task_coverage/*/revision_task_id
+          - result/input_usage_summary/*/source_id
+        P-WRITE-CONTENT:
+          ENTITY_REF:
+          - result/paragraphs/*/section_contract_id
+          - result/trace_links/*/source_id
+          - result/source_preservation_summary/*/paragraph_id
+          - result/claim_advancement/section_contract_id
+        P-WRITE-CRITIC:
+          ENTITY_REF:
+          - result/paragraph_reviews/*/paragraph_id
+        P-EXPRESSION-POLISH:
+          ENTITY_REF:
+          - result/candidate_id
+          - result/paragraphs/*/paragraph_id
+          - result/paragraphs/*/section_contract_id
+          - result/trace_links/*/trace_id
+          - result/trace_links/*/source_id
+          - result/source_preservation_summary/*/paragraph_id
+          - result/edit_log/*/paragraph_id
+          - result/claim_advancement/section_contract_id
+        P-INTEGRATION-CRITIC:
+          ENTITY_REF:
+          - result/mapping_checks/*/source_id
+          - result/central_proposition_coverage/central_proposition_id
+        P-SCHEME-EXTRACT:
+          SOURCE_REF:
+          - result/extraction_coverage/*/source_id
+        P-PUBLIC-RESEARCH-CRITIC:
+          SOURCE_REF:
+          - result/source_quality_summary/*/source_id
       groups:
         ENTITY_REF:
         - acceptance_refs
+        - blueprint_paragraph_id
+        - source_item_id
+        - target_item_id
         - accepted_claim_ids
         - advanced_claim_ids
         - affected_section_ids
@@ -186,7 +269,9 @@ rules:
         - output_trace_ids
         - overflow_section_ids
         - paragraph_ids
+        - predecessor_task_id
         - prerequisite_section_ids
+        - primary_claim_id
         - preserved_trace_ids
         - project_item_slots
         - protected_object_ids
@@ -200,7 +285,10 @@ rules:
         - research_question_ids
         - sections
         - status_upgrade_item_ids
+        - successor_task_id
         - supporting_section_ids
+        - suggested_question_id
+        - target_id
         - target_ids
         - target_object_ids
         - target_section_ids
@@ -250,9 +338,12 @@ rules:
         - required_user_confirmations
         PROTOCOL_REF:
         - allowed_model_endpoint_ids
+        - project_id
         NEW_ENTITY_ID:
         - architecture_id
         - attachment_id
+        - contract_id
+        - finding_instance_id
         - blueprint_id
         - candidate_id
         - central_proposition_id

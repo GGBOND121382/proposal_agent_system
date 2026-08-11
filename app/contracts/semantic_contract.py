@@ -100,6 +100,7 @@ class SemanticContract:
     forbid_self_evidence: bool
     required_evidence_contract_field: str
     reference_field_semantics: Mapping[str, ReferenceSemantic]
+    reference_path_semantics: Mapping[str, tuple[tuple[tuple[str, ...], ReferenceSemantic], ...]]
     input_object_reference_fields: frozenset[str]
     reference_suffix_aliases: Mapping[str, tuple[str, ...]]
 
@@ -222,11 +223,38 @@ class SemanticContract:
         primary = str(paragraph.get("primary_claim_id") or "")
         return ({primary} & self.evidence_ids(paragraph)) if primary else set()
 
-    def field_semantic(self, field_name: str) -> ReferenceSemantic | None:
+    @staticmethod
+    def _path_matches(path: Iterable[Any], pattern: tuple[str, ...]) -> bool:
+        normalized = tuple("*" if isinstance(part, int) else str(part) for part in path)
+        return len(normalized) == len(pattern) and all(
+            expected == "*" or actual == expected
+            for actual, expected in zip(normalized, pattern)
+        )
+
+    def field_semantic(
+        self,
+        field_name: str,
+        *,
+        prompt_id: str | None = None,
+        path: Iterable[Any] | None = None,
+    ) -> ReferenceSemantic | None:
+        if path is not None:
+            for scope in (str(prompt_id or ""), "*"):
+                if not scope:
+                    continue
+                for pattern, semantic in self.reference_path_semantics.get(scope, ()):
+                    if self._path_matches(path, pattern):
+                        return semantic
         return self.reference_field_semantics.get(str(field_name))
 
-    def reference_annotation(self, field_name: str) -> Mapping[str, str]:
-        semantic = self.field_semantic(field_name)
+    def reference_annotation(
+        self,
+        field_name: str,
+        *,
+        prompt_id: str | None = None,
+        path: Iterable[Any] | None = None,
+    ) -> Mapping[str, str]:
+        semantic = self.field_semantic(field_name, prompt_id=prompt_id, path=path)
         return MappingProxyType(
             {"x-reference-semantic": semantic.value} if semantic is not None else {}
         )
@@ -520,11 +548,14 @@ def annotate_schema_reference_semantics(
 
     active = contract or get_semantic_contract()
     annotated = copy.deepcopy(dict(schema))
+    prompt_id = str(
+        (((annotated.get("properties") or {}).get("prompt_id") or {}).get("const") or "")
+    ).strip() or None
 
-    def visit(node: Any) -> None:
+    def visit(node: Any, path: tuple[str, ...] = ()) -> None:
         if isinstance(node, list):
             for item in node:
-                visit(item)
+                visit(item, path)
             return
         if not isinstance(node, dict):
             return
@@ -533,14 +564,20 @@ def annotate_schema_reference_semantics(
             for raw_name, child in properties.items():
                 name = str(raw_name)
                 if isinstance(child, dict):
-                    semantic = active.field_semantic(name)
+                    child_path = (*path, name)
+                    semantic = active.field_semantic(
+                        name, prompt_id=prompt_id, path=child_path
+                    )
                     if semantic is not None:
                         child["x-reference-semantic"] = semantic.value
                         _apply_reference_value_shape(child, semantic)
-                    visit(child)
+                    visit(child, child_path)
+        items = node.get("items")
+        if isinstance(items, dict):
+            visit(items, (*path, "*"))
         for key, value in node.items():
-            if key != "properties":
-                visit(value)
+            if key not in {"properties", "items"}:
+                visit(value, path)
 
     visit(annotated)
     return annotated
@@ -603,34 +640,78 @@ def assert_schema_reference_coverage(
     discovered: set[str] = set()
     annotation_errors: list[str] = []
 
-    def inspect_annotations(node: Any, path: str = "") -> None:
+    def inspect_annotations(
+        node: Any,
+        *,
+        prompt_id: str | None,
+        semantic_path: tuple[str, ...] = (),
+        display_path: str = "",
+    ) -> None:
         if isinstance(node, list):
             for index, item in enumerate(node):
-                inspect_annotations(item, f"{path}/{index}")
+                inspect_annotations(
+                    item,
+                    prompt_id=prompt_id,
+                    semantic_path=semantic_path,
+                    display_path=f"{display_path}/{index}",
+                )
             return
         if not isinstance(node, Mapping):
             return
+
         properties = node.get("properties")
         if isinstance(properties, Mapping):
             for raw_name, child in properties.items():
                 name = str(raw_name)
-                if isinstance(child, Mapping):
-                    semantic = active.field_semantic(name)
-                    if semantic is not None:
-                        annotated = child.get("x-reference-semantic")
-                        if annotated != semantic.value:
-                            annotation_errors.append(
-                                f"{path}/properties/{name}: expected x-reference-semantic="
-                                f"{semantic.value!r}, got {annotated!r}"
-                            )
-                    inspect_annotations(child, f"{path}/properties/{name}")
+                if not isinstance(child, Mapping):
+                    continue
+                child_semantic_path = (*semantic_path, name)
+                semantic = active.field_semantic(
+                    name,
+                    prompt_id=prompt_id,
+                    path=child_semantic_path,
+                )
+                if semantic is not None:
+                    annotated = child.get("x-reference-semantic")
+                    if annotated != semantic.value:
+                        annotation_errors.append(
+                            f"{display_path}/properties/{name}: expected "
+                            f"x-reference-semantic={semantic.value!r}, got {annotated!r}"
+                        )
+                inspect_annotations(
+                    child,
+                    prompt_id=prompt_id,
+                    semantic_path=child_semantic_path,
+                    display_path=f"{display_path}/properties/{name}",
+                )
+
+        items = node.get("items")
+        if isinstance(items, Mapping):
+            inspect_annotations(
+                items,
+                prompt_id=prompt_id,
+                semantic_path=(*semantic_path, "*"),
+                display_path=f"{display_path}/items",
+            )
+
         for key, value in node.items():
-            if key != "properties":
-                inspect_annotations(value, f"{path}/{key}")
+            if key in {"properties", "items"}:
+                continue
+            if isinstance(value, (Mapping, list)):
+                inspect_annotations(
+                    value,
+                    prompt_id=prompt_id,
+                    semantic_path=semantic_path,
+                    display_path=f"{display_path}/{key}",
+                )
 
     for schema in schemas:
         discovered.update(collect_schema_reference_fields(schema))
-        inspect_annotations(schema)
+        prompt_id = str(
+            (((schema.get("properties") or {}).get("prompt_id") or {}).get("const") or "")
+        ).strip() or None
+        inspect_annotations(schema, prompt_id=prompt_id)
+
     missing = active.unregistered_reference_fields(discovered)
     if missing:
         raise ValueError(
@@ -712,6 +793,34 @@ def load_semantic_contract(path: Path | str = _CONTRACT_PATH) -> SemanticContrac
     if not isinstance(groups, Mapping):
         raise ValueError("reference semantic groups must be an object")
     semantics = MappingProxyType(_load_reference_semantics(groups))
+
+    raw_path_overrides = reference_config.get("path_overrides") or {}
+    if not isinstance(raw_path_overrides, Mapping):
+        raise ValueError("reference path overrides must be an object")
+    path_semantics: dict[str, tuple[tuple[tuple[str, ...], ReferenceSemantic], ...]] = {}
+    for raw_prompt_id, raw_groups in raw_path_overrides.items():
+        if not isinstance(raw_groups, Mapping):
+            raise ValueError(
+                f"reference path overrides for {raw_prompt_id!r} must be an object"
+            )
+        entries: list[tuple[tuple[str, ...], ReferenceSemantic]] = []
+        for raw_semantic, raw_paths in raw_groups.items():
+            try:
+                semantic = ReferenceSemantic(str(raw_semantic))
+            except ValueError as exc:
+                raise ValueError(
+                    f"unknown reference path semantic {raw_semantic!r}"
+                ) from exc
+            for raw_path in _unique_strings(
+                raw_paths or (),
+                location=f"reference path overrides for {raw_prompt_id}/{raw_semantic}",
+            ):
+                parts = tuple(part for part in raw_path.strip("/").split("/") if part)
+                if not parts or parts[-1] == "*":
+                    raise ValueError(f"invalid reference path override: {raw_path!r}")
+                entries.append((parts, semantic))
+        path_semantics[str(raw_prompt_id)] = tuple(entries)
+
     input_object_fields = frozenset(
         _unique_strings(
             reference_config.get("input_object_fields") or (),
@@ -766,6 +875,7 @@ def load_semantic_contract(path: Path | str = _CONTRACT_PATH) -> SemanticContrac
         forbid_self_evidence=bool(evidence.get("forbid_self_evidence", True)),
         required_evidence_contract_field=required_evidence_contract_field,
         reference_field_semantics=semantics,
+        reference_path_semantics=MappingProxyType(path_semantics),
         input_object_reference_fields=input_object_fields,
         reference_suffix_aliases=MappingProxyType(suffix_aliases),
     )

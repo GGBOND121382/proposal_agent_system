@@ -28,7 +28,7 @@ from .status_ontology import (
     normalize_temporal_status,
 )
 
-CONTRACT_REGISTRY_VERSION = "5.4.1"
+CONTRACT_REGISTRY_VERSION = "5.5.0"
 
 
 def prepare_schema_contract(schema: Mapping[str, Any]) -> dict[str, Any]:

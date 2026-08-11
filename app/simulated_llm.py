@@ -574,6 +574,12 @@ class SimulatedLLM:
 
     def _handle_security_classify(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         result = base["result"]
+        object_context = (envelope.get("payload") or {}).get("object_context") or {}
+        object_id = str(object_context.get("object_id") or "").strip()
+        if object_id:
+            # Replay outputs contain a stable sample ID.  In simulated LIVE-style
+            # workflows the classification must target the object from this request.
+            result["object_id"] = object_id
         result["recommended_level"] = "INTERNAL"
         result["sensitive_fields"] = ["人员姓名", "组织名称"]
         result["allowed_environments"] = ["OFFLINE_LOCAL", "ONLINE_PUBLIC"]
@@ -592,6 +598,22 @@ class SimulatedLLM:
         r["application_year"] = 2026
         r["guide_direction_name"] = "物流运输优化与智能体系统" if self._is_transport_project(envelope) else "智能体系统与复杂服务保障"
         r["duration_months"] = 36
+
+        # Replay fixtures use stable sample IDs, but a simulated provider is
+        # expected to consume the current request rather than leak those sample
+        # identifiers into its response.  Coverage has no hash/section metadata
+        # with which the provenance binder could safely recover a stale alias, so
+        # derive it here when the current guide source is unambiguous.
+        guide_documents = [
+            item
+            for item in (envelope.get("payload") or {}).get("guide_documents") or []
+            if isinstance(item, dict) and str(item.get("document_id") or "").strip()
+        ]
+        if len(guide_documents) == 1:
+            document_id = str(guide_documents[0]["document_id"]).strip()
+            for coverage in (base.get("result") or {}).get("extraction_coverage") or []:
+                if isinstance(coverage, dict):
+                    coverage["source_id"] = document_id
         return base
 
     def _handle_scheme_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -652,7 +674,24 @@ class SimulatedLLM:
             },
         ]
         base["result"]["fact_candidates"] = facts
-        base["result"]["coverage"] = [{"span_id": f"span-{i:03d}", "claim_ids": [fact["claim_id"]]} for i, fact in enumerate(facts, 1)]
+
+        # Coverage IDs are references to the current input spans, not entities
+        # created by the extractor.  Never reuse the stable replay span IDs when
+        # a simulated workflow supplies different source spans.
+        source_span_ids = [
+            str(item.get("span_id")).strip()
+            for item in (envelope.get("payload") or {}).get("source_spans") or []
+            if isinstance(item, dict) and str(item.get("span_id") or "").strip()
+        ]
+        if source_span_ids:
+            grouped_claim_ids: dict[str, list[str]] = {}
+            for index, fact in enumerate(facts):
+                span_id = source_span_ids[min(index, len(source_span_ids) - 1)]
+                grouped_claim_ids.setdefault(span_id, []).append(fact["claim_id"])
+            base["result"]["coverage"] = [
+                {"span_id": span_id, "claim_ids": claim_ids}
+                for span_id, claim_ids in grouped_claim_ids.items()
+            ]
         base["result"]["conflict_candidates"] = []
         return base
 

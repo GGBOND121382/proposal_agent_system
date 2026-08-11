@@ -18,7 +18,7 @@ from .contract_registry import (
     synchronize_required_mirrored_arrays,
 )
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
-from .contracts import get_semantic_contract
+from .contracts import ReferenceSemantic, get_semantic_contract
 from .output_integrity import (
     TRUSTED_SOURCE_CATALOG_VERSION,
     attach_trusted_source_catalog,
@@ -64,7 +64,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-08-11.v46-argument-human-gate-status"
+OUTPUT_NORMALIZER_VERSION = "2026-08-11.v48-path-refs-source-binding-human-gate"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -910,36 +910,176 @@ class PromptExecutor:
         return normalized
 
     @staticmethod
-    def _normalize_argument_architecture_status(output: dict[str, Any]) -> dict[str, Any]:
-        """Derive the human-gate status from already model-authored blockers.
+    def _normalize_human_gate_status(output: dict[str, Any]) -> dict[str, Any]:
+        """Derive ``NEED_USER_INPUT`` only from explicit model-authored questions.
 
-        This is deliberately narrow.  It does not create/delete findings, questions,
-        unresolved items, graph entities, or research content.  It only resolves a
-        state-machine contradiction in ``P-ARGUMENT-ARCHITECTURE``: a provider may
-        label an otherwise complete candidate ``PASS``/``REVISE`` while also emitting
-        a blocking user question or a blocking Finding explicitly routed to ``USER``.
-        Those authored blockers mean the workflow cannot advance without human input,
-        so the deterministic consumption status is ``NEED_USER_INPUT``.  ``BLOCK`` is
-        preserved because it may represent an independent hard contract/source error.
+        Every prompt shares the same status vocabulary.  A blocking, directly
+        answerable ``user_question`` is therefore a workflow fact rather than a
+        prompt-specific convention: PASS/REVISE cannot advance while that question
+        is open.  Findings alone are deliberately insufficient because converting
+        a Finding into a human question would invent business content.
         """
 
         normalized = copy.deepcopy(output)
         if str(normalized.get("status") or "").upper() not in {"PASS", "REVISE"}:
             return normalized
-
-        blocking_user_question = any(
+        if any(
             isinstance(item, dict) and bool(item.get("blocking"))
             for item in normalized.get("user_questions") or []
-        )
-        blocking_user_finding = any(
-            isinstance(item, dict)
-            and bool(item.get("blocking"))
-            and str(item.get("suggested_route") or "").upper() == "USER"
-            for item in normalized.get("findings") or []
-        )
-        if blocking_user_question or blocking_user_finding:
+        ):
             normalized["status"] = "NEED_USER_INPUT"
         return normalized
+
+    @staticmethod
+    def _human_gate_contract_errors(output: dict[str, Any]) -> list[str]:
+        """Return contradictions between USER-routed blockers and gate payload."""
+
+        blocking_questions = [
+            item
+            for item in output.get("user_questions") or []
+            if isinstance(item, dict) and bool(item.get("blocking"))
+        ]
+        errors: list[str] = []
+        for index, finding in enumerate(output.get("findings") or []):
+            if not isinstance(finding, dict):
+                continue
+            if not bool(finding.get("blocking")):
+                continue
+            if str(finding.get("suggested_route") or "").upper() != "USER":
+                continue
+            if bool(finding.get("repairable")):
+                errors.append(
+                    f"/findings/{index}/repairable: blocking USER-routed Finding "
+                    "cannot be marked repairable by an automated producer"
+                )
+            if not blocking_questions:
+                errors.append(
+                    f"/findings/{index}: blocking USER-routed Finding requires at "
+                    "least one blocking, directly answerable user_question; runtime "
+                    "will not invent that question"
+                )
+        return errors
+
+    def _normalize_protocol_reference_values(
+        self,
+        prompt_id: str,
+        output: dict[str, Any],
+        envelope: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], list[str]]:
+        """Bind protocol-owned scalar identifiers to authoritative context values.
+
+        This is intentionally narrower than business reference normalization.
+        At present only ``project_id`` is input-owned: whenever an output schema
+        exposes it, the value must mirror ``scope.project_id`` from the current
+        envelope. Section ``profile_id`` values are validated separately against
+        the prompt pack registry because choosing a profile is business logic.
+        """
+        normalized = copy.deepcopy(output)
+        expected_project_id = str(
+            (((envelope or {}).get("scope") or {}).get("project_id") or "")
+            if isinstance((envelope or {}).get("scope"), dict)
+            else ""
+        ).strip()
+        if not expected_project_id:
+            return normalized, []
+
+        contract = get_semantic_contract()
+        changes: list[str] = []
+
+        def visit(node: Any, path: tuple[Any, ...]) -> None:
+            if isinstance(node, list):
+                for index, item in enumerate(node):
+                    visit(item, (*path, index))
+                return
+            if not isinstance(node, dict):
+                return
+            for key, value in list(node.items()):
+                current = (*path, key)
+                semantic = contract.field_semantic(
+                    key,
+                    prompt_id=prompt_id,
+                    path=current,
+                )
+                if (
+                    semantic is ReferenceSemantic.PROTOCOL_REF
+                    and key == "project_id"
+                    and isinstance(value, str)
+                    and value != expected_project_id
+                ):
+                    node[key] = expected_project_id
+                    changes.append(
+                        f"{'/'.join(str(part) for part in current)}:"
+                        f"{value}->{expected_project_id}"
+                    )
+                    value = expected_project_id
+                visit(value, current)
+
+        visit(normalized, ())
+        return normalized, changes
+
+    def _protocol_reference_contract_errors(
+        self,
+        prompt_id: str,
+        output: dict[str, Any],
+        envelope: dict[str, Any] | None,
+    ) -> list[str]:
+        """Validate scalar protocol references against authoritative registries."""
+
+        contract = get_semantic_contract()
+        scope = (envelope or {}).get("scope")
+        expected_project_id = (
+            str(scope.get("project_id") or "").strip()
+            if isinstance(scope, dict)
+            else ""
+        )
+        section_profiles = getattr(self.pack, "section_profiles", {}) or {}
+        allowed_profile_ids = {
+            str(item.get("profile_id") or "").strip()
+            for item in section_profiles.get("profiles") or []
+            if isinstance(item, dict) and str(item.get("profile_id") or "").strip()
+        }
+        default_profile = section_profiles.get("default_profile")
+        if isinstance(default_profile, dict) and str(default_profile.get("profile_id") or "").strip():
+            allowed_profile_ids.add(str(default_profile["profile_id"]).strip())
+
+        errors: list[str] = []
+
+        def pointer(path: tuple[Any, ...]) -> str:
+            return "/" + "/".join(str(part) for part in path)
+
+        def visit(node: Any, path: tuple[Any, ...]) -> None:
+            if isinstance(node, list):
+                for index, item in enumerate(node):
+                    visit(item, (*path, index))
+                return
+            if not isinstance(node, dict):
+                return
+            for key, value in node.items():
+                current = (*path, key)
+                semantic = contract.field_semantic(
+                    key,
+                    prompt_id=prompt_id,
+                    path=current,
+                )
+                if semantic is ReferenceSemantic.PROTOCOL_REF and isinstance(value, str):
+                    if key == "project_id" and expected_project_id and value != expected_project_id:
+                        errors.append(
+                            f"{pointer(current)}: project_id {value!r} does not match "
+                            f"authoritative scope.project_id {expected_project_id!r}"
+                        )
+                    elif (
+                        key == "profile_id"
+                        and allowed_profile_ids
+                        and value not in allowed_profile_ids
+                    ):
+                        errors.append(
+                            f"{pointer(current)}: profile_id {value!r} is not registered "
+                            "in prompt_pack/knowledge/section_profiles.yaml"
+                        )
+                visit(value, current)
+
+        visit(output, ())
+        return errors
 
     def _normalize_output(
         self,
@@ -1041,6 +1181,27 @@ class PromptExecutor:
         if protocol_changes:
             normalized.setdefault("warnings", []).append(
                 "SYSTEM_PROTOCOL_CONSTANT_NORMALIZATION: " + ", ".join(protocol_changes)
+            )
+
+        normalized, protocol_ref_changes = self._normalize_protocol_reference_values(
+            prompt_id,
+            normalized,
+            envelope,
+        )
+        if protocol_ref_changes:
+            normalized.setdefault("warnings", []).append(
+                "SYSTEM_PROTOCOL_REFERENCE_NORMALIZATION: "
+                + "; ".join(protocol_ref_changes[:12])
+            )
+        protocol_ref_errors = self._protocol_reference_contract_errors(
+            prompt_id,
+            normalized,
+            envelope,
+        )
+        if protocol_ref_errors:
+            raise PromptExecutionError(
+                "Output protocol reference validation failed",
+                validation_errors=protocol_ref_errors,
             )
 
         receipt_changes = self._complete_deterministic_protocol_receipts(
@@ -1161,8 +1322,14 @@ class PromptExecutor:
                     "Output reference integrity validation failed",
                     validation_errors=reference_errors,
                 )
-        if prompt_id == "P-ARGUMENT-ARCHITECTURE":
-            normalized = self._normalize_argument_architecture_status(normalized)
+        if envelope:
+            normalized = self._normalize_human_gate_status(normalized)
+            human_gate_errors = self._human_gate_contract_errors(normalized)
+            if human_gate_errors:
+                raise PromptExecutionError(
+                    "Output human-gate contract validation failed",
+                    validation_errors=human_gate_errors,
+                )
         return normalized
 
     @staticmethod

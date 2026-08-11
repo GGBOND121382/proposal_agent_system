@@ -160,6 +160,12 @@ _REFERENCE_ARRAY_FIELDS.update(
     for field_name, semantic in get_semantic_contract().reference_field_semantics.items()
     if semantic in {ReferenceSemantic.ENTITY_REF, ReferenceSemantic.FINDING_REF}
 )
+_EXISTING_TARGET_SEMANTICS = frozenset({
+    ReferenceSemantic.ENTITY_REF,
+    ReferenceSemantic.SOURCE_REF,
+    ReferenceSemantic.FINDING_REF,
+    ReferenceSemantic.ENTITY_OR_FIELD_PATH,
+})
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _REGISTERED_DIAGNOSTIC_REFS: frozenset[str] = frozenset()
 _SOURCE_ID_ALIAS_PREFIXES = tuple(
@@ -343,19 +349,33 @@ def _pointer(path: tuple[Any, ...]) -> str:
 
 def _collect_defined_ids(value: Any) -> set[str]:
     found: set[str] = set()
+    contract = get_semantic_contract()
+    prompt_id = (
+        str(value.get("prompt_id") or "").strip()
+        if isinstance(value, Mapping)
+        else ""
+    ) or None
 
-    def visit(node: Any) -> None:
+    def visit(node: Any, path: tuple[Any, ...]) -> None:
         if isinstance(node, list):
-            for item in node:
-                visit(item)
+            for index, item in enumerate(node):
+                visit(item, (*path, index))
             return
         if not isinstance(node, Mapping):
             return
         for key, item in node.items():
+            current = (*path, key)
+            semantic = contract.field_semantic(
+                str(key), prompt_id=prompt_id, path=current
+            )
             if (
                 key.endswith("_id")
                 and key not in _PROTOCOL_ID_FIELDS
                 and key != "source_id"
+                and (
+                    semantic is None
+                    or semantic is ReferenceSemantic.NEW_ENTITY_ID
+                )
                 and isinstance(item, (str, int))
                 and not isinstance(item, bool)
                 and str(item).strip()
@@ -373,9 +393,9 @@ def _collect_defined_ids(value: Any) -> set[str]:
                 for ref in item:
                     if isinstance(ref, Mapping) and str(ref.get("source_id") or "").strip():
                         found.add(str(ref["source_id"]).strip())
-            visit(item)
+            visit(item, current)
 
-    visit(value)
+    visit(value, ())
     return found
 
 
@@ -407,26 +427,39 @@ def _collect_visible_reference_ids(value: Any) -> set[str]:
     This is intentionally used only on input/trusted context, never on the
     output being validated.  It lets a repair preserve upstream references
     without allowing a newly generated output reference to authorize itself.
+    Both array and scalar references are contract-driven.
     """
     found: set[str] = set()
+    contract = get_semantic_contract()
+    prompt_id = (
+        str(value.get("prompt_id") or "").strip()
+        if isinstance(value, Mapping)
+        else ""
+    ) or None
 
-    def visit(node: Any) -> None:
+    def visit(node: Any, path: tuple[Any, ...]) -> None:
         if isinstance(node, list):
-            for item in node:
-                visit(item)
+            for index, item in enumerate(node):
+                visit(item, (*path, index))
             return
         if not isinstance(node, Mapping):
             return
         for key, item in node.items():
+            current = (*path, key)
+            semantic = contract.field_semantic(
+                str(key), prompt_id=prompt_id, path=current
+            )
             if _is_reference_array_field(str(key)) and isinstance(item, list):
                 found.update(
-                    str(value).strip()
-                    for value in item
-                    if isinstance(value, str) and value.strip()
+                    str(reference).strip()
+                    for reference in item
+                    if isinstance(reference, str) and reference.strip()
                 )
-            visit(item)
+            elif semantic in _EXISTING_TARGET_SEMANTICS and isinstance(item, str) and item.strip():
+                found.add(item.strip())
+            visit(item, current)
 
-    visit(value)
+    visit(value, ())
     return found
 
 
@@ -975,12 +1008,14 @@ def bind_trusted_source_refs(
     *,
     db: Any = None,
 ) -> tuple[Any, dict[str, Any]]:
-    """Return a copy whose every ``source_refs`` item is input-backed.
+    """Return a copy whose source-reference objects are input-backed.
 
-    Unknown source IDs are reported and left unchanged so the caller can block
-    deterministically.  Known source IDs have all protocol metadata replaced
-    by trusted values; model-authored version IDs, hashes, security labels,
-    ranks, spans and quotes are never accepted as authority.
+    Both the common ``source_refs`` array and the schema-supported singular
+    ``source_ref`` object use the same deterministic binder. Unknown source IDs
+    are reported and left unchanged so the caller can block deterministically.
+    Known source IDs have all protocol metadata replaced by trusted values;
+    model-authored version IDs, hashes, security labels, ranks, spans and quotes
+    are never accepted as authority.
     """
     normalized = copy.deepcopy(output)
     effective_envelope = attach_trusted_source_catalog(envelope)
@@ -1006,6 +1041,151 @@ def bind_trusted_source_refs(
                 return candidate
         return candidates[0] if len(candidates) == 1 else None
 
+    def bind_one(
+        ref: Any,
+        ref_path: tuple[Any, ...],
+        *,
+        seen: set[tuple[str, str | None]] | None = None,
+    ) -> Any | None:
+        if not isinstance(ref, Mapping):
+            errors.append(f"{_pointer(ref_path)}: source reference must be an object")
+            return ref
+
+        raw_source_id = str(ref.get("source_id") or "").strip()
+        if not raw_source_id:
+            errors.append(f"{_pointer(ref_path)}/source_id: missing source identifier")
+            return dict(ref)
+
+        requested_section = (
+            ref.get("section_id")
+            if isinstance(ref.get("section_id"), str)
+            and ref.get("section_id").strip()
+            else None
+        )
+        source_id, alias_kind = _resolve_catalog_source_id(
+            raw_source_id,
+            catalog.keys(),
+            alias_index,
+        )
+
+        provider_hash = _hash(ref.get("source_hash"))
+        if source_id is None:
+            # A provider may truncate a long opaque ID while still copying the
+            # exact 64-character source hash. Rebind only when that hash is
+            # unambiguous in the trusted catalog.
+            hash_targets = set(hash_index.get(provider_hash) or set())
+            if len(hash_targets) == 1:
+                source_id = next(iter(hash_targets))
+                alias_kind = "UNIQUE_SOURCE_HASH"
+            elif requested_section and requested_section in hash_targets:
+                source_id = requested_section
+                alias_kind = "EXACT_SECTION_HASH"
+            elif len(hash_targets) > 1:
+                section_ids = {
+                    str(candidate.get("section_id"))
+                    for target in hash_targets
+                    for candidate in catalog.get(target) or []
+                    if candidate.get("section_id")
+                    and _hash(candidate.get("source_hash")) == provider_hash
+                }
+                if (
+                    len(section_ids) == 1
+                    and next(iter(section_ids)) in hash_targets
+                ):
+                    source_id = next(iter(section_ids))
+                    alias_kind = "UNIQUE_SECTION_FOR_HASH"
+
+        if source_id is None and requested_section and requested_section in catalog:
+            # An exact trusted section ID is a first-class alias. This fallback
+            # is used only when the provider's source_id itself is not trusted.
+            source_id = requested_section
+            alias_kind = "EXACT_SECTION_ID"
+
+        if source_id is None:
+            errors.append(
+                f"{_pointer(ref_path)}/source_id: {raw_source_id!r} is not present "
+                "in the trusted input envelope"
+            )
+            return dict(ref)
+
+        trusted = select(source_id, requested_section)
+        if trusted is None:
+            # A valid document/source ID can be paired with a section alias from
+            # another trusted catalog view. First prefer the unique candidate
+            # under that source carrying the provider-copied trusted hash.
+            if provider_hash:
+                source_hash_matches = [
+                    candidate
+                    for candidate in catalog.get(source_id) or []
+                    if _hash(candidate.get("source_hash")) == provider_hash
+                ]
+                if len(source_hash_matches) == 1:
+                    trusted = source_hash_matches[0]
+                    alias_kind = alias_kind or "SOURCE_HASH_SECTION"
+
+            # If the requested section is itself catalogued, rebind only when
+            # trusted identity metadata proves that it is the same source view.
+            if trusted is None and requested_section and requested_section in catalog:
+                exact_section = select(requested_section, requested_section)
+                if exact_section is not None:
+                    exact_hash = _hash(exact_section.get("source_hash"))
+                    provider_version = str(
+                        ref.get("document_version_id") or ""
+                    ).strip()
+                    exact_version = str(
+                        exact_section.get("document_version_id") or ""
+                    ).strip()
+                    hash_compatible = bool(
+                        provider_hash
+                        and exact_hash
+                        and provider_hash == exact_hash
+                    )
+                    version_compatible = bool(
+                        not provider_hash
+                        and provider_version
+                        and exact_version
+                        and provider_version == exact_version
+                    )
+                    if hash_compatible or version_compatible:
+                        source_id = requested_section
+                        trusted = exact_section
+                        alias_kind = (
+                            "EXACT_SECTION_HASH"
+                            if hash_compatible
+                            else "EXACT_SECTION_VERSION"
+                        )
+
+        if trusted is None:
+            errors.append(
+                f"{_pointer(ref_path)}/source_id: {raw_source_id!r} does not resolve "
+                "to one unambiguous trusted section"
+            )
+            return dict(ref)
+
+        key_tuple = (source_id, trusted.get("section_id"))
+        if seen is not None:
+            if key_tuple in seen:
+                changes.append({
+                    "path": _pointer(ref_path),
+                    "action": "DROP_DUPLICATE",
+                    "source_id": source_id,
+                })
+                return None
+            seen.add(key_tuple)
+
+        authoritative = copy.deepcopy(trusted)
+        if dict(ref) != authoritative:
+            changes.append({
+                "path": _pointer(ref_path),
+                "action": "BIND_ALIAS" if alias_kind else "REBIND",
+                "source_id": source_id,
+                "provider_source_id": raw_source_id,
+                "alias_kind": alias_kind,
+                "requested_section_id": requested_section,
+                "trusted_section_id": authoritative.get("section_id"),
+            })
+        return authoritative
+
     def visit(node: Any, path: tuple[Any, ...]) -> None:
         if isinstance(node, list):
             for index, item in enumerate(node):
@@ -1013,113 +1193,19 @@ def bind_trusted_source_refs(
             return
         if not isinstance(node, dict):
             return
+
         for key, value in list(node.items()):
             current_path = (*path, key)
             if key == "source_refs" and isinstance(value, list):
                 rebuilt: list[Any] = []
                 seen: set[tuple[str, str | None]] = set()
                 for index, ref in enumerate(value):
-                    ref_path = (*current_path, index)
-                    if not isinstance(ref, Mapping):
-                        errors.append(f"{_pointer(ref_path)}: source reference must be an object")
-                        rebuilt.append(ref)
-                        continue
-                    raw_source_id = str(ref.get("source_id") or "").strip()
-                    if not raw_source_id:
-                        errors.append(f"{_pointer(ref_path)}/source_id: missing source identifier")
-                        rebuilt.append(dict(ref))
-                        continue
-                    requested_section = (
-                        ref.get("section_id")
-                        if isinstance(ref.get("section_id"), str)
-                        and ref.get("section_id").strip()
-                        else None
-                    )
-                    source_id, alias_kind = _resolve_catalog_source_id(
-                        raw_source_id,
-                        catalog.keys(),
-                        alias_index,
-                    )
-                    if source_id is None:
-                        # A provider may truncate a long opaque ID while still
-                        # copying the exact 64-character source hash.  Rebind
-                        # only when that hash identifies one trusted source;
-                        # duplicate or unknown hashes remain blocking.
-                        provider_hash = _hash(ref.get("source_hash"))
-                        hash_targets = set(hash_index.get(provider_hash) or set())
-                        if len(hash_targets) == 1:
-                            source_id = next(iter(hash_targets))
-                            alias_kind = "UNIQUE_SOURCE_HASH"
-                        elif (
-                            requested_section
-                            and requested_section in hash_targets
-                        ):
-                            # A document section is deliberately catalogued
-                            # both under its document ID and under the exact
-                            # section ID.  That makes a section hash non-unique
-                            # by source ID even though the provenance itself is
-                            # unambiguous.  Prefer the exact requested section
-                            # only when it carries the same trusted hash.
-                            source_id = requested_section
-                            alias_kind = "EXACT_SECTION_HASH"
-                        elif len(hash_targets) > 1:
-                            section_ids = {
-                                str(candidate.get("section_id"))
-                                for target in hash_targets
-                                for candidate in catalog.get(target) or []
-                                if candidate.get("section_id")
-                                and _hash(candidate.get("source_hash")) == provider_hash
-                            }
-                            if (
-                                len(section_ids) == 1
-                                and next(iter(section_ids)) in hash_targets
-                            ):
-                                source_id = next(iter(section_ids))
-                                alias_kind = "UNIQUE_SECTION_FOR_HASH"
-                    if (
-                        source_id is None
-                        and requested_section
-                        and requested_section in catalog
-                    ):
-                        # The provider may put an entity label in source_id
-                        # while still copying the exact opaque section ID from
-                        # the trusted catalog. The section identifier is itself
-                        # a first-class trusted source alias, so bind to it and
-                        # discard the untrusted label. Prefer the stronger hash
-                        # match above whenever one was supplied.
-                        source_id = requested_section
-                        alias_kind = "EXACT_SECTION_ID"
-                    if source_id is None:
-                        errors.append(
-                            f"{_pointer(ref_path)}/source_id: {raw_source_id!r} is not present in the trusted input envelope"
-                        )
-                        rebuilt.append(dict(ref))
-                        continue
-                    trusted = select(source_id, requested_section)
-                    if trusted is None:
-                        errors.append(
-                            f"{_pointer(ref_path)}/source_id: {raw_source_id!r} does not resolve to one unambiguous trusted section"
-                        )
-                        rebuilt.append(dict(ref))
-                        continue
-                    key_tuple = (source_id, trusted.get("section_id"))
-                    if key_tuple in seen:
-                        changes.append({"path": _pointer(ref_path), "action": "DROP_DUPLICATE", "source_id": source_id})
-                        continue
-                    seen.add(key_tuple)
-                    authoritative = copy.deepcopy(trusted)
-                    if dict(ref) != authoritative:
-                        changes.append({
-                            "path": _pointer(ref_path),
-                            "action": "BIND_ALIAS" if alias_kind else "REBIND",
-                            "source_id": source_id,
-                            "provider_source_id": raw_source_id,
-                            "alias_kind": alias_kind,
-                            "requested_section_id": requested_section,
-                            "trusted_section_id": authoritative.get("section_id"),
-                        })
-                    rebuilt.append(authoritative)
+                    bound = bind_one(ref, (*current_path, index), seen=seen)
+                    if bound is not None:
+                        rebuilt.append(bound)
                 node[key] = rebuilt
+            elif key == "source_ref":
+                node[key] = bind_one(value, current_path)
             else:
                 visit(value, current_path)
 
@@ -1145,7 +1231,8 @@ def normalize_reference_id_aliases(
     Exact IDs always win.  A wrapper such as ``ref-``/``source-`` is removed
     only when the remainder is one identifier that is already visible in the
     current input or defined in the current output.  Unknown or ambiguous IDs
-    remain unchanged and are rejected by ``validate_reference_ids``.
+    remain unchanged and are rejected by ``validate_reference_ids``. Scalar
+    references use the same path-aware semantic contract as array references.
     """
     normalized = copy.deepcopy(output)
     known_entities = (
@@ -1157,7 +1244,50 @@ def normalize_reference_id_aliases(
     )
     named_input_objects = _collect_named_input_object_ids(envelope or {})
     contract = get_semantic_contract()
+    prompt_id = (
+        str(normalized.get("prompt_id") or "").strip()
+        if isinstance(normalized, Mapping)
+        else ""
+    ) or None
     changes: list[dict[str, Any]] = []
+
+    def known_for(field_name: str) -> set[str]:
+        known = set(known_entities)
+        if contract.allows_input_object(field_name):
+            known.update(named_input_objects)
+        return known
+
+    def normalize_one(
+        raw: str,
+        *,
+        field_name: str,
+        semantic: ReferenceSemantic | None,
+        path: tuple[Any, ...],
+    ) -> str:
+        identifier = raw.strip()
+        if semantic not in _EXISTING_TARGET_SEMANTICS:
+            return identifier
+        resolved, alias_kind = _resolve_reference_id_alias(
+            identifier,
+            known_for(field_name),
+            registered_descriptor_suffixes=(
+                contract.registered_reference_suffixes(field_name)
+            ),
+            allow_entity_field_path=(
+                semantic is ReferenceSemantic.ENTITY_OR_FIELD_PATH
+                or contract.allows_entity_field_path(field_name)
+            ),
+        )
+        if resolved is not None and alias_kind:
+            changes.append({
+                "path": _pointer(path),
+                "action": "BIND_REFERENCE_ALIAS",
+                "provider_reference_id": identifier,
+                "reference_id": resolved,
+                "alias_kind": alias_kind,
+            })
+            return resolved
+        return identifier
 
     def visit(node: Any, path: tuple[Any, ...]) -> None:
         if isinstance(node, list):
@@ -1168,37 +1298,32 @@ def normalize_reference_id_aliases(
             return
         for key, value in list(node.items()):
             current = (*path, key)
+            semantic = contract.field_semantic(
+                key, prompt_id=prompt_id, path=current
+            )
             if _is_reference_array_field(key) and isinstance(value, list):
-                known = set(known_entities)
-                if contract.allows_input_object(key):
-                    known.update(named_input_objects)
                 rebuilt: list[Any] = []
                 for index, raw in enumerate(value):
                     if not isinstance(raw, str):
                         rebuilt.append(raw)
                         continue
-                    identifier = raw.strip()
-                    resolved, alias_kind = _resolve_reference_id_alias(
-                        identifier,
-                        known,
-                        registered_descriptor_suffixes=(
-                            contract.registered_reference_suffixes(key)
-                        ),
-                        allow_entity_field_path=contract.allows_entity_field_path(key),
-                    )
-                    if resolved is not None and alias_kind:
-                        rebuilt.append(resolved)
-                        changes.append({
-                            "path": _pointer((*current, index)),
-                            "action": "BIND_REFERENCE_ALIAS",
-                            "provider_reference_id": identifier,
-                            "reference_id": resolved,
-                            "alias_kind": alias_kind,
-                        })
-                    else:
-                        rebuilt.append(identifier)
+                    rebuilt.append(normalize_one(
+                        raw,
+                        field_name=key,
+                        semantic=semantic,
+                        path=(*current, index),
+                    ))
                 node[key] = rebuilt
-            visit(node.get(key), current)
+                value = rebuilt
+            elif semantic in _EXISTING_TARGET_SEMANTICS and isinstance(value, str):
+                node[key] = normalize_one(
+                    value,
+                    field_name=key,
+                    semantic=semantic,
+                    path=current,
+                )
+                value = node[key]
+            visit(value, current)
 
     visit(normalized, ())
     return normalized, {
@@ -1213,7 +1338,7 @@ def validate_reference_ids(
     output: Any,
     envelope: Mapping[str, Any] | None,
 ) -> list[str]:
-    """Validate reference-only ID arrays against visible/defined entities."""
+    """Validate scalar and array reference IDs against visible/defined entities."""
     known_entities = (
         _collect_defined_ids(envelope or {})
         | _collect_visible_reference_ids(envelope or {})
@@ -1225,6 +1350,51 @@ def validate_reference_ids(
     contract = get_semantic_contract()
     errors: list[str] = []
     root_status = output.get("status") if isinstance(output, Mapping) else None
+    prompt_id = (
+        str(output.get("prompt_id") or "").strip()
+        if isinstance(output, Mapping)
+        else ""
+    ) or None
+
+    def known_for(field_name: str) -> set[str]:
+        known = set(known_entities)
+        if contract.allows_input_object(field_name):
+            known.update(named_input_objects)
+        return known
+
+    def validate_one(
+        raw: Any,
+        *,
+        field_name: str,
+        semantic: ReferenceSemantic | None,
+        path: tuple[Any, ...],
+    ) -> None:
+        if not isinstance(raw, str) or not raw.strip():
+            errors.append(f"{_pointer(path)}: reference ID must be a non-empty string")
+            return
+        if semantic not in _EXISTING_TARGET_SEMANTICS:
+            return
+        if field_name == "evidence_refs" and root_status in {"BLOCK", "ERROR"}:
+            return
+        if raw in known_for(field_name):
+            return
+        pointer = _pointer(path)
+        semantic_label = semantic.value if semantic is not None else "REFERENCE"
+        hint = ""
+        if (
+            len(path) >= 4
+            and path[0] == "result"
+            and path[1] == "research_design_matrix"
+        ):
+            hint = (
+                "; if this is a new design entity, define a complete object with "
+                f"node_id={raw!r} under /result/argument_architecture/nodes before referencing it"
+            )
+        errors.append(
+            f"{pointer}: {semantic_label} reference ID {raw!r} "
+            "is not present in its allowed input namespace or defined output entities"
+            + hint
+        )
 
     def visit(node: Any, path: tuple[Any, ...]) -> None:
         if isinstance(node, list):
@@ -1235,38 +1405,24 @@ def validate_reference_ids(
             return
         for key, value in node.items():
             current = (*path, key)
+            semantic = contract.field_semantic(
+                key, prompt_id=prompt_id, path=current
+            )
             if _is_reference_array_field(key) and isinstance(value, list):
-                known = set(known_entities)
-                if contract.allows_input_object(key):
-                    known.update(named_input_objects)
-                semantic = contract.field_semantic(key)
-                semantic_label = semantic.value if semantic is not None else "REFERENCE"
-                # BLOCK/ERROR artifacts are never consumed as authoritative
-                # workflow facts; their free-form diagnostic evidence labels
-                # remain trace-only.
-                if key == "evidence_refs" and root_status in {"BLOCK", "ERROR"}:
-                    continue
                 for index, raw in enumerate(value):
-                    if not isinstance(raw, str) or not raw.strip():
-                        errors.append(f"{_pointer((*current, index))}: reference ID must be a non-empty string")
-                        continue
-                    if raw not in known:
-                        pointer = _pointer((*current, index))
-                        hint = ""
-                        if (
-                            len(current) >= 4
-                            and current[0] == "result"
-                            and current[1] == "research_design_matrix"
-                        ):
-                            hint = (
-                                "; if this is a new design entity, define a complete object with "
-                                f"node_id={raw!r} under /result/argument_architecture/nodes before referencing it"
-                            )
-                        errors.append(
-                            f"{pointer}: {semantic_label} reference ID {raw!r} "
-                            "is not present in its allowed input namespace or defined output entities"
-                            + hint
-                        )
+                    validate_one(
+                        raw,
+                        field_name=key,
+                        semantic=semantic,
+                        path=(*current, index),
+                    )
+            elif semantic in _EXISTING_TARGET_SEMANTICS and isinstance(value, str):
+                validate_one(
+                    value,
+                    field_name=key,
+                    semantic=semantic,
+                    path=current,
+                )
             visit(value, current)
 
     visit(output, ())
