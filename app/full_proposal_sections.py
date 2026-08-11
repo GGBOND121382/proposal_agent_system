@@ -122,8 +122,14 @@ class FullProposalSectionsMixin:
                         )
                 except WorkflowInputRequired:
                     raise
-                except (PromptExecutionError, ValueError, KeyError) as exc:
-                    return self._block_section_chain(wf, state, section, str(exc), configuration_error=exc)
+                except PromptExecutionError as exc:
+                    return self._block_section_prompt_failure(
+                        wf, state, section, exc
+                    )
+                except (ValueError, KeyError) as exc:
+                    return self._block_section_chain(
+                        wf, state, section, str(exc), configuration_error=exc
+                    )
 
                 if result["status"] == "PASS":
                     progress.pop("pending_repair_rereview", None)

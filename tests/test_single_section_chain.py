@@ -7,6 +7,7 @@ import pytest
 from collections import defaultdict
 from typing import Any
 
+from app.executor import PromptExecutionError
 from app.workflow_authoring import WorkflowAuthoringMixin
 from app.workflow_repair import WorkflowRepairMixin
 
@@ -240,6 +241,37 @@ class ArbitratedChainHarness(ChainHarness):
 
 
 SECTION = {"section_id": "section-1", "title": "研究内容"}
+
+
+def test_legacy_section_contract_failure_is_not_flattened_to_technical():
+    harness = ChainHarness([SECTION])
+    original_execute = harness.executor.execute
+
+    async def execute_with_legacy_contract_failure(
+        prompt_id: str, envelope: dict[str, Any], **kwargs: Any
+    ) -> dict[str, Any]:
+        if prompt_id == "P-EXPRESSION-POLISH":
+            raise PromptExecutionError(
+                "Output schema validation failed",
+                validation_errors=[
+                    "/result/source_preservation_summary/0/action: '"
+                    "SPLIT' is not one of the allowed enum values"
+                ],
+                run_id="run-expression-polish-invalid",
+            )
+        return await original_execute(prompt_id, envelope, **kwargs)
+
+    harness.executor.execute = execute_with_legacy_contract_failure
+
+    result = asyncio.run(
+        harness._write_sections(harness.wf, harness.wf["state"])
+    )
+
+    assert result["status"] == "BLOCKED_CONTRACT"
+    progress = harness.wf["state"]["section_progress"]["section-1"]
+    assert progress["phase"] == "POLISH"
+    assert progress["status"] == "BLOCKED_CONTRACT"
+    assert "Output schema validation failed" in progress["last_error"]
 
 
 def test_single_section_happy_path_runs_exact_chain_and_gate():

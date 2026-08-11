@@ -55,6 +55,54 @@ def _function_stream_events(output_json: str) -> list[dict]:
     ]
 
 
+def _assistant_json_stream_events(content: str) -> list[dict]:
+    split = len(content) // 2
+    return [
+        {
+            "choices": [
+                {
+                    "delta": {"content": content[:split]},
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {"content": content[split:]},
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+    ]
+
+
+def _wrong_tool_stream_events(content: str = "") -> list[dict]:
+    return [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "content": content,
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {
+                                    "name": "some_other_tool",
+                                    "arguments": "{}",
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+
+
 class _FakeStreamResponse:
     status_code = 200
 
@@ -184,9 +232,100 @@ def test_minimax_uses_streamed_serialized_json_function(monkeypatch):
     assert result.output == {"status": "PASS"}
     assert result.model_id == "offline-general-primary"
     assert result.response_contract_mode == "FUNCTION_SERIALIZED_JSON_STREAM_MINIMAX"
-    assert result.parse_report["wire_protocol"] == "STRICT_SERIALIZED_JSON_FUNCTION"
+    assert result.parse_report["wire_protocol"] == "STRICT_MINIMAX_TOOL_OR_JSON"
+    assert result.parse_report["wire_wrapper_parse_report"]["transport"] == "FUNCTION_OUTPUT_JSON"
     assert result.parse_report["wire_wrapper_parse_report"]["repair_count"] == 0
     assert result.provider_attempts == 1
+
+
+def test_minimax_accepts_strict_assistant_json_when_auto_tool_is_not_called(monkeypatch):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = _assistant_json_stream_events('{"status":"PASS"}')
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    result = asyncio.run(
+        _gateway()._invoke_live(
+            _route(),
+            "P-TEST",
+            "Return JSON.",
+            {"payload": {"value": 1}},
+            {"type": "object"},
+        )
+    )
+
+    assert result.output == {"status": "PASS"}
+    assert result.raw_text == '{"status":"PASS"}'
+    assert result.response_contract_mode == "FUNCTION_SERIALIZED_JSON_STREAM_MINIMAX"
+    assert result.parse_report["wire_protocol"] == "STRICT_MINIMAX_TOOL_OR_JSON"
+    assert result.parse_report["wire_wrapper_parse_report"]["mode"] == "STRICT_ASSISTANT_JSON_FALLBACK"
+    assert result.parse_report["wire_wrapper_parse_report"]["transport"] == "ASSISTANT_JSON"
+    _FakeAsyncClient.stream_events = None
+
+
+def test_minimax_rejects_assistant_prose_even_when_it_contains_json(monkeypatch):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = _assistant_json_stream_events(
+        'Here is the result: {"status":"PASS"}'
+    )
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    with pytest.raises(ProviderError, match="strict JSON object") as captured:
+        asyncio.run(
+            _gateway()._invoke_live(
+                _route(),
+                "P-TEST",
+                "Return JSON.",
+                {"payload": {"value": 1}},
+                {"type": "object"},
+            )
+        )
+
+    assert captured.value.provider_failure_kind is ProviderFailureKind.RESPONSE_PARSE
+    assert captured.value.provider_phase == "assistant_json_parse"
+    _FakeAsyncClient.stream_events = None
+
+
+def test_minimax_rejects_code_fenced_assistant_json(monkeypatch):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = _assistant_json_stream_events(
+        '```json\n{"status":"PASS"}\n```'
+    )
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    with pytest.raises(ProviderError, match="strict JSON object") as captured:
+        asyncio.run(
+            _gateway()._invoke_live(
+                _route(),
+                "P-TEST",
+                "Return JSON.",
+                {"payload": {"value": 1}},
+                {"type": "object"},
+            )
+        )
+
+    assert captured.value.provider_failure_kind is ProviderFailureKind.RESPONSE_PARSE
+    _FakeAsyncClient.stream_events = None
+
+
+def test_minimax_rejects_wrong_tool_even_if_assistant_content_is_valid_json(monkeypatch):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = _wrong_tool_stream_events('{"status":"PASS"}')
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    with pytest.raises(ProviderError, match="must either call submit_P-TEST") as captured:
+        asyncio.run(
+            _gateway()._invoke_live(
+                _route(),
+                "P-TEST",
+                "Return JSON.",
+                {"payload": {"value": 1}},
+                {"type": "object"},
+            )
+        )
+
+    assert captured.value.provider_failure_kind is ProviderFailureKind.RESPONSE_SHAPE
+    assert captured.value.provider_phase == "function_call"
+    _FakeAsyncClient.stream_events = None
 
 
 def test_strict_schema_response_is_not_locally_repaired(monkeypatch):

@@ -4,7 +4,7 @@ from typing import Any
 
 from .executor import PromptExecutionError
 from .llm import MODEL_RESPONSE_PROTOCOL_VERSION
-from .runtime_failures import FailureCategory
+from .runtime_failures import FailureCategory, classify_runtime_failure
 from .util import sha256_json, sha256_text
 from .workflow_input import CURRENT_PROPOSAL_INPUT, WorkflowInputRequired, material_input_questions
 from .workflow_status import WorkflowStatus
@@ -217,6 +217,41 @@ class WorkflowAuthoringMixin:
         return mapping.get(category, WorkflowStatus.BLOCKED_TECHNICAL.value)
 
     _section_block_status = _targeted_repair_block_status
+
+    def _block_section_prompt_failure(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        section: dict[str, Any],
+        exc: PromptExecutionError,
+    ) -> dict[str, Any]:
+        """Block or pause a section using the shared runtime failure taxonomy.
+
+        Legacy section checkpoints can surface schema failures as a plain
+        ``PromptExecutionError(validation_errors=...)`` instead of a typed
+        provider exception.  Do not flatten those contract failures into the
+        historical technical-error fallback.
+        """
+        classification = classify_runtime_failure(exc)
+        if classification.category is FailureCategory.CONFIGURATION:
+            return self._block_section_chain(
+                wf,
+                state,
+                section,
+                str(exc),
+                configuration_error=exc,
+            )
+
+        section_id = str(section.get("section_id") or "")
+        progress = state.setdefault("section_progress", {}).setdefault(
+            section_id, {}
+        )
+        status = classification.workflow_status
+        progress["status"] = status
+        progress["last_error"] = str(exc)
+        state["last_error"] = f"{section.get('title')}: {exc}"
+        self._update(wf, status=status, state=state)
+        return self.get(wf["id"])
 
     async def _execute_section_prompt(
         self,
@@ -538,8 +573,14 @@ class WorkflowAuthoringMixin:
                         )
                 except WorkflowInputRequired:
                     raise
-                except (PromptExecutionError, ValueError, KeyError) as exc:
-                    return self._block_section_chain(wf, state, section, str(exc), configuration_error=exc)
+                except PromptExecutionError as exc:
+                    return self._block_section_prompt_failure(
+                        wf, state, section, exc
+                    )
+                except (ValueError, KeyError) as exc:
+                    return self._block_section_chain(
+                        wf, state, section, str(exc), configuration_error=exc
+                    )
 
                 if result["status"] == "PASS":
                     progress.pop("pending_repair_rereview", None)

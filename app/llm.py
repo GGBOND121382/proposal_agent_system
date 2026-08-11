@@ -15,7 +15,7 @@ from .simulated_llm import SimulatedLLM
 
 JSON_PARSER_VERSION = "2026-07-29.v1-audited-local-repairs"
 MODEL_RESPONSE_PROTOCOL_VERSION = (
-    "2026-08-02.v3-minimax-streamed-serialized-json-function"
+    "2026-08-10.v4-minimax-streamed-tool-or-json"
 )
 
 
@@ -407,17 +407,21 @@ class ModelGateway:
                     },
                 }
             ]
-            # MiniMax currently supports auto/none tool selection.  Make the
-            # single allowed call an explicit protocol obligation and reject a
-            # prose response rather than treating it as contract output.
+            # MiniMax currently supports auto/none tool selection, so a tool call
+            # cannot be forced at the wire level.  Prefer the single submit tool,
+            # while allowing one strict assistant JSON object as a transport-only
+            # fallback.  Both representations still flow through the same business
+            # schema validation owned by the prompt executor.
             request["tool_choice"] = "auto"
             request["messages"][0]["content"] += (
-                "\n\n# MiniMax serialized structured submission boundary\n"
-                f"Call `{function_name}` exactly once. The sole `output_json` argument "
-                "must be a JSON string containing the complete final business output "
-                "object governed by the runtime output schema above. Serialize every "
-                "nested object and array inside that string. Do not return prose or "
-                "markdown. Do not omit, rename, move, repair, or default any business field."
+                "\n\n# MiniMax structured submission boundary\n"
+                f"Prefer calling `{function_name}` exactly once. The sole `output_json` "
+                "argument must be a JSON string containing the complete final business "
+                "output object governed by the runtime output schema above. If no tool "
+                "call is emitted, return that same complete business output directly as "
+                "one strict JSON object and nothing else. Do not return prose, markdown, "
+                "code fences, or multiple objects. Do not omit, rename, move, repair, or "
+                "default any business field."
             )
             request["reasoning_split"] = True
             # Streaming keeps long generations active across intermediaries that
@@ -536,7 +540,7 @@ class ModelGateway:
         if wire_report is not None:
             parse_report = {
                 **parse_report,
-                "wire_protocol": "STRICT_SERIALIZED_JSON_FUNCTION",
+                "wire_protocol": "STRICT_MINIMAX_TOOL_OR_JSON",
                 "wire_wrapper_parse_report": wire_report,
             }
         return LLMResult(
@@ -563,12 +567,15 @@ class ModelGateway:
         *,
         expected_name: str,
     ) -> tuple[str, dict[str, Any]]:
-        """Receive one MiniMax function call carrying a serialized JSON object.
+        """Receive one strict MiniMax structured business object.
 
-        The string is a declared provider wire representation, analogous to an
-        HTTP response body.  It is deserialized exactly once and is never
-        repaired or normalized here; business-schema validation remains owned
-        by the prompt executor.
+        The preferred wire representation is one ``submit_*`` function call
+        carrying ``output_json``.  MiniMax exposes ``tool_choice=auto`` rather
+        than a force-this-function mode, so a response with no tool call may
+        instead carry the complete business object directly in assistant
+        content.  That fallback is intentionally narrow: it must be exactly one
+        strict JSON object with no prose, markdown, code fences, or local JSON
+        repair.  Business-schema validation remains owned by the prompt executor.
         """
 
         calls: dict[int, dict[str, str]] = {}
@@ -639,12 +646,44 @@ class ModelGateway:
                 phase="stream_complete",
                 retryable_hint=False,
             )
+
+        if not calls:
+            direct_json = assistant_content.strip()
+            if not direct_json:
+                raise ProviderError(
+                    "MiniMax stream completed without a function call or assistant JSON object",
+                    kind=ProviderFailureKind.EMPTY_STREAM,
+                    phase="stream_complete",
+                    retryable_hint=True,
+                )
+            try:
+                _, direct_report = _load_strict_json_object(direct_json)
+            except LLMError as exc:
+                raise ProviderError(
+                    f"MiniMax returned assistant content instead of a strict JSON object: {exc}",
+                    kind=ProviderFailureKind.RESPONSE_PARSE,
+                    phase="assistant_json_parse",
+                    response_excerpt=assistant_content[:1000],
+                    retryable_hint=False,
+                ) from exc
+            return direct_json, {
+                **direct_report,
+                "mode": "STRICT_ASSISTANT_JSON_FALLBACK",
+                "event_count": event_count,
+                "finish_reason": finish_reason,
+                "transport": "ASSISTANT_JSON",
+            }
+
         matching = [
             item for item in calls.values() if item.get("name") == expected_name
         ]
         if len(calls) != 1 or len(matching) != 1 or assistant_content.strip():
             raise ProviderError(
-                f"MiniMax must call {expected_name} exactly once without assistant prose",
+                (
+                    f"MiniMax must either call {expected_name} exactly once without "
+                    "assistant content, or return one strict assistant JSON object "
+                    "without any tool call"
+                ),
                 kind=ProviderFailureKind.RESPONSE_SHAPE,
                 phase="function_call",
                 response_excerpt=assistant_content[:1000],
@@ -683,6 +722,7 @@ class ModelGateway:
             "mode": "STRICT_FUNCTION_WRAPPER_JSON",
             "event_count": event_count,
             "finish_reason": finish_reason,
+            "transport": "FUNCTION_OUTPUT_JSON",
         }
 
     async def _stream_chat_completion(
