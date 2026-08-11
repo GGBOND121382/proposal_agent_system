@@ -225,6 +225,8 @@ def test_minimax_uses_streamed_serialized_json_function(monkeypatch):
     assert sent["tools"][0]["function"]["name"] == "submit_P-TEST"
     assert sent["tools"][0]["function"]["strict"] is True
     assert "sole `output_json` argument" in sent["messages"][0]["content"]
+    assert "compact JSON" in sent["messages"][0]["content"]
+    assert "no pretty-print indentation" in sent["messages"][0]["content"]
     parameters = sent["tools"][0]["function"]["parameters"]
     assert parameters["additionalProperties"] is False
     assert parameters["required"] == ["output_json"]

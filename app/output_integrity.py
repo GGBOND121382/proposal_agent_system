@@ -1251,9 +1251,21 @@ def validate_reference_ids(
                         errors.append(f"{_pointer((*current, index))}: reference ID must be a non-empty string")
                         continue
                     if raw not in known:
+                        pointer = _pointer((*current, index))
+                        hint = ""
+                        if (
+                            len(current) >= 4
+                            and current[0] == "result"
+                            and current[1] == "research_design_matrix"
+                        ):
+                            hint = (
+                                "; if this is a new design entity, define a complete object with "
+                                f"node_id={raw!r} under /result/argument_architecture/nodes before referencing it"
+                            )
                         errors.append(
-                            f"{_pointer((*current, index))}: {semantic_label} reference ID {raw!r} "
+                            f"{pointer}: {semantic_label} reference ID {raw!r} "
                             "is not present in its allowed input namespace or defined output entities"
+                            + hint
                         )
             visit(value, current)
 

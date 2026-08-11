@@ -64,7 +64,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-08-03.v45-protocol-receipt-completion"
+OUTPUT_NORMALIZER_VERSION = "2026-08-11.v46-argument-human-gate-status"
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -909,6 +909,38 @@ class PromptExecutor:
             )
         return normalized
 
+    @staticmethod
+    def _normalize_argument_architecture_status(output: dict[str, Any]) -> dict[str, Any]:
+        """Derive the human-gate status from already model-authored blockers.
+
+        This is deliberately narrow.  It does not create/delete findings, questions,
+        unresolved items, graph entities, or research content.  It only resolves a
+        state-machine contradiction in ``P-ARGUMENT-ARCHITECTURE``: a provider may
+        label an otherwise complete candidate ``PASS``/``REVISE`` while also emitting
+        a blocking user question or a blocking Finding explicitly routed to ``USER``.
+        Those authored blockers mean the workflow cannot advance without human input,
+        so the deterministic consumption status is ``NEED_USER_INPUT``.  ``BLOCK`` is
+        preserved because it may represent an independent hard contract/source error.
+        """
+
+        normalized = copy.deepcopy(output)
+        if str(normalized.get("status") or "").upper() not in {"PASS", "REVISE"}:
+            return normalized
+
+        blocking_user_question = any(
+            isinstance(item, dict) and bool(item.get("blocking"))
+            for item in normalized.get("user_questions") or []
+        )
+        blocking_user_finding = any(
+            isinstance(item, dict)
+            and bool(item.get("blocking"))
+            and str(item.get("suggested_route") or "").upper() == "USER"
+            for item in normalized.get("findings") or []
+        )
+        if blocking_user_question or blocking_user_finding:
+            normalized["status"] = "NEED_USER_INPUT"
+        return normalized
+
     def _normalize_output(
         self,
         prompt_id: str,
@@ -919,9 +951,9 @@ class PromptExecutor:
 
         The method may repair protocol representation (registered enum aliases,
         authoritative envelope constants, unambiguous field ownership, and exact
-        trusted-reference aliases).  It must not create, delete, or rewrite any
-        business entity, claim, paragraph, finding, verdict, status, slot, key,
-        budget, graph node, or graph edge.
+        trusted-reference aliases) and derive a workflow status from already-authored
+        blockers.  It must not create, delete, or rewrite any business entity, claim,
+        paragraph, finding, verdict, slot, key, budget, graph node, or graph edge.
         """
         structure_validator = getattr(self.pack, "validate_structure", None)
         if callable(structure_validator):
@@ -1129,6 +1161,8 @@ class PromptExecutor:
                     "Output reference integrity validation failed",
                     validation_errors=reference_errors,
                 )
+        if prompt_id == "P-ARGUMENT-ARCHITECTURE":
+            normalized = self._normalize_argument_architecture_status(normalized)
         return normalized
 
     @staticmethod

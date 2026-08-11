@@ -15,7 +15,7 @@ from .simulated_llm import SimulatedLLM
 
 JSON_PARSER_VERSION = "2026-07-29.v1-audited-local-repairs"
 MODEL_RESPONSE_PROTOCOL_VERSION = (
-    "2026-08-10.v4-minimax-streamed-tool-or-json"
+    "2026-08-11.v5-minimax-compact-tool-or-json"
 )
 
 
@@ -421,7 +421,10 @@ class ModelGateway:
                 "call is emitted, return that same complete business output directly as "
                 "one strict JSON object and nothing else. Do not return prose, markdown, "
                 "code fences, or multiple objects. Do not omit, rename, move, repair, or "
-                "default any business field."
+                "default any business field. Serialize the final business object as compact "
+                "JSON: no pretty-print indentation, blank lines, or optional whitespace. "
+                "Keep descriptive strings concise and do not repeat the same evidence prose "
+                "across fields when exact reference IDs already carry that linkage."
             )
             request["reasoning_split"] = True
             # Streaming keeps long generations active across intermediaries that
