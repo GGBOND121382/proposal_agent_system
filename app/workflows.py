@@ -714,6 +714,25 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 )
                 self._update(wf, state=state)
 
+        successful_contract_repair_run_id = str(
+            prior_cycle.get("successful_contract_repair_run_id") or ""
+        ).strip()
+        if successful_contract_repair_run_id:
+            result = self._replay_producer_contract_repair(
+                wf,
+                prompt_id=prompt_id,
+                envelope=envelope,
+                source_run_id=str(
+                    prior_cycle.get("contract_repair_source_run_id") or ""
+                ),
+                repair_run_id=successful_contract_repair_run_id,
+            )
+            prior_cycle["last_success_replayed_at"] = utc_now()
+            if wait_matches_cycle:
+                state.pop("provider_wait", None)
+            self._update(wf, state=state)
+            return result
+
         successful_call_key = str(
             prior_cycle.get("successful_call_key") or ""
         ).strip()
@@ -864,44 +883,79 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 # grant another provider attempt.
                 self._update(wf, state=state)
 
-                if not retry_allowed_here:
-                    raise
-
-                if not decision.should_retry:
-                    raise ProviderRetriesExhausted(
-                        exc,
-                        classification=classification,
-                        decision=decision,
-                        failure_payload=failure,
-                    ) from exc
-
-                RepairLedger.provider_retry(
+                failed_provider_wait = copy.deepcopy(state["provider_wait"])
+                contract_repair = await self._repair_producer_contract_failure(
+                    wf,
                     state,
-                    retry_key,
-                    details={
-                        "prompt_id": prompt_id,
-                        "cycle_id": cycle_id,
-                        "attempt_call_key": attempt_call_key,
-                        "completed_attempts": completed_attempts,
-                        "next_attempt": completed_attempts + 1,
-                        "failure_kind": classification.failure_kind,
-                        "http_status": classification.http_status,
-                        "delay_seconds": decision.delay_seconds,
-                        "reason": decision.reason,
-                    },
+                    prompt_id=prompt_id,
+                    envelope=envelope,
+                    exc=exc,
+                    classification=classification,
                 )
-                self._update(wf, state=state)
-                if decision.delay_seconds > 0:
-                    await self._honor_persisted_retry_delay(state["provider_wait"])
-                continue
+                if contract_repair.get("result") is not None:
+                    result = contract_repair["result"]
+                    # Applying the repair persists a deep-copied workflow state;
+                    # continue bookkeeping on that current cycle object.
+                    prior_cycle = state.setdefault(
+                        "provider_call_cycles", {}
+                    ).setdefault(retry_key, prior_cycle)
+                else:
+                    if contract_repair.get("attempted"):
+                        state["provider_wait"] = failed_provider_wait
+                        self._update(wf, state=state)
+                        raise
+                    if not retry_allowed_here:
+                        raise
+
+                    if not decision.should_retry:
+                        raise ProviderRetriesExhausted(
+                            exc,
+                            classification=classification,
+                            decision=decision,
+                            failure_payload=failure,
+                        ) from exc
+
+                    RepairLedger.provider_retry(
+                        state,
+                        retry_key,
+                        details={
+                            "prompt_id": prompt_id,
+                            "cycle_id": cycle_id,
+                            "attempt_call_key": attempt_call_key,
+                            "completed_attempts": completed_attempts,
+                            "next_attempt": completed_attempts + 1,
+                            "failure_kind": classification.failure_kind,
+                            "http_status": classification.http_status,
+                            "delay_seconds": decision.delay_seconds,
+                            "reason": decision.reason,
+                        },
+                    )
+                    self._update(wf, state=state)
+                    if decision.delay_seconds > 0:
+                        await self._honor_persisted_retry_delay(
+                            state["provider_wait"]
+                        )
+                    continue
 
             completed_attempts = attempt_number
             prior_cycle["completed_attempts"] = completed_attempts
             prior_cycle.pop("attempt_in_flight", None)
             prior_cycle["successful_attempt"] = attempt_number
-            prior_cycle["successful_call_key"] = str(
-                result.get("call_key") or attempt_call_key
-            )
+            contract_repair_metadata = result.get("contract_repair")
+            if isinstance(contract_repair_metadata, dict):
+                prior_cycle.pop("successful_call_key", None)
+                prior_cycle["successful_contract_repair_run_id"] = str(
+                    contract_repair_metadata.get("repair_run_id") or ""
+                )
+                prior_cycle["contract_repair_source_run_id"] = str(
+                    contract_repair_metadata.get("source_run_id") or ""
+                )
+            else:
+                prior_cycle.pop("successful_contract_repair_run_id", None)
+                prior_cycle.pop("contract_repair_source_run_id", None)
+                prior_cycle["successful_call_key"] = str(
+                    result.get("call_key") or attempt_call_key
+                )
             prior_cycle["successful_run_id"] = str(
                 result.get("run_id") or ""
             ) or None

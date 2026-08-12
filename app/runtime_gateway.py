@@ -10,9 +10,11 @@ from .llm import (
     LLMResult,
     MODEL_RESPONSE_PROTOCOL_VERSION,
     ModelGateway as BaseModelGateway,
+    ProviderError,
     _extract_json_with_report,
     _load_strict_json_object,
 )
+from .runtime_failures import ProviderFailureKind
 from .runtime_evidence import ModelCallEvidenceStore
 from .runtime_policy import CapabilityPolicy
 from .util import new_id, sha256_json
@@ -93,8 +95,86 @@ class AuditedModelGateway(BaseModelGateway):
                 fallback_reason=verified.metadata.get("fallback_reason"),
             )
 
+        if self.evidence_store.has_failed_response(call_key):
+            failed = self.evidence_store.load_failed_response(call_key)
+            metadata = failed["metadata"]
+            kind_value = str(metadata.get("failure_kind") or ProviderFailureKind.RESPONSE_PARSE.value)
+            try:
+                kind = ProviderFailureKind(kind_value)
+            except ValueError:
+                kind = ProviderFailureKind.RESPONSE_PARSE
+            raise ProviderError(
+                str(metadata.get("error") or "Replayed persisted provider failure"),
+                kind=kind,
+                http_status=metadata.get("http_status"),
+                retry_after_seconds=metadata.get("retry_after_seconds"),
+                phase=metadata.get("provider_phase"),
+                response_excerpt=metadata.get("response_excerpt"),
+                response_text=failed.get("rejected_text"),
+                retryable_hint=metadata.get("retryable_hint"),
+                validation_errors=list(metadata.get("validation_errors") or []),
+            )
+
+        def persist_provider_raw(
+            raw_text: str,
+            provider_metadata: dict[str, Any],
+        ) -> None:
+            provider_attempt = int(provider_metadata.get("provider_attempt") or 1)
+            self.evidence_store.write_provider_response(
+                call_key,
+                provider_attempt=provider_attempt,
+                raw_text=raw_text,
+                metadata={
+                    "prompt_id": prompt_id,
+                    "runtime_mode": self.settings.runtime_mode,
+                    "environment": route.environment,
+                    "model_id": route.model_id,
+                    "endpoint_id": route.endpoint_id,
+                    "provider_model_name": route.provider_model_name,
+                    "request_sha256": request_meta["request_sha256"],
+                    **provider_metadata,
+                },
+            )
+
         self.evidence_store.faults.hit("before_model_request", call_key, prompt_id=prompt_id)
-        result = await super().invoke(route, prompt_id, system_prompt, envelope, output_schema)
+        try:
+            result = await super().invoke(
+                route,
+                prompt_id,
+                system_prompt,
+                envelope,
+                output_schema,
+                raw_response_sink=persist_provider_raw,
+            )
+        except ProviderError as exc:
+            failure_meta = self.evidence_store.write_failed_response(
+                call_key,
+                rejected_text=exc.response_text,
+                metadata={
+                    "prompt_id": prompt_id,
+                    "runtime_mode": self.settings.runtime_mode,
+                    "environment": route.environment,
+                    "model_id": route.model_id,
+                    "endpoint_id": route.endpoint_id,
+                    "provider_model_name": route.provider_model_name,
+                    "request_sha256": request_meta["request_sha256"],
+                    "error": str(exc),
+                    "failure_kind": exc.provider_failure_kind.value,
+                    "http_status": exc.http_status,
+                    "retry_after_seconds": exc.retry_after_seconds,
+                    "provider_phase": exc.provider_phase,
+                    "response_excerpt": exc.response_excerpt,
+                    "retryable_hint": exc.retryable_hint,
+                    "validation_errors": list(exc.validation_errors or []),
+                    "model_response_protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
+                },
+            )
+            self.evidence_store.faults.hit(
+                "after_failed_response_persist",
+                call_key,
+                prompt_id=prompt_id,
+            )
+            raise
         if result.response_contract_mode in {
             "JSON_SCHEMA_STRICT",
             "FUNCTION_SERIALIZED_JSON_STREAM_MINIMAX",
@@ -119,6 +199,7 @@ class AuditedModelGateway(BaseModelGateway):
                 "response_contract_mode": result.response_contract_mode,
                 "provider_attempts": result.provider_attempts,
                 "fallback_reason": result.fallback_reason,
+                "provider_responses": self.evidence_store.provider_response_records(call_key),
             },
         )
         self.evidence_store.faults.hit("after_response_persist", call_key, prompt_id=prompt_id)

@@ -10,7 +10,7 @@ import pytest
 
 from app.llm import LLMError, ProviderError, _extract_json
 from app.runtime_failures import ProviderFailureKind
-from app.runtime_gateway import BaseModelGateway
+from app.runtime_gateway import AuditedModelGateway, BaseModelGateway
 from app.security import Route
 
 
@@ -53,6 +53,33 @@ def _function_stream_events(output_json: str) -> list[dict]:
         },
         {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
     ]
+
+
+
+def _truncated_function_stream_events(output_json_prefix: str) -> list[dict]:
+    wrapper_prefix = json.dumps({"output_json": output_json_prefix})[:-2]
+    return [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {
+                                    "name": "submit_P-TEST",
+                                    "arguments": wrapper_prefix,
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                }
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "length"}]},
+    ]
+
 
 
 def _assistant_json_stream_events(content: str) -> list[dict]:
@@ -436,6 +463,126 @@ def test_strict_schema_response_is_not_locally_repaired(monkeypatch):
 
     assert captured.value.provider_failure_kind is ProviderFailureKind.RESPONSE_PARSE
     _FakeAsyncClient.stream_events = None
+
+
+
+def test_audited_gateway_persists_full_raw_response_before_parse_failure(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    monkeypatch.setenv("MODEL_CALL_EVIDENCE_DIR", str(tmp_path / "model_calls"))
+    _FakeAsyncClient.stream_events = _function_stream_events('{"status":"PASS"')
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    base = _gateway()
+    gateway = AuditedModelGateway(
+        SimpleNamespace(
+            runtime_mode="LIVE",
+            request_timeout_seconds=240,
+            data_dir=tmp_path,
+        ),
+        base.pack,
+    )
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            gateway.invoke(
+                _route(),
+                "P-TEST",
+                "Return JSON.",
+                {"payload": {"value": 1}},
+                {"type": "object"},
+                call_key="call-malformed-response",
+            )
+        )
+
+    assert captured.value.provider_failure_kind is ProviderFailureKind.RESPONSE_PARSE
+
+    provider_raw_path, provider_meta_path = gateway.evidence_store.provider_response_paths(
+        "call-malformed-response",
+        1,
+    )
+    rejected_path, failed_meta_path = gateway.evidence_store.failed_response_paths(
+        "call-malformed-response"
+    )
+    _, parsed_path, success_meta_path = gateway.evidence_store.response_paths(
+        "call-malformed-response"
+    )
+
+    provider_raw = provider_raw_path.read_text(encoding="utf-8")
+    assert "data: " in provider_raw
+    assert "submit_P-TEST" in provider_raw
+    assert provider_meta_path.exists()
+    assert rejected_path.read_text(encoding="utf-8") == '{"status":"PASS"'
+    assert failed_meta_path.exists()
+    assert not parsed_path.exists()
+    assert not success_meta_path.exists()
+
+    failed = gateway.evidence_store.load_failed_response("call-malformed-response")
+    assert failed["metadata"]["failure_kind"] == "RESPONSE_PARSE"
+    assert failed["metadata"]["provider_phase"] == "response_parse"
+    assert failed["metadata"]["provider_response_count"] == 1
+    assert failed["rejected_text"] == '{"status":"PASS"'
+
+    _FakeAsyncClient.stream_events = None
+
+
+
+
+def test_audited_gateway_persists_partial_raw_response_on_output_truncation(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    monkeypatch.setenv("MODEL_CALL_EVIDENCE_DIR", str(tmp_path / "model_calls"))
+    _FakeAsyncClient.stream_events = _truncated_function_stream_events(
+        '{"status":"PASS","result":'
+    )
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    base = _gateway()
+    gateway = AuditedModelGateway(
+        SimpleNamespace(
+            runtime_mode="LIVE",
+            request_timeout_seconds=240,
+            data_dir=tmp_path,
+        ),
+        base.pack,
+    )
+
+    with pytest.raises(ProviderError) as captured:
+        asyncio.run(
+            gateway.invoke(
+                _route(),
+                "P-TEST",
+                "Return JSON.",
+                {"payload": {"value": 1}},
+                {"type": "object"},
+                call_key="call-truncated-response",
+            )
+        )
+
+    assert captured.value.provider_failure_kind is ProviderFailureKind.OUTPUT_TRUNCATED
+    provider_raw_path, _ = gateway.evidence_store.provider_response_paths(
+        "call-truncated-response",
+        1,
+    )
+    rejected_path, failed_meta_path = gateway.evidence_store.failed_response_paths(
+        "call-truncated-response"
+    )
+    provider_raw = provider_raw_path.read_text(encoding="utf-8")
+    assert '"finish_reason": "length"' in provider_raw
+    assert rejected_path.exists()
+    assert failed_meta_path.exists()
+
+    failed = gateway.evidence_store.load_failed_response("call-truncated-response")
+    assert failed["metadata"]["failure_kind"] == "OUTPUT_TRUNCATED"
+    assert failed["metadata"]["provider_response_count"] == 1
+    assert failed["rejected_text"]
+
+    _FakeAsyncClient.stream_events = None
+
 
 
 def test_minimax_transport_error_is_typed_for_workflow_owned_retry(monkeypatch):

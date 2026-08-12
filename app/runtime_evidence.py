@@ -140,6 +140,185 @@ class ModelCallEvidenceStore:
             self.responses_dir / f"{key}.meta.json",
         )
 
+    def provider_response_paths(
+        self,
+        call_key: str,
+        provider_attempt: int,
+    ) -> tuple[Path, Path]:
+        key = _safe_key(call_key)
+        attempt = max(1, int(provider_attempt))
+        stem = f"{key}.provider-attempt-{attempt}"
+        return (
+            self.responses_dir / f"{stem}.raw.txt",
+            self.responses_dir / f"{stem}.meta.json",
+        )
+
+    def failed_response_paths(self, call_key: str) -> tuple[Path, Path]:
+        key = _safe_key(call_key)
+        return (
+            self.responses_dir / f"{key}.rejected.txt",
+            self.responses_dir / f"{key}.failed.meta.json",
+        )
+
+    def write_provider_response(
+        self,
+        call_key: str,
+        *,
+        provider_attempt: int,
+        raw_text: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist the provider wire response before any parsing or validation.
+
+        This evidence is intentionally separate from ``response_paths``.  The
+        latter preserves the historical contract of storing the extracted
+        business JSON on successful calls, while these files preserve exactly
+        what the provider returned (including MiniMax SSE lines) even when the
+        response cannot be parsed.
+        """
+
+        raw_path, meta_path = self.provider_response_paths(call_key, provider_attempt)
+        raw_hash = sha256_text(raw_text)
+        record = {
+            **metadata,
+            "call_key": call_key,
+            "provider_attempt": max(1, int(provider_attempt)),
+            "raw_response_sha256": raw_hash,
+            "raw_path": str(raw_path),
+            "created_at": utc_now(),
+        }
+        if raw_path.exists() or meta_path.exists():
+            if not raw_path.exists() or not meta_path.exists():
+                raise EvidenceIntegrityError(
+                    f"Partial provider response evidence for {call_key} attempt {provider_attempt}"
+                )
+            existing_raw = raw_path.read_text(encoding="utf-8")
+            existing_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if (
+                sha256_text(existing_raw) != raw_hash
+                or existing_meta.get("raw_response_sha256") != raw_hash
+            ):
+                raise EvidenceIntegrityError(
+                    f"Provider response evidence mismatch for {call_key} attempt {provider_attempt}"
+                )
+            return existing_meta
+
+        _atomic_write_text(raw_path, raw_text)
+        _atomic_write_json(meta_path, record)
+        return record
+
+    def provider_response_records(self, call_key: str) -> list[dict[str, Any]]:
+        key = _safe_key(call_key)
+        records: list[dict[str, Any]] = []
+        pattern = f"{key}.provider-attempt-*.meta.json"
+        for meta_path in sorted(self.responses_dir.glob(pattern)):
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            attempt = int(metadata.get("provider_attempt") or 1)
+            raw_path, expected_meta_path = self.provider_response_paths(call_key, attempt)
+            if expected_meta_path != meta_path or not raw_path.exists():
+                raise EvidenceIntegrityError(
+                    f"Partial provider response evidence for {call_key} attempt {attempt}"
+                )
+            raw_text = raw_path.read_text(encoding="utf-8")
+            if sha256_text(raw_text) != metadata.get("raw_response_sha256"):
+                raise EvidenceIntegrityError(
+                    f"Provider raw response hash mismatch for {call_key} attempt {attempt}"
+                )
+            records.append(metadata)
+        return records
+
+    def write_failed_response(
+        self,
+        call_key: str,
+        *,
+        rejected_text: str | None,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Commit failure metadata without discarding the unparseable response.
+
+        ``rejected_text`` is the full logical candidate that failed parsing or
+        shape checks when one exists.  The exact provider wire response is kept
+        separately by ``write_provider_response`` and linked from this record.
+        """
+
+        rejected_path, meta_path = self.failed_response_paths(call_key)
+        rejected_hash = (
+            sha256_text(rejected_text) if rejected_text is not None else None
+        )
+        provider_records = self.provider_response_records(call_key)
+        record = {
+            **metadata,
+            "call_key": call_key,
+            "rejected_response_sha256": rejected_hash,
+            "rejected_path": str(rejected_path) if rejected_text is not None else None,
+            "provider_responses": provider_records,
+            "provider_response_count": len(provider_records),
+            "created_at": utc_now(),
+        }
+
+        if meta_path.exists() or rejected_path.exists():
+            if not meta_path.exists():
+                raise EvidenceIntegrityError(f"Partial failed response evidence for {call_key}")
+            existing = json.loads(meta_path.read_text(encoding="utf-8"))
+            if rejected_text is not None:
+                if not rejected_path.exists():
+                    raise EvidenceIntegrityError(
+                        f"Missing rejected response evidence for {call_key}"
+                    )
+                existing_text = rejected_path.read_text(encoding="utf-8")
+                if (
+                    sha256_text(existing_text) != rejected_hash
+                    or existing.get("rejected_response_sha256") != rejected_hash
+                ):
+                    raise EvidenceIntegrityError(
+                        f"Rejected response evidence mismatch for {call_key}"
+                    )
+            elif rejected_path.exists():
+                raise EvidenceIntegrityError(
+                    f"Unexpected rejected response evidence for {call_key}"
+                )
+            return existing
+
+        if rejected_text is not None:
+            _atomic_write_text(rejected_path, rejected_text)
+        _atomic_write_json(meta_path, record)
+        return record
+
+    def has_failed_response(self, call_key: str) -> bool:
+        _, meta_path = self.failed_response_paths(call_key)
+        return meta_path.exists()
+
+    def load_failed_response(self, call_key: str) -> dict[str, Any]:
+        rejected_path, meta_path = self.failed_response_paths(call_key)
+        if not meta_path.exists():
+            raise FileNotFoundError(call_key)
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        rejected_hash = metadata.get("rejected_response_sha256")
+        rejected_text = None
+        if rejected_hash is not None:
+            if not rejected_path.exists():
+                raise EvidenceIntegrityError(
+                    f"Missing rejected response evidence for {call_key}"
+                )
+            rejected_text = rejected_path.read_text(encoding="utf-8")
+            if sha256_text(rejected_text) != rejected_hash:
+                raise EvidenceIntegrityError(
+                    f"Rejected response hash mismatch for {call_key}"
+                )
+        provider_records = self.provider_response_records(call_key)
+        expected_records = metadata.get("provider_responses") or []
+        if [r.get("raw_response_sha256") for r in provider_records] != [
+            r.get("raw_response_sha256") for r in expected_records
+        ]:
+            raise EvidenceIntegrityError(
+                f"Provider response list mismatch for failed call {call_key}"
+            )
+        return {
+            "metadata": metadata,
+            "rejected_text": rejected_text,
+            "provider_responses": provider_records,
+        }
+
     def write_request(self, call_key: str, request_payload: dict[str, Any]) -> dict[str, Any]:
         request_path, meta_path = self.request_paths(call_key)
         request_hash = sha256_json(request_payload)

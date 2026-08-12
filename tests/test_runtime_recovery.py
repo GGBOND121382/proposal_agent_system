@@ -214,6 +214,52 @@ def test_response_evidence_detects_tampering(tmp_path):
         store.load_verified_response("call-1")
 
 
+
+def test_failed_response_evidence_preserves_provider_raw_and_rejected_candidate(tmp_path):
+    store = ModelCallEvidenceStore(tmp_path / "evidence")
+    store.write_request("call-bad", {"prompt": "p"})
+    provider_raw = (
+        'data: {"choices":[{"delta":{"content":"bad"},"finish_reason":null}]}\n'
+        'data: [DONE]'
+    )
+    store.write_provider_response(
+        "call-bad",
+        provider_attempt=1,
+        raw_text=provider_raw,
+        metadata={
+            "prompt_id": "P-TEST",
+            "failure_surface": "provider_wire",
+        },
+    )
+    store.write_failed_response(
+        "call-bad",
+        rejected_text='{"status":"PASS"',
+        metadata={
+            "error": "malformed JSON",
+            "failure_kind": "RESPONSE_PARSE",
+            "provider_phase": "response_parse",
+        },
+    )
+
+    provider_raw_path, provider_meta_path = store.provider_response_paths("call-bad", 1)
+    rejected_path, failed_meta_path = store.failed_response_paths("call-bad")
+    _, parsed_path, success_meta_path = store.response_paths("call-bad")
+
+    assert provider_raw_path.read_text(encoding="utf-8") == provider_raw
+    assert provider_meta_path.exists()
+    assert rejected_path.read_text(encoding="utf-8") == '{"status":"PASS"'
+    assert failed_meta_path.exists()
+    assert not parsed_path.exists()
+    assert not success_meta_path.exists()
+
+    failed = store.load_failed_response("call-bad")
+    assert failed["metadata"]["failure_kind"] == "RESPONSE_PARSE"
+    assert failed["metadata"]["provider_response_count"] == 1
+    assert failed["rejected_text"] == '{"status":"PASS"'
+    assert failed["provider_responses"][0]["raw_response_sha256"]
+
+
+
 def test_response_evidence_survives_json_parser_upgrade(tmp_path, monkeypatch):
     store = ModelCallEvidenceStore(tmp_path / "evidence")
     store.write_request("call-parser-upgrade", {"prompt": "p"})

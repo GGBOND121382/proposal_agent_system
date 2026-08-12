@@ -171,12 +171,11 @@ def test_prompt_and_model_capability_declare_the_real_contract_mode() -> None:
         encoding="utf-8"
     )
     assert "finding_instance_id" in prompt
-    assert '"unresolved_finding_ids": []' in prompt
-    assert "重新生成完整 JSON 对象" in prompt
-    assert "不得把已解决的原 Finding 复制到顶层 `findings`" in prompt
-    assert "原 Finding 的 P0/P1 严重级别" in prompt
-    assert "祖先授权语义" in prompt
-    assert "/content/paragraphs/2/function" in prompt
+    assert "输出完整 `repaired_object`" in prompt
+    assert "只在 `allowed_paths` 内产生修改" in prompt
+    assert "每个输入 Finding 必须明确归入" in prompt
+    assert "不复述已经解决的历史 Finding" in prompt
+    assert "祖先授权语义" not in prompt
 
     config = yaml.safe_load(
         (ROOT / "prompt_pack/config/models.yaml").read_text(encoding="utf-8")

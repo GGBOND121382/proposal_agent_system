@@ -4,7 +4,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -36,6 +36,7 @@ class ProviderError(LLMError):
         retry_after_seconds: float | None = None,
         phase: str | None = None,
         response_excerpt: str | None = None,
+        response_text: str | None = None,
         retryable_hint: bool | None = None,
         validation_errors: list[str] | None = None,
     ) -> None:
@@ -45,6 +46,7 @@ class ProviderError(LLMError):
         self.retry_after_seconds = retry_after_seconds
         self.provider_phase = phase
         self.response_excerpt = response_excerpt
+        self.response_text = response_text
         self.retryable_hint = retryable_hint
         self.validation_errors = list(validation_errors or [])
 
@@ -282,7 +284,16 @@ class ModelGateway:
         self.pack = pack
         self.simulator = SimulatedLLM(pack)
 
-    async def invoke(self, route: Route, prompt_id: str, system_prompt: str, envelope: dict[str, Any], output_schema: dict[str, Any]) -> LLMResult:
+    async def invoke(
+        self,
+        route: Route,
+        prompt_id: str,
+        system_prompt: str,
+        envelope: dict[str, Any],
+        output_schema: dict[str, Any],
+        *,
+        raw_response_sink: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> LLMResult:
         mode = self.settings.runtime_mode
         if mode in {"REPLAY", "MOCK"}:
             output = self.pack.replay_output(prompt_id, "normal")
@@ -305,7 +316,14 @@ class ModelGateway:
                 endpoint_id="local-simulated",
                 response_contract_mode="SIMULATED_SCHEMA_OUTPUT",
             )
-        return await self._invoke_live(route, prompt_id, system_prompt, envelope, output_schema)
+        return await self._invoke_live(
+            route,
+            prompt_id,
+            system_prompt,
+            envelope,
+            output_schema,
+            raw_response_sink=raw_response_sink,
+        )
 
     @staticmethod
     def _estimate_text_tokens(text: str) -> int:
@@ -465,7 +483,16 @@ class ModelGateway:
             token in text for token in rejection_tokens
         )
 
-    async def _invoke_live(self, route: Route, prompt_id: str, system_prompt: str, envelope: dict[str, Any], output_schema: dict[str, Any]) -> LLMResult:
+    async def _invoke_live(
+        self,
+        route: Route,
+        prompt_id: str,
+        system_prompt: str,
+        envelope: dict[str, Any],
+        output_schema: dict[str, Any],
+        *,
+        raw_response_sink: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> LLMResult:
         endpoint = route.endpoint
         base_url = str(endpoint.get("base_url") or "").rstrip("/")
         if not base_url:
@@ -568,6 +595,25 @@ class ModelGateway:
             # business object are parsed strictly after the final event.
             request["stream"] = True
 
+        def capture_nonstream_response(
+            response: httpx.Response,
+            *,
+            provider_attempt: int,
+            capture_stage: str,
+        ) -> str:
+            raw_text = response.text
+            if raw_response_sink is not None:
+                raw_response_sink(
+                    raw_text,
+                    {
+                        "provider_attempt": provider_attempt,
+                        "transport": "HTTP_RESPONSE",
+                        "capture_stage": capture_stage,
+                        "http_status": response.status_code,
+                    },
+                )
+            return raw_text
+
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 provider_attempts += 1
@@ -578,6 +624,8 @@ class ModelGateway:
                         headers,
                         request,
                         expected_name=function_name,
+                        raw_response_sink=raw_response_sink,
+                        provider_attempt=provider_attempts,
                     )
                     payload = None
                     response = None
@@ -588,8 +636,13 @@ class ModelGateway:
                         headers=headers,
                         json=request,
                     )
+                    response_text = capture_nonstream_response(
+                        response,
+                        provider_attempt=provider_attempts,
+                        capture_stage="initial_response",
+                    )
                 if response is not None and response.status_code >= 400:
-                    first_error_body = response.text[:1000]
+                    first_error_body = response_text[:1000]
                     if self._is_structured_output_rejection(
                         response.status_code,
                         first_error_body,
@@ -606,8 +659,13 @@ class ModelGateway:
                             headers=headers,
                             json=request,
                         )
+                        response_text = capture_nonstream_response(
+                            response,
+                            provider_attempt=provider_attempts,
+                            capture_stage="structured_output_fallback_response",
+                        )
                 if response is not None and response.status_code >= 400:
-                    body = response.text[:1000]
+                    body = response_text[:1000]
                     raise ProviderError(
                         f"LLM endpoint returned {response.status_code}: {body}",
                         kind=ProviderFailureKind.HTTP_STATUS,
@@ -615,6 +673,7 @@ class ModelGateway:
                         retry_after_seconds=_retry_after_seconds(response),
                         phase="request",
                         response_excerpt=body,
+                        response_text=response_text,
                     )
                 if response is not None:
                     try:
@@ -624,7 +683,8 @@ class ModelGateway:
                             "LLM endpoint returned a non-JSON response",
                             kind=ProviderFailureKind.RESPONSE_PARSE,
                             phase="response_parse",
-                            response_excerpt=response.text[:1000],
+                            response_excerpt=response_text[:1000],
+                            response_text=response_text,
                             retryable_hint=False,
                         ) from exc
         except ProviderError:
@@ -654,6 +714,8 @@ class ModelGateway:
                     "Invalid OpenAI-compatible response structure",
                     kind=ProviderFailureKind.RESPONSE_SHAPE,
                     phase="response_shape",
+                    response_excerpt=response_text[:1000],
+                    response_text=response_text,
                     retryable_hint=False,
                 ) from exc
             content = message.get("content")
@@ -673,6 +735,7 @@ class ModelGateway:
                 kind=ProviderFailureKind.RESPONSE_PARSE,
                 phase="response_parse",
                 response_excerpt=str(content)[:1000],
+                response_text=str(content),
                 retryable_hint=False,
             ) from exc
         if wire_report is not None:
@@ -708,84 +771,152 @@ class ModelGateway:
         request: dict[str, Any],
         *,
         expected_name: str,
+        raw_response_sink: Callable[[str, dict[str, Any]], None] | None = None,
+        provider_attempt: int = 1,
     ) -> tuple[str, dict[str, Any]]:
         """Receive one strict MiniMax structured business object.
 
-        The preferred wire representation is one ``submit_*`` function call
-        carrying ``output_json``.  MiniMax exposes ``tool_choice=auto`` rather
-        than a force-this-function mode, so a response with no tool call may
-        instead carry the complete business object directly in assistant
-        content.  That fallback is intentionally narrow: it must be exactly one
-        strict JSON object with no prose, markdown, code fences, or local JSON
-        repair.  Business-schema validation remains owned by the prompt executor.
+        The exact provider SSE response is captured before any wrapper/business
+        JSON parsing.  This is deliberately separate from the extracted business
+        JSON so malformed, truncated, or wrong-tool responses remain inspectable.
         """
 
         calls: dict[int, dict[str, str]] = {}
         assistant_content = ""
         finish_reason: str | None = None
         event_count = 0
-        async with client.stream("POST", url, headers=headers, json=request) as response:
-            if response.status_code >= 400:
-                body = (await response.aread()).decode("utf-8", errors="replace")[:1000]
-                raise ProviderError(
-                    f"LLM endpoint returned {response.status_code}: {body}",
-                    kind=ProviderFailureKind.HTTP_STATUS,
-                    http_status=response.status_code,
-                    retry_after_seconds=_retry_after_seconds(response),
-                    phase="stream_open",
-                    response_excerpt=body,
-                )
-            async for line in response.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if not data or data == "[DONE]":
-                    continue
-                try:
-                    event = json.loads(data)
-                    choice = (event.get("choices") or [{}])[0]
-                    delta = choice.get("delta") or {}
-                    event_count += 1
-                    finish_reason = choice.get("finish_reason") or finish_reason
-                    piece = delta.get("content") or ""
-                    if isinstance(piece, list):
-                        piece = "".join(
-                            part.get("text", "")
-                            for part in piece
-                            if isinstance(part, dict)
-                        )
-                    assistant_content += str(piece)
-                    for tool_call in delta.get("tool_calls") or []:
-                        index = int(tool_call.get("index", 0))
-                        function = tool_call.get("function") or {}
-                        collected = calls.setdefault(
-                            index, {"name": "", "arguments": ""}
-                        )
-                        if function.get("name"):
-                            collected["name"] = str(function["name"])
-                        argument_piece = function.get("arguments") or ""
-                        if argument_piece:
-                            argument_piece = str(argument_piece)
-                            current = collected["arguments"]
-                            collected["arguments"] = (
-                                argument_piece
-                                if argument_piece.startswith(current)
-                                else current + argument_piece
-                            )
-                except (json.JSONDecodeError, AttributeError, IndexError, TypeError, ValueError) as exc:
-                    raise ProviderError(
-                        "LLM stream returned an invalid function-call event",
-                        kind=ProviderFailureKind.STREAM_EVENT,
-                        phase="stream_event",
-                        response_excerpt=data[:1000],
-                        retryable_hint=True,
-                    ) from exc
+        wire_lines: list[str] = []
+        captured = False
+        http_status: int | None = None
 
+        def capture_wire(
+            stage: str,
+            *,
+            raw_override: str | None = None,
+        ) -> None:
+            nonlocal captured
+            if captured or raw_response_sink is None:
+                return
+            raw_text = raw_override if raw_override is not None else "\n".join(wire_lines)
+            raw_response_sink(
+                raw_text,
+                {
+                    "provider_attempt": provider_attempt,
+                    "transport": "SSE_STREAM",
+                    "capture_stage": stage,
+                    "http_status": http_status,
+                    "event_count": event_count,
+                    "finish_reason": finish_reason,
+                },
+            )
+            captured = True
+
+        def logical_candidate() -> str:
+            if len(calls) == 1:
+                only = next(iter(calls.values()))
+                arguments = str(only.get("arguments") or "")
+                if arguments:
+                    return arguments
+            if calls:
+                return json.dumps(
+                    {
+                        "assistant_content": assistant_content,
+                        "tool_calls": [calls[index] for index in sorted(calls)],
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            return assistant_content
+
+        try:
+            async with client.stream("POST", url, headers=headers, json=request) as response:
+                http_status = response.status_code
+                if response.status_code >= 400:
+                    body = (await response.aread()).decode("utf-8", errors="replace")
+                    capture_wire("stream_open_error", raw_override=body)
+                    raise ProviderError(
+                        f"LLM endpoint returned {response.status_code}: {body[:1000]}",
+                        kind=ProviderFailureKind.HTTP_STATUS,
+                        http_status=response.status_code,
+                        retry_after_seconds=_retry_after_seconds(response),
+                        phase="stream_open",
+                        response_excerpt=body[:1000],
+                        response_text=body,
+                    )
+                async for line in response.aiter_lines():
+                    wire_lines.append(line)
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(data)
+                        choice = (event.get("choices") or [{}])[0]
+                        delta = choice.get("delta") or {}
+                        event_count += 1
+                        finish_reason = choice.get("finish_reason") or finish_reason
+                        piece = delta.get("content") or ""
+                        if isinstance(piece, list):
+                            piece = "".join(
+                                part.get("text", "")
+                                for part in piece
+                                if isinstance(part, dict)
+                            )
+                        assistant_content += str(piece)
+                        for tool_call in delta.get("tool_calls") or []:
+                            index = int(tool_call.get("index", 0))
+                            function = tool_call.get("function") or {}
+                            collected = calls.setdefault(
+                                index, {"name": "", "arguments": ""}
+                            )
+                            if function.get("name"):
+                                collected["name"] = str(function["name"])
+                            argument_piece = function.get("arguments") or ""
+                            if argument_piece:
+                                argument_piece = str(argument_piece)
+                                current = collected["arguments"]
+                                collected["arguments"] = (
+                                    argument_piece
+                                    if argument_piece.startswith(current)
+                                    else current + argument_piece
+                                )
+                    except (
+                        json.JSONDecodeError,
+                        AttributeError,
+                        IndexError,
+                        TypeError,
+                        ValueError,
+                    ) as exc:
+                        capture_wire("stream_event_error")
+                        raise ProviderError(
+                            "LLM stream returned an invalid function-call event",
+                            kind=ProviderFailureKind.STREAM_EVENT,
+                            phase="stream_event",
+                            response_excerpt=data[:1000],
+                            response_text=data,
+                            retryable_hint=True,
+                        ) from exc
+        except ProviderError:
+            if wire_lines:
+                capture_wire("stream_provider_error")
+            raise
+        except (httpx.TimeoutException, httpx.RequestError):
+            if wire_lines:
+                capture_wire("stream_transport_error")
+            raise
+
+        # This happens before all wrapper/business parsing and status checks.
+        capture_wire("stream_complete")
+
+        candidate = logical_candidate()
         if finish_reason == "length":
             raise ProviderError(
                 "LLM function stream reached the output token limit before completing",
                 kind=ProviderFailureKind.OUTPUT_TRUNCATED,
                 phase="stream_complete",
+                response_excerpt=candidate[:1000],
+                response_text=candidate,
                 retryable_hint=False,
             )
 
@@ -796,6 +927,7 @@ class ModelGateway:
                     "MiniMax stream completed without a function call or assistant JSON object",
                     kind=ProviderFailureKind.EMPTY_STREAM,
                     phase="stream_complete",
+                    response_text=assistant_content,
                     retryable_hint=True,
                 )
             try:
@@ -806,6 +938,7 @@ class ModelGateway:
                     kind=ProviderFailureKind.RESPONSE_PARSE,
                     phase="assistant_json_parse",
                     response_excerpt=assistant_content[:1000],
+                    response_text=assistant_content,
                     retryable_hint=False,
                 ) from exc
             return direct_json, {
@@ -828,7 +961,8 @@ class ModelGateway:
                 ),
                 kind=ProviderFailureKind.RESPONSE_SHAPE,
                 phase="function_call",
-                response_excerpt=assistant_content[:1000],
+                response_excerpt=candidate[:1000],
+                response_text=candidate,
                 retryable_hint=False,
             )
         arguments_text = matching[0].get("arguments") or ""
@@ -837,6 +971,7 @@ class ModelGateway:
                 "MiniMax function stream completed without arguments",
                 kind=ProviderFailureKind.EMPTY_STREAM,
                 phase="stream_complete",
+                response_text=arguments_text,
                 retryable_hint=True,
             )
         try:
@@ -847,6 +982,7 @@ class ModelGateway:
                 kind=ProviderFailureKind.RESPONSE_PARSE,
                 phase="function_arguments_parse",
                 response_excerpt=arguments_text[:1000],
+                response_text=arguments_text,
                 retryable_hint=False,
             ) from exc
         if set(wrapper) != {"output_json"} or not isinstance(
@@ -857,6 +993,7 @@ class ModelGateway:
                 kind=ProviderFailureKind.RESPONSE_SHAPE,
                 phase="function_arguments_shape",
                 response_excerpt=arguments_text[:1000],
+                response_text=arguments_text,
                 retryable_hint=False,
             )
         return wrapper["output_json"], {
@@ -873,63 +1010,111 @@ class ModelGateway:
         url: str,
         headers: dict[str, str],
         request: dict[str, Any],
+        *,
+        raw_response_sink: Callable[[str, dict[str, Any]], None] | None = None,
+        provider_attempt: int = 1,
     ) -> str:
         content = ""
         finish_reason: str | None = None
-        async with client.stream("POST", url, headers=headers, json=request) as response:
-            if response.status_code >= 400:
-                body = (await response.aread()).decode("utf-8", errors="replace")[:1000]
-                raise ProviderError(
-                    f"LLM endpoint returned {response.status_code}: {body}",
-                    kind=ProviderFailureKind.HTTP_STATUS,
-                    http_status=response.status_code,
-                    retry_after_seconds=_retry_after_seconds(response),
-                    phase="stream_open",
-                    response_excerpt=body,
-                )
-            async for line in response.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if not data or data == "[DONE]":
-                    continue
-                try:
-                    event = json.loads(data)
-                    choice = (event.get("choices") or [{}])[0]
-                    delta = choice.get("delta") or {}
-                    piece = delta.get("content") or ""
-                    message = choice.get("message") or {}
-                    if not piece and message.get("content"):
-                        piece = message["content"]
-                    finish_reason = choice.get("finish_reason") or finish_reason
-                except (json.JSONDecodeError, AttributeError, IndexError, TypeError) as exc:
+        event_count = 0
+        wire_lines: list[str] = []
+        captured = False
+        http_status: int | None = None
+
+        def capture_wire(stage: str, *, raw_override: str | None = None) -> None:
+            nonlocal captured
+            if captured or raw_response_sink is None:
+                return
+            raw_text = raw_override if raw_override is not None else "\n".join(wire_lines)
+            raw_response_sink(
+                raw_text,
+                {
+                    "provider_attempt": provider_attempt,
+                    "transport": "SSE_STREAM",
+                    "capture_stage": stage,
+                    "http_status": http_status,
+                    "event_count": event_count,
+                    "finish_reason": finish_reason,
+                },
+            )
+            captured = True
+
+        try:
+            async with client.stream("POST", url, headers=headers, json=request) as response:
+                http_status = response.status_code
+                if response.status_code >= 400:
+                    body = (await response.aread()).decode("utf-8", errors="replace")
+                    capture_wire("stream_open_error", raw_override=body)
                     raise ProviderError(
-                        "LLM stream returned an invalid event",
-                        kind=ProviderFailureKind.STREAM_EVENT,
-                        phase="stream_event",
-                        response_excerpt=data[:1000],
-                        retryable_hint=True,
-                    ) from exc
-                if isinstance(piece, list):
-                    piece = "".join(
-                        part.get("text", "")
-                        for part in piece
-                        if isinstance(part, dict)
+                        f"LLM endpoint returned {response.status_code}: {body[:1000]}",
+                        kind=ProviderFailureKind.HTTP_STATUS,
+                        http_status=response.status_code,
+                        retry_after_seconds=_retry_after_seconds(response),
+                        phase="stream_open",
+                        response_excerpt=body[:1000],
+                        response_text=body,
                     )
-                piece = str(piece)
-                if not piece:
-                    continue
-                # MiniMax may emit cumulative content while other compatible
-                # providers emit token deltas. Support both without duplication.
-                if piece.startswith(content):
-                    content = piece
-                else:
-                    content += piece
+                async for line in response.aiter_lines():
+                    wire_lines.append(line)
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(data)
+                        choice = (event.get("choices") or [{}])[0]
+                        delta = choice.get("delta") or {}
+                        piece = delta.get("content") or ""
+                        message = choice.get("message") or {}
+                        if not piece and message.get("content"):
+                            piece = message["content"]
+                        finish_reason = choice.get("finish_reason") or finish_reason
+                        event_count += 1
+                    except (
+                        json.JSONDecodeError,
+                        AttributeError,
+                        IndexError,
+                        TypeError,
+                    ) as exc:
+                        capture_wire("stream_event_error")
+                        raise ProviderError(
+                            "LLM stream returned an invalid event",
+                            kind=ProviderFailureKind.STREAM_EVENT,
+                            phase="stream_event",
+                            response_excerpt=data[:1000],
+                            response_text=data,
+                            retryable_hint=True,
+                        ) from exc
+                    if isinstance(piece, list):
+                        piece = "".join(
+                            part.get("text", "")
+                            for part in piece
+                            if isinstance(part, dict)
+                        )
+                    piece = str(piece)
+                    if not piece:
+                        continue
+                    if piece.startswith(content):
+                        content = piece
+                    else:
+                        content += piece
+        except ProviderError:
+            if wire_lines:
+                capture_wire("stream_provider_error")
+            raise
+        except (httpx.TimeoutException, httpx.RequestError):
+            if wire_lines:
+                capture_wire("stream_transport_error")
+            raise
+
+        capture_wire("stream_complete")
         if not content:
             raise ProviderError(
                 "LLM stream completed without message content",
                 kind=ProviderFailureKind.EMPTY_STREAM,
                 phase="stream_complete",
+                response_text=content,
                 retryable_hint=True,
             )
         if finish_reason == "length":
@@ -937,6 +1122,9 @@ class ModelGateway:
                 "LLM stream reached the output token limit before completing",
                 kind=ProviderFailureKind.OUTPUT_TRUNCATED,
                 phase="stream_complete",
+                response_excerpt=content[:1000],
+                response_text=content,
                 retryable_hint=False,
             )
         return content
+
