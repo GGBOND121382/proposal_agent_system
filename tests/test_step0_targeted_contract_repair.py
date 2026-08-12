@@ -106,6 +106,7 @@ class _RepairHarness(WorkflowRepairMixin):
         self.context_builder = _ContextBuilder()
         self.repaired_candidate = copy.deepcopy(repaired_candidate)
         self.repair_calls = 0
+        self.last_retry_categories = None
         self.persisted: dict | None = None
 
     def _project_level(self, project_id: str) -> str:
@@ -116,6 +117,7 @@ class _RepairHarness(WorkflowRepairMixin):
 
     async def _execute_prompt_with_provider_retry(self, *args, **kwargs):
         self.repair_calls += 1
+        self.last_retry_categories = kwargs.get("retry_categories")
         return {
             "run_id": "run-repair",
             "status": "PASS",
@@ -216,6 +218,103 @@ class _ContractRetryHarness(_RetryHarness):
         }
 
 
+class _RetryAfterFailedRepairExecutor:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def provider_request_spec_hash(self, prompt_id: str) -> str:
+        return "request-spec"
+
+    async def execute(self, prompt_id, envelope, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            error = PromptExecutionError(
+                "provider-authored contract failure",
+                validation_errors=["/result/value: invalid"],
+                run_id="run-producer-1",
+            )
+            error.provider_failure_kind = "RESPONSE_SHAPE"
+            error.provider_phase = "output_structure_validation"
+            error.retryable_hint = False
+            raise error
+        return {
+            "run_id": "run-producer-2",
+            "prompt_id": prompt_id,
+            "status": "PASS",
+            "route": {
+                "environment": "OFFLINE_LOCAL",
+                "model_id": "producer-model",
+                "endpoint_id": "offline-primary",
+            },
+            "output": {"status": "PASS", "result": {"value": "valid"}},
+            "call_key": kwargs["call_key"],
+        }
+
+
+class _ParseThenSuccessExecutor:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def provider_request_spec_hash(self, prompt_id: str) -> str:
+        return "request-spec"
+
+    async def execute(self, prompt_id, envelope, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            error = PromptExecutionError(
+                "MiniMax assistant JSON parse failed",
+                run_id="run-repair-parse-1",
+            )
+            error.provider_failure_kind = "RESPONSE_PARSE"
+            error.provider_phase = "assistant_json_parse"
+            error.retryable_hint = False
+            raise error
+        return {
+            "run_id": "run-repair-parse-2",
+            "prompt_id": prompt_id,
+            "status": "PASS",
+            "route": {
+                "environment": "OFFLINE_LOCAL",
+                "model_id": "repair-model",
+                "endpoint_id": "offline-primary",
+            },
+            "output": {"status": "PASS", "result": {"value": "valid"}},
+            "call_key": kwargs["call_key"],
+        }
+
+
+class _ParseRetryHarness(WorkflowEngine):
+    def __init__(self) -> None:
+        self.executor = _ParseThenSuccessExecutor()
+
+    def _update(self, wf, **kwargs):
+        if "state" in kwargs:
+            wf["state"] = kwargs["state"]
+
+    def _record_runtime_failure(self, wf, state, *, prompt_id, exc):
+        return {"workflow_status": "BLOCKED_CONTRACT"}
+
+    async def _repair_producer_contract_failure(self, *args, **kwargs):
+        return {"attempted": False, "result": None}
+
+
+class _FailedRepairThenRetryHarness(WorkflowEngine):
+    def __init__(self) -> None:
+        self.executor = _RetryAfterFailedRepairExecutor()
+        self.repair_calls = 0
+
+    def _update(self, wf, **kwargs):
+        if "state" in kwargs:
+            wf["state"] = kwargs["state"]
+
+    def _record_runtime_failure(self, wf, state, *, prompt_id, exc):
+        return {"workflow_status": "BLOCKED_CONTRACT"}
+
+    async def _repair_producer_contract_failure(self, *args, **kwargs):
+        self.repair_calls += 1
+        return {"attempted": True, "result": None}
+
+
 class _SupersedeHarness(WorkflowRepairMixin):
     def __init__(self) -> None:
         self.deactivated: list[str] = []
@@ -285,6 +384,77 @@ async def test_contract_repair_success_does_not_regenerate_the_producer() -> Non
 
 
 @pytest.mark.asyncio
+async def test_response_parse_failure_can_regenerate_at_repair_provider_boundary() -> None:
+    engine = _ParseRetryHarness()
+    state = {
+        "options": {
+            "provider_retry_limit": 2,
+            "provider_retry_base_delay_seconds": 0,
+            "provider_retry_max_delay_seconds": 0,
+        },
+        "provider_call_cycles": {},
+    }
+    wf = {
+        "id": "wf-generic",
+        "project_id": "project-1",
+        "current_step": 0,
+        "state": state,
+    }
+
+    result = await engine._execute_prompt_with_provider_retry(
+        wf,
+        state,
+        prompt_id="P-TARGETED-REPAIR",
+        envelope={"prompt_id": "P-TARGETED-REPAIR"},
+        retry_categories=frozenset({
+            FailureCategory.PROVIDER_TRANSIENT,
+            FailureCategory.OUTPUT_CONTRACT,
+        }),
+    )
+
+    assert result["run_id"] == "run-repair-parse-2"
+    assert engine.executor.calls == 2
+    cycle = state["provider_call_cycles"]["0:P-TARGETED-REPAIR"]
+    assert cycle["completed_attempts"] == 2
+    assert cycle["successful_attempt"] == 2
+    assert "provider_wait" not in state
+
+
+@pytest.mark.asyncio
+async def test_failed_contract_repair_does_not_consume_remaining_producer_retry() -> None:
+    engine = _FailedRepairThenRetryHarness()
+    state = {
+        "options": {
+            "provider_retry_limit": 2,
+            "provider_retry_base_delay_seconds": 0,
+            "provider_retry_max_delay_seconds": 0,
+        },
+        "provider_call_cycles": {},
+    }
+    wf = {
+        "id": "wf-generic",
+        "project_id": "project-1",
+        "current_step": 4,
+        "state": state,
+    }
+
+    result = await engine._execute_prompt_with_provider_retry(
+        wf,
+        state,
+        prompt_id=PRODUCER,
+        envelope={"prompt_id": PRODUCER},
+    )
+
+    assert result["run_id"] == "run-producer-2"
+    assert engine.executor.calls == 2
+    assert engine.repair_calls == 1
+    cycle = state["provider_call_cycles"][f"4:{PRODUCER}"]
+    assert cycle["completed_attempts"] == 2
+    assert cycle["successful_attempt"] == 2
+    assert "provider_wait" not in state
+
+
+@pytest.mark.asyncio
 async def test_located_persisted_contract_error_is_repaired_once_and_fully_revalidated() -> None:
     original = {
         "schema_version": "2.0",
@@ -317,6 +487,10 @@ async def test_located_persisted_contract_error_is_repaired_once_and_fully_reval
 
     assert outcome["attempted"] is True
     assert harness.repair_calls == 1
+    assert harness.last_retry_categories == frozenset({
+        FailureCategory.PROVIDER_TRANSIENT,
+        FailureCategory.OUTPUT_CONTRACT,
+    })
     assert outcome["result"]["output"] == repaired
     assert original == original_snapshot
     assert sha256_json(original) != sha256_json(repaired)

@@ -55,6 +55,25 @@ def _function_stream_events(output_json: str) -> list[dict]:
     ]
 
 
+def _function_stream_events_with_chatter(
+    output_json: str,
+    chatter: str,
+) -> list[dict]:
+    events = _function_stream_events(output_json)
+    events.insert(
+        0,
+        {
+            "choices": [
+                {
+                    "delta": {"content": chatter},
+                    "finish_reason": None,
+                }
+            ]
+        },
+    )
+    return events
+
+
 
 def _truncated_function_stream_events(output_json_prefix: str) -> list[dict]:
     wrapper_prefix = json.dumps({"output_json": output_json_prefix})[:-2]
@@ -333,7 +352,8 @@ def test_minimax_uses_streamed_serialized_json_function(monkeypatch):
     assert sent["max_completion_tokens"] == 4096
     assert "max_tokens" not in sent
     assert sent["stream"] is True
-    assert sent["reasoning_split"] is True
+    assert sent["thinking"] == {"type": "disabled"}
+    assert "reasoning_split" not in sent
     assert "response_format" not in sent
     assert sent["tool_choice"] == "auto"
     assert len(sent["tools"]) == 1
@@ -353,6 +373,78 @@ def test_minimax_uses_streamed_serialized_json_function(monkeypatch):
     assert result.parse_report["wire_wrapper_parse_report"]["transport"] == "FUNCTION_OUTPUT_JSON"
     assert result.parse_report["wire_wrapper_parse_report"]["repair_count"] == 0
     assert result.provider_attempts == 1
+
+
+def test_minimax_m2_keeps_reasoning_split_when_thinking_cannot_be_disabled(monkeypatch):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = None
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    result = asyncio.run(
+        _gateway()._invoke_live(
+            _route("MiniMax-M2.7-highspeed"),
+            "P-TEST",
+            "Return JSON.",
+            {"payload": {"value": 1}},
+            {"type": "object"},
+        )
+    )
+
+    sent = _FakeAsyncClient.captured["json"]
+    assert sent["reasoning_split"] is True
+    assert "thinking" not in sent
+    assert result.output == {"status": "PASS"}
+
+
+def test_minimax_accepts_valid_tool_call_even_with_assistant_chatter(monkeypatch):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = _function_stream_events_with_chatter(
+        '{"status":"PASS"}',
+        "I will submit the structured result now.",
+    )
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    result = asyncio.run(
+        _gateway()._invoke_live(
+            _route(),
+            "P-TEST",
+            "Return JSON.",
+            {"payload": {"value": 1}},
+            {"type": "object"},
+        )
+    )
+
+    assert result.output == {"status": "PASS"}
+    report = result.parse_report["wire_wrapper_parse_report"]
+    assert report["assistant_chatter_ignored"] is True
+    assert report["assistant_chatter_chars"] > 0
+    _FakeAsyncClient.stream_events = None
+
+
+def test_minimax_accepts_first_complete_json_and_ignores_trailing_output(monkeypatch):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = _assistant_json_stream_events(
+        '{"status":"PASS"}\n{"note":"provider chatter"}'
+    )
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    result = asyncio.run(
+        _gateway()._invoke_live(
+            _route(),
+            "P-TEST",
+            "Return JSON.",
+            {"payload": {"value": 1}},
+            {"type": "object"},
+        )
+    )
+
+    assert result.output == {"status": "PASS"}
+    report = result.parse_report
+    assert report["trailing_output_ignored"] is True
+    assert report["trailing_output_chars"] > 0
+    # The immutable raw provider text is still retained verbatim.
+    assert result.raw_text == '{"status":"PASS"}\n{"note":"provider chatter"}'
+    _FakeAsyncClient.stream_events = None
 
 
 def test_minimax_accepts_strict_assistant_json_when_auto_tool_is_not_called(monkeypatch):

@@ -901,9 +901,12 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     ).setdefault(retry_key, prior_cycle)
                 else:
                     if contract_repair.get("attempted"):
+                        # Restore the producer checkpoint after a failed repair,
+                        # but do not strand a still-retryable producer cycle.
+                        # The common bounded retry path below owns the remaining
+                        # attempts and preserves the existing backoff/ledger.
                         state["provider_wait"] = failed_provider_wait
                         self._update(wf, state=state)
-                        raise
                     if not retry_allowed_here:
                         raise
 
@@ -1210,6 +1213,56 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             },
         )
         return self.get(wf["id"])
+
+    def _recover_retryable_provider_checkpoint(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+    ) -> bool:
+        """Reopen a blocked workflow when its persisted retry is still pending.
+
+        A failed contract-repair attempt may leave the outer producer checkpoint
+        with ``decision.should_retry=true`` and unused attempts.  The workflow
+        status must not hide that already-persisted retry decision.  This helper
+        changes only orchestration status; it preserves the exact provider cycle,
+        attempt counters, call keys, and backoff timestamp.
+        """
+
+        if not is_recoverable_block(wf["status"]):
+            return False
+        wait = state.get("provider_wait")
+        if not isinstance(wait, dict):
+            return False
+        if (wait.get("decision") or {}).get("should_retry") is not True:
+            return False
+        if not self._provider_wait_matches_checkpoint(wf, state, wait):
+            return False
+
+        recovery = {
+            "reason": "PERSISTED_PROVIDER_RETRY_STILL_AVAILABLE",
+            "from_status": wf["status"],
+            "to_status": WorkflowStatus.RUNNING.value,
+            "prompt_id": wait.get("prompt_id"),
+            "completed_attempts": wait.get("completed_attempts"),
+            "max_attempts": wait.get("max_attempts"),
+            "recovered_at": utc_now(),
+        }
+        state.setdefault("checkpoint_recovery_history", []).append(recovery)
+        del state["checkpoint_recovery_history"][:-50]
+        state["recovered_from"] = wf["status"]
+        state.pop("last_error", None)
+        self._update(
+            wf,
+            status=WorkflowStatus.RUNNING.value,
+            state=state,
+        )
+        self.db.audit(
+            "PROVIDER_RETRY_CHECKPOINT_RECOVERED",
+            project_id=wf["project_id"],
+            object_id=wf["id"],
+            metadata=recovery,
+        )
+        return True
 
     def _recover_provider_block_after_protocol_upgrade(
         self,
@@ -1946,6 +1999,9 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             wf = self.get(workflow_id)
             state = wf["state"]
         if self._recover_contract_block_after_normalizer_upgrade(wf, state):
+            wf = self.get(workflow_id)
+            state = wf["state"]
+        if self._recover_retryable_provider_checkpoint(wf, state):
             wf = self.get(workflow_id)
             state = wf["state"]
         if (

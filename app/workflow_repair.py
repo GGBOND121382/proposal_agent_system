@@ -337,7 +337,10 @@ class WorkflowRepairMixin:
                 prompt_id="P-TARGETED-REPAIR",
                 envelope=repair_envelope,
                 call_key=repair_call_key,
-                retry_categories=frozenset({FailureCategory.PROVIDER_TRANSIENT}),
+                retry_categories=frozenset({
+                    FailureCategory.PROVIDER_TRANSIENT,
+                    FailureCategory.OUTPUT_CONTRACT,
+                }),
             )
             repair_output = repaired.get("output")
             repair_payload = (
