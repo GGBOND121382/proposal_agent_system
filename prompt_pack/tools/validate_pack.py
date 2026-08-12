@@ -71,10 +71,18 @@ if reg:
         if p['model_profile'] not in profiles: errors.append(f'MODEL_PROFILE_MISSING {p["prompt_id"]}: {p["model_profile"]}')
         if not p.get('executor_role'): errors.append(f'EXECUTOR_ROLE_MISSING {p["prompt_id"]}')
         text=(ROOT/p['prompt_file']).read_text(encoding='utf-8')
-        if f'执行角色：`{p.get("executor_role")}`' not in text: errors.append(f'PROMPT_EXECUTOR_MISMATCH {p["prompt_id"]}')
-        if len(text)<2200: errors.append(f'PROMPT_TOO_SHORT {p["prompt_id"]}: {len(text)}')
-        for heading in ['## 角色与权限','## 必须读取的输入','## 执行步骤','## 状态判定','## Finding代码','## 强制自检','## 输出要求']:
-            if heading not in text: errors.append(f'PROMPT_HEADING_MISSING {p["prompt_id"]}: {heading}')
+        if f'执行角色：`{p.get("executor_role")}`' not in text:
+            errors.append(f'PROMPT_EXECUTOR_MISMATCH {p["prompt_id"]}')
+        # Prompt lint protects identity and business vocabulary, not verbosity.
+        # The old 2200-character minimum plus mandatory "强制自检" heading
+        # forced deterministic validator rules back into model prompts.  Keep a
+        # small sanity floor and a generous anti-bloat ceiling instead.
+        if len(text)<600:
+            errors.append(f'PROMPT_TOO_SHORT {p["prompt_id"]}: {len(text)}')
+        if len(text)>6000:
+            errors.append(f'PROMPT_TOO_LONG {p["prompt_id"]}: {len(text)}')
+        if '## Finding代码' not in text:
+            errors.append(f'PROMPT_HEADING_MISSING {p["prompt_id"]}: ## Finding代码')
         inp=load_json(ROOT/p['input_schema']); out=load_json(ROOT/p['output_schema'])
         if inp:
             try: Draft202012Validator.check_schema(inp)

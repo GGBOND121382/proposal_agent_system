@@ -45,7 +45,7 @@
 | `profiles/research_foundation.yaml` | 1040 | `3c4394559c27e2f84f56348fb0612d1b45c12d29f6acbc908edc57e6d435c3ca` |
 | `profiles/research_objective.yaml` | 851 | `1a77ae7595c0e7f5fb2bba426955434586bb4dfec96da1bd4c0c6da29fb3134f` |
 | `profiles/technical_route.yaml` | 1090 | `0de2264f4a6b3caae20a91a216e5ecabc9671de3740e9b293a41c099535c831c` |
-| `prompts/argument/argument_architecture.md` | 3981 | `cf57aad9fbeb7368edc22fdc8a338be20ec40d92a2bfda7a02fa01e13814a6ca` |
+| `prompts/argument/argument_architecture.md` | 2223 | `d1b002e125fd870317efc1cdf22f4380d3d4e8620795dda9485a895aff48903e` |
 | `prompts/argument/argument_architecture_critic.md` | 6760 | `370b313e3e0822a26272040166506fc63dec266fa0b2cac9d1d5b9e86cbee09e` |
 | `prompts/fact/fact_critic.md` | 5713 | `70278ebf3e591e0f7cf70232080efaad02d452bae6ef423b65130b7c63ff7464` |
 | `prompts/fact/fact_extract.md` | 5839 | `6fde485ef321b0384704f59d6f21cfe873bf465830bb7bb55855f63aff86c744` |
@@ -58,7 +58,7 @@
 | `prompts/public_research/research_critic.md` | 5734 | `e587a3b947977fec56e8015f3e96c96a12ece4bd564e2e33ba523bf92c829407` |
 | `prompts/public_research/research_plan.md` | 6772 | `57a9ad2016a1b911e6500d665066a0e42cf8023bda94cc2eb215c337b009836d` |
 | `prompts/public_research/research_synthesis.md` | 5933 | `dec26f6dfc44058212c281a89c0aef0a076558e96b8c102843d805409d3dd0f6` |
-| `prompts/repair/targeted_repair.md` | 2015 | `c2faa34a0f0550337ae08b62762293c387c55a60fae2bea3ca5512278cd44eda` |
+| `prompts/repair/targeted_repair.md` | 1527 | `fce69fed59faa0220efcc55948fd46000a517c1e3a5427dc3835ce5ac69b66e3` |
 | `prompts/scheme/scheme_critic.md` | 5637 | `d7129e10522c28834d51ea3ad9301d4860b04fcb25b437f41b6561af34a06c3c` |
 | `prompts/scheme/scheme_extract.md` | 5590 | `066bf4a839439e513bb7a556fdd17e5c02d0b1fdfca812d05a42aecc05fcbe11` |
 | `prompts/security/final_confidentiality_review.md` | 5798 | `103841a28321859ccf747ef1b3e6fb44d0da2daa72830cd993d64d6ae7d9d355` |
@@ -327,4 +327,4 @@
 | `schemas/prompts/write_critic_output.schema.json` | 6424 | `5282a5f5f11fb6b20d4bc13e9755c71b2a3ead7b9872c6ce3f04f7c0929cfb3c` |
 | `tools/build_v2.py` | 124181 | `23890c15f47003b72c4874662e8b3224dbb142d43347c2594cf8ef6147a55029` |
 | `tools/run_validation.sh` | 80 | `5cc493c4b390c41caac3e0af9a81685452a941480ad24716906430f46a736942` |
-| `tools/validate_pack.py` | 12149 | `2190c32bb74a7a89963e38b9724586cf55efcb58a92f5f883f9c91acc325da79` |
+| `tools/validate_pack.py` | 12447 | `16927bfd71aa5cef2ac8d09aff3625209f0125fbaca65206634ab83b0f6167fd` |

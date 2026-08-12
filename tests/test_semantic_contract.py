@@ -82,8 +82,9 @@ def test_self_evidence_is_rejected_by_deterministic_guard() -> None:
     )
 
 
-def test_system_prompt_contains_shared_semantic_contract(tmp_path) -> None:
-    # Use __new__ to exercise the pure prompt assembly method without runtime services.
+def test_system_prompt_does_not_duplicate_deterministic_semantic_contract(tmp_path) -> None:
+    # The semantic contract remains executable code; the provider prompt gets
+    # only a compact boundary instead of a second copy of validator rules.
     executor = PromptExecutor.__new__(PromptExecutor)
     class Pack:
         shared_prompt = "shared"
@@ -95,8 +96,10 @@ def test_system_prompt_contains_shared_semantic_contract(tmp_path) -> None:
         {"type": "object", "properties": {}},
         {"payload": {}, "task": {}, "scope": {}, "security_context": {}, "freshness": {}},
     )
-    assert "统一语义契约" in prompt
-    assert "A claim must never cite itself as evidence" in prompt
+    assert "# 运行时契约边界" in prompt
+    assert "统一语义契约（运行时生成）" not in prompt
+    assert "A claim must never cite itself as evidence" not in prompt
+    assert get_semantic_contract().rule("SC-EVIDENCE-SELF-REFERENCE") is not None
 
 
 def test_machine_rules_have_stable_ids_and_explicit_owners() -> None:

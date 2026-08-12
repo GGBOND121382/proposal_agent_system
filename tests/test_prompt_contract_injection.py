@@ -52,32 +52,31 @@ def test_contract_hash_is_canonical_and_traceable() -> None:
     ]
 
 
-def test_system_prompt_injects_the_generated_contract_exactly_once() -> None:
+def test_system_prompt_keeps_semantic_contract_in_runtime_not_provider_prompt() -> None:
     prompt = _system_prompt("P-WRITE-BLUEPRINT")
     contract = get_semantic_contract()
     assert SEMANTIC_CONTRACT_PROMPT_MARKER not in prompt
-    assert prompt.count("# 统一语义契约（运行时生成）") == 1
-    assert prompt.count(f"Semantic-Contract-SHA256: {contract.contract_hash}") == 1
+    assert "# 运行时契约边界" in prompt
+    assert "由运行时确定性校验" in prompt
+    assert "# 统一语义契约（运行时生成）" not in prompt
+    assert f"Semantic-Contract-SHA256: {contract.contract_hash}" not in prompt
     for rule_id in contract.rule_ids:
-        assert prompt.count(f"`{rule_id}`") == 1
-    assert "P-ABS-005.must_answer" in prompt
-    assert "never 'must_answer' alone" in prompt
+        assert f"`{rule_id}`" not in prompt
 
 
-def test_producer_critic_and_repair_receive_the_same_contract_identity() -> None:
-    contract = get_semantic_contract()
-    identity = f"Semantic-Contract-SHA256: {contract.contract_hash}"
+def test_producer_critic_and_repair_share_the_same_lean_runtime_boundary() -> None:
     for prompt_id in (
         "P-WRITE-BLUEPRINT",
         "P-WRITE-BLUEPRINT-CRITIC",
         "P-TARGETED-REPAIR",
     ):
         prompt = _system_prompt(prompt_id)
-        assert identity in prompt
-        assert prompt.count(identity) == 1
+        assert prompt.count("# 运行时契约边界") == 1
+        assert "Schema、枚举、字段归属、引用完整性、来源绑定、状态/Gate和语义契约" in prompt
+        assert "# 统一语义契约（运行时生成）" not in prompt
 
 
-def test_missing_marker_falls_back_to_one_generated_contract() -> None:
+def test_missing_marker_does_not_reinject_validator_rules_into_provider_prompt() -> None:
     executor = PromptExecutor.__new__(PromptExecutor)
 
     class PackWithoutMarker:
@@ -93,7 +92,9 @@ def test_missing_marker_falls_back_to_one_generated_contract() -> None:
         {"type": "object", "properties": {}},
         {"payload": {}, "task": {}, "scope": {}, "security_context": {}, "freshness": {}},
     )
-    assert prompt.count("# 统一语义契约（运行时生成）") == 1
+    assert "legacy shared prompt" in prompt
+    assert prompt.count("# 运行时契约边界") == 1
+    assert "# 统一语义契约（运行时生成）" not in prompt
 
 
 def test_blueprint_critic_treats_blueprint_fields_as_the_paragraph_design() -> None:

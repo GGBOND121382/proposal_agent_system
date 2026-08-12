@@ -9,9 +9,6 @@ from typing import Any
 from .llm import LLMError, ModelGateway, ProviderError
 from .json_pointer import is_ancestor_or_same, join_pointer, paths_overlap
 from .contract_registry import (
-    augment_prompt_with_enum_contract,
-    augment_prompt_with_field_ownership_contract,
-    augment_prompt_with_reference_integrity_contract,
     normalize_registered_enum_aliases_against_schema,
     repair_field_ownership_against_schema,
     required_null_container_errors,
@@ -24,7 +21,6 @@ from .output_integrity import (
     attach_trusted_source_catalog,
     bind_trusted_source_refs,
     normalize_reference_id_aliases,
-    trusted_source_prompt_contract,
     validate_reference_ids,
 )
 from .proposal_quality import ProposalQualityGuard, SECTION_FUNCTION_ROLE_ALIASES
@@ -65,6 +61,15 @@ TRACE_SOURCE_KIND_ALIASES = {
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
 OUTPUT_NORMALIZER_VERSION = "2026-08-11.v48-path-refs-source-binding-human-gate"
+MODEL_CONTEXT_PROJECTION_VERSION = "2026-08-12.v3-provider-business-metadata-trim"
+MODEL_SYSTEM_PROMPT_VERSION = "2026-08-12.v2-capability-selective-shared-modules"
+
+_PROVIDER_SOURCE_REF_OMIT_FIELDS = frozenset({
+    "document_version_id",
+    "span_start",
+    "span_end",
+    "source_hash",
+})
 
 
 def _schema_source_type(value: Any) -> Any:
@@ -1653,7 +1658,42 @@ class PromptExecutor:
         started = time.perf_counter()
         quality_context_envelope = envelope
         model_envelope, input_compaction = self._prepare_model_envelope(prompt_id, envelope)
+        # ``model_envelope`` remains the full deterministic validation context.
+        # The provider sees a smaller projection that excludes runtime-only
+        # provenance/catalog material but preserves business semantics.
         model_envelope = attach_trusted_source_catalog(model_envelope)
+        provider_contract_envelope, provider_contract_projection = (
+            self._prepare_provider_contract_envelope(model_envelope)
+        )
+        provider_envelope, provider_business_projection = self._prepare_provider_envelope(
+            provider_contract_envelope
+        )
+        provider_projection = {
+            "strategy": "TWO_STAGE_PROVIDER_BUSINESS_PROJECTION",
+            "projection_version": MODEL_CONTEXT_PROJECTION_VERSION,
+            "validation_context_chars": provider_contract_projection["validation_context_chars"],
+            "provider_contract_chars": provider_contract_projection["provider_contract_chars"],
+            "provider_envelope_chars": provider_business_projection["provider_envelope_chars"],
+            "saved_chars": (
+                provider_contract_projection["validation_context_chars"]
+                - provider_business_projection["provider_envelope_chars"]
+            ),
+            "saved_ratio": (
+                (
+                    provider_contract_projection["validation_context_chars"]
+                    - provider_business_projection["provider_envelope_chars"]
+                )
+                / provider_contract_projection["validation_context_chars"]
+                if provider_contract_projection["validation_context_chars"]
+                else 0.0
+            ),
+            "contract_projection": provider_contract_projection,
+            "business_projection": provider_business_projection,
+            "validation_uses_full_trusted_context": True,
+        }
+        input_compaction = self._merge_input_compaction(
+            input_compaction, provider_projection
+        )
         input_hash = sha256_json(model_envelope)
         route = None
         output: dict[str, Any] | None = None
@@ -1670,14 +1710,22 @@ class PromptExecutor:
             if model_envelope is not envelope:
                 model_input_errors = self.pack.validate(prompt_id, "input", model_envelope)
                 if model_input_errors:
-                    raise PromptExecutionError("Compacted model input schema validation failed", validation_errors=model_input_errors)
+                    raise PromptExecutionError("Compacted validation input schema failed", validation_errors=model_input_errors)
+            provider_input_errors = self.pack.validate(
+                prompt_id, "input", provider_contract_envelope
+            )
+            if provider_input_errors:
+                raise PromptExecutionError(
+                    "Provider contract projection failed schema validation",
+                    validation_errors=provider_input_errors,
+                )
             route = self.router.route(prompt_id, model_envelope, original_environment=original_environment)
             project_config = load_project_config(self.db, project_id)
             if route.environment == "ONLINE_PUBLIC":
-                assert_online_payload_safe(model_envelope, project_config)
+                assert_online_payload_safe(provider_envelope, project_config)
             output_schema = self.pack.inlined_schema(prompt_id, "output")
-            system_prompt = self._system_prompt(prompt_id, output_schema, model_envelope)
-            result = await self.gateway.invoke(route, prompt_id, system_prompt, model_envelope, output_schema)
+            system_prompt = self._system_prompt(prompt_id, output_schema, provider_envelope)
+            result = await self.gateway.invoke(route, prompt_id, system_prompt, provider_envelope, output_schema)
             raw_response_text = result.raw_text
             try:
                 output = self._normalize_output(prompt_id, result.output, model_envelope)
@@ -2141,6 +2189,231 @@ class PromptExecutor:
             "quality_guard_uses_full_context": True,
         }
 
+    @staticmethod
+    def _prepare_provider_contract_envelope(
+        validation_envelope: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Create the schema-valid provider contract envelope.
+
+        This first projection removes bulky trusted-catalog/provenance material
+        that is already retained in the deterministic validation envelope while
+        preserving the original prompt input schema.  The result is validated
+        against that schema before the second, model-facing business projection
+        is created.
+        """
+
+        provider = copy.deepcopy(validation_envelope)
+        before_chars = len(json.dumps(provider, ensure_ascii=False, separators=(",", ":")))
+        catalog = provider.pop("trusted_source_catalog", None)
+        removed_catalog_entries = len(catalog) if isinstance(catalog, list) else 0
+        removed_fields: dict[str, int] = {}
+        nulled_inherited_fields: dict[str, int] = {}
+
+        def strip_source_ref(ref: Any) -> None:
+            if not isinstance(ref, dict):
+                return
+            for field in _PROVIDER_SOURCE_REF_OMIT_FIELDS:
+                if field in ref:
+                    ref.pop(field, None)
+                    removed_fields[field] = removed_fields.get(field, 0) + 1
+
+        def visit(node: Any) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    visit(item)
+                return
+            if not isinstance(node, dict):
+                return
+            for key, value in list(node.items()):
+                if key == "source_ref":
+                    strip_source_ref(value)
+                elif key == "source_refs" and isinstance(value, list):
+                    for ref in value:
+                        strip_source_ref(ref)
+                elif key == "inherited_source_catalog" and isinstance(value, list):
+                    # Keep this intermediate envelope schema-valid.  The
+                    # model-facing business projection removes these machine
+                    # provenance fields entirely after the schema check.
+                    for entry in value:
+                        if not isinstance(entry, dict):
+                            continue
+                        for field in ("document_version_id", "source_hash"):
+                            if entry.get(field) is not None:
+                                entry[field] = None
+                                nulled_inherited_fields[field] = (
+                                    nulled_inherited_fields.get(field, 0) + 1
+                                )
+                visit(value)
+
+        visit(provider)
+        after_chars = len(json.dumps(provider, ensure_ascii=False, separators=(",", ":")))
+        return provider, {
+            "strategy": "SCHEMA_VALID_PROVIDER_CONTRACT_PROJECTION",
+            "validation_context_chars": before_chars,
+            "provider_contract_chars": after_chars,
+            "saved_chars": before_chars - after_chars,
+            "removed_trusted_source_catalog_entries": removed_catalog_entries,
+            "removed_source_ref_fields": removed_fields,
+            "nulled_inherited_catalog_fields": nulled_inherited_fields,
+        }
+
+    @staticmethod
+    def _prepare_provider_envelope(
+        provider_contract_envelope: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Create the actual model-visible business envelope.
+
+        The full input and the schema-valid provider contract projection have
+        already been validated before this object is sent to the model.  Remove
+        deterministic integrity material that the model neither needs to reason
+        about nor should copy: runtime-only hashes and wrapper IDs.  A tiny
+        exception remains for hashes that the current output contract explicitly
+        requires the model to preserve verbatim (trace lineage and protected-path
+        receipts).  Semantic IDs used to connect business entities remain.
+        """
+
+        provider = copy.deepcopy(provider_contract_envelope)
+        before_chars = len(json.dumps(provider, ensure_ascii=False, separators=(",", ":")))
+        removed_hash_fields: dict[str, int] = {}
+        retained_contract_hash_fields: dict[str, int] = {}
+        removed_runtime_ids: dict[str, int] = {}
+        removed_machine_metadata_fields: dict[str, int] = {}
+        removed_containers: dict[str, int] = {}
+
+        runtime_id_paths = {
+            ("prompt_id",),
+            ("task", "task_id"),
+            ("scope", "project_id"),
+            ("payload", "task_instruction", "task_instruction_id"),
+        }
+
+        # These fields are deterministic container/transport metadata.  They are
+        # useful to the runtime but do not change the model's business reasoning.
+        current_section_machine_fields = {
+            "block_ids",
+            "contains_table",
+            "contains_formula",
+            "contains_image",
+            "contains_comment",
+            "contains_revision",
+            "security_level",
+        }
+        project_item_machine_fields = {"owner_ref", "security_level"}
+
+        def is_machine_metadata(path: tuple[str, ...], key: str) -> bool:
+            if (
+                path == ("payload", "current_sections", "[]")
+                and key in current_section_machine_fields
+            ):
+                return True
+            if (
+                path == ("payload", "project_subgraph", "items", "[]")
+                and key in project_item_machine_fields
+            ):
+                return True
+            if path == ("payload", "project_subgraph") and key in {"item_ids", "relation_ids"}:
+                return True
+            return False
+
+        def hash_is_model_required(path: tuple[str, ...], key: str) -> bool:
+            # These are not free-form integrity hints.  Existing output
+            # contracts require the model to preserve them verbatim, so they
+            # are part of the current transport contract rather than useless
+            # generation context.
+            if key == "source_hash" and "trace_links" in path:
+                return True
+            if key == "hash" and len(path) >= 2 and path[:2] == ("payload", "protected_hashes"):
+                return True
+            return False
+
+        def visit(node: Any, path: tuple[str, ...] = ()) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    visit(item, path + ("[]",))
+                return
+            if not isinstance(node, dict):
+                return
+
+            for key in list(node.keys()):
+                child_path = path + (key,)
+                value = node.get(key)
+
+                if (
+                    key == "document_version_id"
+                    and len(path) >= 3
+                    and path[:2] == ("payload", "inherited_source_catalog")
+                ):
+                    node.pop(key, None)
+                    removed_runtime_ids["/payload/inherited_source_catalog[]/document_version_id"] = (
+                        removed_runtime_ids.get(
+                            "/payload/inherited_source_catalog[]/document_version_id", 0
+                        )
+                        + 1
+                    )
+                    continue
+
+                if is_machine_metadata(path, key):
+                    node.pop(key, None)
+                    metadata_path = "/" + "/".join(path + (key,))
+                    removed_machine_metadata_fields[metadata_path] = (
+                        removed_machine_metadata_fields.get(metadata_path, 0) + 1
+                    )
+                    continue
+
+                if key == "hash" or key.endswith("_hash"):
+                    if hash_is_model_required(path, key):
+                        retained_contract_hash_fields[key] = (
+                            retained_contract_hash_fields.get(key, 0) + 1
+                        )
+                    else:
+                        node.pop(key, None)
+                        removed_hash_fields[key] = removed_hash_fields.get(key, 0) + 1
+                        continue
+
+                if child_path in runtime_id_paths:
+                    node.pop(key, None)
+                    path_text = "/" + "/".join(child_path)
+                    removed_runtime_ids[path_text] = removed_runtime_ids.get(path_text, 0) + 1
+                    continue
+
+                visit(value, child_path)
+
+            # ``freshness`` contains deterministic digest attestations only.
+            # Once those hashes are removed, do not send an empty wrapper.
+            if path == () and isinstance(node.get("freshness"), dict) and not node["freshness"]:
+                node.pop("freshness", None)
+                removed_containers["/freshness"] = 1
+
+        visit(provider)
+        after_chars = len(json.dumps(provider, ensure_ascii=False, separators=(",", ":")))
+        return provider, {
+            "strategy": "MODEL_FACING_BUSINESS_PROJECTION",
+            "projection_version": MODEL_CONTEXT_PROJECTION_VERSION,
+            "provider_contract_chars": before_chars,
+            "provider_envelope_chars": after_chars,
+            "saved_chars": before_chars - after_chars,
+            "saved_ratio": (before_chars - after_chars) / before_chars if before_chars else 0.0,
+            "removed_hash_fields": removed_hash_fields,
+            "retained_contract_hash_fields": retained_contract_hash_fields,
+            "removed_runtime_ids": removed_runtime_ids,
+            "removed_machine_metadata_fields": removed_machine_metadata_fields,
+            "removed_containers": removed_containers,
+            "validation_uses_full_trusted_context": True,
+            "provider_contract_was_schema_validated": True,
+        }
+
+    @staticmethod
+    def _merge_input_compaction(
+        existing: dict[str, Any] | None,
+        provider_projection: dict[str, Any],
+    ) -> dict[str, Any]:
+        if existing:
+            return {**existing, "provider_projection": provider_projection}
+        return {
+            "strategy": "MODEL_FACING_SOURCE_PROJECTION",
+            "provider_projection": provider_projection,
+        }
+
     def _system_prompt(
         self,
         prompt_id: str,
@@ -2164,42 +2437,38 @@ class PromptExecutor:
             "# 本次运行时协议身份\n"
             f"- `prompt_id`固定为`{prompt_id}`。\n"
             f"- `prompt_version`固定为`{prompt_version}`。\n"
-            f"- `schema_version`固定为`{schema_version}`。\n"
-            "以上三项必须与输入Envelope和强制输出Schema完全一致。"
+            f"- `schema_version`固定为`{schema_version}`。"
         )
-        base_prompt = (
-            self.pack.shared_prompt
+        runtime_boundary = (
+            "# 运行时契约边界\n"
+            "你只生成当前任务的业务候选。Schema、枚举、字段归属、引用完整性、"
+            "来源绑定、状态/Gate和语义契约由运行时确定性校验；不要复述、模拟或逐项自检这些规则。\n"
+            "引用已有对象时只使用输入中可见的ID；source_refs.source_id只复制输入中可见的source_id。"
+            "版本、Hash和Span等可信来源元数据由运行时绑定，不要猜测或计算。"
+        )
+        human_boundary = (
+            "# 人工输入约束\n"
+            "payload.human_resolutions若非空即为已确认回答，只能在其target_paths和当前任务范围内使用。"
+        )
+        if hasattr(self.pack, "shared_prompt_for"):
+            shared_source = self.pack.shared_prompt_for(prompt_id)
+        else:
+            shared_source = self.pack.shared_prompt
+        shared_prompt = str(shared_source).replace(
+            "{{SEMANTIC_CONTRACT_RUNTIME}}", ""
+        ).strip()
+        return (
+            shared_prompt
             + "\n\n"
             + protocol_identity
             + "\n\n"
             + self.pack.prompt_text(prompt_id)
-        )
-        base_prompt = augment_prompt_with_enum_contract(
-            base_prompt,
-            output_schema,
-            contract_id=f"prompt-pack:{prompt_id}:output",
-        )
-        base_prompt = augment_prompt_with_field_ownership_contract(
-            base_prompt,
-            output_schema,
-            contract_id=f"prompt-pack:{prompt_id}:field-ownership",
-        )
-        base_prompt = augment_prompt_with_reference_integrity_contract(
-            base_prompt,
-            output_schema,
-            contract_id=f"prompt-pack:{prompt_id}:reference-integrity",
-        )
-        semantic_contract = get_semantic_contract()
-        base_prompt = semantic_contract.inject_into_prompt(base_prompt)
-        source_contract = trusted_source_prompt_contract(envelope)
-        return (
-            base_prompt
-            + source_contract
-            + "\n\n# 人工输入约束\n"
-            + "若输入 payload.human_resolutions 非空，这些记录是已经通过门禁确认的人工回答。"
-              "必须在其 target_paths 和当前任务范围内使用；不得忽略、扩大解释或改写为未经确认的事实。"
+            + "\n\n"
+            + runtime_boundary
+            + "\n\n"
+            + human_boundary
             + "\n\n# 运行时强制输出Schema\n"
-            + json.dumps(output_schema, ensure_ascii=False)
+            + json.dumps(output_schema, ensure_ascii=False, separators=(",", ":"))
         )
 
     def _save_run(self, run_id: str, project_id: str, workflow_id: str | None, prompt_id: str, status: str, model_id: str | None, endpoint_id: str | None, input_hash: str, envelope: dict[str, Any], output: dict[str, Any] | None, error: str | None, duration_ms: int) -> None:

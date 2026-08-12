@@ -136,12 +136,20 @@ class WorkflowRepairMixin:
             )
             allowed_paths.append(pointer)
 
-        closure_roots = {
-            parse_pointer(path)[0]
-            for path in allowed_paths
-            if parse_pointer(path)
-        } & {path.removeprefix("/") for path in cls._STATUS_CLOSURE_PATHS}
-        if closure_roots:
+        def requires_status_closure(path: str) -> bool:
+            parts = parse_pointer(path)
+            if not parts:
+                return False
+            root = parts[0]
+            # Status/question/unresolved errors are inherently cross-field.  A
+            # Finding-level error may also describe a missing gate counterpart,
+            # but a scalar nested Finding error (for example /repairable) must
+            # stay narrowly scoped instead of authorizing the whole gate state.
+            if root in {"status", "user_questions", "unresolved_items"}:
+                return True
+            return root == "findings" and len(parts) <= 2
+
+        if any(requires_status_closure(path) for path in allowed_paths):
             allowed_paths.extend(cls._STATUS_CLOSURE_PATHS)
         return findings, list(dict.fromkeys(allowed_paths))
 

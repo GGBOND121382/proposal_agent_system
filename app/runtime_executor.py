@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from .executor import (
+    MODEL_CONTEXT_PROJECTION_VERSION,
+    MODEL_SYSTEM_PROMPT_VERSION,
     OUTPUT_NORMALIZER_VERSION,
     PromptExecutionError,
     PromptExecutor as BasePromptExecutor,
@@ -113,6 +115,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "candidate_models": candidate_models,
                 "output_schema": self.pack.inlined_schema(prompt_id, "output"),
                 "trusted_source_catalog_contract_version": TRUSTED_SOURCE_CATALOG_VERSION,
+                "model_context_projection_version": MODEL_CONTEXT_PROJECTION_VERSION,
+                "model_system_prompt_version": MODEL_SYSTEM_PROMPT_VERSION,
                 "model_response_protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
             }
         except (AttributeError, KeyError, TypeError):
@@ -630,7 +634,41 @@ class RuntimePromptExecutor(BasePromptExecutor):
         started = time.perf_counter()
         quality_context_envelope = envelope
         model_envelope, input_compaction = self._prepare_model_envelope(prompt_id, envelope)
+        # Keep full trusted provenance for deterministic consumption while the
+        # provider receives only the business-relevant projection.
         model_envelope = attach_trusted_source_catalog(model_envelope)
+        provider_contract_envelope, provider_contract_projection = (
+            self._prepare_provider_contract_envelope(model_envelope)
+        )
+        provider_envelope, provider_business_projection = self._prepare_provider_envelope(
+            provider_contract_envelope
+        )
+        provider_projection = {
+            "strategy": "TWO_STAGE_PROVIDER_BUSINESS_PROJECTION",
+            "projection_version": MODEL_CONTEXT_PROJECTION_VERSION,
+            "validation_context_chars": provider_contract_projection["validation_context_chars"],
+            "provider_contract_chars": provider_contract_projection["provider_contract_chars"],
+            "provider_envelope_chars": provider_business_projection["provider_envelope_chars"],
+            "saved_chars": (
+                provider_contract_projection["validation_context_chars"]
+                - provider_business_projection["provider_envelope_chars"]
+            ),
+            "saved_ratio": (
+                (
+                    provider_contract_projection["validation_context_chars"]
+                    - provider_business_projection["provider_envelope_chars"]
+                )
+                / provider_contract_projection["validation_context_chars"]
+                if provider_contract_projection["validation_context_chars"]
+                else 0.0
+            ),
+            "contract_projection": provider_contract_projection,
+            "business_projection": provider_business_projection,
+            "validation_uses_full_trusted_context": True,
+        }
+        input_compaction = self._merge_input_compaction(
+            input_compaction, provider_projection
+        )
         input_hash = sha256_json(model_envelope)
         model_request_spec_hash = self._model_request_spec_hash(prompt_id)
         call_key = self._call_key(
@@ -681,13 +719,21 @@ class RuntimePromptExecutor(BasePromptExecutor):
             if model_envelope is not envelope:
                 compact_errors = self.pack.validate(prompt_id, "input", model_envelope)
                 if compact_errors:
-                    raise PromptExecutionError("Compacted model input schema validation failed", validation_errors=compact_errors)
+                    raise PromptExecutionError("Compacted validation input schema failed", validation_errors=compact_errors)
+            provider_input_errors = self.pack.validate(
+                prompt_id, "input", provider_contract_envelope
+            )
+            if provider_input_errors:
+                raise PromptExecutionError(
+                    "Provider contract projection failed schema validation",
+                    validation_errors=provider_input_errors,
+                )
             route = self.router.route(prompt_id, model_envelope, original_environment=original_environment)
             project_config = load_project_config(self.db, project_id)
             if route.environment == "ONLINE_PUBLIC":
-                assert_online_payload_safe(model_envelope, project_config)
+                assert_online_payload_safe(provider_envelope, project_config)
             output_schema = self.pack.inlined_schema(prompt_id, "output")
-            system_prompt = self._system_prompt(prompt_id, output_schema, model_envelope)
+            system_prompt = self._system_prompt(prompt_id, output_schema, provider_envelope)
             contract_recovery = self._recoverable_contract_output(
                 project_id=project_id,
                 workflow_id=workflow_id,
@@ -723,12 +769,12 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     route,
                     prompt_id,
                     system_prompt,
-                    model_envelope,
+                    provider_envelope,
                     output_schema,
                     call_key=call_key,
                 )
             else:
-                result = await self.gateway.invoke(route, prompt_id, system_prompt, model_envelope, output_schema)
+                result = await self.gateway.invoke(route, prompt_id, system_prompt, provider_envelope, output_schema)
             raw_response_text = result.raw_text
             provider_output = copy.deepcopy(result.output)
             try:
@@ -824,6 +870,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 input_hash=input_hash,
                 model_request_spec_hash=model_request_spec_hash,
                 model_envelope=model_envelope,
+                provider_envelope=provider_envelope,
                 consumed_output=consumed_output,
                 provider_output=provider_output,
                 raw_response_text=raw_response_text,
@@ -995,7 +1042,14 @@ class RuntimePromptExecutor(BasePromptExecutor):
             "model_id": kwargs.get("model_id"),
             "endpoint_id": kwargs.get("endpoint_id"),
             "system_prompt": kwargs.get("system_prompt"),
+            # Keep the canonical trace input bound to prompt_runs.input_json/input_hash.
+            # The provider-visible projection is recorded separately so audit/recovery
+            # semantics remain stable while outbound context can stay lean.
             "input_envelope": kwargs["model_envelope"],
+            "provider_input_envelope": kwargs.get("provider_envelope") or kwargs["model_envelope"],
+            "provider_input_sha256": sha256_json(
+                kwargs.get("provider_envelope") or kwargs["model_envelope"]
+            ),
             "quality_context_envelope": kwargs.get("quality_context_envelope"),
             "quality_context_hash": sha256_json(kwargs["quality_context_envelope"]) if kwargs.get("quality_context_envelope") is not None else None,
             "input_compaction": kwargs.get("input_compaction"),

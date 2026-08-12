@@ -325,18 +325,29 @@ def test_planning_profile_declares_task_budget_while_model_owns_hard_limits(hard
     assert "max_output_tokens" not in endpoint["limits"]
 
 
-def test_argument_prompt_has_weak_model_hardening_contract(hardening_runtime):
-    pack, _ = hardening_runtime
-    prompt = pack.prompt_text("P-ARGUMENT-ARCHITECTURE")
+def test_argument_prompt_keeps_business_boundary_without_duplicating_runtime_validators(
+    hardening_runtime,
+):
+    pack, executor = hardening_runtime
+    prompt_id = "P-ARGUMENT-ARCHITECTURE"
+    prompt = pack.prompt_text(prompt_id)
     shared = pack.shared_prompt
+    envelope = pack.replay_input(prompt_id)
+    system_prompt = executor._system_prompt(prompt_id, pack.inlined_schema(prompt_id, "output"), envelope)
 
     forbidden_role_template = "不得替代其他智能体完成事实确认、论证架构、章节规划、证据写作、表达编辑或全篇评价"
     assert forbidden_role_template not in prompt
-    for prompt_id in pack.prompt_ids():
-        assert forbidden_role_template not in pack.prompt_text(prompt_id)
-    assert "不得越权执行其他Prompt的生产任务" in prompt
-    assert "result.argument_architecture.nodes[]" in prompt
-    assert "user_questions[*].blocking=true" in prompt
-    assert "最终`status`必须为`NEED_USER_INPUT`" in prompt
+    for candidate_prompt_id in pack.prompt_ids():
+        assert forbidden_role_template not in pack.prompt_text(candidate_prompt_id)
+
+    # Role isolation remains explicit, but deterministic validation details must
+    # not be copied into the producer prompt a second time.
+    assert "只负责业务语义" in prompt
+    assert "你只生成当前任务的业务候选" in system_prompt
+    assert "result.argument_architecture.nodes[]" not in prompt
+    assert "user_questions[*].blocking=true" not in prompt
+    assert "最终`status`必须为`NEED_USER_INPUT`" not in prompt
+
+    # Shared output discipline still exists without a prompt-local validator checklist.
     assert "无问题" in shared
     assert "紧凑JSON" in shared

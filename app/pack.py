@@ -29,6 +29,7 @@ class PromptPack:
         self._structure_validator_cache: dict[tuple[str, str], Draft202012Validator] = {}
 
     def _load_shared_prompt(self) -> str:
+        """Load the full legacy shared prompt for compatibility and auditing."""
         parts = []
         for rel in [
             "prompts/shared/business_rules.md",
@@ -40,6 +41,80 @@ class PromptPack:
         ]:
             parts.append((self.root / rel).read_text(encoding="utf-8"))
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _markdown_h2_sections(text: str) -> tuple[str, dict[str, str]]:
+        """Split one shared markdown module into intro and ``##`` sections."""
+        intro: list[str] = []
+        sections: dict[str, list[str]] = {}
+        current: str | None = None
+        for line in text.splitlines():
+            if line.startswith("## "):
+                current = line[3:].strip()
+                sections[current] = [line]
+                continue
+            if current is None:
+                intro.append(line)
+            else:
+                sections[current].append(line)
+        return (
+            "\n".join(intro).strip(),
+            {name: "\n".join(lines).strip() for name, lines in sections.items()},
+        )
+
+    def shared_prompt_for(self, prompt_id: str) -> str:
+        """Return only shared modules that can affect the current Prompt.
+
+        Deterministic validators continue to own Schema/reference/provenance
+        enforcement.  This selection only prevents unrelated operational skills
+        (for example Mermaid or public-research instructions) from being sent to
+        every model call.
+        """
+        entry = self.entry(prompt_id)
+        parts = [
+            (self.root / "prompts/shared/business_rules.md").read_text(encoding="utf-8"),
+            (self.root / "prompts/shared/security_rules.md").read_text(encoding="utf-8"),
+            (self.root / "prompts/shared/source_authority.md").read_text(encoding="utf-8"),
+            (self.root / "prompts/shared/knowledge_status_rules.md").read_text(encoding="utf-8"),
+        ]
+
+        skill_text = (self.root / "prompts/shared/skill_rules.md").read_text(encoding="utf-8")
+        intro, skill_sections = self._markdown_h2_sections(skill_text)
+        selected_skill_sections: list[str] = []
+
+        # The generic weak-model boundary applies to every model call.
+        weak_model = skill_sections.get("弱模型任务边界")
+        if weak_model:
+            selected_skill_sections.append(weak_model)
+
+        model_profile = str(entry.get("model_profile") or "")
+        environment = str(entry.get("required_environment") or "")
+        executor_role = str(entry.get("executor_role") or "")
+
+        # Public-research mechanics are relevant only to public-research calls.
+        if model_profile == "public_research" or environment == "ONLINE_PUBLIC":
+            public_research = skill_sections.get("公共研究技能")
+            if public_research:
+                selected_skill_sections.insert(0, public_research)
+
+        # Mermaid source generation belongs to the actual writing producer, not
+        # planners, critics, expression editors, or unrelated prompts.
+        if model_profile == "formal_writing" and executor_role == "Writing Agent":
+            mermaid = skill_sections.get("Mermaid图形技能")
+            if mermaid:
+                selected_skill_sections.insert(0, mermaid)
+
+        if selected_skill_sections:
+            skill_parts = []
+            if intro:
+                skill_parts.append(intro)
+            skill_parts.extend(selected_skill_sections)
+            parts.append("\n\n".join(skill_parts))
+
+        parts.append(
+            (self.root / "prompts/shared/output_protocol.md").read_text(encoding="utf-8")
+        )
+        return "\n\n".join(part.strip() for part in parts if part.strip())
 
     def _build_schema_registry(self) -> Registry:
         registry = Registry()

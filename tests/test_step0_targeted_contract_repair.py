@@ -504,6 +504,69 @@ def test_generated_repair_contract_obeys_existing_schema_and_scope_validator() -
     )
 
 
+
+def test_user_routed_repairable_scalar_is_narrowly_repairable_and_then_passes_full_contract() -> None:
+    pack = PromptPack(ROOT / "prompt_pack")
+    executor = PromptExecutor.__new__(PromptExecutor)
+    executor.pack = pack
+    envelope = pack.replay_input(PRODUCER)
+    candidate = pack.replay_output(PRODUCER, "normal")
+    candidate["status"] = "REVISE"
+    candidate["findings"] = [
+        {
+            "finding_instance_id": "F-USER-FOUNDATION-001",
+            "code": "FOUNDATION_EVIDENCE_MISSING",
+            "severity": "P0",
+            "category": "ARGUMENT",
+            "target_type": "ARGUMENT_NODE",
+            "target_path_or_span": "/result/argument_architecture/nodes/0",
+            "description": "团队研究基础缺少必须由用户确认的可核验来源。",
+            "evidence_refs": [],
+            "repairable": True,
+            "repair_instruction": "由用户提供或确认团队研究基础来源。",
+            "suggested_route": "USER",
+            "blocking": True,
+        }
+    ]
+    candidate["user_questions"] = [
+        {
+            "question_id": "UQ-FOUNDATION-001",
+            "question_type": "MISSING_INFORMATION",
+            "question": "请提供或确认团队前期研究基础的可核验来源。",
+            "reason": "该信息不能由自动化生产者补造。",
+            "target_paths": ["/payload/confirmed_facts"],
+            "answer_schema": {"type": "ARRAY", "allowed_values": []},
+            "blocking": True,
+            "priority": "P0",
+        }
+    ]
+
+    with pytest.raises(PromptExecutionError) as captured:
+        executor._normalize_output(PRODUCER, candidate, envelope)
+
+    assert captured.value.validation_errors == [
+        "/findings/0/repairable: blocking USER-routed Finding cannot be marked "
+        "repairable by an automated producer"
+    ]
+    mapped = WorkflowRepairMixin._contract_repair_findings(
+        PRODUCER,
+        candidate,
+        captured.value.validation_errors,
+    )
+    assert mapped is not None
+    findings, validator_paths = mapped
+    assert validator_paths == ["/findings/0/repairable"]
+    assert findings[0]["target_path_or_span"] == "/findings/0/repairable"
+
+    repaired = copy.deepcopy(candidate)
+    repaired["findings"][0]["repairable"] = False
+    normalized = executor._normalize_output(PRODUCER, repaired, envelope)
+
+    assert normalized["status"] == "NEED_USER_INPUT"
+    assert pack.validate(PRODUCER, "output", normalized) == []
+    executor._validate_output_semantics(PRODUCER, envelope, normalized)
+
+
 def test_contract_repair_orchestration_has_no_step_or_argument_prompt_special_case() -> None:
     source = inspect.getsource(WorkflowRepairMixin._repair_producer_contract_failure)
     assert "current_step == 0" not in source
