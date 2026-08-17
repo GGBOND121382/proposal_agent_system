@@ -55,6 +55,15 @@ def _function_stream_events(output_json: str) -> list[dict]:
     ]
 
 
+def _direct_function_stream_events(arguments_json: str) -> list[dict]:
+    split = len(arguments_json) // 2
+    return [
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "submit_P-TEST", "arguments": arguments_json[:split]}}]}, "finish_reason": None}]},
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": arguments_json[split:]}}]}, "finish_reason": None}]},
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+
+
 def _function_stream_events_with_chatter(
     output_json: str,
     chatter: str,
@@ -373,6 +382,36 @@ def test_minimax_uses_streamed_serialized_json_function(monkeypatch):
     assert result.parse_report["wire_wrapper_parse_report"]["transport"] == "FUNCTION_OUTPUT_JSON"
     assert result.parse_report["wire_wrapper_parse_report"]["repair_count"] == 0
     assert result.provider_attempts == 1
+
+
+def test_minimax_semantic_contract_uses_direct_tool_arguments(monkeypatch):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = _direct_function_stream_events(
+        '{"value":"semantic-result"}'
+    )
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"value": {"type": "string"}},
+        "required": ["value"],
+    }
+    result = asyncio.run(
+        _gateway()._invoke_live(
+            _route(), "P-TEST", "完成语义任务。",
+            {"project_task": {"objective": "test"}}, schema,
+            direct_tool_arguments=True,
+        )
+    )
+    sent = _FakeAsyncClient.captured["json"]
+    assert sent["tools"][0]["function"]["parameters"] == schema
+    assert "output_json" not in json.dumps(sent["tools"][0]["function"]["parameters"])
+    assert "不要再套 output_json 字符串" in sent["messages"][0]["content"]
+    assert result.output == {"value": "semantic-result"}
+    report = result.parse_report["wire_wrapper_parse_report"]
+    assert report["transport"] == "DIRECT_FUNCTION_ARGUMENTS"
+    assert report["mode"] == "STRICT_DIRECT_FUNCTION_ARGUMENTS"
+    _FakeAsyncClient.stream_events = None
 
 
 def test_minimax_m2_keeps_reasoning_split_when_thinking_cannot_be_disabled(monkeypatch):

@@ -2,7 +2,7 @@
 
 ## 元数据
 
-- 版本：`3.1.0`
+- 版本：`3.2.0`
 - 执行角色：`Critic Agent`
 - 执行环境：`OFFLINE_LOCAL`
 - 模型配置：`critic`
@@ -43,7 +43,7 @@
 
 ## 专用规则
 
-- 版本：`3.1.0`
+- 版本：`3.2.0`
 - 角色：`Section Blueprint Critic`
 
 逐段检查并输出 `argument_checks`，只评价LLM Critic职责域内的论证质量：章节功能是否清楚、命题推进是否形成实质论证、现有证据是否足以支撑所述结论、段落之间是否形成连贯关系，以及是否退化为通用模板。
@@ -99,4 +99,4 @@ Finding必须包含严重级别、类别、目标对象与路径、具体证据�
 
 ## 输出要求
 
-只返回符合 `schemas/prompts/write_blueprint_critic_output.schema.json` 的JSON对象。`prompt_id`必须为`P-WRITE-BLUEPRINT-CRITIC`，`prompt_version`必须为`3.1.0`。不得输出Markdown代码块、解释文字或Schema之外的字段。
+只返回符合 `schemas/prompts/write_blueprint_critic_output.schema.json` 的JSON对象。`prompt_id`必须为`P-WRITE-BLUEPRINT-CRITIC`，`prompt_version`必须为`3.2.0`。不得输出Markdown代码块、解释文字或Schema之外的字段。

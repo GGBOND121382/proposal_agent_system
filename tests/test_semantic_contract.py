@@ -106,7 +106,7 @@ def test_machine_rules_have_stable_ids_and_explicit_owners() -> None:
     from app.contracts.semantic_contract import RuleResponsibility
 
     contract = get_semantic_contract()
-    assert contract.rule_registry_version == "1.3.0"
+    assert contract.rule_registry_version == "1.8.0"
     assert contract.allows_input_object("required_input_ids")
     assert contract.allows_input_object("evidence_refs")
     assert contract.registered_reference_suffixes("unresolved_slot_ids") == (
@@ -119,6 +119,15 @@ def test_machine_rules_have_stable_ids_and_explicit_owners() -> None:
         "SC-CLAIM-COVERAGE",
         "SC-EVIDENCE-SELF-REFERENCE",
         "SC-EVIDENCE-CONTRACT-COVERAGE",
+        "SC-ARGUMENT-DETERMINISTIC-CHAINS",
+        "SC-ARGUMENT-DESIGN-MATRIX-COMPLETENESS",
+        "SC-ARGUMENT-EVIDENCE-REQUIREMENTS",
+        "SC-ARGUMENT-STRUCTURAL-REQUIREMENTS",
+        "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY",
+        "SC-ARGUMENT-DETERMINISTIC-DEFECTS",
+        "SC-ARGUMENT-STATE-OWNERSHIP",
+        "SC-ARGUMENT-TARGETED-REPAIR-POLICY",
+        "SC-ARGUMENT-LIFECYCLE-COMPOSITION",
         "SC-REFERENCE-FIELD-SEMANTICS",
     }
     assert {
@@ -130,6 +139,15 @@ def test_machine_rules_have_stable_ids_and_explicit_owners() -> None:
         "SC-CLAIM-COVERAGE",
         "SC-EVIDENCE-SELF-REFERENCE",
         "SC-EVIDENCE-CONTRACT-COVERAGE",
+        "SC-ARGUMENT-DETERMINISTIC-CHAINS",
+        "SC-ARGUMENT-DESIGN-MATRIX-COMPLETENESS",
+        "SC-ARGUMENT-EVIDENCE-REQUIREMENTS",
+        "SC-ARGUMENT-STRUCTURAL-REQUIREMENTS",
+        "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY",
+        "SC-ARGUMENT-DETERMINISTIC-DEFECTS",
+        "SC-ARGUMENT-STATE-OWNERSHIP",
+        "SC-ARGUMENT-TARGETED-REPAIR-POLICY",
+        "SC-ARGUMENT-LIFECYCLE-COMPOSITION",
     }
     assert contract.rule("SC-REFERENCE-FIELD-SEMANTICS").responsibility is (
         RuleResponsibility.OUTPUT_INTEGRITY

@@ -726,6 +726,15 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     prior_cycle.get("contract_repair_source_run_id") or ""
                 ),
                 repair_run_id=successful_contract_repair_run_id,
+                repair_application_artifact_id=(
+                    str(
+                        prior_cycle.get(
+                            "successful_contract_repair_artifact_id"
+                        )
+                        or ""
+                    ).strip()
+                    or None
+                ),
             )
             prior_cycle["last_success_replayed_at"] = utc_now()
             if wait_matches_cycle:
@@ -950,11 +959,18 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 prior_cycle["successful_contract_repair_run_id"] = str(
                     contract_repair_metadata.get("repair_run_id") or ""
                 )
+                prior_cycle["successful_contract_repair_artifact_id"] = str(
+                    contract_repair_metadata.get(
+                        "repair_application_artifact_id"
+                    )
+                    or ""
+                )
                 prior_cycle["contract_repair_source_run_id"] = str(
                     contract_repair_metadata.get("source_run_id") or ""
                 )
             else:
                 prior_cycle.pop("successful_contract_repair_run_id", None)
+                prior_cycle.pop("successful_contract_repair_artifact_id", None)
                 prior_cycle.pop("contract_repair_source_run_id", None)
                 prior_cycle["successful_call_key"] = str(
                     result.get("call_key") or attempt_call_key
@@ -1356,6 +1372,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             )
         except QualityGuardContractError as exc:
             raise PromptExecutionError(str(exc)) from exc
+        if prompt_id == "P-ARGUMENT-ARCHITECTURE":
+            # v8 authoritative-state path: quality guard is observation-only.
+            # Producer status/result come only from the projector.
+            return None, raw_status, copy.deepcopy(output)
         if not is_critic and str(guard_report.get("status") or "PASS") == "PASS":
             return None, raw_status, copy.deepcopy(output)
         record = self.decision_arbiter.arbitrate(
@@ -1393,6 +1413,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         output = copy.deepcopy(result.get("output") or {})
         if not decision:
             return str(result.get("status") or output.get("status") or "ERROR"), output
+        if str(output.get("prompt_id") or "") == "P-ARGUMENT-ARCHITECTURE-CRITIC":
+            # Decision records remain useful audit metadata, but they have no
+            # write capability over the canonical Argument Critic container.
+            return str(output.get("status") or result.get("status") or "ERROR"), output
         mapping = {
             "PASS": "PASS",
             "REVISE": "REVISE",
@@ -1404,7 +1428,24 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             str(decision.get("decision") or ""),
             str(result.get("status") or output.get("status") or "ERROR"),
         )
-        actionable = []
+        semantic_canonical = (
+            str(output.get("prompt_id") or "") == "P-ARGUMENT-ARCHITECTURE-CRITIC"
+            and isinstance((output.get("result") or {}).get("deterministic_receipts"), list)
+        )
+        actionable = (
+            [copy.deepcopy(item) for item in output.get("findings") or [] if isinstance(item, dict)]
+            if semantic_canonical
+            else []
+        )
+        seen = {
+            (
+                str(item.get("defect_key") or ""),
+                str(item.get("finding_instance_id") or ""),
+                str(item.get("code") or ""),
+                str(item.get("target_path_or_span") or ""),
+            )
+            for item in actionable
+        }
         for entry in (decision.get("decision_basis") or {}).get("actionable_findings") or []:
             if isinstance(entry, dict) and isinstance(entry.get("finding"), dict):
                 finding = copy.deepcopy(entry["finding"])
@@ -1413,7 +1454,15 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 finding.pop("rule_id", None)
                 finding.pop("responsibility", None)
                 finding.pop("source", None)
-                actionable.append(finding)
+                key = (
+                    str(finding.get("defect_key") or ""),
+                    str(finding.get("finding_instance_id") or ""),
+                    str(finding.get("code") or ""),
+                    str(finding.get("target_path_or_span") or ""),
+                )
+                if key not in seen:
+                    actionable.append(finding)
+                    seen.add(key)
         output["status"] = effective_status
         output["findings"] = actionable
         return effective_status, output
@@ -1764,6 +1813,250 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             if suggested not in {"USER", "PROJECT_OWNER"}:
                 return True
         return False
+
+    def _prepare_semantic_producer_regeneration(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        *,
+        producer_prompt: str,
+        output: dict[str, Any],
+    ) -> str:
+        """Retry a semantic producer for deterministic non-USER deficiencies.
+
+        The Runtime does not invent research content here.  It only converts its
+        already-derived evidence/readiness deficiencies into a bounded revision
+        card for the same producer.  A remaining deficiency after the configured
+        budget is content-blocking, never an empty or advisory human Gate.
+        """
+        entry = self.pack.entry(producer_prompt)
+        if str(entry.get("model_contract_mode") or "").upper() != "SEMANTIC":
+            return "NOT_APPLICABLE"
+        if producer_prompt not in set(CRITIC_PRODUCER.values()):
+            return "NOT_APPLICABLE"
+
+        gap_report = [
+            copy.deepcopy(item)
+            for item in (output.get("result") or {}).get("evidence_gap_report") or []
+            if isinstance(item, dict) and not bool(item.get("blocking"))
+        ]
+        if not gap_report:
+            return "NOT_APPLICABLE"
+
+        options = state.get("options") or {}
+        try:
+            limit = int(options.get("semantic_producer_regeneration_limit", 1))
+        except (TypeError, ValueError):
+            limit = 1
+        limit = max(0, min(limit, 3))
+
+        rounds = state.setdefault("semantic_producer_regeneration_rounds", {})
+        completed = int(rounds.get(producer_prompt) or 0)
+        if completed >= limit:
+            state["last_error"] = (
+                f"{producer_prompt} 在 {completed} 轮非 USER 语义补全重生成后仍存在"
+                "证据或研究链缺口；继续自动重试不会增加新的证据来源。"
+                "该缺口保持内容阻断，不转为空问题人工 Gate。"
+            )
+            self._clear_workflow_repair_rereview(state, producer_prompt)
+            self._update(
+                wf,
+                status=WorkflowStatus.BLOCKED_CONTENT.value,
+                state=state,
+            )
+            return "EXHAUSTED"
+
+        feedback: list[dict[str, Any]] = []
+        for index, gap in enumerate(gap_report, 1):
+            reason = str(gap.get("reason") or "存在尚未闭合的语义或证据缺口")
+            action = str(
+                gap.get("suggested_source_or_question")
+                or "利用当前可用材料补全该缺口；若证据确实不存在则保持未知，不得虚构。"
+            )
+            feedback.append(
+                {
+                    "finding_instance_id": (
+                        f"runtime-semantic-gap-{producer_prompt}-{completed + 1}-{index}"
+                    ),
+                    "defect_key": str(gap.get("defect_key") or ""),
+                    "code": str(gap.get("finding_code") or "RESEARCH_DESIGN_INCOMPLETE"),
+                    "severity": "P1",
+                    "description": reason,
+                    "repair_instruction": action,
+                    "evidence_refs": [],
+                    "semantic_component": str(gap.get("semantic_component") or "RESEARCH_DESIGN"),
+                    "semantic_thread": gap.get("thread_index")
+                    if isinstance(gap.get("thread_index"), int)
+                    else None,
+                    "semantic_review_unit_key": str(gap.get("semantic_review_unit_key") or "") or None,
+                    "suggested_route": str(gap.get("suggested_route") or "ORIGINAL_PRODUCER"),
+                    "blocking": True,
+                }
+            )
+
+        round_number = completed + 1
+        rounds[producer_prompt] = round_number
+        state.setdefault("producer_revision_findings", {})[
+            producer_prompt
+        ] = feedback
+        state.setdefault("semantic_producer_regeneration_history", []).append(
+            {
+                "producer_prompt": producer_prompt,
+                "round": round_number,
+                "gap_ids": [
+                    str(item.get("gap_id") or "")
+                    for item in gap_report
+                    if item.get("gap_id")
+                ],
+                "created_at": utc_now(),
+            }
+        )
+        del state["semantic_producer_regeneration_history"][:-50]
+
+        current_step = int(wf.get("current_step") or 0)
+        state.setdefault("step_results", {}).pop(str(current_step), None)
+        state.pop("provider_wait", None)
+        self._clear_workflow_repair_rereview(state, producer_prompt)
+        self._update(
+            wf,
+            status=WorkflowStatus.RUNNING.value,
+            current_step=current_step,
+            state=state,
+        )
+        self.db.audit(
+            "SEMANTIC_PRODUCER_REGENERATION_SCHEDULED",
+            project_id=wf["project_id"],
+            object_id=wf["id"],
+            metadata={
+                "producer_prompt": producer_prompt,
+                "round": round_number,
+                "gap_count": len(gap_report),
+                "step": current_step,
+            },
+        )
+        return "SCHEDULED"
+
+    def _prepare_original_producer_regeneration(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        *,
+        critic_prompt: str,
+        output: dict[str, Any],
+    ) -> str:
+        """Route structural semantic findings back to their original producer."""
+        entry = self.pack.entry(critic_prompt)
+        if str(entry.get("model_contract_mode") or "").upper() != "SEMANTIC":
+            return "NOT_APPLICABLE"
+        producer = CRITIC_PRODUCER.get(critic_prompt)
+        if not producer:
+            return "NOT_APPLICABLE"
+        findings = [
+            copy.deepcopy(item)
+            for item in output.get("findings") or []
+            if isinstance(item, dict)
+            and bool(item.get("blocking", True))
+            and str(item.get("suggested_route") or "").upper() == "ORIGINAL_PRODUCER"
+        ]
+        if not findings:
+            return "NOT_APPLICABLE"
+
+        steps = self.get(wf["id"])["steps"]
+        producer_steps = [
+            index for index, step in enumerate(steps)
+            if step.get("prompt_id") == producer
+        ]
+        if not producer_steps:
+            state["last_error"] = (
+                f"{critic_prompt} requested ORIGINAL_PRODUCER regeneration, "
+                f"but producer {producer} is not present in this workflow."
+            )
+            self._update(wf, status=WorkflowStatus.BLOCKED_TECHNICAL.value, state=state)
+            return "EXHAUSTED"
+        target_step = producer_steps[0]
+        if target_step >= int(wf.get("current_step") or 0):
+            state["last_error"] = (
+                f"{critic_prompt} requested regeneration of {producer}, but "
+                "the producer is not an earlier workflow step."
+            )
+            self._update(wf, status=WorkflowStatus.BLOCKED_TECHNICAL.value, state=state)
+            return "EXHAUSTED"
+
+        options = state.get("options") or {}
+        try:
+            limit = int(options.get("original_producer_regeneration_limit", 2))
+        except (TypeError, ValueError):
+            limit = 2
+        limit = max(0, min(limit, 5))
+        rounds = state.setdefault("producer_regeneration_rounds", {})
+        completed = int(rounds.get(critic_prompt) or 0)
+        if completed >= limit:
+            state["last_error"] = (
+                f"{critic_prompt} 在 {completed} 轮原生产阶段重生成后仍存在结构性语义问题；"
+                "继续自动重生成可能形成循环，需要补充事实、调整研究设计或人工决定。"
+            )
+            self._clear_workflow_repair_rereview(state, critic_prompt)
+            self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
+            return "EXHAUSTED"
+
+        round_number = completed + 1
+        rounds[critic_prompt] = round_number
+        state.setdefault("producer_revision_findings", {})[producer] = findings
+        state.setdefault("producer_regeneration_history", []).append({
+            "critic_prompt": critic_prompt,
+            "producer_prompt": producer,
+            "round": round_number,
+            "finding_instance_ids": [str(item.get("finding_instance_id") or "") for item in findings if item.get("finding_instance_id")],
+            "finding_codes": [str(item.get("code") or "") for item in findings if item.get("code")],
+            "from_step": int(wf.get("current_step") or 0),
+            "to_step": target_step,
+            "created_at": utc_now(),
+        })
+        del state["producer_regeneration_history"][:-50]
+        step_results = state.setdefault("step_results", {})
+        for key in list(step_results):
+            try:
+                index = int(key)
+            except (TypeError, ValueError):
+                continue
+            if index >= target_step:
+                step_results.pop(key, None)
+        state.pop("provider_wait", None)
+        if producer == "P-ARGUMENT-ARCHITECTURE":
+            # ORIGINAL_PRODUCER establishes a new semantic subject.  The old
+            # targeted-repair override must stop being active at scheduling time,
+            # not only after a replacement Producer run eventually succeeds.
+            self._supersede_repair_subject(
+                state,
+                critic_prompt=critic_prompt,
+                producer_prompt=producer,
+                reason="ORIGINAL_PRODUCER_REGENERATION_SCHEDULED",
+            )
+        else:
+            self._clear_workflow_repair_rereview(state, critic_prompt)
+        if producer == "P-ARGUMENT-ARCHITECTURE":
+            state["section_results"] = []
+            state["planning_revision_findings"] = []
+            state.pop("integration_repair_section_ids", None)
+            state.pop("integration_repair_findings", None)
+            state.pop("active_section_id", None)
+            state.pop("active_section_index", None)
+
+        wf["current_step"] = target_step
+        self._update(wf, status=WorkflowStatus.RUNNING.value, current_step=target_step, state=state)
+        self.db.audit(
+            "ORIGINAL_PRODUCER_REGENERATION_SCHEDULED",
+            project_id=wf["project_id"],
+            object_id=wf["id"],
+            metadata={
+                "critic_prompt": critic_prompt,
+                "producer_prompt": producer,
+                "round": round_number,
+                "target_step": target_step,
+                "finding_codes": [str(item.get("code") or "") for item in findings if item.get("code")],
+            },
+        )
+        return "SCHEDULED"
 
     @staticmethod
     def _is_legacy_wf3_input_block(wf: dict[str, Any], state: dict[str, Any]) -> bool:
@@ -2330,6 +2623,27 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     (state.get("prerequisite_workflow_ids") or {}).get("WF-4_PROPOSAL_AUTHORING") or ""
                 )
             state["original_environment"] = result["route"]["environment"]
+            # Any newly executed Producer output is a new repair subject.  An
+            # older semantic repair must never mask regeneration/human-input
+            # reruns in ContextBuilder.  If this very result was recovered by
+            # an output-contract repair, preserve only that newly committed
+            # application because it is the canonical value for this run.
+            contract_repair_artifact_id = str(
+                ((result.get("contract_repair") or {}).get("repair_application_artifact_id"))
+                or ""
+            ).strip()
+            for critic_id, producer_id in CRITIC_PRODUCER.items():
+                if producer_id != prompt_id:
+                    continue
+                self._supersede_repair_subject(
+                    state,
+                    critic_prompt=critic_id,
+                    producer_prompt=prompt_id,
+                    reason="FRESH_PRODUCER_RESULT",
+                    preserve_application_artifact_id=(
+                        contract_repair_artifact_id or None
+                    ),
+                )
             output = result["output"]
             if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS" and result["status"] == "PASS":
                 claim_validation = self.research_service.validate_synthesis(
@@ -2442,6 +2756,16 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     continue
                 if repair_state == "EXHAUSTED":
                     return self.get(workflow_id)
+            if effective_status == "REVISE":
+                regeneration_state = self._prepare_original_producer_regeneration(
+                    wf, state, critic_prompt=prompt_id, output=effective_output
+                )
+                if regeneration_state == "SCHEDULED":
+                    wf = self.get(workflow_id)
+                    state = wf["state"]
+                    continue
+                if regeneration_state == "EXHAUSTED":
+                    return self.get(workflow_id)
             if effective_status == "REVISE" and self._can_auto_repair(prompt_id, state):
                 repaired = await self._auto_repair(wf, prompt_id, envelope, effective_output, state)
                 if repaired:
@@ -2480,6 +2804,22 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                         state=state,
                     )
                     return self.get(workflow_id)
+            if effective_status == "REVISE":
+                producer_regeneration_state = (
+                    self._prepare_semantic_producer_regeneration(
+                        wf,
+                        state,
+                        producer_prompt=prompt_id,
+                        output=effective_output,
+                    )
+                )
+                if producer_regeneration_state == "SCHEDULED":
+                    wf = self.get(workflow_id)
+                    state = wf["state"]
+                    continue
+                if producer_regeneration_state == "EXHAUSTED":
+                    return self.get(workflow_id)
+
             if effective_status == "REVISE" and isinstance(pending_rereview, dict):
                 self._clear_workflow_repair_rereview(state, prompt_id)
                 state["last_error"] = (
@@ -2506,21 +2846,61 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     state=state,
                 )
                 return self.get(workflow_id)
-            if effective_status in {"REVISE", "NEED_USER_INPUT"}:
+            if effective_status == "NEED_USER_INPUT":
                 self._clear_workflow_repair_rereview(state, prompt_id)
-                gate_type = self.pack.entry(prompt_id).get("next_human_gate") or "PROJECT_GAP_RESOLUTION"
+                blocking_gate_questions = [
+                    item
+                    for item in effective_output.get("user_questions") or []
+                    if isinstance(item, dict) and bool(item.get("blocking"))
+                ]
+                if not blocking_gate_questions:
+                    state["last_error"] = (
+                        f"{prompt_id} returned NEED_USER_INPUT without a concrete blocking "
+                        "user question; an empty human Gate is forbidden by the semantic contract."
+                    )
+                    self._update(
+                        wf,
+                        status=WorkflowStatus.BLOCKED_CONTRACT.value,
+                        state=state,
+                    )
+                    return self.get(workflow_id)
+                gate_type = (
+                    self.pack.entry(prompt_id).get("next_human_gate")
+                    or "PROJECT_GAP_RESOLUTION"
+                )
                 self._create_gate(
                     wf,
                     gate_type,
                     target_id=result["run_id"],
-                    questions=output.get("user_questions", []),
+                    questions=blocking_gate_questions,
                     checkpoint_status=WorkflowStatus.WAITING_GATE.value,
                     checkpoint_state=state,
                 )
                 return self.get(workflow_id)
 
+            if effective_status == "REVISE":
+                self._clear_workflow_repair_rereview(state, prompt_id)
+                state["last_error"] = (
+                    f"{prompt_id} remains REVISE after the available machine "
+                    "repair/regeneration routes were attempted or found inapplicable. "
+                    "Non-blocking/advisory questions do not authorize a human Gate; "
+                    "the deficiency remains content-blocked until retrieval, evidence, "
+                    "or a subsequent machine regeneration can resolve it."
+                )
+                self._update(
+                    wf,
+                    status=WorkflowStatus.BLOCKED_CONTENT.value,
+                    state=state,
+                )
+                return self.get(workflow_id)
+
             next_gate = self.pack.entry(prompt_id).get("next_human_gate")
             self._clear_workflow_repair_rereview(state, prompt_id)
+            producer_revision_findings = state.get("producer_revision_findings")
+            if isinstance(producer_revision_findings, dict) and prompt_id in producer_revision_findings:
+                producer_revision_findings.pop(prompt_id, None)
+                if not producer_revision_findings:
+                    state.pop("producer_revision_findings", None)
             wf["current_step"] += 1
             self._update(wf, current_step=wf["current_step"], state=state)
             if next_gate:

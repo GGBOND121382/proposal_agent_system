@@ -360,13 +360,13 @@ def test_scheme_output_does_not_fabricate_rule_when_model_reports_missing_rules(
     _, pack, _, _, _, executor, *_ = runtime
     envelope = pack.replay_input("P-SCHEME-EXTRACT")
     output = pack.replay_output("P-SCHEME-EXTRACT", "normal")
-    output["status"] = "NEED_USER_INPUT"
+    output["status"] = "REVISE"
     output["result"]["scheme_profile"]["rules"] = []
     output["result"]["extraction_coverage"] = []
 
     normalized = executor._normalize_output("P-SCHEME-EXTRACT", output, envelope)
 
-    assert normalized["status"] == "NEED_USER_INPUT"
+    assert normalized["status"] == "REVISE"
     assert normalized["result"]["scheme_profile"]["rules"] == []
     assert normalized["result"]["extraction_coverage"] == []
     errors = pack.validate("P-SCHEME-EXTRACT", "output", normalized)
@@ -2554,7 +2554,11 @@ def test_contract_upgrade_gets_one_recovery_attempt_after_retry_limit(runtime, m
         output = pack.replay_output(prompt_id)
         if prompt_id == "P-TEMPLATE-CRITIC":
             output["status"] = "NEED_USER_INPUT"
-            output["user_questions"] = ["请确认模板范围。"]
+            output["user_questions"] = copy.deepcopy(
+                pack.replay_output(
+                    "P-TEMPLATE-CRITIC", "need_user_input"
+                )["user_questions"]
+            )
         guard_enabled = bool(executor.quality_guard_enabled)
         guard_report = (
             build_guard_report(prompt_id, output, [])
@@ -3075,3 +3079,104 @@ def test_runtime_exact_recovery_run_is_not_hidden_by_fifty_newer_failures(
     assert result["output"]["result"]["source_preservation_summary"][0][
         "action"
     ] == "REPHRASED"
+
+def test_semantic_producer_non_user_deficiency_regenerates_without_gate(runtime):
+    settings, pack, db, _, _, _, engine, _ = runtime
+    project_id = create_project(db, internet=False)
+    add_standard_materials(settings, db, project_id)
+
+    async def prepare_prerequisites():
+        for workflow_type in [
+            "WF-1_PROJECT_INTAKE",
+            "WF-2_TEMPLATE_EXTRACTION",
+        ]:
+            workflow = await finish_workflow(
+                engine, project_id, workflow_type
+            )
+            assert workflow["status"] == "COMPLETED"
+
+    asyncio.run(prepare_prerequisites())
+
+    workflow = engine.start(project_id, "WF-4_PROPOSAL_AUTHORING")
+    workflow = engine.get(workflow["id"])
+    argument_step = next(
+        index
+        for index, step in enumerate(workflow["steps"])
+        if step.get("prompt_id") == "P-ARGUMENT-ARCHITECTURE"
+    )
+    state = workflow["state"]
+    engine._update(
+        workflow,
+        status="RUNNING",
+        current_step=argument_step,
+        state=state,
+    )
+    workflow = engine.get(workflow["id"])
+    state = workflow["state"]
+
+    revise_output = {
+        "result": {
+            "evidence_gap_report": [
+                {
+                    "gap_id": "arg-evidence-gap-001",
+                    "defect_key": "EVIDENCE_REQUIREMENT_UNSATISFIED:FOUNDATION_SUPPORT:0:arg-foundation-001",
+                    "defect_family": "EVIDENCE_REQUIREMENT_UNSATISFIED",
+                    "finding_code": "FOUNDATION_EVIDENCE_MISSING",
+                    "semantic_component": "FOUNDATION",
+                    "semantic_object_id": "arg-foundation-001",
+                    "semantic_review_unit_key": "FOUNDATION:arg-foundation-001",
+                    "quality_dimension": "FEASIBILITY_FOUNDATION",
+                    "suggested_route": "ORIGINAL_PRODUCER",
+                    "required_node_type": "TEAM_EVIDENCE",
+                    "thread_index": 0,
+                    "reason": "研究线程缺少合格研究基础。",
+                    "blocking": False,
+                    "suggested_source_or_question": (
+                        "利用当前材料补充可核验研究基础；没有则保持未知。"
+                    ),
+                }
+            ]
+        },
+        "user_questions": [
+            {
+                "question_id": "advisory-only",
+                "blocking": False,
+                "question": "可选：后续是否补充更多内部材料？",
+            }
+        ],
+    }
+
+    first = engine._prepare_semantic_producer_regeneration(
+        workflow,
+        state,
+        producer_prompt="P-ARGUMENT-ARCHITECTURE",
+        output=revise_output,
+    )
+    assert first == "SCHEDULED"
+
+    scheduled = engine.get(workflow["id"])
+    assert scheduled["status"] == "RUNNING"
+    assert scheduled["current_step"] == argument_step
+    assert engine.list_gates(workflow_id=workflow["id"]) == []
+
+    feedback = scheduled["state"]["producer_revision_findings"][
+        "P-ARGUMENT-ARCHITECTURE"
+    ]
+    assert len(feedback) == 1
+    assert feedback[0]["code"] == "FOUNDATION_EVIDENCE_MISSING"
+    assert feedback[0]["semantic_component"] == "FOUNDATION"
+    assert feedback[0]["semantic_thread"] == 0
+    assert feedback[0]["repair_instruction"]
+
+    second = engine._prepare_semantic_producer_regeneration(
+        scheduled,
+        scheduled["state"],
+        producer_prompt="P-ARGUMENT-ARCHITECTURE",
+        output=revise_output,
+    )
+    assert second == "EXHAUSTED"
+
+    exhausted = engine.get(workflow["id"])
+    assert exhausted["status"] == "BLOCKED_CONTENT"
+    assert engine.list_gates(workflow_id=workflow["id"]) == []
+    assert "不转为空问题人工 Gate" in exhausted["state"]["last_error"]

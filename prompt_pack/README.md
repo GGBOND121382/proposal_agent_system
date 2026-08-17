@@ -24,6 +24,17 @@
 
 V2证明文件、Schema和Replay在静态层面一致；不等于真实模型质量、真实保密审批或生产部署已经通过。真实模型上线前必须执行Prompt回归和安全红队测试。
 
+## 2.3.0 语义模型边界
+
+- `P-ARGUMENT-ARCHITECTURE`、其 Critic 和 `P-TARGETED-REPAIR` 使用独立 Model Schema；
+- LLM 只生成不能由规则唯一推出的科研语义；ID、Graph/Matrix、状态、Hash、引用回执由 Runtime 派生；
+- Producer 只接收项目任务、约束、Evidence Cards、设计语义 seed、revision issues 和 human resolutions；
+- Critic 只判断七类论证质量维度与语义问题，结构检查回执由 Runtime 生成；
+- Targeted Repair 明确拆分 WRITE 目标与 READ 上下文，只返回最小修改操作；
+- 确定性协议错误优先由 Runtime 在副本上按唯一规则修复并重新走完整 Validator；
+- 需要新增/删除业务实体或重构研究线程时，不进入 Targeted Repair，回 Original Producer；
+- MiniMax 语义任务直接使用 function arguments 承载语义对象，不再嵌套 `output_json` 字符串。
+
 ## 2.2.1 Provider模型Token预算
 
 - `.env`只选择模型，不重复维护token上限；

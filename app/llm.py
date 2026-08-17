@@ -15,7 +15,7 @@ from .simulated_llm import SimulatedLLM
 
 JSON_PARSER_VERSION = "2026-07-29.v1-audited-local-repairs"
 MODEL_RESPONSE_PROTOCOL_VERSION = (
-    "2026-08-12.v8-minimax-m3-no-thinking-first-object-tool-chatter"
+    "2026-08-13.v9-semantic-direct-tool-arguments"
 )
 TOKEN_BUDGET_RESOLVER_VERSION = "2026-08-11.v1-model-capability-context-headroom"
 
@@ -305,6 +305,7 @@ class ModelGateway:
         output_schema: dict[str, Any],
         *,
         raw_response_sink: Callable[[str, dict[str, Any]], None] | None = None,
+        direct_tool_arguments: bool = False,
     ) -> LLMResult:
         mode = self.settings.runtime_mode
         if mode in {"REPLAY", "MOCK"}:
@@ -335,6 +336,7 @@ class ModelGateway:
             envelope,
             output_schema,
             raw_response_sink=raw_response_sink,
+            direct_tool_arguments=direct_tool_arguments,
         )
 
     @staticmethod
@@ -504,6 +506,7 @@ class ModelGateway:
         output_schema: dict[str, Any],
         *,
         raw_response_sink: Callable[[str, dict[str, Any]], None] | None = None,
+        direct_tool_arguments: bool = False,
     ) -> LLMResult:
         endpoint = route.endpoint
         base_url = str(endpoint.get("base_url") or "").rstrip("/")
@@ -553,31 +556,37 @@ class ModelGateway:
                 "submit_" + re.sub(r"[^A-Za-z0-9_-]", "_", prompt_id)
             )[:64]
             request.pop("response_format")
+            tool_parameters = (
+                output_schema
+                if direct_tool_arguments
+                else {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "output_json": {
+                            "type": "string",
+                            "description": (
+                                "The complete final business output serialized "
+                                "as one strict JSON object string matching the "
+                                "runtime output schema."
+                            ),
+                        }
+                    },
+                    "required": ["output_json"],
+                }
+            )
             request["tools"] = [
                 {
                     "type": "function",
                     "function": {
                         "name": function_name,
-                        "description": (
-                            "Submit one exact serialized JSON business output for "
-                            + prompt_id
-                        ),
+                        "description": ((
+                            "Submit the final semantic task result for "
+                            if direct_tool_arguments
+                            else "Submit one exact serialized JSON business output for "
+                        ) + prompt_id),
                         "strict": True,
-                        "parameters": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "output_json": {
-                                    "type": "string",
-                                    "description": (
-                                        "The complete final business output serialized "
-                                        "as one strict JSON object string matching the "
-                                        "runtime output schema."
-                                    ),
-                                }
-                            },
-                            "required": ["output_json"],
-                        },
+                        "parameters": tool_parameters,
                     },
                 }
             ]
@@ -587,19 +596,26 @@ class ModelGateway:
             # fallback.  Both representations still flow through the same business
             # schema validation owned by the prompt executor.
             request["tool_choice"] = "auto"
-            request["messages"][0]["content"] += (
-                "\n\n# MiniMax structured submission boundary\n"
-                f"Prefer calling `{function_name}` exactly once. The sole `output_json` "
-                "argument must be a JSON string containing the complete final business "
-                "output object governed by the runtime output schema above. If no tool "
-                "call is emitted, return that same complete business output directly as "
-                "one strict JSON object and nothing else. Do not return prose, markdown, "
-                "code fences, or multiple objects. Do not omit, rename, move, repair, or "
-                "default any business field. Serialize the final business object as compact "
-                "JSON: no pretty-print indentation, blank lines, or optional whitespace. "
-                "Keep descriptive strings concise and do not repeat the same evidence prose "
-                "across fields when exact reference IDs already carry that linkage."
-            )
+            if direct_tool_arguments:
+                request["messages"][0]["content"] += (
+                    "\n\n提交结果时优先调用结构化提交工具一次；"
+                    "工具参数本身就是最终语义结果，不要再套 output_json 字符串，"
+                    "不要输出额外说明。若未调用工具，则直接返回同一 JSON 对象。"
+                )
+            else:
+                request["messages"][0]["content"] += (
+                    "\n\n# MiniMax structured submission boundary\n"
+                    f"Prefer calling `{function_name}` exactly once. The sole `output_json` "
+                    "argument must be a JSON string containing the complete final business "
+                    "output object governed by the runtime output schema above. If no tool "
+                    "call is emitted, return that same complete business output directly as "
+                    "one strict JSON object and nothing else. Do not return prose, markdown, "
+                    "code fences, or multiple objects. Do not omit, rename, move, repair, or "
+                    "default any business field. Serialize the final business object as compact "
+                    "JSON: no pretty-print indentation, blank lines, or optional whitespace. "
+                    "Keep descriptive strings concise and do not repeat the same evidence prose "
+                    "across fields when exact reference IDs already carry that linkage."
+                )
             # MiniMax-M3 defaults to adaptive thinking when ``thinking`` is
             # omitted.  Structured producer/critic/repair calls do not need a
             # long hidden reasoning stream, so disable it explicitly.  M2.x
@@ -646,6 +662,7 @@ class ModelGateway:
                         expected_name=function_name,
                         raw_response_sink=raw_response_sink,
                         provider_attempt=provider_attempts,
+                        direct_tool_arguments=direct_tool_arguments,
                     )
                     payload = None
                     response = None
@@ -793,6 +810,7 @@ class ModelGateway:
         expected_name: str,
         raw_response_sink: Callable[[str, dict[str, Any]], None] | None = None,
         provider_attempt: int = 1,
+        direct_tool_arguments: bool = False,
     ) -> tuple[str, dict[str, Any]]:
         """Receive one strict MiniMax structured business object.
 
@@ -1005,6 +1023,16 @@ class ModelGateway:
                 response_text=arguments_text,
                 retryable_hint=False,
             ) from exc
+        if direct_tool_arguments:
+            return arguments_text, {
+                **wrapper_report,
+                "mode": "STRICT_DIRECT_FUNCTION_ARGUMENTS",
+                "event_count": event_count,
+                "finish_reason": finish_reason,
+                "transport": "DIRECT_FUNCTION_ARGUMENTS",
+                "assistant_chatter_ignored": bool(ignored_assistant_content),
+                "assistant_chatter_chars": len(ignored_assistant_content),
+            }
         if set(wrapper) != {"output_json"} or not isinstance(
             wrapper.get("output_json"), str
         ):

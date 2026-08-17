@@ -10,7 +10,7 @@
       "const": "P-ARGUMENT-ARCHITECTURE-CRITIC"
     },
     "prompt_version": {
-      "const": "3.1.0"
+      "const": "9.0.0"
     },
     "status": {
       "type": "string",
@@ -44,7 +44,7 @@
         },
         "chain_checks": {
           "type": "array",
-          "minItems": 6,
+          "minItems": 8,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -57,6 +57,7 @@
                   "OBJECTIVE_TO_WORK_PACKAGE",
                   "WORK_PACKAGE_TO_METHOD",
                   "METHOD_TO_EVALUATION",
+                  "EVALUATION_TO_INNOVATION",
                   "PRIOR_WORK_TO_INNOVATION",
                   "FOUNDATION_TO_FEASIBILITY"
                 ]
@@ -67,8 +68,7 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "minItems": 1
+                }
               },
               "target_ids": {
                 "type": "array",
@@ -76,8 +76,7 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "minItems": 1
+                }
               },
               "complete": {
                 "type": "boolean"
@@ -120,12 +119,20 @@
               "evidence": {
                 "type": "string",
                 "minLength": 1
+              },
+              "mismatched_dimensions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
               }
             },
             "required": [
               "research_question_id",
               "complete",
               "missing_dimensions",
+              "mismatched_dimensions",
               "evidence"
             ]
           }
@@ -165,8 +172,265 @@
             ]
           }
         },
+        "deterministic_receipts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "receipt_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "rule_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "failure_code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "finding_code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "thread_index": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "research_question_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "target_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "target_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "missing_relation": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "semantic_object_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "semantic_component": {
+                "type": "string",
+                "minLength": 1
+              },
+              "semantic_review_unit_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "target_path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "defect_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "repair_instruction": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "suggested_route": {
+                "const": "ORIGINAL_PRODUCER"
+              },
+              "blocking": {
+                "type": "boolean"
+              },
+              "defect_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "owner_semantic_object_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "owner_semantic_component": {
+                "type": "string",
+                "minLength": 1
+              },
+              "owner_semantic_review_unit_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "owner_target_path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "quality_dimension": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required_node_type": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "receipt_id",
+              "defect_family",
+              "rule_id",
+              "failure_code",
+              "finding_code",
+              "thread_index",
+              "research_question_id",
+              "source_id",
+              "target_id",
+              "source_ids",
+              "target_ids",
+              "missing_relation",
+              "semantic_object_id",
+              "semantic_component",
+              "semantic_review_unit_key",
+              "target_path",
+              "owner_semantic_object_id",
+              "owner_semantic_component",
+              "owner_semantic_review_unit_key",
+              "owner_target_path",
+              "quality_dimension",
+              "required_node_type",
+              "defect_key",
+              "description",
+              "repair_instruction",
+              "evidence_ids",
+              "suggested_route",
+              "blocking"
+            ]
+          }
+        },
         "quality_dimensions": {
-          "$ref": "../common/quality_scorecard.schema.json"
+          "type": "array",
+          "minItems": 7,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "dimension": {
+                "type": "string",
+                "enum": [
+                  "CENTRAL_THESIS",
+                  "ARGUMENT_CHAIN",
+                  "EVIDENCE_SUPPORT",
+                  "METHOD_SUBSTANCE",
+                  "INNOVATION_BASELINE",
+                  "FEASIBILITY_FOUNDATION",
+                  "METRIC_JUSTIFICATION"
+                ]
+              },
+              "score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 4
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required_action": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "dimension",
+              "score",
+              "passed",
+              "evidence",
+              "required_action"
+            ]
+          }
+        },
+        "structural_checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "requirement_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "semantic_object_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "satisfied": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "requirement_id",
+              "semantic_object_id",
+              "satisfied",
+              "reason"
+            ]
+          }
         }
       },
       "required": [
@@ -174,14 +438,70 @@
         "checked_node_ids",
         "chain_checks",
         "design_matrix_checks",
+        "structural_checks",
         "evidence_checks",
+        "deterministic_receipts",
         "quality_dimensions"
       ]
     },
     "findings": {
       "type": "array",
       "items": {
-        "$ref": "../common/finding.schema.json"
+        "allOf": [
+          {
+            "$ref": "../common/finding.schema.json"
+          },
+          {
+            "required": [
+              "finding_instance_id",
+              "defect_key",
+              "defect_namespace"
+            ]
+          },
+          {
+            "if": {
+              "properties": {
+                "defect_namespace": {
+                  "const": "MACHINE_DEFECT"
+                }
+              },
+              "required": [
+                "defect_namespace"
+              ],
+              "additionalProperties": true
+            },
+            "then": {
+              "properties": {
+                "defect_key": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "defect_namespace": {
+                  "const": "SEMANTIC_OBSERVATION"
+                }
+              },
+              "required": [
+                "defect_namespace"
+              ],
+              "additionalProperties": true
+            },
+            "then": {
+              "properties": {
+                "defect_key": {
+                  "type": "null"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        ]
       }
     },
     "unresolved_items": {

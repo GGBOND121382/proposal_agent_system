@@ -71,7 +71,8 @@ def build_matrix(pack_root: Path = PACK_ROOT) -> dict[str, Any]:
         input_schema = pack.schema(prompt_id, "input")
         output_schema = pack.schema(prompt_id, "output")
         prompt_text = pack.prompt_text(prompt_id)
-        documented_codes = sorted(documented_finding_codes(prompt_text))
+        semantic_mode = str(entry.get("model_contract_mode") or "").upper() == "SEMANTIC"
+        documented_codes = [] if semantic_mode else sorted(documented_finding_codes(prompt_text))
         input_stats = _schema_stats(input_schema)
         output_stats = _schema_stats(output_schema)
         inlined_output_stats = _schema_stats(pack.inlined_schema(prompt_id, "output"))
@@ -94,13 +95,13 @@ def build_matrix(pack_root: Path = PACK_ROOT) -> dict[str, Any]:
                 else []
             )
             finding_errors = (
-                replay_finding_code_errors(
-                    prompt_id=prompt_id,
-                    output=output,
-                    prompt_text=prompt_text,
+                [] if semantic_mode else (
+                    replay_finding_code_errors(
+                        prompt_id=prompt_id,
+                        output=output,
+                        prompt_text=prompt_text,
+                    ) if isinstance(output, dict) else []
                 )
-                if isinstance(output, dict)
-                else []
             )
             if isinstance(output, dict):
                 status_counts[str(output.get("status") or "<missing>")] += 1
@@ -149,7 +150,7 @@ def build_matrix(pack_root: Path = PACK_ROOT) -> dict[str, Any]:
                     "detail": f"{expected_schema_const!r} != {entry['output_schema']!r}",
                 }
             )
-        if not documented_codes:
+        if not semantic_mode and not documented_codes:
             blocking_issues.append(
                 {
                     "prompt_id": prompt_id,
@@ -188,6 +189,9 @@ def build_matrix(pack_root: Path = PACK_ROOT) -> dict[str, Any]:
                 "output_schema": entry["output_schema"],
                 "expected_output_schema_const": expected_schema_const,
                 "documented_finding_codes": documented_codes,
+                "finding_vocabulary_owner": "MODEL_SCHEMA_AND_RUNTIME" if semantic_mode else "PROMPT_MARKDOWN",
+                "model_input_schema": entry.get("model_input_schema"),
+                "model_output_schema": entry.get("model_output_schema"),
                 "replay_finding_codes": sorted(replay_codes),
                 "input_schema_stats": input_stats,
                 "output_schema_stats": output_stats,

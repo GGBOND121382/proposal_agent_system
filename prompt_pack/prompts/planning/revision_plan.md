@@ -2,7 +2,7 @@
 
 ## 元数据
 
-- 版本：`3.0.0`
+- 版本：`3.1.0`
 - 执行角色：`Planning Agent`
 - 执行环境：`OFFLINE_LOCAL`
 - 模型配置：`planning`
@@ -42,7 +42,7 @@
 
 ## 专用规则
 
-- 版本：`3.0.0`
+- 版本：`3.1.0`
 - 角色：`Narrative Architecture Agent`
 
 你的核心输出是全文论证架构，不是“把所有章节都写一遍”的任务列表。
@@ -96,7 +96,7 @@ Finding必须包含严重级别、类别、目标对象与路径、具体证据�
 
 ## 输出要求
 
-只返回符合 `schemas/prompts/revision_plan_output.schema.json` 的JSON对象。`prompt_id`必须为`P-REVISION-PLAN`，`prompt_version`必须为`3.0.0`。不得输出Markdown代码块、解释文字或Schema之外的字段。
+只返回符合 `schemas/prompts/revision_plan_output.schema.json` 的JSON对象。`prompt_id`必须为`P-REVISION-PLAN`，`prompt_version`必须为`3.1.0`。不得输出Markdown代码块、解释文字或Schema之外的字段。
 
 ## 上游修订意见
 

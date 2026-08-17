@@ -1,11 +1,12 @@
-version: 2.4.1
-rule_registry_version: 1.3.0
+version: 2.9.0
+rule_registry_version: 1.8.0
 rules:
   SC-ARGUMENT-ROLE-COMPATIBILITY:
     responsibility: DETERMINISTIC_GUARD
     category: ARGUMENT_ROLE
     blocking: true
-    description: Canonicalize argument roles and decide whether an actual role satisfies a required role.
+    description: Canonicalize argument roles and decide whether an actual role satisfies
+      a required role.
     config:
       finding_locator_strategy: COLLECTION_SCOPE_WHEN_MISSING
       canonical:
@@ -87,7 +88,8 @@ rules:
     responsibility: DETERMINISTIC_GUARD
     category: INFORMATION_KEY
     blocking: true
-    description: Decide whether an information key is an approved root or an approved hierarchical child.
+    description: Decide whether an information key is an approved root or an approved
+      hierarchical child.
     config:
       finding_locator_strategy: PER_INSTANCE_EXISTING_FIELD
       hierarchy_separator: ':'
@@ -98,7 +100,8 @@ rules:
     responsibility: DETERMINISTIC_GUARD
     category: CLAIM_COVERAGE
     blocking: true
-    description: Compute covered claims from the union of all registered claim-bearing blueprint fields.
+    description: Compute covered claims from the union of all registered claim-bearing
+      blueprint fields.
     config:
       finding_locator_strategy: COLLECTION_SCOPE_WHEN_MISSING
       fields:
@@ -112,7 +115,8 @@ rules:
     responsibility: DETERMINISTIC_GUARD
     category: EVIDENCE_EXCLUSION
     blocking: true
-    description: Compute evidence identifiers and reject a primary claim used as its own evidence.
+    description: Compute evidence identifiers and reject a primary claim used as its
+      own evidence.
     config:
       finding_locator_strategy: PER_INSTANCE_EXISTING_FIELD
       evidence_fields:
@@ -124,17 +128,711 @@ rules:
     responsibility: DETERMINISTIC_GUARD
     category: EVIDENCE_COVERAGE
     blocking: true
-    description: Require every evidence identifier mandated by the section contract to be bound by the blueprint.
+    description: Require every evidence identifier mandated by the section contract
+      to be bound by the blueprint.
     config:
       finding_locator_strategy: COLLECTION_SCOPE_WHEN_MISSING
       contract_field: must_use_evidence_ids
+  SC-ARGUMENT-DETERMINISTIC-CHAINS:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_CHAIN
+    blocking: true
+    description: Define every deterministic Argument Architecture chain check from
+      one registry.
+    config:
+      chains:
+      - chain_type: GAP_TO_QUESTION
+        source_field: gap_ids
+        target_fields:
+        - research_question_id
+        relation: MOTIVATES
+        coverage: SOURCE
+      - chain_type: QUESTION_TO_OBJECTIVE
+        source_field: research_question_id
+        target_fields:
+        - objective_ids
+        relation: ADDRESSED_BY
+        coverage: SOURCE
+      - chain_type: OBJECTIVE_TO_WORK_PACKAGE
+        source_field: objective_ids
+        target_fields:
+        - work_package_ids
+        relation: DECOMPOSES_TO
+        coverage: BOTH
+      - chain_type: WORK_PACKAGE_TO_METHOD
+        source_field: work_package_ids
+        target_fields:
+        - method_ids
+        relation: USES
+        coverage: BOTH
+      - chain_type: METHOD_TO_EVALUATION
+        source_field: method_ids
+        target_fields:
+        - evaluation_ids
+        relation: VALIDATED_BY
+        coverage: BOTH
+      - chain_type: EVALUATION_TO_INNOVATION
+        source_field: evaluation_ids
+        target_fields:
+        - innovation_ids
+        relation: EVIDENCES
+        coverage: TARGET
+      - chain_type: PRIOR_WORK_TO_INNOVATION
+        source_field: closest_prior_work_ids
+        target_fields:
+        - innovation_ids
+        relation: CONTRASTS_WITH
+        coverage: BOTH
+      - chain_type: FOUNDATION_TO_FEASIBILITY
+        source_field: foundation_evidence_ids
+        target_fields:
+        - work_package_ids
+        - method_ids
+        relation: SUPPORTS
+        coverage: SOURCE
+  SC-ARGUMENT-DESIGN-MATRIX-COMPLETENESS:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_MATRIX
+    blocking: true
+    description: Define the required per-thread design-matrix bindings from one registry.
+    config:
+      required_fields:
+      - gap_ids
+      - objective_ids
+      - work_package_ids
+      - method_ids
+      - evaluation_ids
+      - innovation_ids
+      - foundation_evidence_ids
+      - closest_prior_work_ids
+  SC-ARGUMENT-EVIDENCE-REQUIREMENTS:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_EVIDENCE
+    blocking: true
+    description: Define every evidence-required Argument Architecture semantic component
+      and its support predicate.
+    config:
+      supported_knowledge_statuses:
+      - CONFIRMED
+      - USER_ASSERTED
+      - DOCUMENT_EXTRACTED
+      source_policies:
+        STANDARD:
+          require_source_ref: true
+        FOUNDATION:
+          require_source_ref: true
+          allowed_source_types:
+          - EVIDENCE_MATERIAL
+          - TECHNICAL_MATERIAL
+          require_quoted_text: true
+      requirements:
+      - requirement_id: CENTRAL_PROPOSITION_SUPPORT
+        selector: central_proposition
+        status_node_type: CENTRAL_PROPOSITION
+        subject: OBJECT
+        presence: REQUIRED
+        coverage: ALL
+        deterministic_defect_family: EVIDENCE_REQUIREMENT_UNSATISFIED
+        source_policy: STANDARD
+        finding_code: ARGUMENT_EVIDENCE_UNSUPPORTED
+        semantic_component: CENTRAL_PROPOSITION
+        quality_dimension: EVIDENCE_SUPPORT
+        deficiency_kind: OTHER
+        required_node_type: EVIDENCE
+        reason: 中心研究命题缺少由同一证据记录同时满足可信状态与来源要求的证据绑定，当前不能 PASS。
+        suggested_question: 补充能够直接支持中心研究命题的可核验证据。
+      - requirement_id: RESEARCH_GAP_SUPPORT
+        selector: research_threads/*/gap
+        status_node_type: RESEARCH_GAP
+        subject: OBJECT
+        presence: REQUIRED
+        coverage: ALL
+        deterministic_defect_family: EVIDENCE_REQUIREMENT_UNSATISFIED
+        source_policy: STANDARD
+        finding_code: ARGUMENT_EVIDENCE_UNSUPPORTED
+        semantic_component: GAP
+        quality_dimension: EVIDENCE_SUPPORT
+        deficiency_kind: OTHER
+        required_node_type: EVIDENCE
+        reason: 研究差距缺少可核验的证据绑定，不能据此宣称现有研究确有该缺口。
+        suggested_question: 补充能够直接支持该研究差距的已有材料或公开文献证据。
+      - requirement_id: LIMITATION_MECHANISM_SUPPORT
+        selector: research_threads/*/gap/limitation_mechanism
+        status_node_type: LIMITATION_MECHANISM
+        subject: OBJECT
+        presence: IF_PRESENT
+        coverage: ALL
+        deterministic_defect_family: EVIDENCE_REQUIREMENT_UNSATISFIED
+        source_policy: STANDARD
+        finding_code: ARGUMENT_EVIDENCE_UNSUPPORTED
+        semantic_component: LIMITATION
+        quality_dimension: EVIDENCE_SUPPORT
+        deficiency_kind: OTHER
+        required_node_type: EVIDENCE
+        reason: 限制机制缺少其自身的可核验证据；Runtime 不得沿用研究差距证据替它背书。
+        suggested_question: 补充直接支持该限制机制的可核验证据；没有证据时保持该限制机制未就绪，不得虚构。
+      - requirement_id: INNOVATION_PRIOR_WORK_SUPPORT
+        selector: research_threads/*/innovations/*/closest_prior_work
+        status_node_type: CLOSEST_PRIOR_WORK
+        owner_selector: research_threads/*/innovations/*
+        subject: COLLECTION
+        presence: REQUIRED
+        coverage: ALL
+        deterministic_defect_family: EVIDENCE_REQUIREMENT_UNSATISFIED
+        source_policy: STANDARD
+        finding_code: INNOVATION_BASELINE_MISSING
+        semantic_component: INNOVATION
+        quality_dimension: INNOVATION_BASELINE
+        deficiency_kind: CLOSEST_PRIOR_WORK
+        required_node_type: CLOSEST_PRIOR_WORK
+        reason: 创新点缺少有证据绑定的最近工作比较基线，创新性判断尚不能闭合。
+        suggested_question: 补充与该创新点最接近的已有工作及可核验来源。
+      - requirement_id: FOUNDATION_SUPPORT
+        selector: research_threads/*/foundation
+        status_node_type: TEAM_EVIDENCE
+        subject: COLLECTION
+        presence: IF_PRESENT
+        coverage: ALL
+        deterministic_defect_family: EVIDENCE_REQUIREMENT_UNSATISFIED
+        source_policy: FOUNDATION
+        finding_code: FOUNDATION_EVIDENCE_MISSING
+        semantic_component: FOUNDATION
+        quality_dimension: FEASIBILITY_FOUNDATION
+        deficiency_kind: FOUNDATION
+        required_node_type: TEAM_EVIDENCE
+        reason: 已有研究基础缺少由同一证据记录同时满足可信状态与合格内部研究/技术材料来源要求的证据绑定，不能据此确认可行性基础。
+        suggested_question: 补充能够证明该研究基础或已有能力的内部研究/技术材料。
+      - requirement_id: EVALUATION_BASELINE_SUPPORT
+        selector: research_threads/*/work_packages/*/methods/*/evaluations/*/baselines
+        status_node_type: BASELINE
+        owner_selector: research_threads/*/work_packages/*/methods/*/evaluations/*
+        subject: COLLECTION
+        presence: REQUIRED
+        coverage: ALL
+        deterministic_defect_family: EVIDENCE_REQUIREMENT_UNSATISFIED
+        source_policy: STANDARD
+        finding_code: ARGUMENT_METRIC_JUSTIFICATION_MISSING
+        semantic_component: EVALUATION
+        quality_dimension: METRIC_JUSTIFICATION
+        deficiency_kind: METRIC_JUSTIFICATION
+        required_node_type: EXPERIMENT_DESIGN
+        reason: 验证方案缺少有证据绑定的比较基线/指标依据，评价闭环尚不充分。
+        suggested_question: 补充代表性比较基线、指标来源或相应可核验依据。
+  SC-ARGUMENT-STRUCTURAL-REQUIREMENTS:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_STRUCTURE
+    blocking: true
+    description: Define deterministic semantic-object obligations that are not evidence
+      predicates or graph-relation checks.
+    config:
+      requirements:
+      - requirement_id: EVALUATION_SUCCESS_CRITERIA_REQUIRED
+        selector: research_threads/*/work_packages/*/methods/*/evaluations/*/success_criteria
+        owner_selector: research_threads/*/work_packages/*/methods/*/evaluations/*
+        presence: REQUIRED
+        deterministic_defect_family: STRUCTURAL_REQUIREMENT_UNSATISFIED
+        finding_code: ARGUMENT_METRIC_JUSTIFICATION_MISSING
+        semantic_component: EVALUATION
+        quality_dimension: METRIC_JUSTIFICATION
+        required_node_type: EXPERIMENT_DESIGN
+        reason: 验证方案缺少明确成功判据，无法确定研究目标是否达到。
+        repair_instruction: 由原 Argument Producer 为该验证方案补充可观测、可比较或可证伪的成功判据。
+      graph_ownership:
+        deterministic_defect_family: GRAPH_TOPOLOGY_INVALID
+        finding_code: RESEARCH_DESIGN_INCOMPLETE
+        quality_dimension: ARGUMENT_CHAIN
+        reason: 论证图存在未归属、重复归属或父子关系类型错误的语义对象。
+        repair_instruction: 由原 Argument Producer 从语义设计重新生成图对象及其归属关系；Runtime 不得猜测或补造机器关系。
+        node_types:
+          LIMITATION_MECHANISM:
+            relation: EXPLAINS
+            direction: OUTGOING
+            owner_reference_type: RESEARCH_GAP
+          ASSUMPTION:
+            mode: METHOD_OR_THREAD_BINDING
+          THEORETICAL_PROPERTY:
+            relation: HAS_PROPERTY
+            direction: INCOMING
+            owner_reference_type: METHOD
+          BASELINE:
+            relation: COMPARES_WITH
+            direction: INCOMING
+            owner_reference_type: EXPERIMENT_DESIGN
+          ABLATION:
+            relation: INCLUDES_ABLATION
+            direction: INCOMING
+            owner_reference_type: EXPERIMENT_DESIGN
+          SUCCESS_CRITERION:
+            relation: MEASURED_BY
+            direction: INCOMING
+            owner_reference_type: EXPERIMENT_DESIGN
+          CONTRIBUTION:
+            relation: YIELDS
+            direction: INCOMING
+            owner_reference_type: NOVEL_MECHANISM
+  SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_META
+    blocking: true
+    description: Define the allowed Critic issue code/dimension taxonomy and default
+      revision component from one runtime registry.
+    config:
+      dimensions:
+        CENTRAL_THESIS:
+          issue_codes:
+          - ARGUMENT_PROPOSITION_UNTESTABLE
+          - ARGUMENT_SCOPE_VIOLATION
+        ARGUMENT_CHAIN:
+          issue_codes:
+          - GAP_QUESTION_CHAIN_BROKEN
+          - RESEARCH_DESIGN_INCOMPLETE
+          - ARGUMENT_SCOPE_VIOLATION
+        EVIDENCE_SUPPORT:
+          issue_codes:
+          - ARGUMENT_EVIDENCE_UNSUPPORTED
+        METHOD_SUBSTANCE:
+          issue_codes:
+          - ARGUMENT_METHOD_SUBSTANCE_WEAK
+          - RESEARCH_DESIGN_INCOMPLETE
+        INNOVATION_BASELINE:
+          issue_codes:
+          - INNOVATION_BASELINE_MISSING
+        FEASIBILITY_FOUNDATION:
+          issue_codes:
+          - FOUNDATION_EVIDENCE_MISSING
+        METRIC_JUSTIFICATION:
+          issue_codes:
+          - ARGUMENT_METRIC_JUSTIFICATION_MISSING
+      revision_component_by_code:
+        ARGUMENT_PROPOSITION_UNTESTABLE: CENTRAL_PROPOSITION
+        GAP_QUESTION_CHAIN_BROKEN: RESEARCH_THREAD
+        RESEARCH_DESIGN_INCOMPLETE: RESEARCH_DESIGN
+        INNOVATION_BASELINE_MISSING: INNOVATION_BASELINE
+        FOUNDATION_EVIDENCE_MISSING: FOUNDATION
+        ARGUMENT_SCOPE_VIOLATION: SCOPE
+        ARGUMENT_EVIDENCE_UNSUPPORTED: EVIDENCE
+        ARGUMENT_METRIC_JUSTIFICATION_MISSING: EVALUATION
+        ARGUMENT_METHOD_SUBSTANCE_WEAK: METHOD
+      deterministic_failure_score: 1
+      component_by_node_type:
+        CENTRAL_PROPOSITION: CENTRAL_PROPOSITION
+        RESEARCH_QUESTION: QUESTION
+        RESEARCH_GAP: GAP
+        LIMITATION_MECHANISM: LIMITATION
+        OBJECTIVE: OBJECTIVE
+        WORK_PACKAGE: WORK_PACKAGE
+        FORMAL_MODEL: METHOD
+        ALGORITHM: METHOD
+        ANALYTICAL_METHOD: METHOD
+        ENGINEERING_METHOD: METHOD
+        EXPERIMENT_DESIGN: EVALUATION
+        NOVEL_MECHANISM: INNOVATION
+        CLOSEST_PRIOR_WORK: PRIOR_WORK
+        TEAM_EVIDENCE: FOUNDATION
+        ASSUMPTION: ASSUMPTION
+        THEORETICAL_PROPERTY: THEORETICAL_PROPERTY
+        BASELINE: BASELINE
+        ABLATION: ABLATION
+        SUCCESS_CRITERION: SUCCESS_CRITERION
+        CONTRIBUTION: CONTRIBUTION
+      matrix_field_by_component:
+        GAP: gap_ids
+        OBJECTIVE: objective_ids
+        WORK_PACKAGE: work_package_ids
+        METHOD: method_ids
+        EVALUATION: evaluation_ids
+        INNOVATION: innovation_ids
+        PRIOR_WORK: closest_prior_work_ids
+        FOUNDATION: foundation_evidence_ids
+      reference_type_members:
+        METHOD:
+        - FORMAL_MODEL
+        - ALGORITHM
+        - ANALYTICAL_METHOD
+        - ENGINEERING_METHOD
+      precise_target_components:
+      - CENTRAL_PROPOSITION
+      - QUESTION
+      - GAP
+      - LIMITATION
+      - OBJECTIVE
+      - WORK_PACKAGE
+      - METHOD
+      - ASSUMPTION
+      - THEORETICAL_PROPERTY
+      - EVALUATION
+      - BASELINE
+      - ABLATION
+      - SUCCESS_CRITERION
+      - INNOVATION
+      - CONTRIBUTION
+      - PRIOR_WORK
+      - FOUNDATION
+      allowed_target_components_by_code:
+        ARGUMENT_PROPOSITION_UNTESTABLE:
+        - CENTRAL_PROPOSITION
+        GAP_QUESTION_CHAIN_BROKEN:
+        - GAP
+        - QUESTION
+        - THREAD
+        RESEARCH_DESIGN_INCOMPLETE:
+        - GAP
+        - QUESTION
+        - OBJECTIVE
+        - WORK_PACKAGE
+        - METHOD
+        - EVALUATION
+        - SUCCESS_CRITERION
+        - INNOVATION
+        - PRIOR_WORK
+        - FOUNDATION
+        - THREAD
+        INNOVATION_BASELINE_MISSING:
+        - INNOVATION
+        - PRIOR_WORK
+        FOUNDATION_EVIDENCE_MISSING:
+        - FOUNDATION
+        ARGUMENT_SCOPE_VIOLATION:
+        - CENTRAL_PROPOSITION
+        - SCOPE
+        - THREAD
+        ARGUMENT_EVIDENCE_UNSUPPORTED:
+        - CENTRAL_PROPOSITION
+        - GAP
+        - LIMITATION
+        - PRIOR_WORK
+        - FOUNDATION
+        - EVALUATION
+        - BASELINE
+        ARGUMENT_METRIC_JUSTIFICATION_MISSING:
+        - EVALUATION
+        - BASELINE
+        - SUCCESS_CRITERION
+        ARGUMENT_METHOD_SUBSTANCE_WEAK:
+        - METHOD
+        - ASSUMPTION
+        - THEORETICAL_PROPERTY
+      producer_gap_kind_policy:
+        FOUNDATION:
+          finding_code: FOUNDATION_EVIDENCE_MISSING
+          semantic_component: FOUNDATION
+          required_node_type: TEAM_EVIDENCE
+        CLOSEST_PRIOR_WORK:
+          finding_code: INNOVATION_BASELINE_MISSING
+          semantic_component: INNOVATION
+          required_node_type: CLOSEST_PRIOR_WORK
+        METRIC_JUSTIFICATION:
+          finding_code: ARGUMENT_METRIC_JUSTIFICATION_MISSING
+          semantic_component: EVALUATION
+          required_node_type: EXPERIMENT_DESIGN
+        OTHER:
+          finding_code: RESEARCH_DESIGN_INCOMPLETE
+          semantic_component: RESEARCH_DESIGN
+          required_node_type: EVIDENCE
+      question_target_path_by_area:
+        PROJECT_SCOPE: /payload/task_instruction
+        FOUNDATION_EVIDENCE: /payload/confirmed_facts
+        PRIOR_WORK: /payload/confirmed_facts
+        METRIC_JUSTIFICATION: /payload/project_subgraph
+        RESEARCH_DESIGN: /payload/project_subgraph
+        OTHER: /payload/confirmed_facts
+  SC-ARGUMENT-DETERMINISTIC-DEFECTS:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_META
+    blocking: true
+    description: Own machine defect identity, route, blocking semantics and quality
+      impact; model semantic observations are a separate namespace.
+    config:
+      identity_recipe: RULE_FAMILY_THREAD_OWNER_OBJECT
+      critic_result_required_fields:
+      - structural_checks
+      - deterministic_receipts
+      critic_finding_required_fields:
+      - finding_instance_id
+      - defect_key
+      - defect_namespace
+      receipt_required_fields:
+      - receipt_id
+      - defect_family
+      - rule_id
+      - failure_code
+      - finding_code
+      - thread_index
+      - research_question_id
+      - source_id
+      - target_id
+      - source_ids
+      - target_ids
+      - missing_relation
+      - semantic_object_id
+      - semantic_component
+      - semantic_review_unit_key
+      - target_path
+      - owner_semantic_object_id
+      - owner_semantic_component
+      - owner_semantic_review_unit_key
+      - owner_target_path
+      - quality_dimension
+      - required_node_type
+      - defect_key
+      - description
+      - repair_instruction
+      - evidence_ids
+      - suggested_route
+      - blocking
+      families:
+        CHAIN_SOURCE_SET_MISSING:
+          failure_code: CHAIN_SOURCE_SET_MISSING
+          finding_code: RESEARCH_DESIGN_INCOMPLETE
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: THREAD_OR_OBJECT
+          quality_dimension: ARGUMENT_CHAIN
+        CHAIN_TARGET_SET_MISSING:
+          failure_code: CHAIN_TARGET_SET_MISSING
+          finding_code: RESEARCH_DESIGN_INCOMPLETE
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: THREAD_OR_OBJECT
+          quality_dimension: ARGUMENT_CHAIN
+        CHAIN_RELATION_MISSING_FROM_SOURCE:
+          failure_code: CHAIN_RELATION_MISSING_FROM_SOURCE
+          finding_code: RESEARCH_DESIGN_INCOMPLETE
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: THREAD_OR_OBJECT
+          quality_dimension: ARGUMENT_CHAIN
+        CHAIN_RELATION_MISSING_TO_TARGET:
+          failure_code: CHAIN_RELATION_MISSING_TO_TARGET
+          finding_code: RESEARCH_DESIGN_INCOMPLETE
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: THREAD_OR_OBJECT
+          quality_dimension: ARGUMENT_CHAIN
+        DESIGN_MATRIX_MISSING:
+          failure_code: DESIGN_MATRIX_MISSING
+          finding_code: RESEARCH_DESIGN_INCOMPLETE
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: THREAD_OR_OBJECT
+          quality_dimension: ARGUMENT_CHAIN
+        DESIGN_MATRIX_REQUIRED_DIMENSION_MISSING:
+          failure_code: DESIGN_MATRIX_REQUIRED_DIMENSION_MISSING
+          finding_code: RESEARCH_DESIGN_INCOMPLETE
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: THREAD_OR_OBJECT
+          quality_dimension: ARGUMENT_CHAIN
+        DESIGN_MATRIX_THREAD_COVERAGE_MISMATCH:
+          failure_code: DESIGN_MATRIX_THREAD_COVERAGE_MISMATCH
+          finding_code: RESEARCH_DESIGN_INCOMPLETE
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: THREAD_OR_OBJECT
+          quality_dimension: ARGUMENT_CHAIN
+        GRAPH_TOPOLOGY_INVALID:
+          failure_code: GRAPH_TOPOLOGY_INVALID
+          finding_code: RESEARCH_DESIGN_INCOMPLETE
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: THREAD_OR_OBJECT
+          quality_dimension: ARGUMENT_CHAIN
+        STRUCTURAL_REQUIREMENT_UNSATISFIED:
+          failure_code: STRUCTURAL_REQUIREMENT_UNSATISFIED
+          finding_code_source: REQUIREMENT
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: OWNER_OBJECT
+          quality_dimension_source: REQUIREMENT
+        EVIDENCE_REQUIREMENT_UNSATISFIED:
+          failure_code: EVIDENCE_REQUIREMENT_UNSATISFIED
+          finding_code_source: REQUIREMENT
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          ownership_scope: OWNER_OBJECT
+          quality_dimension_source: REQUIREMENT
+  SC-ARGUMENT-STATE-OWNERSHIP:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_META
+    blocking: true
+    description: Define the sole authored semantic state, pure runtime projections,
+      independent defect namespaces and transactional repair boundary.
+    config:
+      authoritative_root: result/authored_state
+      projection_version: ARGUMENT_PROJECTOR_V2
+      overlap_policy: COEXIST
+      repair_mode: AUTHORITATIVE_STATE_TRANSACTION
+      field_writers:
+        result/authored_state: ARGUMENT_STATE_COMMITTER
+        result/argument_architecture: ARGUMENT_PROJECTOR
+        result/research_design_matrix: ARGUMENT_PROJECTOR
+        result/evidence_gap_report: ARGUMENT_PROJECTOR
+        result/scope_decision: ARGUMENT_PROJECTOR
+        result/readiness: ARGUMENT_PROJECTOR
+        result/authored_evidence_bindings: ARGUMENT_PROJECTOR
+        result/authored_thread_assumptions: ARGUMENT_PROJECTOR
+        result/projection_meta: ARGUMENT_PROJECTOR
+        critic/result/deterministic_receipts: DETERMINISTIC_RUNTIME
+        critic/findings: CANONICAL_WORK_ITEM_RESOLVER
+        critic/result/quality_dimensions: CANONICAL_WORK_ITEM_RESOLVER
+        critic/user_questions: CANONICAL_WORK_ITEM_RESOLVER
+        critic/unresolved_items: CANONICAL_WORK_ITEM_RESOLVER
+        critic/status: CANONICAL_WORK_ITEM_RESOLVER
+        producer/status: ARGUMENT_PROJECTOR
+        producer/findings: ARGUMENT_PROJECTOR
+        producer/unresolved_items: ARGUMENT_PROJECTOR
+        producer/user_questions: ARGUMENT_PROJECTOR
+        producer/source_refs: ARGUMENT_PROJECTOR
+        producer/warnings: ARGUMENT_PROJECTOR
+        critic/result/verdict: CANONICAL_WORK_ITEM_RESOLVER
+        critic/result/checked_node_ids: ARGUMENT_CRITIC_RUNTIME_FROM_MODEL_REVIEW
+        critic/result/chain_checks: DETERMINISTIC_RUNTIME
+        critic/result/design_matrix_checks: DETERMINISTIC_RUNTIME
+        critic/result/structural_checks: DETERMINISTIC_RUNTIME
+        critic/result/evidence_checks: DETERMINISTIC_RUNTIME
+        critic/source_refs: CANONICAL_WORK_ITEM_RESOLVER
+        critic/warnings: CANONICAL_WORK_ITEM_RESOLVER
+      namespace_writers:
+        MACHINE_DEFECT: DETERMINISTIC_RUNTIME
+        SEMANTIC_OBSERVATION: ARGUMENT_CRITIC_RUNTIME_FROM_MODEL_ISSUES
+      authoritative_fields:
+      - central_proposition
+      - scope
+      - research_threads
+      - evidence_gaps
+      - user_questions
+      - cannot_proceed_reason
+      derived_result_fields:
+      - argument_architecture
+      - research_design_matrix
+      - evidence_gap_report
+      - scope_decision
+      - readiness
+      - authored_evidence_bindings
+      - authored_thread_assumptions
+      - projection_meta
+      semantic_observation_identity: RUN_SCOPED_INSTANCE
+      quality_guard_mode: OBSERVE_CANONICAL_ONLY
+      decision_arbiter_mode: AUDIT_ONLY
+  SC-ARGUMENT-LIFECYCLE-COMPOSITION:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_META
+    blocking: true
+    description: Declare the exact runtime shape at every Producer, Critic, Repair, persistence and rereview handoff.
+    config:
+      producer_prompt: P-ARGUMENT-ARCHITECTURE
+      shapes:
+        producer_persisted_output: PRODUCER_PROTOCOL_OUTPUT
+        producer_consumer_value: PRODUCER_RESULT
+        critic_architecture_candidate: PRODUCER_RESULT
+        targeted_repair_original_content: PRODUCER_RESULT
+        repair_application_value: PRODUCER_RESULT
+        repair_canonical_output: PRODUCER_PROTOCOL_OUTPUT
+        authoritative_state: AUTHORED_STATE
+        argument_graph_consumer: ARGUMENT_GRAPH
+      transitions:
+        PRODUCER_PERSIST_TO_CONTEXT:
+          writer_shape: PRODUCER_PROTOCOL_OUTPUT
+          reader_shape: PRODUCER_RESULT
+          adapter: OUTPUT_RESULT
+        CONTEXT_TO_CRITIC:
+          writer_shape: PRODUCER_RESULT
+          reader_shape: PRODUCER_RESULT
+          adapter: AUTHORITATIVE_REPROJECT
+        CRITIC_TO_TARGETED_REPAIR:
+          writer_shape: PRODUCER_RESULT
+          reader_shape: PRODUCER_RESULT
+          adapter: IDENTITY
+        TARGETED_REPAIR_TO_PROJECTOR:
+          writer_shape: PRODUCER_RESULT
+          reader_shape: AUTHORED_STATE
+          adapter: RESULT_AUTHORED_STATE
+        PROJECTOR_TO_REPAIR_APPLICATION:
+          writer_shape: PRODUCER_PROTOCOL_OUTPUT
+          reader_shape: PRODUCER_RESULT
+          adapter: OUTPUT_RESULT
+        REPAIR_APPLICATION_TO_CONTEXT:
+          writer_shape: PRODUCER_RESULT
+          reader_shape: PRODUCER_RESULT
+          adapter: ACTIVE_REPAIR_VALUE
+        CONTEXT_TO_CRITIC_REREVIEW:
+          writer_shape: PRODUCER_RESULT
+          reader_shape: PRODUCER_RESULT
+          adapter: AUTHORITATIVE_REPROJECT
+        CONTEXT_TO_DOWNSTREAM:
+          writer_shape: PRODUCER_RESULT
+          reader_shape: PRODUCER_RESULT
+          adapter: AUTHORITATIVE_REPROJECT
+        CONTEXT_TO_WF3_RESEARCH:
+          writer_shape: PRODUCER_RESULT
+          reader_shape: ARGUMENT_GRAPH
+          adapter: AUTHORITATIVE_REPROJECT_ARGUMENT_GRAPH
+      lifecycle_rules:
+        repair_commit_and_rereview_checkpoint: ATOMIC
+        original_producer_regeneration: SUPERSEDES_ACTIVE_REPAIR
+        integration_argument_regeneration: SUPERSEDES_ACTIVE_REPAIR
+        human_input_rereview: PRESERVES_ACTIVE_REPAIR
+        prerequisite_source_scope: TRANSITIVE_FROZEN_CLOSURE
+        post_projection_contract_failure: REGENERATE_OR_RUNTIME_FAIL_NO_LLM_ENVELOPE_REPAIR
+  SC-ARGUMENT-TARGETED-REPAIR-POLICY:
+    responsibility: DETERMINISTIC_GUARD
+    category: ARGUMENT_REPAIR
+    blocking: true
+    description: Define Argument Architecture local-repair write permissions and machine-managed
+      fields from one policy.
+    config:
+      # Targeted Repair receives the ProducerResult consumer value, not the
+      # outer Producer protocol envelope.  The persisted source-of-truth path is
+      # result/authored_state; inside repair content that same state is /authored_state.
+      authoritative_root: /authored_state
+      editable_fields:
+      - statement
+      - proposition_type
+      - falsifiable_or_comparable
+      - boundary_conditions
+      - question_type
+      - answerability
+      - success_evidence
+      - in_scope
+      - out_of_scope
+      - falsification_or_comparison_rule
+      machine_fields:
+      - node_id
+      - node_type
+      - status
+      - source_refs
+      - graph_id
+      - edge_id
+      - source_id
+      - target_id
+      - relation
+      - relation_id
+      - object_id
+      - object_type
+      - finding_instance_id
+      - target_path_or_span
+      machine_suffixes:
+      - _hash
+      - _ids
+      - _id
+      local_context_max_depth: 3
+      local_context_max_items: 8
+      reference_node_types:
+        gap_ids: RESEARCH_GAP
+        objective_ids: OBJECTIVE
+        work_package_ids: WORK_PACKAGE
+        method_ids: METHOD
+        evaluation_ids: EXPERIMENT_DESIGN
+        innovation_ids: NOVEL_MECHANISM
+        foundation_evidence_ids: TEAM_EVIDENCE
+        closest_prior_work_ids: CLOSEST_PRIOR_WORK
   SC-REFERENCE-FIELD-SEMANTICS:
     responsibility: OUTPUT_INTEGRITY
     category: REFERENCE_FIELD
     blocking: true
-    description: Classify every identifier-like schema field so validation and normalization share one
-      meaning; entity field paths must be anchored by an exact visible entity ID and bare property names
-      are never references.
+    description: Classify every identifier-like schema field so validation and normalization
+      share one meaning; entity field paths must be anchored by an exact visible entity
+      ID and bare property names are never references.
     config:
       input_object_fields:
       - required_input_ids
@@ -231,6 +929,7 @@ rules:
         - target_item_id
         - accepted_claim_ids
         - advanced_claim_ids
+        - assumption_node_ids
         - affected_section_ids
         - allowed_shared_context_ids
         - blocking_node_ids
@@ -386,3 +1085,5 @@ rules:
         - task_instruction_id
         - template_id
         - trace_id
+        LOCAL_STRUCTURED_REF:
+        - evaluation_refs

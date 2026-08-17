@@ -10,7 +10,7 @@
       "const": "P-ARGUMENT-ARCHITECTURE"
     },
     "prompt_version": {
-      "const": "3.1.0"
+      "const": "9.0.0"
     },
     "task": {
       "type": "object",

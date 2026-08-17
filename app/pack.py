@@ -71,6 +71,11 @@ class PromptPack:
         every model call.
         """
         entry = self.entry(prompt_id)
+        if str(entry.get("model_contract_mode") or "").upper() == "SEMANTIC":
+            return (
+                self.root / "prompts/shared/semantic_model_rules.md"
+            ).read_text(encoding="utf-8").strip()
+
         parts = [
             (self.root / "prompts/shared/business_rules.md").read_text(encoding="utf-8"),
             (self.root / "prompts/shared/security_rules.md").read_text(encoding="utf-8"),
@@ -144,6 +149,39 @@ class PromptPack:
     def schema(self, prompt_id: str, kind: str) -> dict[str, Any]:
         return read_json(self.schema_path(prompt_id, kind))
 
+    def has_model_contract(self, prompt_id: str) -> bool:
+        entry = self.entry(prompt_id)
+        return bool(entry.get("model_input_schema") and entry.get("model_output_schema"))
+
+    def model_schema_path(self, prompt_id: str, kind: str) -> Path:
+        entry = self.entry(prompt_id)
+        key = "model_input_schema" if kind == "input" else "model_output_schema"
+        path = entry.get(key)
+        if not path:
+            raise KeyError(f"{prompt_id} does not define {key}")
+        return (self.root / str(path)).resolve()
+
+    def model_schema(self, prompt_id: str, kind: str) -> dict[str, Any]:
+        return read_json(self.model_schema_path(prompt_id, kind))
+
+    def model_validator(self, prompt_id: str, kind: str) -> Draft202012Validator:
+        path = self.model_schema_path(prompt_id, kind)
+        schema = self.model_schema(prompt_id, kind)
+        schema["$id"] = path.as_uri()
+        return Draft202012Validator(schema, registry=self._schema_registry, format_checker=Draft202012Validator.FORMAT_CHECKER)
+
+    def validate_model(self, prompt_id: str, kind: str, value: Any) -> list[str]:
+        errors = sorted(self.model_validator(prompt_id, kind).iter_errors(value), key=lambda e: list(e.absolute_path))
+        result: list[str] = []
+        for err in errors:
+            path = "/" + "/".join(str(x) for x in err.absolute_path)
+            result.append(f"{path or '/'}: {err.message}")
+        return result
+
+    def inlined_model_schema(self, prompt_id: str, kind: str) -> dict[str, Any]:
+        path = self.model_schema_path(prompt_id, kind)
+        return self._inline_refs(read_json(path), path, set())
+
     def validator(self, prompt_id: str, kind: str) -> Draft202012Validator:
         path = self.schema_path(prompt_id, kind)
         schema = self.schema(prompt_id, kind)
@@ -158,7 +196,10 @@ class PromptPack:
             result.append(f"{path or '/'}: {err.message}")
         if isinstance(value, dict):
             result.extend(self._protocol_semantic_errors(prompt_id, kind, value))
-            if kind == "output":
+            if kind == "output" and not (
+                str(self.entry(prompt_id).get("model_contract_mode") or "").upper()
+                == "SEMANTIC"
+            ):
                 result.extend(
                     finding_code_errors(
                         prompt_id=prompt_id,

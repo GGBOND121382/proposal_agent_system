@@ -12,6 +12,14 @@ from .util import new_id, sha256_text
 from .contracts.semantic_checks import check_blueprint_semantics
 from .contracts.semantic_contract import get_semantic_contract
 from .json_pointer import join_pointer
+from .model_semantic_contracts import (
+    _critic_chain_checks,
+    _critic_design_matrix_checks,
+    _critic_evidence_checks,
+    build_argument_architecture_critic_model_input,
+    expand_argument_architecture_critic_model_output,
+    project_argument_authoritative_state,
+)
 from .logistics_application_content import SECTION_TITLES as LOGISTICS_SECTION_TITLES, REF_CATALOG as LOGISTICS_REF_CATALOG, blocks_for as logistics_blocks_for
 from .transport_optimization_application_content import SECTION_TITLES as TRANSPORT_SECTION_TITLES, REF_CATALOG as TRANSPORT_REF_CATALOG, blocks_for as transport_blocks_for
 
@@ -128,6 +136,38 @@ class SimulatedLLM:
                 }
         return None
 
+
+    @staticmethod
+    def _trusted_source_ref(
+        envelope: dict[str, Any],
+        *,
+        source_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return an existing source-ref object from the trusted input envelope.
+
+        Semantic Argument inputs often carry evidence through typed fact cards rather
+        than raw document slots.  SIMULATED replay placeholders must bind to that
+        existing provenance instead of inventing or retaining replay-only IDs.
+        """
+        matches: list[dict[str, Any]] = []
+
+        def visit(node: Any) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    visit(item)
+                return
+            if not isinstance(node, dict):
+                return
+            sid = str(node.get("source_id") or "").strip()
+            stype = str(node.get("source_type") or "").strip()
+            if sid and stype and (source_type is None or stype == source_type):
+                matches.append(copy.deepcopy(node))
+            for value in node.values():
+                visit(value)
+
+        visit(envelope.get("payload") or {})
+        return matches[0] if matches else None
+
     def _bind_replay_source_refs(
         self,
         output: dict[str, Any],
@@ -171,11 +211,15 @@ class SimulatedLLM:
                     # Only document-backed source types have a deterministic
                     # binding to a prompt input document. Public/search sources
                     # and unknown types remain subject to strict validation.
-                    replacement = (
-                        self._document_source_ref(envelope, preferred_roles=preferred)
-                        if preferred is not None
-                        else None
+                    replacement = self._trusted_source_ref(
+                        envelope, source_type=source_type
                     )
+                    if replacement is None:
+                        replacement = (
+                            self._document_source_ref(envelope, preferred_roles=preferred)
+                            if preferred is not None
+                            else None
+                        )
                 if replacement is not None:
                     for key in list(node):
                         if key in replacement:
@@ -294,6 +338,25 @@ class SimulatedLLM:
             "score": 4.0 if passed else 2.0,
             "passed": passed,
             "evidence": ["已按结构化输入逐项检查。"],
+            "required_action": None if passed else "补充缺失论证并重新审查。",
+        } for dimension in dimensions]
+
+    @staticmethod
+    def _argument_quality_dimensions(passed: bool = True) -> list[dict[str, Any]]:
+        dimensions = [
+            "CENTRAL_THESIS",
+            "ARGUMENT_CHAIN",
+            "EVIDENCE_SUPPORT",
+            "METHOD_SUBSTANCE",
+            "INNOVATION_BASELINE",
+            "FEASIBILITY_FOUNDATION",
+            "METRIC_JUSTIFICATION",
+        ]
+        return [{
+            "dimension": dimension,
+            "score": 4.0 if passed else 2.0,
+            "passed": passed,
+            "evidence": ["已按论证语义逐项检查。"],
             "required_action": None if passed else "补充缺失论证并重新审查。",
         } for dimension in dimensions]
 
@@ -673,6 +736,23 @@ class SimulatedLLM:
                 "security_level": "INTERNAL",
             },
         ]
+        source_spans = [
+            item for item in (envelope.get("payload") or {}).get("source_spans") or []
+            if isinstance(item, dict) and isinstance(item.get("source_ref"), dict)
+        ]
+        evidence_ref = next((
+            copy.deepcopy(item["source_ref"]) for item in source_spans
+            if str((item.get("source_ref") or {}).get("source_type") or "")
+            in {"EVIDENCE_MATERIAL", "TECHNICAL_MATERIAL"}
+        ), None)
+        general_ref = next((copy.deepcopy(item["source_ref"]) for item in source_spans), None)
+        if general_ref is not None:
+            facts[0]["source_refs"] = [general_ref]
+        if evidence_ref is not None:
+            facts[1]["source_refs"] = [evidence_ref]
+        elif general_ref is not None:
+            facts[1]["source_refs"] = [copy.deepcopy(general_ref)]
+
         base["result"]["fact_candidates"] = facts
 
         # Coverage IDs are references to the current input spans, not entities
@@ -705,7 +785,15 @@ class SimulatedLLM:
         base["result"]["blocked_section_profiles"] = []
         base["result"]["chapter_readiness"] = [{"profile_id": pid, "readiness": "READY", "missing_item_ids": [], "blocking_conflict_ids": []} for pid in core]
         dimensions = ["DOCUMENT_CONTRACT", "CENTRAL_PROPOSITION", "RESEARCH_GAP", "RESEARCH_QUESTIONS", "CLOSEST_PRIOR_WORK", "METHOD_SUBSTANCE", "EVALUATION_DESIGN", "INNOVATION_BASELINE", "RESEARCH_FOUNDATION", "METRIC_JUSTIFICATION", "SCOPE_AND_PAGE_BUDGET"]
-        base["result"]["critical_readiness_checks"] = [{"check_id": f"readiness-{i:03d}", "dimension": d, "passed": True, "reason": "输入图谱存在对应节点和来源。", "missing_node_types": [], "evidence_ids": ["prop-001"]} for i,d in enumerate(dimensions,1)]
+        payload = envelope.get("payload") or {}
+        graph = payload.get("argument_graph") or payload.get("argument_graph_candidate") or {}
+        evidence_id = str(((graph.get("central_proposition") or {}).get("node_id")) or "").strip()
+        if not evidence_id:
+            evidence_id = next((
+                str(node.get("node_id")) for node in graph.get("nodes") or []
+                if isinstance(node, dict) and str(node.get("node_id") or "").strip()
+            ), "")
+        base["result"]["critical_readiness_checks"] = [{"check_id": f"readiness-{i:03d}", "dimension": d, "passed": True, "reason": "输入图谱存在对应节点和来源。", "missing_node_types": [], "evidence_ids": [evidence_id] if evidence_id else []} for i,d in enumerate(dimensions,1)]
         stage = str(envelope.get("payload", {}).get("readiness_stage") or "READY_FOR_ARGUMENT_ARCHITECTURE")
         base["result"]["assessed_stage"] = stage
         base["result"]["ready_for_argument_architecture"] = True
@@ -1719,6 +1807,51 @@ class SimulatedLLM:
 
 
     def _handle_argument_architecture(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        # v8 SIMULATED mode follows the same ownership rule as production: start
+        # from model-authored semantic state and let the deterministic projector
+        # create every graph/matrix/status/source representation.
+        authored = copy.deepcopy(((base.get("result") or {}).get("authored_state")))
+        if isinstance(authored, dict):
+            facts = [
+                fact for fact in (envelope.get("payload") or {}).get("confirmed_facts") or []
+                if isinstance(fact, dict) and str(fact.get("claim_id") or "").strip()
+            ]
+            supported_ids = [
+                str(fact["claim_id"]) for fact in facts
+                if any(
+                    isinstance(ref, dict) and str(ref.get("source_id") or "").strip()
+                    for ref in fact.get("source_refs") or []
+                )
+            ]
+            foundation_ids = [
+                str(fact["claim_id"]) for fact in facts
+                if any(
+                    isinstance(ref, dict)
+                    and str(ref.get("source_type") or "") in {"EVIDENCE_MATERIAL", "TECHNICAL_MATERIAL"}
+                    and bool(str(ref.get("quoted_text") or "").strip())
+                    for ref in fact.get("source_refs") or []
+                )
+            ]
+            preferred_id = (foundation_ids or supported_ids or [None])[0]
+
+            def rebind(node: Any) -> None:
+                if isinstance(node, list):
+                    for item in node:
+                        rebind(item)
+                    return
+                if not isinstance(node, dict):
+                    return
+                if "evidence_ids" in node and isinstance(node.get("evidence_ids"), list):
+                    if node["evidence_ids"] and preferred_id:
+                        node["evidence_ids"] = [preferred_id]
+                    elif node["evidence_ids"] and not preferred_id:
+                        node["evidence_ids"] = []
+                for value in node.values():
+                    rebind(value)
+
+            rebind(authored)
+            return project_argument_authoritative_state(envelope, authored)
+
         _, _, generated = self._research_definition(envelope)
         payload = envelope.get("payload", {})
         seed = copy.deepcopy(payload.get("argument_graph_seed") or generated)
@@ -1786,7 +1919,13 @@ class SimulatedLLM:
         add_edge(method_ids[0], "VALIDATED_BY", eval_ids[0], "对照与消融实验验证方法")
         add_edge(prior_ids[0], "CONTRASTS_WITH", innovation_ids[0], "创新以最接近工作为比较基线")
         if foundation_ids:
-            add_edge(foundation_ids[0], "SUPPORTS", work_ids[-1], "前期证据支撑任务可行性")
+            for work_id in work_ids:
+                add_edge(
+                    foundation_ids[0],
+                    "SUPPORTS",
+                    work_id,
+                    "模拟生产者明确声明前期证据支撑该工作包可行性",
+                )
         add_edge(eval_ids[0], "EVIDENCES", innovation_ids[0], "实验结果验证新增机制")
 
         matrix = []
@@ -1826,6 +1965,11 @@ class SimulatedLLM:
                 "blocking_node_ids": [] if foundation_ids else ["foundation-001"],
                 "summary": "研究问题、方法、验证、创新和可行性证据已形成闭环。" if foundation_ids else "研究论证主线已形成，但研究基础缺少可定位证据，不能进入章节规划。",
             },
+            # SIMULATED mode authors canonical source refs directly and therefore
+            # has no model-visible Evidence Card IDs to preserve. Keep the
+            # provenance sidecar explicit but empty rather than reverse-guessing
+            # evidence identities from shared source IDs.
+            "authored_evidence_bindings": [],
         }
         foundation_node_index = next(
             (
@@ -1866,41 +2010,55 @@ class SimulatedLLM:
 
     def _handle_argument_architecture_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         candidate = envelope.get("payload", {}).get("architecture_candidate") or {}
+        if isinstance(candidate.get("authored_state"), dict):
+            canonical = project_argument_authoritative_state(
+                envelope, copy.deepcopy(candidate["authored_state"])
+            )["result"]
+            critic_envelope = copy.deepcopy(envelope)
+            critic_envelope.setdefault("payload", {})["architecture_candidate"] = canonical
+            model_input = build_argument_architecture_critic_model_input(critic_envelope)
+            reviewed_keys = [
+                str(item.get("unit_key"))
+                for item in (model_input.get("candidate") or {}).get("review_units") or []
+                if isinstance(item, dict) and str(item.get("unit_key") or "").strip()
+            ]
+            semantic = {
+                "quality_dimensions": self._argument_quality_dimensions(True),
+                "reviewed_unit_keys": reviewed_keys,
+                "issues": [],
+                "user_questions": [],
+            }
+            return expand_argument_architecture_critic_model_output(
+                critic_envelope, semantic
+            )
         graph = candidate.get("argument_architecture") or {}
         node_ids = [str(graph.get("central_proposition", {}).get("node_id") or "")]
         node_ids.extend(str(q.get("node_id")) for q in graph.get("research_questions", []))
         node_ids.extend(str(n.get("node_id")) for n in graph.get("nodes", []))
         node_ids = [x for x in dict.fromkeys(node_ids) if x]
-        type_map = {str(n.get("node_type")): str(n.get("node_id")) for n in graph.get("nodes", [])}
-        qids = [str(q.get("node_id")) for q in graph.get("research_questions", [])]
-        chains = [
-            ("GAP_TO_QUESTION", [type_map.get("RESEARCH_GAP", "gap-001")], qids),
-            ("QUESTION_TO_OBJECTIVE", qids, [type_map.get("OBJECTIVE", "objective-001")]),
-            ("OBJECTIVE_TO_WORK_PACKAGE", [type_map.get("OBJECTIVE", "objective-001")], [str(n.get("node_id")) for n in graph.get("nodes", []) if n.get("node_type") == "WORK_PACKAGE"]),
-            ("WORK_PACKAGE_TO_METHOD", [str(n.get("node_id")) for n in graph.get("nodes", []) if n.get("node_type") == "WORK_PACKAGE"], [type_map.get("FORMAL_MODEL", "method-001")]),
-            ("METHOD_TO_EVALUATION", [type_map.get("FORMAL_MODEL", "method-001")], [type_map.get("EXPERIMENT_DESIGN", "experiment-001")]),
-            ("PRIOR_WORK_TO_INNOVATION", [type_map.get("CLOSEST_PRIOR_WORK", "prior-001")], [type_map.get("NOVEL_MECHANISM", "innovation-001")]),
-            ("FOUNDATION_TO_FEASIBILITY", [type_map.get("TEAM_EVIDENCE", "foundation-001")], [str(n.get("node_id")) for n in graph.get("nodes", []) if n.get("node_type") == "WORK_PACKAGE"][-1:]),
-        ]
+        chain_checks = _critic_chain_checks(candidate)
+        design_matrix_checks = _critic_design_matrix_checks(candidate)
+        evidence_checks = _critic_evidence_checks(candidate)
         foundation_nodes = [n for n in graph.get("nodes", []) if n.get("node_type") == "TEAM_EVIDENCE"]
         foundation_supported = any(
             n.get("status") in {"SUPPORTED", "CONFIRMED"}
             and any(ref.get("source_type") in {"EVIDENCE_MATERIAL", "TECHNICAL_MATERIAL"} for ref in n.get("source_refs", []) if isinstance(ref, dict))
             for n in foundation_nodes
         )
-        candidate_ready = bool((candidate.get("readiness") or {}).get("ready")) and foundation_supported
+        candidate_ready = (
+            bool((candidate.get("readiness") or {}).get("ready"))
+            and foundation_supported
+            and all(item.get("complete") for item in chain_checks)
+            and all(item.get("complete") for item in design_matrix_checks)
+            and all(item.get("supported") for item in evidence_checks)
+        )
         base["result"] = {
             "verdict": "ACCEPT" if candidate_ready else "BLOCK",
             "checked_node_ids": node_ids,
-            "chain_checks": [{"chain_type": t, "source_ids": [x for x in a if x], "target_ids": [x for x in b if x], "complete": bool(a and b), "evidence": "图谱存在对应节点、边和来源。"} for t, a, b in chains],
-            "design_matrix_checks": [{"research_question_id": str(item.get("research_question_id")), "complete": True, "missing_dimensions": [], "evidence": "目标、任务、方法、验证、创新和比较规则齐全。"} for item in candidate.get("research_design_matrix", [])],
-            "evidence_checks": [{
-                "node_id": nid,
-                "supported": not (nid in {str(n.get("node_id")) for n in foundation_nodes} and not foundation_supported),
-                "source_ids": [str(ref.get("source_id")) for n in graph.get("nodes", []) if str(n.get("node_id")) == nid for ref in n.get("source_refs", []) if isinstance(ref, dict)],
-                "reason": "节点具有可定位来源。" if not (nid in {str(n.get("node_id")) for n in foundation_nodes} and not foundation_supported) else "研究基础节点缺少EVIDENCE_MATERIAL或TECHNICAL_MATERIAL。",
-            } for nid in node_ids],
-            "quality_dimensions": self._quality_dimensions(candidate_ready),
+            "chain_checks": chain_checks,
+            "design_matrix_checks": design_matrix_checks,
+            "evidence_checks": evidence_checks,
+            "quality_dimensions": self._argument_quality_dimensions(candidate_ready),
         }
         base["status"] = "PASS" if candidate_ready else "NEED_USER_INPUT"
         base["findings"] = [] if candidate_ready else [{

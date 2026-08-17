@@ -340,14 +340,12 @@ def test_argument_prompt_keeps_business_boundary_without_duplicating_runtime_val
     for candidate_prompt_id in pack.prompt_ids():
         assert forbidden_role_template not in pack.prompt_text(candidate_prompt_id)
 
-    # Role isolation remains explicit, but deterministic validation details must
-    # not be copied into the producer prompt a second time.
-    assert "只负责业务语义" in prompt
-    assert "你只生成当前任务的业务候选" in system_prompt
+    # The model sees a research-design task, not runtime validation code.
+    assert "科研论证架构设计" in prompt
+    assert "现有差距及其限制机制 → 研究问题 → 研究目标" in prompt
+    assert "语义任务通则" in system_prompt
     assert "result.argument_architecture.nodes[]" not in prompt
     assert "user_questions[*].blocking=true" not in prompt
     assert "最终`status`必须为`NEED_USER_INPUT`" not in prompt
-
-    # Shared output discipline still exists without a prompt-local validator checklist.
-    assert "无问题" in shared
-    assert "紧凑JSON" in shared
+    assert "source_hash" not in system_prompt
+    assert "protected_hash" not in system_prompt

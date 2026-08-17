@@ -68,8 +68,13 @@ def test_rendered_system_prompt_exposes_only_the_current_protocol_identity() -> 
         prompt_version = entry["prompt_version"]
         schema_version = output_schema["properties"]["schema_version"]["const"]
 
-        identity = rendered.split("# 本次运行时协议身份", 1)[1].split("\n\n", 1)[0]
-        assert f"`prompt_id`固定为`{prompt_id}`" in identity
-        assert f"`prompt_version`固定为`{prompt_version}`" in identity
-        assert f"`schema_version`固定为`{schema_version}`" in identity
-        assert "`prompt_version`固定为`2.0.0`" not in rendered or prompt_version == "2.0.0"
+        if str(entry.get("model_contract_mode") or "").upper() == "SEMANTIC":
+            assert "# 本次运行时协议身份" not in rendered
+            assert "语义任务通则" in rendered
+            assert f"版本：`{prompt_version}`" in rendered
+        else:
+            identity = rendered.split("# 本次运行时协议身份", 1)[1].split("\n\n", 1)[0]
+            assert f"`prompt_id`固定为`{prompt_id}`" in identity
+            assert f"`prompt_version`固定为`{prompt_version}`" in identity
+            assert f"`schema_version`固定为`{schema_version}`" in identity
+            assert "`prompt_version`固定为`2.0.0`" not in rendered or prompt_version == "2.0.0"

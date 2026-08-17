@@ -187,15 +187,15 @@ def test_producer_schema_and_replays_share_prompt_version() -> None:
             encoding="utf-8"
         )
     )
-    assert input_schema["properties"]["prompt_version"] == {"const": "3.1.0"}
-    assert output_schema["properties"]["prompt_version"] == {"const": "3.1.0"}
+    assert input_schema["properties"]["prompt_version"] == {"const": "3.2.0"}
+    assert output_schema["properties"]["prompt_version"] == {"const": "3.2.0"}
 
     for path in Path("prompt_pack/replay/cases/write_blueprint").glob("*.json"):
         case = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(case.get("input"), dict):
-            assert case["input"]["prompt_version"] == "3.1.0"
+            assert case["input"]["prompt_version"] == "3.2.0"
         if isinstance(case.get("expected_output"), dict):
-            assert case["expected_output"]["prompt_version"] == "3.1.0"
+            assert case["expected_output"]["prompt_version"] == "3.2.0"
 
 
 def test_producer_normal_replay_satisfies_deterministic_contract() -> None:
@@ -233,7 +233,7 @@ def test_builder_declares_v3_blueprint_contract_from_authoritative_sources() -> 
     from pathlib import Path
 
     builder = Path("prompt_pack/tools/build_v2.py").read_text(encoding="utf-8")
-    assert "'P-WRITE-BLUEPRINT': '3.1.0'" in builder
+    assert "'P-WRITE-BLUEPRINT': '3.2.0'" in builder
     assert "'proposal_contract','argument_graph','narrative_architecture','section_contract','prior_section_digest','revision_findings'" in builder
     assert "'argument_role':enum([" in builder
     assert "'required_evidence_ids':arr(idstr())" in builder
@@ -297,7 +297,7 @@ def test_critic_normal_replay_checks_every_valid_blueprint_paragraph() -> None:
     payload = case["input"]["payload"]
     blueprint = payload["blueprint_candidate"]
     assert check_blueprint_semantics(blueprint, payload) == ()
-    assert case["input"]["prompt_version"] == "3.1.0"
+    assert case["input"]["prompt_version"] == "3.2.0"
     result = case["expected_output"]["result"]
     assert result["checked_paragraph_ids"] == [
         paragraph["paragraph_id"] for paragraph in blueprint["paragraphs"]

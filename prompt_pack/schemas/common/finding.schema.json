@@ -8,6 +8,17 @@
       "minLength": 1,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
     },
+    "defect_namespace": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "MACHINE_DEFECT",
+        "SEMANTIC_OBSERVATION",
+        null
+      ]
+    },
     "code": {
       "type": "string",
       "minLength": 1
@@ -101,6 +112,32 @@
     },
     "blocking": {
       "type": "boolean"
+    },
+    "semantic_component": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "semantic_thread": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "semantic_review_unit_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "defect_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
     }
   },
   "additionalProperties": false,

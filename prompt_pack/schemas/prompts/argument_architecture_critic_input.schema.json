@@ -10,7 +10,7 @@
       "const": "P-ARGUMENT-ARCHITECTURE-CRITIC"
     },
     "prompt_version": {
-      "const": "3.1.0"
+      "const": "9.0.0"
     },
     "task": {
       "type": "object",
@@ -469,8 +469,7 @@
                       "type": "string",
                       "minLength": 1,
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                    },
-                    "minItems": 1
+                    }
                   },
                   "falsification_or_comparison_rule": {
                     "type": "string",
@@ -504,6 +503,53 @@
                     "minLength": 1,
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                   },
+                  "defect_key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "defect_family": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "finding_code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "semantic_component": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "semantic_object_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "semantic_review_unit_key": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "quality_dimension": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "suggested_route": {
+                    "enum": [
+                      "ORIGINAL_PRODUCER",
+                      "ARGUMENT_ARCHITECTURE_AGENT",
+                      "USER",
+                      "BLOCK"
+                    ]
+                  },
+                  "thread_index": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
                   "required_node_type": {
                     "type": "string",
                     "minLength": 1
@@ -522,10 +568,19 @@
                 },
                 "required": [
                   "gap_id",
+                  "defect_key",
+                  "defect_family",
+                  "finding_code",
+                  "semantic_component",
+                  "semantic_object_id",
+                  "semantic_review_unit_key",
+                  "quality_dimension",
                   "required_node_type",
+                  "thread_index",
                   "reason",
                   "blocking",
-                  "suggested_source_or_question"
+                  "suggested_source_or_question",
+                  "suggested_route"
                 ]
               }
             },
@@ -587,6 +642,82 @@
                 "blocking_node_ids",
                 "summary"
               ]
+            },
+            "authored_evidence_bindings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "node_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "evidence_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "node_id",
+                  "evidence_ids"
+                ]
+              }
+            },
+            "authored_thread_assumptions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "thread_index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "assumption_node_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "thread_index",
+                  "assumption_node_ids"
+                ]
+              }
+            },
+            "authored_state": {
+              "$ref": "../model/argument_architecture_model_output.schema.json"
+            },
+            "projection_meta": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "projection_version": {
+                  "type": "string",
+                  "const": "ARGUMENT_PROJECTOR_V2"
+                },
+                "source_state_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "projection_input_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "projection_version",
+                "source_state_sha256",
+                "projection_input_sha256"
+              ]
             }
           },
           "required": [
@@ -594,7 +725,11 @@
             "research_design_matrix",
             "evidence_gap_report",
             "scope_decision",
-            "readiness"
+            "readiness",
+            "authored_evidence_bindings",
+            "authored_thread_assumptions",
+            "authored_state",
+            "projection_meta"
           ]
         },
         "human_resolutions": {

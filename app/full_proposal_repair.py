@@ -76,6 +76,16 @@ class FullProposalRepairMixin:
             )
             state.pop("integration_repair_section_ids", None)
             state.pop("integration_repair_findings", None)
+            # Integration review is another legitimate route back to the
+            # Argument Producer.  It establishes a new semantic subject just
+            # like a direct ORIGINAL_PRODUCER finding, so any active local
+            # Argument repair must stop masking the producer before the jump.
+            self._supersede_repair_subject(
+                state,
+                critic_prompt="P-ARGUMENT-ARCHITECTURE-CRITIC",
+                producer_prompt="P-ARGUMENT-ARCHITECTURE",
+                reason="INTEGRATION_ARGUMENT_REGENERATION_SCHEDULED",
+            )
             target_step = next(
                 index for index, step in enumerate(self.get(wf["id"])["steps"])
                 if step.get("prompt_id") == "P-ARGUMENT-ARCHITECTURE"

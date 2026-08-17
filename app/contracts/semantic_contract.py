@@ -25,6 +25,15 @@ _REQUIRED_RULE_IDS = frozenset(
         "SC-CLAIM-COVERAGE",
         "SC-EVIDENCE-SELF-REFERENCE",
         "SC-EVIDENCE-CONTRACT-COVERAGE",
+        "SC-ARGUMENT-DETERMINISTIC-CHAINS",
+        "SC-ARGUMENT-DESIGN-MATRIX-COMPLETENESS",
+        "SC-ARGUMENT-EVIDENCE-REQUIREMENTS",
+        "SC-ARGUMENT-STRUCTURAL-REQUIREMENTS",
+        "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY",
+        "SC-ARGUMENT-DETERMINISTIC-DEFECTS",
+        "SC-ARGUMENT-STATE-OWNERSHIP",
+        "SC-ARGUMENT-LIFECYCLE-COMPOSITION",
+        "SC-ARGUMENT-TARGETED-REPAIR-POLICY",
         "SC-REFERENCE-FIELD-SEMANTICS",
     }
 )
@@ -46,6 +55,7 @@ class ReferenceSemantic(str, Enum):
     HUMAN_TEXT = "HUMAN_TEXT"
     PROTOCOL_REF = "PROTOCOL_REF"
     NEW_ENTITY_ID = "NEW_ENTITY_ID"
+    LOCAL_STRUCTURED_REF = "LOCAL_STRUCTURED_REF"
 
 
 
@@ -458,7 +468,708 @@ def _load_rule_registry(raw: Mapping[str, Any]) -> Mapping[str, SemanticRule]:
     missing = sorted(_REQUIRED_RULE_IDS - set(rules))
     if missing:
         raise ValueError("semantic contract is missing required rules: " + ", ".join(missing))
+    _validate_argument_meta_rules(rules)
     return MappingProxyType(rules)
+
+
+
+def _validate_argument_meta_rules(rules: Mapping[str, SemanticRule]) -> None:
+    """Validate the executable Argument meta-contract before runtime use."""
+
+    evidence_rule = rules["SC-ARGUMENT-EVIDENCE-REQUIREMENTS"]
+    evidence_config = evidence_rule.config
+    supported_statuses = tuple(
+        str(value).strip()
+        for value in evidence_config.get("supported_knowledge_statuses") or ()
+        if str(value).strip()
+    )
+    if not supported_statuses or len(set(supported_statuses)) != len(supported_statuses):
+        raise ValueError(
+            "SC-ARGUMENT-EVIDENCE-REQUIREMENTS supported_knowledge_statuses "
+            "must be non-empty and unique"
+        )
+
+    source_policies = evidence_config.get("source_policies") or {}
+    if not isinstance(source_policies, Mapping) or not source_policies:
+        raise ValueError(
+            "SC-ARGUMENT-EVIDENCE-REQUIREMENTS source_policies must be a non-empty mapping"
+        )
+    for policy_id, policy in source_policies.items():
+        if not str(policy_id).strip() or not isinstance(policy, Mapping):
+            raise ValueError("argument evidence source policy entries must be named objects")
+        if "require_source_ref" in policy and not isinstance(policy.get("require_source_ref"), bool):
+            raise ValueError(
+                f"argument evidence source policy {policy_id!r} require_source_ref must be boolean"
+            )
+        if "require_quoted_text" in policy and not isinstance(policy.get("require_quoted_text"), bool):
+            raise ValueError(
+                f"argument evidence source policy {policy_id!r} require_quoted_text must be boolean"
+            )
+        allowed_types = tuple(
+            str(value).strip()
+            for value in policy.get("allowed_source_types") or ()
+            if str(value).strip()
+        )
+        if len(set(allowed_types)) != len(allowed_types):
+            raise ValueError(
+                f"argument evidence source policy {policy_id!r} allowed_source_types must be unique"
+            )
+
+    requirements = evidence_config.get("requirements") or ()
+    if not isinstance(requirements, (tuple, list)) or not requirements:
+        raise ValueError(
+            "SC-ARGUMENT-EVIDENCE-REQUIREMENTS requirements must be non-empty"
+        )
+    allowed_subjects = {"OBJECT", "COLLECTION"}
+    allowed_presence = {"REQUIRED", "IF_PRESENT"}
+    allowed_coverage = {"ALL", "ANY"}
+
+    taxonomy_config = rules["SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY"].config
+    taxonomy_dimensions = taxonomy_config.get("dimensions") or {}
+    if not isinstance(taxonomy_dimensions, Mapping) or not taxonomy_dimensions:
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY dimensions must be a non-empty mapping"
+        )
+    dimension_issue_codes: dict[str, set[str]] = {}
+    all_issue_codes: set[str] = set()
+    for dimension, config in taxonomy_dimensions.items():
+        dimension_name = str(dimension).strip()
+        if not dimension_name or not isinstance(config, Mapping):
+            raise ValueError("argument critic taxonomy dimension entries must be named objects")
+        codes = tuple(
+            str(value).strip()
+            for value in config.get("issue_codes") or ()
+            if str(value).strip()
+        )
+        if not codes or len(set(codes)) != len(codes):
+            raise ValueError(
+                f"argument critic taxonomy dimension {dimension_name!r} issue_codes must be non-empty and unique"
+            )
+        dimension_issue_codes[dimension_name] = set(codes)
+        all_issue_codes.update(codes)
+    revision_component_by_code = taxonomy_config.get("revision_component_by_code") or {}
+    if not isinstance(revision_component_by_code, Mapping):
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY revision_component_by_code must be a mapping"
+        )
+    if {str(code) for code in revision_component_by_code} != all_issue_codes:
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY revision_component_by_code must cover every issue code exactly"
+        )
+    if any(not str(component).strip() for component in revision_component_by_code.values()):
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY revision components must be non-empty"
+        )
+
+    component_by_node_type = taxonomy_config.get("component_by_node_type") or {}
+    if not isinstance(component_by_node_type, Mapping) or not component_by_node_type:
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY component_by_node_type must be a non-empty mapping"
+        )
+    semantic_components = {
+        str(value).strip()
+        for value in component_by_node_type.values()
+        if str(value).strip()
+    } | {"SCOPE", "THREAD", "RESEARCH_DESIGN"}
+    if len(semantic_components) < 3:
+        raise ValueError("argument critic semantic component registry is empty")
+    precise_components = tuple(
+        str(value).strip()
+        for value in taxonomy_config.get("precise_target_components") or ()
+        if str(value).strip()
+    )
+    if not precise_components or len(set(precise_components)) != len(precise_components):
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY precise_target_components must be non-empty and unique"
+        )
+    unknown_precise = sorted(set(precise_components) - semantic_components)
+    if unknown_precise:
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY precise target components are unknown: "
+            + ", ".join(unknown_precise)
+        )
+    allowed_targets = taxonomy_config.get("allowed_target_components_by_code") or {}
+    if not isinstance(allowed_targets, Mapping) or {str(code) for code in allowed_targets} != all_issue_codes:
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY allowed_target_components_by_code must cover every issue code exactly"
+        )
+    for issue_code, components in allowed_targets.items():
+        values = tuple(
+            str(value).strip() for value in components or () if str(value).strip()
+        )
+        if not values or len(set(values)) != len(values):
+            raise ValueError(
+                f"argument critic issue {issue_code!r} must define non-empty unique target components"
+            )
+        unknown = sorted(set(values) - semantic_components)
+        if unknown:
+            raise ValueError(
+                f"argument critic issue {issue_code!r} references unknown target components: "
+                + ", ".join(unknown)
+            )
+    matrix_fields = taxonomy_config.get("matrix_field_by_component") or {}
+    if not isinstance(matrix_fields, Mapping) or not matrix_fields:
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY matrix_field_by_component must be a non-empty mapping"
+        )
+    reference_type_members = taxonomy_config.get("reference_type_members") or {}
+    if not isinstance(reference_type_members, Mapping):
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY reference_type_members must be a mapping"
+        )
+    known_node_types = {str(value).strip() for value in component_by_node_type if str(value).strip()}
+    for reference_type, members in reference_type_members.items():
+        values = tuple(str(value).strip() for value in members or () if str(value).strip())
+        if not str(reference_type).strip() or not values or len(values) != len(set(values)):
+            raise ValueError("argument critic reference_type_members entries must be named, non-empty and unique")
+        unknown_members = sorted(set(values) - known_node_types)
+        if unknown_members:
+            raise ValueError(
+                f"argument critic reference type {reference_type!r} has unknown members: "
+                + ", ".join(unknown_members)
+            )
+
+    failure_score = taxonomy_config.get("deterministic_failure_score")
+    if not isinstance(failure_score, int) or not 1 <= failure_score <= 5:
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY deterministic_failure_score must be an integer in [1,5]"
+        )
+
+    defect_rule = rules["SC-ARGUMENT-DETERMINISTIC-DEFECTS"]
+    defect_config = defect_rule.config
+    identity_recipe = str(defect_config.get("identity_recipe") or "").upper()
+    if identity_recipe != "RULE_FAMILY_THREAD_OWNER_OBJECT":
+        raise ValueError(
+            "SC-ARGUMENT-DETERMINISTIC-DEFECTS identity_recipe must be RULE_FAMILY_THREAD_OWNER_OBJECT"
+        )
+    families = defect_config.get("families") or {}
+    if not isinstance(families, Mapping) or not families:
+        raise ValueError(
+            "SC-ARGUMENT-DETERMINISTIC-DEFECTS families must be a non-empty mapping"
+        )
+    for field_name in (
+        "critic_result_required_fields",
+        "critic_finding_required_fields",
+        "receipt_required_fields",
+    ):
+        values = tuple(
+            str(value).strip()
+            for value in defect_config.get(field_name) or ()
+            if str(value).strip()
+        )
+        if not values or len(set(values)) != len(values):
+            raise ValueError(
+                f"SC-ARGUMENT-DETERMINISTIC-DEFECTS {field_name} must be non-empty and unique"
+            )
+
+    allowed_routes = {"ORIGINAL_PRODUCER", "ARGUMENT_ARCHITECTURE_AGENT", "USER", "BLOCK"}
+    for family_id, family in families.items():
+        if not isinstance(family, Mapping):
+            raise ValueError(f"deterministic defect family {family_id!r} must be an object")
+        failure_code = str(family.get("failure_code") or "").strip()
+        route = str(family.get("route") or "").strip().upper()
+        finding_code = str(family.get("finding_code") or "").strip()
+        finding_code_source = str(family.get("finding_code_source") or "").strip().upper()
+        if not failure_code:
+            raise ValueError(f"deterministic defect family {family_id!r} is missing failure_code")
+        if route not in allowed_routes:
+            raise ValueError(
+                f"deterministic defect family {family_id!r} has unknown route {route!r}"
+            )
+        ownership_scope = str(family.get("ownership_scope") or "").strip().upper()
+        if ownership_scope not in {"THREAD_OR_OBJECT", "OWNER_OBJECT"}:
+            raise ValueError(
+                f"deterministic defect family {family_id!r} has unknown ownership_scope {ownership_scope!r}"
+            )
+        if bool(finding_code) == bool(finding_code_source):
+            raise ValueError(
+                f"deterministic defect family {family_id!r} must configure exactly one of "
+                "finding_code or finding_code_source"
+            )
+        if finding_code_source and finding_code_source != "REQUIREMENT":
+            raise ValueError(
+                f"deterministic defect family {family_id!r} has unsupported "
+                f"finding_code_source {finding_code_source!r}"
+            )
+        quality_dimension = str(family.get("quality_dimension") or "").strip()
+        quality_dimension_source = str(family.get("quality_dimension_source") or "").strip().upper()
+        if bool(quality_dimension) == bool(quality_dimension_source):
+            raise ValueError(
+                f"deterministic defect family {family_id!r} must configure exactly one of "
+                "quality_dimension or quality_dimension_source"
+            )
+        if quality_dimension and quality_dimension not in dimension_issue_codes:
+            raise ValueError(
+                f"deterministic defect family {family_id!r} references unknown quality_dimension {quality_dimension!r}"
+            )
+        if quality_dimension_source and quality_dimension_source != "REQUIREMENT":
+            raise ValueError(
+                f"deterministic defect family {family_id!r} has unsupported quality_dimension_source "
+                f"{quality_dimension_source!r}"
+            )
+        if "model_issue_owners" in family:
+            raise ValueError(
+                f"deterministic defect family {family_id!r} must not own model semantic observations"
+            )
+
+    seen_requirement_ids: set[str] = set()
+    seen_status_node_types: set[str] = set()
+    for requirement in requirements:
+        if not isinstance(requirement, Mapping):
+            raise ValueError("argument evidence requirement entries must be objects")
+        requirement_id = str(requirement.get("requirement_id") or "").strip()
+        if not requirement_id or requirement_id in seen_requirement_ids:
+            raise ValueError(
+                f"argument evidence requirement_id must be unique and non-empty: {requirement_id!r}"
+            )
+        seen_requirement_ids.add(requirement_id)
+        status_node_type = str(requirement.get("status_node_type") or "").strip()
+        if not status_node_type or status_node_type not in known_node_types:
+            raise ValueError(
+                f"argument evidence requirement {requirement_id} has unknown or missing status_node_type {status_node_type!r}"
+            )
+        if status_node_type in seen_status_node_types:
+            raise ValueError(
+                f"argument evidence status_node_type must be unique: {status_node_type!r}"
+            )
+        seen_status_node_types.add(status_node_type)
+        selector = str(requirement.get("selector") or "").strip()
+        if not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*(?:/(?:\*|[A-Za-z_][A-Za-z0-9_]*))*",
+            selector,
+        ):
+            raise ValueError(
+                f"argument evidence requirement {requirement_id} has invalid selector {selector!r}"
+            )
+        owner_selector = str(requirement.get("owner_selector") or "").strip()
+        if owner_selector:
+            if not re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]*(?:/(?:\*|[A-Za-z_][A-Za-z0-9_]*))*",
+                owner_selector,
+            ):
+                raise ValueError(
+                    f"argument evidence requirement {requirement_id} has invalid owner_selector {owner_selector!r}"
+                )
+            if owner_selector.count("*") != selector.count("*"):
+                raise ValueError(
+                    f"argument evidence requirement {requirement_id} owner_selector must use the same wildcard captures as selector"
+                )
+        subject = str(requirement.get("subject") or "").upper()
+        presence = str(requirement.get("presence") or "").upper()
+        coverage = str(requirement.get("coverage") or "").upper()
+        source_policy = str(requirement.get("source_policy") or "")
+        defect_family = str(requirement.get("deterministic_defect_family") or "")
+        for required_field in (
+            "finding_code",
+            "semantic_component",
+            "quality_dimension",
+            "reason",
+            "suggested_question",
+        ):
+            if not str(requirement.get(required_field) or "").strip():
+                raise ValueError(
+                    f"argument evidence requirement {requirement_id} is missing {required_field}"
+                )
+        if subject not in allowed_subjects:
+            raise ValueError(
+                f"argument evidence requirement {requirement_id} has unknown subject {subject!r}"
+            )
+        if presence not in allowed_presence:
+            raise ValueError(
+                f"argument evidence requirement {requirement_id} has unknown presence {presence!r}"
+            )
+        if coverage not in allowed_coverage:
+            raise ValueError(
+                f"argument evidence requirement {requirement_id} has unknown coverage {coverage!r}"
+            )
+        if subject == "OBJECT" and coverage != "ALL":
+            raise ValueError(
+                f"argument evidence requirement {requirement_id} OBJECT coverage must be ALL"
+            )
+        if source_policy not in source_policies:
+            raise ValueError(
+                f"argument evidence requirement {requirement_id} references unknown "
+                f"source_policy {source_policy!r}"
+            )
+        if defect_family not in families:
+            raise ValueError(
+                f"argument evidence requirement {requirement_id} references unknown "
+                f"deterministic_defect_family {defect_family!r}"
+            )
+        family = families[defect_family]
+        if str(family.get("finding_code_source") or "").upper() == "REQUIREMENT":
+            if not str(requirement.get("finding_code") or "").strip():
+                raise ValueError(
+                    f"argument evidence requirement {requirement_id} must provide finding_code"
+                )
+
+        if str(family.get("quality_dimension_source") or "").upper() == "REQUIREMENT":
+            quality_dimension = str(requirement.get("quality_dimension") or "").strip()
+            if quality_dimension not in dimension_issue_codes:
+                raise ValueError(
+                    f"argument evidence requirement {requirement_id} references unknown quality_dimension {quality_dimension!r}"
+                )
+
+    structural_config = rules["SC-ARGUMENT-STRUCTURAL-REQUIREMENTS"].config
+    structural_requirements = structural_config.get("requirements") or ()
+    if not isinstance(structural_requirements, (tuple, list)) or not structural_requirements:
+        raise ValueError(
+            "SC-ARGUMENT-STRUCTURAL-REQUIREMENTS requirements must be non-empty"
+        )
+    seen_structural_ids: set[str] = set()
+    for requirement in structural_requirements:
+        if not isinstance(requirement, Mapping):
+            raise ValueError("argument structural requirement entries must be objects")
+        requirement_id = str(requirement.get("requirement_id") or "").strip()
+        if not requirement_id or requirement_id in seen_structural_ids:
+            raise ValueError(
+                f"argument structural requirement_id must be unique and non-empty: {requirement_id!r}"
+            )
+        seen_structural_ids.add(requirement_id)
+        selector = str(requirement.get("selector") or "").strip()
+        owner_selector = str(requirement.get("owner_selector") or "").strip()
+        selector_pattern = r"[A-Za-z_][A-Za-z0-9_]*(?:/(?:\*|[A-Za-z_][A-Za-z0-9_]*))*"
+        if not re.fullmatch(selector_pattern, selector):
+            raise ValueError(
+                f"argument structural requirement {requirement_id} has invalid selector {selector!r}"
+            )
+        if not owner_selector or not re.fullmatch(selector_pattern, owner_selector):
+            raise ValueError(
+                f"argument structural requirement {requirement_id} has invalid owner_selector {owner_selector!r}"
+            )
+        if owner_selector.count("*") != selector.count("*"):
+            raise ValueError(
+                f"argument structural requirement {requirement_id} owner_selector must use the same wildcard captures as selector"
+            )
+        presence = str(requirement.get("presence") or "").upper()
+        if presence not in allowed_presence:
+            raise ValueError(
+                f"argument structural requirement {requirement_id} has unknown presence {presence!r}"
+            )
+        defect_family = str(requirement.get("deterministic_defect_family") or "")
+        if defect_family not in families:
+            raise ValueError(
+                f"argument structural requirement {requirement_id} references unknown deterministic_defect_family {defect_family!r}"
+            )
+        for required_field in (
+            "finding_code",
+            "semantic_component",
+            "quality_dimension",
+            "required_node_type",
+            "reason",
+            "repair_instruction",
+        ):
+            if not str(requirement.get(required_field) or "").strip():
+                raise ValueError(
+                    f"argument structural requirement {requirement_id} is missing {required_field}"
+                )
+        family = families[defect_family]
+        if str(family.get("finding_code_source") or "").upper() != "REQUIREMENT":
+            raise ValueError(
+                f"argument structural requirement {requirement_id} defect family must source finding_code from REQUIREMENT"
+            )
+        if str(family.get("quality_dimension_source") or "").upper() != "REQUIREMENT":
+            raise ValueError(
+                f"argument structural requirement {requirement_id} defect family must source quality_dimension from REQUIREMENT"
+            )
+        finding_code = str(requirement.get("finding_code") or "")
+        quality_dimension = str(requirement.get("quality_dimension") or "")
+        if finding_code not in dimension_issue_codes.get(quality_dimension, set()):
+            raise ValueError(
+                f"argument structural requirement {requirement_id} has incompatible quality_dimension/finding_code"
+            )
+
+    graph_ownership = structural_config.get("graph_ownership") or {}
+    if not isinstance(graph_ownership, Mapping):
+        raise ValueError("SC-ARGUMENT-STRUCTURAL-REQUIREMENTS graph_ownership must be an object")
+    graph_defect_family = str(graph_ownership.get("deterministic_defect_family") or "")
+    graph_finding_code = str(graph_ownership.get("finding_code") or "")
+    graph_quality_dimension = str(graph_ownership.get("quality_dimension") or "")
+    if graph_defect_family not in families:
+        raise ValueError("argument graph_ownership references unknown deterministic defect family")
+    graph_family = families[graph_defect_family]
+    if str(graph_family.get("finding_code") or "") != graph_finding_code:
+        raise ValueError("argument graph_ownership finding_code must match its deterministic family")
+    if str(graph_family.get("quality_dimension") or "") != graph_quality_dimension:
+        raise ValueError("argument graph_ownership quality_dimension must match its deterministic family")
+    if graph_finding_code not in dimension_issue_codes.get(graph_quality_dimension, set()):
+        raise ValueError("argument graph_ownership finding_code/quality_dimension are incompatible")
+    for field_name in ("reason", "repair_instruction"):
+        if not str(graph_ownership.get(field_name) or "").strip():
+            raise ValueError(f"argument graph_ownership is missing {field_name}")
+    ownership_node_types = graph_ownership.get("node_types") or {}
+    if not isinstance(ownership_node_types, Mapping) or not ownership_node_types:
+        raise ValueError("argument graph_ownership node_types must be a non-empty mapping")
+    for node_type, policy in ownership_node_types.items():
+        node_type_name = str(node_type).strip()
+        if node_type_name not in component_by_node_type:
+            raise ValueError(f"argument graph_ownership references unknown node type {node_type_name!r}")
+        if not isinstance(policy, Mapping):
+            raise ValueError(f"argument graph_ownership policy for {node_type_name!r} must be an object")
+        mode = str(policy.get("mode") or "").upper()
+        if mode:
+            if mode != "METHOD_OR_THREAD_BINDING" or node_type_name != "ASSUMPTION":
+                raise ValueError(f"argument graph_ownership has unsupported mode {mode!r}")
+            continue
+        relation = str(policy.get("relation") or "").strip()
+        direction = str(policy.get("direction") or "").upper()
+        owner_reference_type = str(policy.get("owner_reference_type") or "").strip()
+        if not relation or direction not in {"INCOMING", "OUTGOING"} or not owner_reference_type:
+            raise ValueError(f"argument graph_ownership policy for {node_type_name!r} is incomplete")
+        owner_members = set(reference_type_members.get(owner_reference_type) or (owner_reference_type,))
+        if not owner_members or not owner_members <= set(component_by_node_type):
+            raise ValueError(f"argument graph_ownership policy for {node_type_name!r} has unknown owner type")
+
+    state_config = rules["SC-ARGUMENT-STATE-OWNERSHIP"].config
+    authoritative_root = str(state_config.get("authoritative_root") or "").strip()
+    if authoritative_root != "result/authored_state":
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP authoritative_root must be result/authored_state"
+        )
+    if str(state_config.get("projection_version") or "") != "ARGUMENT_PROJECTOR_V2":
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP projection_version must be ARGUMENT_PROJECTOR_V2"
+        )
+    if str(state_config.get("overlap_policy") or "").upper() != "COEXIST":
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP overlap_policy must be COEXIST"
+        )
+    if str(state_config.get("repair_mode") or "").upper() != "AUTHORITATIVE_STATE_TRANSACTION":
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP repair_mode must be AUTHORITATIVE_STATE_TRANSACTION"
+        )
+    if str(state_config.get("semantic_observation_identity") or "").upper() != "RUN_SCOPED_INSTANCE":
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP semantic_observation_identity must be RUN_SCOPED_INSTANCE"
+        )
+    if str(state_config.get("quality_guard_mode") or "").upper() != "OBSERVE_CANONICAL_ONLY":
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP quality_guard_mode must be OBSERVE_CANONICAL_ONLY"
+        )
+    if str(state_config.get("decision_arbiter_mode") or "").upper() != "AUDIT_ONLY":
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP decision_arbiter_mode must be AUDIT_ONLY"
+        )
+    field_writers = state_config.get("field_writers") or {}
+    if not isinstance(field_writers, Mapping) or not field_writers:
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP field_writers must be a non-empty mapping"
+        )
+    if any(not str(path).strip() or not str(writer).strip() for path, writer in field_writers.items()):
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP field_writers contains an empty path/writer"
+        )
+    authoritative_fields = tuple(
+        str(value).strip() for value in state_config.get("authoritative_fields") or ()
+        if str(value).strip()
+    )
+    derived_result_fields = tuple(
+        str(value).strip() for value in state_config.get("derived_result_fields") or ()
+        if str(value).strip()
+    )
+    if not authoritative_fields or len(set(authoritative_fields)) != len(authoritative_fields):
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP authoritative_fields must be non-empty and unique"
+        )
+    if not derived_result_fields or len(set(derived_result_fields)) != len(derived_result_fields):
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP derived_result_fields must be non-empty and unique"
+        )
+    if set(authoritative_fields) & set(derived_result_fields):
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP authored and derived fields must be disjoint"
+        )
+    expected_writers = {
+        authoritative_root: "ARGUMENT_STATE_COMMITTER",
+        **{f"result/{field}": "ARGUMENT_PROJECTOR" for field in derived_result_fields},
+        "producer/status": "ARGUMENT_PROJECTOR",
+        "producer/findings": "ARGUMENT_PROJECTOR",
+        "producer/unresolved_items": "ARGUMENT_PROJECTOR",
+        "producer/user_questions": "ARGUMENT_PROJECTOR",
+        "producer/source_refs": "ARGUMENT_PROJECTOR",
+        "producer/warnings": "ARGUMENT_PROJECTOR",
+        "critic/result/checked_node_ids": "ARGUMENT_CRITIC_RUNTIME_FROM_MODEL_REVIEW",
+        "critic/result/chain_checks": "DETERMINISTIC_RUNTIME",
+        "critic/result/design_matrix_checks": "DETERMINISTIC_RUNTIME",
+        "critic/result/structural_checks": "DETERMINISTIC_RUNTIME",
+        "critic/result/evidence_checks": "DETERMINISTIC_RUNTIME",
+        "critic/result/deterministic_receipts": "DETERMINISTIC_RUNTIME",
+        "critic/result/verdict": "CANONICAL_WORK_ITEM_RESOLVER",
+        "critic/findings": "CANONICAL_WORK_ITEM_RESOLVER",
+        "critic/result/quality_dimensions": "CANONICAL_WORK_ITEM_RESOLVER",
+        "critic/user_questions": "CANONICAL_WORK_ITEM_RESOLVER",
+        "critic/unresolved_items": "CANONICAL_WORK_ITEM_RESOLVER",
+        "critic/source_refs": "CANONICAL_WORK_ITEM_RESOLVER",
+        "critic/warnings": "CANONICAL_WORK_ITEM_RESOLVER",
+        "critic/status": "CANONICAL_WORK_ITEM_RESOLVER",
+    }
+    normalized_writers = {str(path): str(writer) for path, writer in field_writers.items()}
+    if normalized_writers != expected_writers:
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP field_writers must assign exactly one declared writer to every persisted authoritative/derived semantic field"
+        )
+    namespace_writers = {
+        str(namespace): str(writer)
+        for namespace, writer in (state_config.get("namespace_writers") or {}).items()
+    }
+    if namespace_writers != {
+        "MACHINE_DEFECT": "DETERMINISTIC_RUNTIME",
+        "SEMANTIC_OBSERVATION": "ARGUMENT_CRITIC_RUNTIME_FROM_MODEL_ISSUES",
+    }:
+        raise ValueError(
+            "SC-ARGUMENT-STATE-OWNERSHIP namespace_writers must keep machine defects and semantic observations in separate writer namespaces"
+        )
+
+    lifecycle_config = rules["SC-ARGUMENT-LIFECYCLE-COMPOSITION"].config
+    if str(lifecycle_config.get("producer_prompt") or "") != "P-ARGUMENT-ARCHITECTURE":
+        raise ValueError(
+            "SC-ARGUMENT-LIFECYCLE-COMPOSITION producer_prompt must identify the authoritative Argument producer"
+        )
+    expected_shapes = {
+        "producer_persisted_output": "PRODUCER_PROTOCOL_OUTPUT",
+        "producer_consumer_value": "PRODUCER_RESULT",
+        "critic_architecture_candidate": "PRODUCER_RESULT",
+        "targeted_repair_original_content": "PRODUCER_RESULT",
+        "repair_application_value": "PRODUCER_RESULT",
+        "repair_canonical_output": "PRODUCER_PROTOCOL_OUTPUT",
+        "authoritative_state": "AUTHORED_STATE",
+        "argument_graph_consumer": "ARGUMENT_GRAPH",
+    }
+    actual_shapes = {
+        str(key): str(value)
+        for key, value in (lifecycle_config.get("shapes") or {}).items()
+    }
+    if actual_shapes != expected_shapes:
+        raise ValueError(
+            "SC-ARGUMENT-LIFECYCLE-COMPOSITION shapes must define the exact ProducerProtocolOutput/ProducerResult/AuthoredState boundaries"
+        )
+    expected_transitions = {
+        "PRODUCER_PERSIST_TO_CONTEXT": ("PRODUCER_PROTOCOL_OUTPUT", "PRODUCER_RESULT", "OUTPUT_RESULT"),
+        "CONTEXT_TO_CRITIC": ("PRODUCER_RESULT", "PRODUCER_RESULT", "AUTHORITATIVE_REPROJECT"),
+        "CRITIC_TO_TARGETED_REPAIR": ("PRODUCER_RESULT", "PRODUCER_RESULT", "IDENTITY"),
+        "TARGETED_REPAIR_TO_PROJECTOR": ("PRODUCER_RESULT", "AUTHORED_STATE", "RESULT_AUTHORED_STATE"),
+        "PROJECTOR_TO_REPAIR_APPLICATION": ("PRODUCER_PROTOCOL_OUTPUT", "PRODUCER_RESULT", "OUTPUT_RESULT"),
+        "REPAIR_APPLICATION_TO_CONTEXT": ("PRODUCER_RESULT", "PRODUCER_RESULT", "ACTIVE_REPAIR_VALUE"),
+        "CONTEXT_TO_CRITIC_REREVIEW": ("PRODUCER_RESULT", "PRODUCER_RESULT", "AUTHORITATIVE_REPROJECT"),
+        "CONTEXT_TO_DOWNSTREAM": ("PRODUCER_RESULT", "PRODUCER_RESULT", "AUTHORITATIVE_REPROJECT"),
+        "CONTEXT_TO_WF3_RESEARCH": ("PRODUCER_RESULT", "ARGUMENT_GRAPH", "AUTHORITATIVE_REPROJECT_ARGUMENT_GRAPH"),
+    }
+    transitions = lifecycle_config.get("transitions") or {}
+    if set(str(key) for key in transitions) != set(expected_transitions):
+        raise ValueError(
+            "SC-ARGUMENT-LIFECYCLE-COMPOSITION transitions must cover every registered Argument lifecycle handoff"
+        )
+    for transition_id, expected in expected_transitions.items():
+        raw = transitions.get(transition_id) or {}
+        actual = (
+            str(raw.get("writer_shape") or ""),
+            str(raw.get("reader_shape") or ""),
+            str(raw.get("adapter") or ""),
+        )
+        if actual != expected:
+            raise ValueError(
+                f"SC-ARGUMENT-LIFECYCLE-COMPOSITION {transition_id} shape contract mismatch: {actual!r}"
+            )
+    lifecycle_rules = {
+        str(key): str(value)
+        for key, value in (lifecycle_config.get("lifecycle_rules") or {}).items()
+    }
+    if lifecycle_rules != {
+        "repair_commit_and_rereview_checkpoint": "ATOMIC",
+        "original_producer_regeneration": "SUPERSEDES_ACTIVE_REPAIR",
+        "integration_argument_regeneration": "SUPERSEDES_ACTIVE_REPAIR",
+        "human_input_rereview": "PRESERVES_ACTIVE_REPAIR",
+        "prerequisite_source_scope": "TRANSITIVE_FROZEN_CLOSURE",
+        "post_projection_contract_failure": "REGENERATE_OR_RUNTIME_FAIL_NO_LLM_ENVELOPE_REPAIR",
+    }:
+        raise ValueError(
+            "SC-ARGUMENT-LIFECYCLE-COMPOSITION lifecycle_rules must close repair commit, regeneration and human-input rereview semantics"
+        )
+
+    repair_config = rules["SC-ARGUMENT-TARGETED-REPAIR-POLICY"].config
+    repair_authoritative_root = str(repair_config.get("authoritative_root") or "").strip()
+    persisted_tokens = tuple(token for token in authoritative_root.split("/") if token)
+    expected_repair_root = "/" + "/".join(persisted_tokens[1:])
+    if not persisted_tokens or persisted_tokens[0] != "result" or repair_authoritative_root != expected_repair_root:
+        raise ValueError(
+            "SC-ARGUMENT-TARGETED-REPAIR-POLICY authoritative_root must be the ProducerResult-relative form of the persisted state root"
+        )
+    editable_fields = {
+        str(value).strip()
+        for value in repair_config.get("editable_fields") or ()
+        if str(value).strip()
+    }
+    machine_fields = {
+        str(value).strip()
+        for value in repair_config.get("machine_fields") or ()
+        if str(value).strip()
+    }
+    machine_suffixes = tuple(
+        str(value).strip()
+        for value in repair_config.get("machine_suffixes") or ()
+        if str(value).strip()
+    )
+    if not editable_fields or not machine_fields or not machine_suffixes:
+        raise ValueError(
+            "SC-ARGUMENT-TARGETED-REPAIR-POLICY must define editable_fields, "
+            "machine_fields, and machine_suffixes"
+        )
+    overlap = sorted(editable_fields & machine_fields)
+    if overlap:
+        raise ValueError(
+            "SC-ARGUMENT-TARGETED-REPAIR-POLICY editable/machine fields overlap: "
+            + ", ".join(overlap)
+        )
+    suffix_collisions = sorted(
+        field
+        for field in editable_fields
+        if any(field.endswith(suffix) for suffix in machine_suffixes)
+    )
+    if suffix_collisions:
+        raise ValueError(
+            "SC-ARGUMENT-TARGETED-REPAIR-POLICY editable fields match machine suffixes: "
+            + ", ".join(suffix_collisions)
+        )
+    for bound_name in ("local_context_max_depth", "local_context_max_items"):
+        value = repair_config.get(bound_name)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError(
+                f"SC-ARGUMENT-TARGETED-REPAIR-POLICY {bound_name} must be a positive integer"
+            )
+    reference_node_types = repair_config.get("reference_node_types") or {}
+    if not isinstance(reference_node_types, Mapping) or not reference_node_types:
+        raise ValueError(
+            "SC-ARGUMENT-TARGETED-REPAIR-POLICY reference_node_types must be a non-empty mapping"
+        )
+    registered_reference_fields = {str(field) for field in reference_node_types}
+    matrix_node_types: set[str] = set()
+    for reference_type in reference_node_types.values():
+        ref_type = str(reference_type)
+        members = reference_type_members.get(ref_type) or (ref_type,)
+        matrix_node_types.update(str(value) for value in members)
+    topology_node_types = {str(value) for value in ownership_node_types}
+    graph_node_types = set(component_by_node_type) - {"CENTRAL_PROPOSITION", "RESEARCH_QUESTION"}
+    uncovered_graph_types = sorted(graph_node_types - matrix_node_types - topology_node_types)
+    if uncovered_graph_types:
+        raise ValueError(
+            "argument semantic graph node types lack matrix/topology ownership: "
+            + ", ".join(uncovered_graph_types)
+        )
+    unknown_matrix_fields = sorted(
+        str(field) for field in matrix_fields.values() if str(field) not in registered_reference_fields
+    )
+    if unknown_matrix_fields:
+        raise ValueError(
+            "SC-ARGUMENT-CRITIC-ISSUE-TAXONOMY matrix fields are not registered repair reference fields: "
+            + ", ".join(unknown_matrix_fields)
+        )
+    if any(
+        not str(field).strip() or not str(node_type).strip()
+        for field, node_type in reference_node_types.items()
+    ):
+        raise ValueError(
+            "SC-ARGUMENT-TARGETED-REPAIR-POLICY reference_node_types contains an empty entry"
+        )
 
 
 def _load_reference_semantics(groups: Mapping[str, Any]) -> dict[str, ReferenceSemantic]:

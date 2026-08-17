@@ -58,7 +58,12 @@ def test_replay_findings_use_prompt_documented_codes() -> None:
         output = _json(PACK_ROOT / item["fixture_path"]).get("expected_output")
         if not isinstance(output, dict):
             continue
+        entry = pack.entry(item["prompt_id"])
+        semantic_mode = str(entry.get("model_contract_mode") or "").upper() == "SEMANTIC"
         documented = documented_finding_codes(pack.prompt_text(item["prompt_id"]))
+        if semantic_mode:
+            assert entry.get("model_output_schema"), item["prompt_id"]
+            continue
         assert documented, item["prompt_id"]
         for finding in output.get("findings") or []:
             assert finding["code"] in documented, (item["fixture_path"], finding["code"])

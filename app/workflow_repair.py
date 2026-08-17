@@ -7,6 +7,12 @@ import re
 from typing import Any
 
 from .executor import PromptExecutionError
+from .deterministic_repair import apply_deterministic_contract_repairs
+from .model_semantic_contracts import (
+    argument_authoritative_repair_paths,
+    project_argument_authoritative_state,
+    targeted_repair_structural_blockers,
+)
 from .util import new_id, sha256_json, utc_now
 from .repair_ledger import RepairLedger
 from .runtime_failures import FailureCategory, classify_runtime_failure
@@ -20,8 +26,20 @@ from .json_pointer import (
 )
 from .output_integrity import attach_trusted_source_catalog
 from .workflow_defs import CRITIC_PRODUCER
+from .contracts.semantic_contract import get_semantic_contract
 
 
+
+
+
+
+def _authoritative_argument_producer_prompt() -> str:
+    return str(
+        get_semantic_contract()
+        .rule("SC-ARGUMENT-LIFECYCLE-COMPOSITION")
+        .config.get("producer_prompt")
+        or ""
+    )
 
 
 PRODUCER_RESULT_KEY = {
@@ -38,6 +56,23 @@ PRODUCER_RESULT_KEY = {
     "P-WRITE-CONTENT": None,
     "P-EXPRESSION-POLISH": None,
 }
+
+
+def producer_consumer_value(prompt_id: str, protocol_output: dict[str, Any]) -> Any:
+    """Return the exact value downstream consumers read from one Producer output.
+
+    ``protocol_output`` is the complete Prompt output envelope.  ``repaired_value``
+    artifacts must persist this consumer value, never the outer envelope.
+    """
+    if not isinstance(protocol_output, dict):
+        return None
+    result = protocol_output.get("result")
+    key = PRODUCER_RESULT_KEY.get(prompt_id)
+    if key is None:
+        return copy.deepcopy(result) if result is not None else None
+    if not isinstance(result, dict):
+        return None
+    return copy.deepcopy(result.get(key))
 
 
 def repair_override_key(producer_prompt: str, state: dict[str, Any]) -> str:
@@ -221,6 +256,7 @@ class WorkflowRepairMixin:
         )
         return consumed, guard_report
 
+
     async def _repair_producer_contract_failure(
         self,
         wf: dict[str, Any],
@@ -231,207 +267,158 @@ class WorkflowRepairMixin:
         exc: BaseException,
         classification: Any,
     ) -> dict[str, Any]:
-        """Attempt one generic model-backed repair of a persisted producer object."""
+        """Repair a located producer contract failure without broadening authority.
 
+        Deterministic representation/policy rules are applied first on a copy.
+        Only unresolved local semantic errors are sent to P-TARGETED-REPAIR.
+        Contract-shape failures from the repair model receive feedback-aware fresh
+        generations; transient provider failures remain provider retry concerns.
+        """
         result: dict[str, Any] = {"attempted": False, "result": None}
         if (
             prompt_id not in PRODUCER_RESULT_KEY
             or prompt_id == "P-TARGETED-REPAIR"
             or classification.category is not FailureCategory.OUTPUT_CONTRACT
-            or str(classification.failure_kind or "")
-            in self._CONTRACT_REPAIR_EXCLUDED_FAILURE_KINDS
+            or str(classification.failure_kind or "") in self._CONTRACT_REPAIR_EXCLUDED_FAILURE_KINDS
         ):
             return result
-        validation_errors = [
-            str(item) for item in (getattr(exc, "validation_errors", None) or [])
-            if str(item)
-        ]
-        run_id = str(getattr(exc, "run_id", "") or "").strip()
-        if not validation_errors or not run_id:
-            return result
-        row = self.db.fetchone(
-            "SELECT id,input_json,output_json FROM prompt_runs "
-            "WHERE id=? AND project_id=? AND workflow_id=? AND prompt_id=? "
-            "AND status='ERROR' AND output_json IS NOT NULL",
-            (run_id, wf["project_id"], wf["id"], prompt_id),
+        validation_errors=[str(x) for x in (getattr(exc,"validation_errors",None) or []) if str(x)]
+        run_id=str(getattr(exc,"run_id","") or "").strip()
+        if not validation_errors or not run_id: return result
+        row=self.db.fetchone(
+            "SELECT id,input_json,output_json FROM prompt_runs WHERE id=? AND project_id=? AND workflow_id=? AND prompt_id=? AND status='ERROR' AND output_json IS NOT NULL",
+            (run_id,wf["project_id"],wf["id"],prompt_id),
         )
-        if not row:
-            return result
+        if not row: return result
         try:
-            candidate = json.loads(row.get("output_json") or "null")
-            producer_input = json.loads(row.get("input_json") or "null")
-        except (TypeError, json.JSONDecodeError):
-            return result
-        if not isinstance(candidate, dict) or not isinstance(producer_input, dict):
-            return result
-        mapped = self._contract_repair_findings(
-            prompt_id,
-            candidate,
-            validation_errors,
-        )
-        if mapped is None:
-            return result
-        findings, validator_paths = mapped
-        allowed_paths = [
-            join_pointer("content", *parse_pointer(path))
-            for path in validator_paths
-        ]
-        protected_paths, protected_hashes = self._contract_repair_protection(
-            candidate,
-            validator_paths,
-        )
-        candidate_hash = sha256_json(candidate)
-        original_object = {
-            "object_type": prompt_id.removeprefix("P-").replace("-", "_"),
-            "object_id": f"contract-{run_id}"[:128],
-            "object_hash": candidate_hash,
-            "content": copy.deepcopy(candidate),
-        }
-        original_ref = {
-            "object_id": original_object["object_id"],
-            "object_type": original_object["object_type"],
-            "version": 1,
-            "object_hash": candidate_hash,
-            "security_level": self._project_level(wf["project_id"]),
-            "display_name": f"{prompt_id}原始失败输出",
-        }
-        overrides = {
-            "payload.original_object": original_object,
-            "payload.original_producer": PRODUCER_ROLE[prompt_id],
-            "payload.findings_to_repair": findings,
-            "payload.allowed_paths": allowed_paths,
-            "payload.protected_paths": protected_paths,
-            "payload.protected_hashes": protected_hashes,
-            "payload.original_input_refs": [original_ref],
-            "payload.inherited_source_catalog": (
-                self._inherited_producer_source_catalog(wf, state, prompt_id)
-            ),
-        }
+            source_candidate=json.loads(row.get("output_json") or "null")
+            producer_input=json.loads(row.get("input_json") or "null")
+        except (TypeError,json.JSONDecodeError): return result
+        if not isinstance(source_candidate,dict) or not isinstance(producer_input,dict): return result
+        mapped=self._contract_repair_findings(prompt_id,source_candidate,validation_errors)
+        if mapped is None: return result
+        result["attempted"]=True
+        findings,validator_paths=mapped
+        source_candidate_hash=sha256_json(source_candidate)
         if not str(state.get("original_environment") or "").strip():
-            producer_environment = str(
-                self.pack.entry(prompt_id).get("required_environment") or ""
-            ).strip()
-            if producer_environment in {"OFFLINE_LOCAL", "ONLINE_PUBLIC"}:
-                state["original_environment"] = producer_environment
-        result["attempted"] = True
-        try:
-            repair_envelope = self.context_builder.build(
-                "P-TARGETED-REPAIR",
-                wf["project_id"],
-                workflow_id=wf["id"],
-                workflow_state=state,
-                overrides=overrides,
+            env=str(self.pack.entry(prompt_id).get("required_environment") or "").strip()
+            if env in {"OFFLINE_LOCAL","ONLINE_PUBLIC"}: state["original_environment"]=env
+
+        def producer_value(validated):
+            return producer_consumer_value(prompt_id, validated)
+        def local_route(mode):
+            return {"environment":str(state.get("original_environment") or "OFFLINE_LOCAL"),"model_id":mode,"endpoint_id":"local-deterministic"}
+        def finalize(*,validated,guard_report,repair_run_id,route,call_key,active_findings,canonical_allowed_paths,repair_mode,deterministic_rule_ids=None):
+            repaired_value=producer_value(validated)
+            if repaired_value is None: return result
+            artifact_id=self._persist_repair_application(
+                wf=wf,state=state,producer_prompt=prompt_id,critic_prompt="OUTPUT_CONTRACT_VALIDATOR",repair_run_id=repair_run_id,
+                original_object_hash=source_candidate_hash,repaired_value=repaired_value,findings=active_findings,allowed_paths=canonical_allowed_paths,
+                collection_key=None,repaired_canonical_output=validated,
             )
-            repair_call_key = "call-contract-repair-" + sha256_json(
-                {
-                    "workflow_id": wf["id"],
-                    "prompt_id": prompt_id,
-                    "run_id": run_id,
-                    "candidate_hash": candidate_hash,
-                    "validation_errors": validation_errors,
-                }
-            )[:24]
-            repaired = await self._execute_prompt_with_provider_retry(
-                wf,
-                state,
-                prompt_id="P-TARGETED-REPAIR",
-                envelope=repair_envelope,
-                call_key=repair_call_key,
-                retry_categories=frozenset({
-                    FailureCategory.PROVIDER_TRANSIENT,
-                    FailureCategory.OUTPUT_CONTRACT,
-                }),
-            )
-            repair_output = repaired.get("output")
-            repair_payload = (
-                repair_output.get("result")
-                if isinstance(repair_output, dict)
-                else None
-            )
-            repaired_candidate = (
-                repair_payload.get("repaired_object")
-                if isinstance(repair_payload, dict)
-                else None
-            )
-            if (
-                isinstance(repaired_candidate, dict)
-                and isinstance(repaired_candidate.get("content"), dict)
-            ):
-                repaired_candidate = repaired_candidate["content"]
-            if repaired.get("status") != "PASS" or not isinstance(
-                repaired_candidate, dict
-            ):
-                return result
-            validated, guard_report = self._validate_repaired_producer_output(
-                prompt_id=prompt_id,
-                candidate=repaired_candidate,
-                producer_input=producer_input,
-                quality_input=envelope,
-            )
-            if sha256_json(validated) == candidate_hash:
-                return result
-            producer_result = validated.get("result")
-            result_key = PRODUCER_RESULT_KEY[prompt_id]
-            repaired_value = (
-                producer_result.get(result_key)
-                if result_key and isinstance(producer_result, dict)
-                else producer_result
-            )
-            if repaired_value is None:
-                return result
-            artifact_id = self._persist_repair_application(
-                wf=wf,
-                state=state,
-                producer_prompt=prompt_id,
-                critic_prompt="OUTPUT_CONTRACT_VALIDATOR",
-                repair_run_id=str(repaired.get("run_id") or ""),
-                original_object_hash=candidate_hash,
-                repaired_value=repaired_value,
-                findings=findings,
-                allowed_paths=allowed_paths,
-                collection_key=None,
-            )
-            active_section_id = str(state.get("active_section_id") or "").strip()
+            active_section_id=str(state.get("active_section_id") or "").strip()
             if active_section_id:
-                target_key = self._repair_override_key(prompt_id, state)
-                state.setdefault("producer_contract_repair_markers", {})[
-                    target_key
-                ] = {
-                    "section_id": active_section_id,
-                    "repair_run_id": str(repaired.get("run_id") or ""),
-                }
-            result["result"] = {
-                "run_id": repaired["run_id"],
-                "prompt_id": prompt_id,
-                "status": validated.get("status", "ERROR"),
-                "route": repaired["route"],
-                "output": validated,
-                "guard_report": guard_report,
-                "quality_guard_enabled": getattr(
-                    self.executor, "quality_guard_enabled", False
-                ),
-                "guard_observation_status": guard_report.get(
-                    "observation_status"
-                ),
-                "call_key": repaired.get("call_key"),
-                "contract_repair": {
-                    "source_run_id": run_id,
-                    "repair_run_id": repaired["run_id"],
-                    "repair_application_artifact_id": artifact_id,
-                    "allowed_paths": allowed_paths,
-                    "original_hash": candidate_hash,
-                    "repaired_hash": sha256_json(validated),
-                },
-            }
-        except (
-            PromptExecutionError,
-            ProviderRetriesExhausted,
-            ValueError,
-            KeyError,
-            TypeError,
-        ):
+                target_key=self._repair_override_key(prompt_id,state)
+                state.setdefault("producer_contract_repair_markers",{})[target_key]={"section_id":active_section_id,"repair_run_id":repair_run_id,"repair_application_artifact_id":artifact_id}
+            result["result"]={"run_id":repair_run_id,"prompt_id":prompt_id,"status":validated.get("status","ERROR"),"route":route,"output":validated,
+                              "guard_report":guard_report,"quality_guard_enabled":getattr(self.executor,"quality_guard_enabled",False),
+                              "guard_observation_status":guard_report.get("observation_status"),"call_key":call_key,
+                              "contract_repair":{"source_run_id":run_id,"repair_run_id":repair_run_id,"repair_application_artifact_id":artifact_id,"repair_mode":repair_mode,
+                                                 "allowed_paths":canonical_allowed_paths,"original_hash":source_candidate_hash,"repaired_hash":sha256_json(validated),
+                                                 "deterministic_rule_ids":list(deterministic_rule_ids or [])}}
             return result
+
+        deterministic=apply_deterministic_contract_repairs(source_candidate,validation_errors,validator_paths)
+        candidate=deterministic.candidate; deterministic_paths=list(deterministic.changed_paths); deterministic_rules=list(deterministic.rule_ids)
+        if deterministic_paths:
+            try:
+                validated,guard_report=self._validate_repaired_producer_output(prompt_id=prompt_id,candidate=candidate,producer_input=producer_input,quality_input=envelope)
+            except PromptExecutionError as deterministic_error:
+                validation_errors=[str(x) for x in (getattr(deterministic_error,"validation_errors",None) or []) if str(x)]
+                if not validation_errors: return result
+                remapped=self._contract_repair_findings(prompt_id,candidate,validation_errors)
+                if remapped is None: return result
+                findings,validator_paths=remapped
+            else:
+                if sha256_json(validated)==source_candidate_hash: return result
+                canonical_allowed=[join_pointer("content",*parse_pointer(path)) for path in deterministic_paths]
+                return finalize(validated=validated,guard_report=guard_report,repair_run_id=f"deterministic-{run_id}",route=local_route("deterministic-contract-repair"),call_key=None,
+                                active_findings=findings,canonical_allowed_paths=canonical_allowed,repair_mode="DETERMINISTIC",deterministic_rule_ids=deterministic_rules)
+
+        # Argument Architecture is authoritative-state based.  Once the semantic
+        # model response has been expanded into a full Producer protocol output,
+        # that envelope and every derived projection are Runtime-owned.  If the
+        # canonical full-output contract still fails after deterministic
+        # representation repair, do not hand the protocol envelope to the LLM
+        # Targeted Repair agent.  A fresh Producer attempt (owned by the common
+        # bounded retry path) or an explicit runtime-contract failure is the only
+        # safe recovery; otherwise Targeted Repair would become a second writer
+        # for machine-owned fields.
+        if prompt_id == _authoritative_argument_producer_prompt():
+            state.setdefault("contract_repair_escalations", []).append(
+                {
+                    "prompt_id": prompt_id,
+                    "source_run_id": run_id,
+                    "reason": "AUTHORITATIVE_RUNTIME_CONTRACT_REGENERATION_REQUIRED",
+                    "details": list(validation_errors)[:20],
+                    "created_at": utc_now(),
+                }
+            )
+            del state["contract_repair_escalations"][:-50]
+            self._update(wf, state=state)
+            return result
+
+        canonical_allowed_paths=[join_pointer("content",*parse_pointer(path)) for path in validator_paths]
+        protected_paths,protected_hashes=self._contract_repair_protection(candidate,validator_paths)
+        candidate_hash=sha256_json(candidate)
+        original_object={"object_type":prompt_id.removeprefix("P-").replace("-","_"),"object_id":f"contract-{run_id}"[:128],"object_hash":candidate_hash,"content":copy.deepcopy(candidate)}
+        original_ref={"object_id":original_object["object_id"],"object_type":original_object["object_type"],"version":1,"object_hash":candidate_hash,"security_level":self._project_level(wf["project_id"]),"display_name":f"{prompt_id}原始失败输出"}
+        base_overrides={"payload.original_object":original_object,"payload.original_producer":PRODUCER_ROLE[prompt_id],"payload.findings_to_repair":findings,
+                        "payload.allowed_paths":canonical_allowed_paths,"payload.protected_paths":protected_paths,"payload.protected_hashes":protected_hashes,
+                        "payload.original_input_refs":[original_ref],"payload.inherited_source_catalog":self._inherited_producer_source_catalog(wf,state,prompt_id)}
+        structural_blockers=targeted_repair_structural_blockers({"payload":{"original_object":original_object,"original_producer":PRODUCER_ROLE[prompt_id],"findings_to_repair":findings,
+                                                                            "allowed_paths":canonical_allowed_paths,"protected_paths":protected_paths,"protected_hashes":protected_hashes,"human_resolutions":[]}})
+        if structural_blockers:
+            state.setdefault("contract_repair_escalations",[]).append({"prompt_id":prompt_id,"source_run_id":run_id,"reason":"STRUCTURAL_SEMANTIC_REGENERATION_REQUIRED","details":structural_blockers,"created_at":utc_now()})
+            del state["contract_repair_escalations"][:-50]; self._update(wf,state=state); return result
+
+        options=state.get("options") or {}
+        try: contract_retry_limit=int(options.get("targeted_repair_contract_retry_limit",options.get("provider_retry_limit",2)))
+        except (TypeError,ValueError): contract_retry_limit=2
+        contract_retry_limit=max(0,min(contract_retry_limit,5)); feedback=[]
+        for semantic_attempt in range(1,contract_retry_limit+2):
+            attempt_overrides=dict(base_overrides)
+            if feedback: attempt_overrides["payload.contract_feedback"]={"attempt":semantic_attempt,"validation_errors":feedback[:20]}
+            try:
+                repair_envelope=self.context_builder.build("P-TARGETED-REPAIR",wf["project_id"],workflow_id=wf["id"],workflow_state=state,overrides=attempt_overrides)
+                repair_call_key="call-contract-repair-"+sha256_json({"workflow_id":wf["id"],"prompt_id":prompt_id,"source_run_id":run_id,"candidate_hash":candidate_hash,"semantic_attempt":semantic_attempt,"feedback":feedback})[:24]
+                repaired=await self._execute_prompt_with_provider_retry(wf,state,prompt_id="P-TARGETED-REPAIR",envelope=repair_envelope,call_key=repair_call_key,retry_categories=frozenset({FailureCategory.PROVIDER_TRANSIENT}))
+            except ProviderRetriesExhausted:
+                return result
+            except (PromptExecutionError,ValueError,KeyError,TypeError) as repair_error:
+                rc=classify_runtime_failure(repair_error)
+                if rc.category is FailureCategory.OUTPUT_CONTRACT and semantic_attempt<=contract_retry_limit:
+                    feedback=[str(x) for x in (getattr(repair_error,"validation_errors",None) or []) if str(x)] or [redact_secret_text(str(repair_error))]
+                    continue
+                return result
+            repair_output=repaired.get("output"); repair_payload=repair_output.get("result") if isinstance(repair_output,dict) else None; repaired_candidate=repair_payload.get("repaired_object") if isinstance(repair_payload,dict) else None
+            if isinstance(repaired_candidate,dict) and isinstance(repaired_candidate.get("content"),dict): repaired_candidate=repaired_candidate["content"]
+            if repaired.get("status")!="PASS": return result
+            if not isinstance(repaired_candidate,dict):
+                if semantic_attempt<=contract_retry_limit: feedback=["Targeted Repair did not produce a repaired object"]; continue
+                return result
+            try:
+                validated,guard_report=self._validate_repaired_producer_output(prompt_id=prompt_id,candidate=repaired_candidate,producer_input=producer_input,quality_input=envelope)
+            except PromptExecutionError as producer_validation_error:
+                if semantic_attempt<=contract_retry_limit:
+                    feedback=[str(x) for x in (getattr(producer_validation_error,"validation_errors",None) or []) if str(x)] or [redact_secret_text(str(producer_validation_error))]; continue
+                return result
+            if sha256_json(validated)==source_candidate_hash: return result
+            combined_allowed=list(dict.fromkeys([*[join_pointer("content",*parse_pointer(path)) for path in deterministic_paths],*canonical_allowed_paths]))
+            return finalize(validated=validated,guard_report=guard_report,repair_run_id=str(repaired.get("run_id") or ""),route=copy.deepcopy(repaired.get("route") or {}),call_key=repaired.get("call_key"),
+                            active_findings=findings,canonical_allowed_paths=combined_allowed,repair_mode="SEMANTIC_OPERATIONS",deterministic_rule_ids=deterministic_rules)
         return result
+
 
     def _replay_producer_contract_repair(
         self,
@@ -441,65 +428,34 @@ class WorkflowRepairMixin:
         envelope: dict[str, Any],
         source_run_id: str,
         repair_run_id: str,
+        repair_application_artifact_id: str | None = None,
     ) -> dict[str, Any]:
-        """Revalidate a committed repair without replaying the producer call."""
-
-        source = self.db.fetchone(
-            "SELECT input_json FROM prompt_runs WHERE id=? AND project_id=? "
-            "AND workflow_id=? AND prompt_id=? AND output_json IS NOT NULL",
-            (source_run_id, wf["project_id"], wf["id"], prompt_id),
-        )
-        repair = self.db.fetchone(
-            "SELECT output_json,model_id,endpoint_id FROM prompt_runs "
-            "WHERE id=? AND project_id=? AND workflow_id=? "
-            "AND prompt_id='P-TARGETED-REPAIR' AND output_json IS NOT NULL",
-            (repair_run_id, wf["project_id"], wf["id"]),
-        )
-        if not source or not repair:
-            raise PromptExecutionError("Persisted producer contract repair is unavailable")
-        try:
-            producer_input = json.loads(source.get("input_json") or "null")
-            repair_output = json.loads(repair.get("output_json") or "null")
-            repaired_candidate = repair_output["result"]["repaired_object"]
-            if (
-                isinstance(repaired_candidate, dict)
-                and isinstance(repaired_candidate.get("content"), dict)
-            ):
-                repaired_candidate = repaired_candidate["content"]
-        except (TypeError, KeyError, json.JSONDecodeError) as exc:
-            raise PromptExecutionError(
-                "Persisted producer contract repair is invalid"
-            ) from exc
-        validated, guard_report = self._validate_repaired_producer_output(
-            prompt_id=prompt_id,
-            candidate=repaired_candidate,
-            producer_input=producer_input,
-            quality_input=envelope,
-        )
-        return {
-            "run_id": repair_run_id,
-            "prompt_id": prompt_id,
-            "status": validated.get("status", "ERROR"),
-            "route": {
-                "environment": wf.get("state", {}).get(
-                    "original_environment", "OFFLINE_LOCAL"
-                ),
-                "model_id": repair.get("model_id"),
-                "endpoint_id": repair.get("endpoint_id"),
-            },
-            "output": validated,
-            "guard_report": guard_report,
-            "quality_guard_enabled": getattr(
-                self.executor, "quality_guard_enabled", False
-            ),
-            "guard_observation_status": guard_report.get("observation_status"),
-            "call_key": None,
-            "reused_committed_result": True,
-            "contract_repair": {
-                "source_run_id": source_run_id,
-                "repair_run_id": repair_run_id,
-            },
-        }
+        """Revalidate a committed contract repair without regenerating it."""
+        source=self.db.fetchone("SELECT input_json FROM prompt_runs WHERE id=? AND project_id=? AND workflow_id=? AND prompt_id=? AND output_json IS NOT NULL",(source_run_id,wf["project_id"],wf["id"],prompt_id))
+        if not source: raise PromptExecutionError("Persisted producer contract repair source is unavailable")
+        try: producer_input=json.loads(source.get("input_json") or "null")
+        except (TypeError,json.JSONDecodeError) as exc: raise PromptExecutionError("Persisted producer contract repair source is invalid") from exc
+        repaired_candidate=None; model_id=None; endpoint_id=None
+        if repair_application_artifact_id:
+            artifact=self.db.fetchone("SELECT content_json FROM artifacts WHERE id=? AND project_id=? AND workflow_id=? AND artifact_type='REPAIR_APPLICATION'",(repair_application_artifact_id,wf["project_id"],wf["id"]))
+            if artifact:
+                try:
+                    ap=json.loads(artifact.get("content_json") or "null"); canonical=ap.get("repaired_canonical_output")
+                    if isinstance(canonical,dict): repaired_candidate=canonical; model_id="deterministic-contract-repair" if str(repair_run_id).startswith("deterministic-") else "persisted-targeted-repair"; endpoint_id="repair-application-artifact"
+                except (TypeError,json.JSONDecodeError): repaired_candidate=None
+        if repaired_candidate is None:
+            repair=self.db.fetchone("SELECT output_json,model_id,endpoint_id FROM prompt_runs WHERE id=? AND project_id=? AND workflow_id=? AND prompt_id='P-TARGETED-REPAIR' AND output_json IS NOT NULL",(repair_run_id,wf["project_id"],wf["id"]))
+            if not repair: raise PromptExecutionError("Persisted producer contract repair is unavailable")
+            try:
+                ro=json.loads(repair.get("output_json") or "null"); repaired_candidate=ro["result"]["repaired_object"]
+                if isinstance(repaired_candidate,dict) and isinstance(repaired_candidate.get("content"),dict): repaired_candidate=repaired_candidate["content"]
+            except (TypeError,KeyError,json.JSONDecodeError) as exc: raise PromptExecutionError("Persisted producer contract repair is invalid") from exc
+            model_id=repair.get("model_id"); endpoint_id=repair.get("endpoint_id")
+        if not isinstance(repaired_candidate,dict): raise PromptExecutionError("Persisted producer contract repair has no canonical output")
+        validated,guard_report=self._validate_repaired_producer_output(prompt_id=prompt_id,candidate=repaired_candidate,producer_input=producer_input,quality_input=envelope)
+        return {"run_id":repair_run_id,"prompt_id":prompt_id,"status":validated.get("status","ERROR"),"route":{"environment":wf.get("state",{}).get("original_environment","OFFLINE_LOCAL"),"model_id":model_id,"endpoint_id":endpoint_id},"output":validated,"guard_report":guard_report,
+                "quality_guard_enabled":getattr(self.executor,"quality_guard_enabled",False),"guard_observation_status":guard_report.get("observation_status"),"call_key":None,"reused_committed_result":True,
+                "contract_repair":{"source_run_id":source_run_id,"repair_run_id":repair_run_id,"repair_application_artifact_id":repair_application_artifact_id}}
 
     def _inherited_producer_source_catalog(
         self,
@@ -605,16 +561,30 @@ class WorkflowRepairMixin:
         identified: list[dict[str, Any]] = []
         for ordinal, finding in enumerate(findings):
             item = copy.deepcopy(finding)
-            digest = sha256_json(
-                {
-                    "critic_prompt": critic_prompt,
-                    "ordinal": ordinal,
-                    "code": item.get("code"),
-                    "target_type": item.get("target_type"),
-                    "target_path_or_span": item.get("target_path_or_span"),
-                    "description": item.get("description"),
-                }
-            )
+            defect_key = str(item.get("defect_key") or "").strip()
+            if defect_key:
+                # Semantic-contract findings already own a stable machine identity.
+                # Repair tracking must preserve that identity across wording changes
+                # instead of rebuilding it from descriptions or target prose.
+                digest = sha256_json(
+                    {
+                        "critic_prompt": critic_prompt,
+                        "defect_key": defect_key,
+                    }
+                )
+            else:
+                # Legacy/non-semantic critics do not yet expose defect_key. Preserve
+                # their established per-instance identity contract unchanged.
+                digest = sha256_json(
+                    {
+                        "critic_prompt": critic_prompt,
+                        "ordinal": ordinal,
+                        "code": item.get("code"),
+                        "target_type": item.get("target_type"),
+                        "target_path_or_span": item.get("target_path_or_span"),
+                        "description": item.get("description"),
+                    }
+                )
             item["finding_instance_id"] = f"finding-{digest[:32]}"
             identified.append(item)
         return identified
@@ -771,6 +741,7 @@ class WorkflowRepairMixin:
         critic_prompt: str,
         producer_prompt: str,
         reason: str,
+        preserve_application_artifact_id: str | None = None,
     ) -> None:
         attempt_key = self._repair_state_key(critic_prompt, state)
         RepairLedger.reset_semantic_budget(
@@ -793,13 +764,24 @@ class WorkflowRepairMixin:
         section_id = str(state.get("active_section_id") or "").strip()
         progress = (state.get("section_progress") or {}).get(section_id) or {}
         latest_run = (progress.get("runs") or [{}])[-1]
-        preserve_current_contract_repair = bool(
-            isinstance(marker, dict)
-            and str(marker.get("section_id") or "") == section_id
-            and str(marker.get("repair_run_id") or "")
-            == str(latest_run.get("run_id") or "")
+        preserve_id = str(preserve_application_artifact_id or "").strip()
+        active_index = state.get("repair_application_artifact_ids")
+        active_ids = (active_index or {}).get(target_key) if isinstance(active_index, dict) else None
+        preserve_explicit_application = bool(
+            preserve_id and preserve_id in {str(item) for item in (active_ids or [])}
         )
-        if not preserve_current_contract_repair:
+        preserve_current_contract_repair = bool(
+            preserve_explicit_application
+            or (
+                isinstance(marker, dict)
+                and str(marker.get("section_id") or "") == section_id
+                and str(marker.get("repair_run_id") or "")
+                == str(latest_run.get("run_id") or "")
+            )
+        )
+        if preserve_explicit_application and isinstance(active_index, dict):
+            active_index[target_key] = [preserve_id]
+        elif not preserve_current_contract_repair:
             self._deactivate_repair_application(state, producer_prompt)
         pending = state.get("pending_repair_rereviews")
         if isinstance(pending, dict):
@@ -1093,6 +1075,8 @@ class WorkflowRepairMixin:
         findings: list[dict[str, Any]],
         allowed_paths: list[str],
         collection_key: str | None,
+        repaired_canonical_output: dict[str, Any] | None = None,
+        atomic_rereview_checkpoint: dict[str, Any] | None = None,
     ) -> str:
         target_key = self._repair_override_key(producer_prompt, state)
         artifact_id = new_id("artifact")
@@ -1108,6 +1092,21 @@ class WorkflowRepairMixin:
             "original_object_hash": original_object_hash,
             "repaired_value_hash": sha256_json(repaired_value),
             "repaired_value": copy.deepcopy(repaired_value),
+            "repaired_value_shape": (
+                "PRODUCER_RESULT"
+                if producer_prompt == "P-ARGUMENT-ARCHITECTURE"
+                else "PRODUCER_CONSUMER_VALUE"
+            ),
+            "repaired_canonical_output": (
+                copy.deepcopy(repaired_canonical_output)
+                if isinstance(repaired_canonical_output, dict)
+                else None
+            ),
+            "repaired_canonical_output_shape": (
+                "PRODUCER_PROTOCOL_OUTPUT"
+                if isinstance(repaired_canonical_output, dict)
+                else None
+            ),
             "finding_codes": [
                 str(item.get("code")) for item in findings if item.get("code")
             ],
@@ -1121,6 +1120,34 @@ class WorkflowRepairMixin:
         )
         ids.append(artifact_id)
         del ids[:-50]
+        if atomic_rereview_checkpoint is not None:
+            checkpoint = copy.deepcopy(atomic_rereview_checkpoint)
+            repair_id = str(checkpoint.get("repair_id") or "").strip()
+            repair_attempt_key = str(checkpoint.get("repair_attempt_key") or "").strip()
+            checkpoint_critic = str(checkpoint.get("critic_prompt") or critic_prompt).strip()
+            if not repair_id or not repair_attempt_key or not checkpoint_critic:
+                raise ValueError("atomic repair rereview checkpoint is incomplete")
+            RepairLedger.applied(
+                next_state,
+                repair_attempt_key,
+                repair_id=repair_id,
+                run_id=repair_run_id or None,
+                application_artifact_id=artifact_id,
+                details={
+                    "critic_prompt": checkpoint_critic,
+                    "producer_prompt": producer_prompt,
+                    "finding_codes": [
+                        str(item.get("code")) for item in findings if item.get("code")
+                    ],
+                },
+            )
+            next_state.setdefault("pending_repair_rereviews", {})[checkpoint_critic] = {
+                "repair_id": repair_id,
+                "repair_attempt_key": repair_attempt_key,
+                "repair_application_artifact_id": artifact_id,
+                "run_id": repair_run_id or None,
+                "critic_prompt": checkpoint_critic,
+            }
         with self.db.transaction() as tx:
             version = tx.next_artifact_version(
                 project_id=wf["project_id"],
@@ -1288,10 +1315,15 @@ class WorkflowRepairMixin:
 
     async def _auto_repair(self, wf: dict[str, Any], critic_prompt: str, critic_input: dict[str, Any], critic_output: dict[str, Any], state: dict[str, Any]) -> dict[str, Any] | None:
         producer = CRITIC_PRODUCER[critic_prompt]
+        pack = getattr(self, "pack", None)
+        entry_reader = getattr(pack, "entry", None)
+        critic_entry = entry_reader(critic_prompt) if callable(entry_reader) else {}
+        semantic_critic = str(critic_entry.get("model_contract_mode") or "").upper() == "SEMANTIC"
         findings = self._identified_repair_findings(critic_prompt, [
             item
             for item in critic_output.get("findings", [])
             if item.get("repairable", False)
+            and not (semantic_critic and str(item.get("suggested_route") or "").upper() == "ORIGINAL_PRODUCER")
             and not (
                 str(item.get("code") or "").startswith("QG_")
                 and str(item.get("target_type") or "").endswith("CRITIC")
@@ -1526,6 +1558,13 @@ class WorkflowRepairMixin:
                     join_pointer("content", "paragraphs", index, "novel_content_key")
                     for index, _paragraph_id in enumerate(original_paragraph_ids)
                 )
+        if producer == "P-ARGUMENT-ARCHITECTURE":
+            authored_paths = argument_authoritative_repair_paths(repair_content, findings)
+            allowed_paths = [
+                join_pointer("content", *parse_pointer(path))
+                for path in authored_paths
+            ]
+
         if producer == "P-WRITE-CONTENT" and any(
             path.endswith("/text") for path in allowed_paths
         ):
@@ -1892,6 +1931,70 @@ class WorkflowRepairMixin:
                 details={**ledger_details, **failure},
             )
             return None
+        repaired_canonical_output: dict[str, Any] | None = None
+        if producer == "P-ARGUMENT-ARCHITECTURE":
+            authored_state = repaired_value.get("authored_state") if isinstance(repaired_value, dict) else None
+            if not isinstance(authored_state, dict):
+                failure = {
+                    "critic_prompt": critic_prompt,
+                    "category": "SEMANTIC_REPAIR_REJECTED",
+                    "error": "Argument Architecture repair did not preserve authoritative authored_state",
+                    "repair_id": repair_id,
+                    "run_id": run_id,
+                    "technical_retries_used": technical_retries_used,
+                    "consumes_semantic_repair_budget": False,
+                    "repair_checkpoint_version": 1,
+                    **checkpoint_identity,
+                    "recorded_at": utc_now(),
+                }
+                state["last_targeted_repair_failure"] = failure
+                RepairLedger.repair_rejected(
+                    state, attempt_key, repair_id=repair_id, run_id=run_id,
+                    details={**ledger_details, **failure},
+                )
+                return None
+            try:
+                repaired_canonical_output = project_argument_authoritative_state(
+                    critic_input, authored_state
+                )
+                projection_errors = self.pack.validate(
+                    producer, "output", repaired_canonical_output
+                )
+                if projection_errors:
+                    raise PromptExecutionError(
+                        "Reprojected Argument Architecture failed producer schema validation",
+                        validation_errors=projection_errors,
+                    )
+            except (PromptExecutionError, ValueError, KeyError, TypeError) as exc:
+                validation_errors = list(getattr(exc, "validation_errors", None) or [])
+                failure = {
+                    "critic_prompt": critic_prompt,
+                    "category": "SEMANTIC_REPAIR_REJECTED",
+                    "error": redact_secret_text(str(exc)),
+                    "validation_errors": validation_errors,
+                    "repair_id": repair_id,
+                    "run_id": run_id,
+                    "technical_retries_used": technical_retries_used,
+                    "consumes_semantic_repair_budget": False,
+                    "repair_checkpoint_version": 1,
+                    **checkpoint_identity,
+                    "recorded_at": utc_now(),
+                }
+                state["last_targeted_repair_failure"] = failure
+                RepairLedger.repair_rejected(
+                    state, attempt_key, repair_id=repair_id, run_id=run_id,
+                    details={**ledger_details, **failure},
+                )
+                return None
+            # Only the reprojected canonical producer result can be committed.
+            # The full protocol output is retained separately for validation/audit;
+            # downstream consumers receive exactly output["result"].
+            repaired_value = producer_consumer_value(producer, repaired_canonical_output)
+            if not isinstance(repaired_value, dict):
+                raise PromptExecutionError(
+                    "Reprojected Argument Architecture has no ProducerResult consumer value"
+                )
+
         RepairLedger.diff_validated(
             state,
             attempt_key,
@@ -1923,6 +2026,16 @@ class WorkflowRepairMixin:
             findings=findings,
             allowed_paths=allowed_paths,
             collection_key=collection_key,
+            repaired_canonical_output=repaired_canonical_output,
+            atomic_rereview_checkpoint=(
+                {
+                    "repair_id": repair_id,
+                    "repair_attempt_key": attempt_key,
+                    "critic_prompt": critic_prompt,
+                }
+                if producer == "P-ARGUMENT-ARCHITECTURE"
+                else None
+            ),
         )
         self.quality_manager.record_targeted_repair(
             project_id=wf["project_id"],
@@ -1933,14 +2046,15 @@ class WorkflowRepairMixin:
             critic_prompt_id=critic_prompt,
             workflow_state=state,
         )
-        RepairLedger.applied(
-            state,
-            attempt_key,
-            repair_id=repair_id,
-            run_id=run_id,
-            application_artifact_id=artifact_id,
-            details=ledger_details,
-        )
+        if producer != "P-ARGUMENT-ARCHITECTURE":
+            RepairLedger.applied(
+                state,
+                attempt_key,
+                repair_id=repair_id,
+                run_id=run_id,
+                application_artifact_id=artifact_id,
+                details=ledger_details,
+            )
         repaired["repair_id"] = repair_id
         repaired["repair_attempt_key"] = attempt_key
         repaired["repair_application_artifact_id"] = artifact_id

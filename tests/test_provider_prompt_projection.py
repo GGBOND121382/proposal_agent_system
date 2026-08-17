@@ -124,8 +124,9 @@ def test_argument_architecture_provider_request_is_materially_smaller_without_we
     assert total_saved_ratio >= 0.40
     assert len(pack.prompt_text(prompt_id)) < 1400
     assert len(system_prompt) < 20000
-    assert MODEL_SYSTEM_PROMPT_VERSION.startswith("2026-08-12.")
-    assert "# 运行时契约边界" in system_prompt
+    assert MODEL_SYSTEM_PROMPT_VERSION.startswith("2026-08-13.")
+    assert "# 运行时契约边界" not in system_prompt
+    assert "语义任务通则" in system_prompt
     assert "FIELD_OWNERSHIP_CONTRACT:START" not in system_prompt
     assert "REFERENCE_INTEGRITY_CONTRACT:START" not in system_prompt
     assert "统一语义契约（运行时生成）" not in system_prompt
@@ -241,7 +242,7 @@ def test_shared_skill_modules_are_loaded_only_for_relevant_capabilities() -> Non
     _, pack = _executor()
 
     argument_shared = pack.shared_prompt_for("P-ARGUMENT-ARCHITECTURE")
-    assert "弱模型任务边界" in argument_shared
+    assert "语义任务通则" in argument_shared
     assert "Mermaid图形技能" not in argument_shared
     assert "公共研究技能" not in argument_shared
 
@@ -319,5 +320,6 @@ def test_argument_architecture_system_prompt_does_not_load_unrelated_skill_modul
 
     assert "Mermaid图形技能" not in system_prompt
     assert "公共研究技能" not in system_prompt
-    assert "弱模型任务边界" in system_prompt
+    assert "语义任务通则" in system_prompt
+    assert "# 运行时契约边界" not in system_prompt
     assert len(system_prompt) < 18000

@@ -10,7 +10,7 @@
       "const": "P-TARGETED-REPAIR"
     },
     "prompt_version": {
-      "const": "3.4.0"
+      "const": "8.0.0"
     },
     "status": {
       "description": "PASS when every requested finding is resolved and the repaired object has no new current issue. REVISE describes a current issue in repaired_object, never a historical finding already listed in resolved_finding_ids.",
@@ -38,7 +38,6 @@
             "minLength": 1,
             "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$"
           },
-          "minItems": 1,
           "x-reference-semantic": "JSON_POINTER"
         },
         "unchanged_protected_hashes": {
@@ -73,7 +72,6 @@
             "minLength": 1,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           },
-          "minItems": 1,
           "uniqueItems": true
         },
         "unresolved_finding_ids": {

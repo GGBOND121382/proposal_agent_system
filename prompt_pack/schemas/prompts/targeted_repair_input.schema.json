@@ -10,7 +10,7 @@
       "const": "P-TARGETED-REPAIR"
     },
     "prompt_version": {
-      "const": "3.4.0"
+      "const": "8.0.0"
     },
     "task": {
       "type": "object",

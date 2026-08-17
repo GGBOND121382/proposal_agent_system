@@ -1221,6 +1221,26 @@ def bind_trusted_source_refs(
     return normalized, report
 
 
+def _inside_argument_authoritative_state(path: tuple[Any, ...]) -> bool:
+    """Keep generic reference machinery out of the authoritative semantic state.
+
+    The authored state is validated by the Argument model semantic contract before
+    projection (and again transactionally after repair).  Generic reference heuristics
+    must not reinterpret business-object collection names such as ``methods`` or mutate
+    evidence identifiers inside this single-writer subtree.
+    """
+    try:
+        config = get_semantic_contract().rule("SC-ARGUMENT-STATE-OWNERSHIP").config
+    except (KeyError, ValueError):
+        return False
+    root = tuple(
+        token for token in str(config.get("authoritative_root") or "").split("/") if token
+    )
+    if not root or len(path) < len(root):
+        return False
+    return any(tuple(path[index:index + len(root)]) == root for index in range(len(path) - len(root) + 1))
+
+
 def normalize_reference_id_aliases(
     output: Any,
     envelope: Mapping[str, Any] | None,
@@ -1295,6 +1315,8 @@ def normalize_reference_id_aliases(
                 visit(item, (*path, index))
             return
         if not isinstance(node, dict):
+            return
+        if _inside_argument_authoritative_state(path):
             return
         for key, value in list(node.items()):
             current = (*path, key)
@@ -1402,6 +1424,8 @@ def validate_reference_ids(
                 visit(item, (*path, index))
             return
         if not isinstance(node, Mapping):
+            return
+        if _inside_argument_authoritative_state(path):
             return
         for key, value in node.items():
             current = (*path, key)

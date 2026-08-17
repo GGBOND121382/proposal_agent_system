@@ -170,12 +170,13 @@ def test_prompt_and_model_capability_declare_the_real_contract_mode() -> None:
     prompt = (ROOT / "prompt_pack/prompts/repair/targeted_repair.md").read_text(
         encoding="utf-8"
     )
-    assert "finding_instance_id" in prompt
-    assert "输出完整 `repaired_object`" in prompt
-    assert "只在 `allowed_paths` 内产生修改" in prompt
-    assert "每个输入 Finding 必须明确归入" in prompt
-    assert "不复述已经解决的历史 Finding" in prompt
-    assert "祖先授权语义" not in prompt
+    assert "`repair_targets`" in prompt
+    assert "`reference_context`" in prompt
+    assert "`APPLY`" in prompt
+    assert "`ESCALATE`" in prompt
+    assert "不要重新输出原对象" in prompt
+    assert "finding_instance_id" not in prompt
+    assert "protected_hash" not in prompt
 
     config = yaml.safe_load(
         (ROOT / "prompt_pack/config/models.yaml").read_text(encoding="utf-8")

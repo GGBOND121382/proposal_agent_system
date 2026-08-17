@@ -13,6 +13,7 @@ from .paragraph_order import (
     ordered_paragraphs,
     paragraph_sequence_error,
 )
+from .contracts import get_semantic_contract
 from .quality_guard import build_guard_report
 from .contracts.semantic_checks import check_blueprint_semantics
 from .util import sha256_text
@@ -321,12 +322,17 @@ class ProposalQualityGuard:
             findings.extend(self._audit_template(template))
 
         elif prompt_id in {"P-ARGUMENT-ARCHITECTURE", "P-ARGUMENT-ARCHITECTURE-CRITIC"}:
-            architecture = (
-                output.get("result")
-                if prompt_id == "P-ARGUMENT-ARCHITECTURE"
-                else payload.get("architecture_candidate")
-            ) or {}
-            findings.extend(self._audit_argument_architecture(architecture, output if prompt_id.endswith("CRITIC") else None))
+            # v8: Argument semantic correctness/status is owned by the authoritative
+            # state projector + canonical work-item resolver. The generic quality
+            # guard is audit-only here and must not create a second actionable rule
+            # source or trust a persisted derived cache.
+            state_policy = get_semantic_contract().rule("SC-ARGUMENT-STATE-OWNERSHIP").config
+            observations["argument_semantic_authority"] = {
+                "mode": str(state_policy.get("quality_guard_mode") or ""),
+                "authoritative_root": str(state_policy.get("authoritative_root") or ""),
+                "projection_version": str(state_policy.get("projection_version") or ""),
+                "derived_cache_trusted": False,
+            }
 
         elif prompt_id in {"P-REVISION-PLAN", "P-REVISION-PLAN-CRITIC"}:
             plan = (

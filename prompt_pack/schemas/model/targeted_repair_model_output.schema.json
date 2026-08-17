@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "targeted_repair_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": [
+        "APPLY",
+        "ESCALATE"
+      ]
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "value": {}
+        },
+        "required": [
+          "path",
+          "value"
+        ]
+      }
+    },
+    "escalation_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "decision",
+    "changes",
+    "escalation_reason"
+  ]
+}

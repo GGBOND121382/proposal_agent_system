@@ -66,30 +66,40 @@ if reg:
     if len(ids)!=len(set(ids)): errors.append(f'PROMPT_COUNT duplicate IDs: {len(ids)}/{len(set(ids))}')
     profiles=yaml.safe_load((ROOT/'config/prompt_model_profiles.yaml').read_text(encoding='utf-8'))['profiles']
     for p in reg['prompts']:
-        for key in ['prompt_file','input_schema','output_schema']:
-            if not (ROOT/p[key]).exists(): errors.append(f'MISSING {p["prompt_id"]} {key}={p[key]}')
+        semantic_mode=str(p.get('model_contract_mode') or '').upper()=='SEMANTIC'
+        required_files=['prompt_file','input_schema','output_schema']
+        if semantic_mode:
+            required_files.extend(['model_input_schema','model_output_schema'])
+        for key in required_files:
+            if not p.get(key) or not (ROOT/p[key]).exists():
+                errors.append(f'MISSING {p["prompt_id"]} {key}={p.get(key)}')
         if p['model_profile'] not in profiles: errors.append(f'MODEL_PROFILE_MISSING {p["prompt_id"]}: {p["model_profile"]}')
         if not p.get('executor_role'): errors.append(f'EXECUTOR_ROLE_MISSING {p["prompt_id"]}')
         text=(ROOT/p['prompt_file']).read_text(encoding='utf-8')
-        if f'执行角色：`{p.get("executor_role")}`' not in text:
+        if not semantic_mode and f'执行角色：`{p.get("executor_role")}`' not in text:
             errors.append(f'PROMPT_EXECUTOR_MISMATCH {p["prompt_id"]}')
-        # Prompt lint protects identity and business vocabulary, not verbosity.
-        # The old 2200-character minimum plus mandatory "强制自检" heading
-        # forced deterministic validator rules back into model prompts.  Keep a
-        # small sanity floor and a generous anti-bloat ceiling instead.
-        if len(text)<600:
+        min_prompt_chars=250 if semantic_mode else 600
+        if len(text)<min_prompt_chars:
             errors.append(f'PROMPT_TOO_SHORT {p["prompt_id"]}: {len(text)}')
         if len(text)>6000:
             errors.append(f'PROMPT_TOO_LONG {p["prompt_id"]}: {len(text)}')
-        if '## Finding代码' not in text:
+        if not semantic_mode and '## Finding代码' not in text:
             errors.append(f'PROMPT_HEADING_MISSING {p["prompt_id"]}: ## Finding代码')
         inp=load_json(ROOT/p['input_schema']); out=load_json(ROOT/p['output_schema'])
+        model_inp=load_json(ROOT/p['model_input_schema']) if semantic_mode else None
+        model_out=load_json(ROOT/p['model_output_schema']) if semantic_mode else None
         if inp:
             try: Draft202012Validator.check_schema(inp)
             except Exception as e: errors.append(f'INPUT_SCHEMA_INVALID {p["prompt_id"]}: {e}')
         if out:
             try: Draft202012Validator.check_schema(out)
             except Exception as e: errors.append(f'OUTPUT_SCHEMA_INVALID {p["prompt_id"]}: {e}')
+        if semantic_mode and model_inp:
+            try: Draft202012Validator.check_schema(model_inp)
+            except Exception as e: errors.append(f'MODEL_INPUT_SCHEMA_INVALID {p["prompt_id"]}: {e}')
+        if semantic_mode and model_out:
+            try: Draft202012Validator.check_schema(model_out)
+            except Exception as e: errors.append(f'MODEL_OUTPUT_SCHEMA_INVALID {p["prompt_id"]}: {e}')
         expected_version=p.get('prompt_version')
         input_version=((inp or {}).get('properties',{}).get('prompt_version',{}).get('const'))
         output_version=((out or {}).get('properties',{}).get('prompt_version',{}).get('const'))
@@ -101,7 +111,7 @@ if reg:
             errors.append(f'OUTPUT_PROMPT_VERSION_MISMATCH {p["prompt_id"]}: registry={expected_version} schema={output_version}')
         if expected_output_schema!=p['output_schema']:
             errors.append(f'INPUT_OUTPUT_SCHEMA_BINDING_MISMATCH {p["prompt_id"]}: registry={p["output_schema"]} schema={expected_output_schema}')
-        if not documented_finding_codes(text):
+        if not semantic_mode and not documented_finding_codes(text):
             errors.append(f'PROMPT_FINDING_CODES_MISSING {p["prompt_id"]}')
         if not prompt_versions or set(prompt_versions)!={expected_version}:
             errors.append(f'PROMPT_TEXT_VERSION_MISMATCH {p["prompt_id"]}: registry={expected_version} text={prompt_versions}')
@@ -171,10 +181,14 @@ if reg and manifest:
                     value=case['expected_output'],
                     expected_output_schema=p['output_schema'],
                 )
-                finding_errors=replay_finding_code_errors(
-                    prompt_id=entry['prompt_id'],
-                    output=case['expected_output'],
-                    prompt_text=(ROOT/p['prompt_file']).read_text(encoding='utf-8'),
+                finding_errors=(
+                    []
+                    if str(p.get('model_contract_mode') or '').upper()=='SEMANTIC'
+                    else replay_finding_code_errors(
+                        prompt_id=entry['prompt_id'],
+                        output=case['expected_output'],
+                        prompt_text=(ROOT/p['prompt_file']).read_text(encoding='utf-8'),
+                    )
                 )
                 for semantic_error in semantic_errors:
                     errors.append(f'REPLAY_OUTPUT_PROTOCOL {entry["fixture_path"]}: {semantic_error}')

@@ -116,13 +116,19 @@ class DecisionArbiter:
         }
 
     @staticmethod
-    def _is_deterministic_critic_finding(finding: Mapping[str, Any]) -> bool:
+    def _is_deterministic_critic_finding(
+        finding: Mapping[str, Any],
+        deterministic_defect_keys: set[str] | frozenset[str] = frozenset(),
+    ) -> bool:
         contract = get_semantic_contract()
         responsibility = str(finding.get("responsibility") or finding.get("source") or "").upper()
         if responsibility in {"DETERMINISTIC_GUARD", "GUARD", "OUTPUT_INTEGRITY"}:
             return True
         rule_id = str(finding.get("rule_id") or "")
         if rule_id in contract.rule_ids:
+            return True
+        defect_key = str(finding.get("defect_key") or "")
+        if defect_key and defect_key in deterministic_defect_keys:
             return True
         return str(finding.get("code") or "").upper().startswith("QG_")
 
@@ -187,12 +193,21 @@ class DecisionArbiter:
         guard_status = self._guard_status(guard_snapshot)
 
         protocol_errors = self._protocol_errors(guard_snapshot)
+        deterministic_defect_keys = {
+            str(item.get("defect_key") or "")
+            for item in (critic_snapshot.get("result") or {}).get("deterministic_receipts") or []
+            if isinstance(item, Mapping) and str(item.get("defect_key") or "")
+        }
         critic_blocking = self._blocking_findings(critic_snapshot)
         ignored_critic = [
-            item for item in critic_blocking if self._is_deterministic_critic_finding(item)
+            item
+            for item in critic_blocking
+            if self._is_deterministic_critic_finding(item, deterministic_defect_keys)
         ]
         owned_critic = [
-            item for item in critic_blocking if not self._is_deterministic_critic_finding(item)
+            item
+            for item in critic_blocking
+            if not self._is_deterministic_critic_finding(item, deterministic_defect_keys)
         ]
         guard_blocking = self._blocking_findings(guard_snapshot)
         blocking_questions = [
@@ -214,6 +229,16 @@ class DecisionArbiter:
         )
         if conflict:
             decision = "CONTRACT_CONFLICT"
+        elif prompt_id == "P-ARGUMENT-ARCHITECTURE-CRITIC":
+            # v8: Argument semantic status is already canonicalized from machine
+            # defects + semantic observations. Guard/arbiter are audit-only and
+            # cannot become a second status writer.
+            decision = {
+                "PASS": "PASS",
+                "REVISE": "REVISE",
+                "BLOCK": "BLOCK",
+                "NEED_USER_INPUT": "WAITING_HUMAN_INPUT",
+            }.get(critic_status, "CONTRACT_CONFLICT")
         elif actionable_human_gate:
             decision = "WAITING_HUMAN_INPUT"
         elif guard_blocking:
@@ -224,6 +249,14 @@ class DecisionArbiter:
             # A hard block without an owned Finding cannot be silently promoted.
             # Keep the block while recording that its rationale is unsupported.
             decision = "BLOCK"
+        elif (
+            prompt_id == "P-ARGUMENT-ARCHITECTURE-CRITIC"
+            and critic_status == "REVISE"
+        ):
+            # The semantic Argument Critic output is already Runtime-canonicalized
+            # after deterministic receipts + model findings are merged. Its REVISE
+            # state cannot be downgraded by the generic qualitative-critic arbiter.
+            decision = "REVISE"
         else:
             decision = "PASS"
 

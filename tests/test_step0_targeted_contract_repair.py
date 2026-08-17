@@ -137,6 +137,9 @@ class _RepairHarness(WorkflowRepairMixin):
         self.persisted = copy.deepcopy(kwargs)
         return "artifact-repair"
 
+    def _update(self, wf, *, state):
+        self.updated_state = copy.deepcopy(state)
+
 
 class _SuccessExecutor:
     def provider_request_spec_hash(self, prompt_id: str) -> str:
@@ -455,7 +458,7 @@ async def test_failed_contract_repair_does_not_consume_remaining_producer_retry(
 
 
 @pytest.mark.asyncio
-async def test_located_persisted_contract_error_is_repaired_once_and_fully_revalidated() -> None:
+async def test_v8_argument_contract_error_without_authoritative_state_escalates_instead_of_local_repair() -> None:
     original = {
         "schema_version": "2.0",
         "prompt_id": PRODUCER,
@@ -485,37 +488,16 @@ async def test_located_persisted_contract_error_is_repaired_once_and_fully_reval
         classification=_classification(kind="RESPONSE_SHAPE"),
     )
 
-    assert outcome["attempted"] is True
-    assert harness.repair_calls == 1
-    assert harness.last_retry_categories == frozenset({
-        FailureCategory.PROVIDER_TRANSIENT,
-        FailureCategory.OUTPUT_CONTRACT,
-    })
-    assert outcome["result"]["output"] == repaired
+    assert outcome == {"attempted": True, "result": None}
+    assert harness.repair_calls == 0
+    assert harness.persisted is None
     assert original == original_snapshot
-    assert sha256_json(original) != sha256_json(repaired)
-    assert harness.executor.normalize_calls == 1
-    assert harness.executor.policy.calls == 1
-    assert harness.executor.guard_calls == 1
-    assert harness.pack.calls == 1
-    assert harness.executor.semantic_calls == 1
-    assert harness.context_builder.overrides["payload.allowed_paths"] == [
-        "/content/result/value"
-    ]
-    assert outcome["result"]["route"]["environment"] == "OFFLINE_LOCAL"
-    assert state["original_environment"] == "OFFLINE_LOCAL"
-    assert "/content/result" not in harness.context_builder.overrides[
-        "payload.protected_paths"
-    ]
-    assert harness.context_builder.overrides["payload.protected_paths"]
-    finding = harness.context_builder.overrides["payload.findings_to_repair"][0]
-    assert finding["description"] == "/result/value: reference id does not exist"
-    assert finding["code"] == "OUTPUT_CONTRACT_VIOLATION"
-    assert harness.persisted["repaired_value"] == repaired["result"]
+    assert state["contract_repair_escalations"][-1]["reason"] == "AUTHORITATIVE_RUNTIME_CONTRACT_REGENERATION_REQUIRED"
+
 
 
 @pytest.mark.asyncio
-async def test_repaired_object_that_still_fails_full_validation_remains_failed() -> None:
+async def test_v8_argument_contract_retry_is_not_attempted_without_authoritative_state() -> None:
     original = {"status": "PASS", "result": {"value": "bad"}}
     repaired = {"status": "PASS", "result": {"value": "still-bad"}}
     harness = _RepairHarness(
@@ -539,8 +521,9 @@ async def test_repaired_object_that_still_fails_full_validation_remains_failed()
     )
 
     assert outcome == {"attempted": True, "result": None}
-    assert harness.repair_calls == 1
+    assert harness.repair_calls == 0
     assert harness.persisted is None
+
 
 
 @pytest.mark.asyncio
@@ -653,7 +636,7 @@ def test_generated_repair_contract_obeys_existing_schema_and_scope_validator() -
     output = {
         "schema_version": "2.0",
         "prompt_id": "P-TARGETED-REPAIR",
-        "prompt_version": "3.4.0",
+        "prompt_version": "8.0.0",
         "status": "PASS",
         "result": {
             "repaired_object": {"content": repaired},

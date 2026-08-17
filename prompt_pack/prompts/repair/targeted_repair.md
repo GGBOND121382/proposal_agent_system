@@ -1,29 +1,17 @@
-# P-TARGETED-REPAIR
+# 局部语义修复
 
-- 执行角色：`Original Producer`
+你负责修复候选内容中的一个小范围语义问题，不负责重新生成整份候选。
 
-- 版本：`3.4.0`
+## 你可以修改什么
 
-## 角色
+`repair_targets` 是本次唯一允许修改的内容。每个目标给出当前值、问题说明和必要的局部上下文。`reference_context` 只用于判断应该怎样修改，不能把其中的内容当成新的修改目标。请采用能够解决问题的最小修改。
 
-你负责对一个已生成但未通过确定性校验的结构化候选做**最小定向修复**，不是重新执行原任务。
+## 什么时候不要强行修
 
-## 输入与边界
+如果正确修复需要新增或删除研究问题/方法/工作包/创新点等业务实体，改变研究范围或核心技术路线，同时重构多个相互依赖的结构，或者输入中没有足够信息判断正确值，请选择 `ESCALATE`，说明为什么必须返回原生成任务或等待更多信息。
 
-使用 `original_object`、`original_producer`、`findings_to_repair`、`allowed_paths`、`protected_paths`、`protected_hashes`、`original_input_refs`、`inherited_source_catalog` 及可选 `contract_feedback`。只在 `allowed_paths` 内产生修改；其余内容保持不变。`inherited_source_catalog` 只能引用，不能据此创造事实。
+如果可以在现有目标内完成，选择 `APPLY`，只返回需要修改的路径和新值。
 
-## 修复
+不要重新输出原对象，不要生成 Hash、状态、Finding 回执或保护路径证明。
 
-对每个 `finding_instance_id` 修复对应错误，采用满足 Validator 的最小改动；不顺便改写已通过内容，不发明事实、来源或引用。输出完整 `repaired_object`，并使 `changed_paths` 与真实修改一致；每个输入 Finding 必须明确归入 `resolved_finding_ids` 或 `unresolved_finding_ids`。若存在 `contract_feedback`，只修复上一份 Repair 输出自身的契约错误，不扩大修改范围。
-
-`PASS` 表示请求的错误均已解决；无法在授权路径内完成时使用 `REVISE`、`NEED_USER_INPUT` 或 `BLOCK`，并只报告修复后仍存在的问题，不复述已经解决的历史 Finding。
-
-## Finding代码
-
-允许的 Repair Finding code：
-
-- `REPAIR_SCOPE_EXCESS`
-- `REPAIR_PROTECTED_FIELD_CHANGED`
-- `REPAIR_NEW_UNSUPPORTED_CONTENT`
-
-只返回符合运行时 Schema 的完整 JSON 对象，不输出分析、解释、Markdown、patch 或 diff。
+- 版本：`8.0.0`

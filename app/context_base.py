@@ -16,7 +16,8 @@ from .candidate_integrity import (
 from .paragraph_order import canonical_candidate_text, ordered_paragraphs, paragraph_sequence_error
 from .privacy import find_sensitive_values
 from .proposal_quality import SECTION_FUNCTION_ROLE_ALIASES
-from .workflow_repair import repair_override_key
+from .workflow_repair import repair_override_key, producer_consumer_value
+from .model_semantic_contracts import project_argument_authoritative_state
 from .util import new_id, sha256_json, sha256_text
 from .wf3_input import (
     WF3_INPUT_GATE_TYPE,
@@ -634,9 +635,28 @@ class ContextBuilder:
         lineage = self._workflow_lineage_ids(workflow_id)
         source_ids: list[str] = list(lineage)
         seen = set(source_ids)
-        for lineage_id in lineage:
-            row = self.db.fetchone("SELECT state_json FROM workflows WHERE id=?", (lineage_id,))
-            if not row:
+        root_row = (
+            self.db.fetchone("SELECT project_id FROM workflows WHERE id=?", (lineage[0],))
+            if lineage
+            else None
+        )
+        project_id = str((root_row or {}).get("project_id") or "")
+
+        # Prerequisite bindings are a frozen dependency graph, not merely one
+        # hop of context.  A downstream workflow that binds WF-4 must retain
+        # WF-4's frozen WF-1/WF-2/WF-3 evidence ancestry as well; otherwise a
+        # fresh authoritative projection can lose evidence that the persisted
+        # authored_state legitimately references.  Traverse only explicit,
+        # same-project, COMPLETED prerequisite edges and stop on seen ids.
+        cursor = 0
+        while cursor < len(source_ids):
+            source_id = source_ids[cursor]
+            cursor += 1
+            row = self.db.fetchone(
+                "SELECT project_id,state_json FROM workflows WHERE id=?",
+                (source_id,),
+            )
+            if not row or (project_id and str(row.get("project_id") or "") != project_id):
                 continue
             state = json.loads(row.get("state_json") or "{}")
             bindings = state.get("prerequisite_workflow_ids") or {}
@@ -650,15 +670,10 @@ class ContextBuilder:
                     "SELECT project_id,status FROM workflows WHERE id=?",
                     (candidate,),
                 )
-                current_row = self.db.fetchone(
-                    "SELECT project_id FROM workflows WHERE id=?",
-                    (lineage_id,),
-                )
                 if (
                     not candidate_row
-                    or not current_row
-                    or str(candidate_row["project_id"]) != str(current_row["project_id"])
-                    or str(candidate_row["status"]) != "COMPLETED"
+                    or str(candidate_row.get("project_id") or "") != project_id
+                    or str(candidate_row.get("status") or "") != "COMPLETED"
                 ):
                     continue
                 source_ids.append(candidate)
@@ -859,6 +874,7 @@ class ContextBuilder:
         indexed_ids = (state.get("repair_application_artifact_ids") or {}).get(target_key)
         indexed_ids = [str(item) for item in indexed_ids or [] if str(item).strip()]
         if workflow_id and indexed_ids:
+            strict_argument_repair = producer_prompt == "P-ARGUMENT-ARCHITECTURE"
             placeholders = ",".join("?" for _ in indexed_ids)
             params: list[Any] = [workflow_id, producer_prompt, *indexed_ids]
             rows = self.db.fetchall(
@@ -872,10 +888,18 @@ class ContextBuilder:
                     ORDER BY version DESC,created_at DESC,id DESC""",
                 tuple(params),
             )
+            if strict_argument_repair and not rows:
+                raise ValueError(
+                    "Active Argument repair pointer does not resolve to a persisted REPAIR_APPLICATION"
+                )
             for row in rows:
                 try:
                     payload = json.loads(row.get("content_json") or "{}")
-                except (TypeError, json.JSONDecodeError):
+                except (TypeError, json.JSONDecodeError) as exc:
+                    if strict_argument_repair:
+                        raise ValueError(
+                            f"Active Argument REPAIR_APPLICATION {row['id']} is not valid JSON"
+                        ) from exc
                     continue
                 if str(payload.get("workflow_id") or workflow_id) != str(workflow_id):
                     continue
@@ -886,7 +910,48 @@ class ContextBuilder:
                 if str(payload.get("application_status") or "APPLIED") != "APPLIED":
                     continue
                 if "repaired_value" in payload:
-                    return copy.deepcopy(payload["repaired_value"])
+                    raw_value = payload["repaired_value"]
+                    expected_hash = str(payload.get("repaired_value_hash") or "").strip()
+                    if expected_hash and sha256_json(raw_value) != expected_hash:
+                        raise ValueError(
+                            f"Active REPAIR_APPLICATION {row['id']} repaired_value hash mismatch"
+                        )
+                    if producer_prompt == "P-ARGUMENT-ARCHITECTURE":
+                        declared_shape = str(payload.get("repaired_value_shape") or "").strip()
+                        if declared_shape and declared_shape != "PRODUCER_RESULT":
+                            raise ValueError(
+                                "Argument REPAIR_APPLICATION repaired_value must be PRODUCER_RESULT"
+                            )
+                        # v8 migration compatibility: old semantic repair artifacts
+                        # accidentally stored the full Producer protocol envelope,
+                        # while contract-repair artifacts already stored output[result].
+                        if isinstance(raw_value, dict) and isinstance(raw_value.get("authored_state"), dict):
+                            value = copy.deepcopy(raw_value)
+                        elif (
+                            not declared_shape
+                            and isinstance(raw_value, dict)
+                            and isinstance((raw_value.get("result") or {}).get("authored_state"), dict)
+                        ):
+                            value = copy.deepcopy(raw_value["result"])
+                        else:
+                            raise ValueError(
+                                "Argument REPAIR_APPLICATION has no ProducerResult authoritative state"
+                            )
+                        canonical_output = payload.get("repaired_canonical_output")
+                        if isinstance(canonical_output, dict):
+                            canonical_value = producer_consumer_value(
+                                producer_prompt, canonical_output
+                            )
+                            if canonical_value != value:
+                                raise ValueError(
+                                    "Argument REPAIR_APPLICATION consumer value does not match canonical Producer output"
+                                )
+                        return value
+                    return copy.deepcopy(raw_value)
+            if strict_argument_repair:
+                raise ValueError(
+                    "Active Argument repair pointer did not resolve to a current applicable repair value"
+                )
 
         return None
 
@@ -909,6 +974,13 @@ class ContextBuilder:
         if not isinstance(value, dict):
             return value
         canonical = copy.deepcopy(value)
+        # v8 Argument Architecture has exactly one writable semantic source.
+        # Context assembly must never reconcile or enrich projector-owned fields
+        # from section prose; consumers either use this frozen projection or the
+        # semantic Critic reprojects from ``authored_state``.  Keep the legacy
+        # reconciliation only for historical results that predate authored_state.
+        if isinstance(canonical.get("authored_state"), dict):
+            return canonical
         is_full_result = isinstance(canonical.get("argument_architecture"), dict)
         architecture = (
             canonical.get("argument_architecture")
@@ -1138,6 +1210,11 @@ class ContextBuilder:
         if not isinstance(value, dict):
             return value
         canonical = copy.deepcopy(value)
+        # Evidence bindings/status are projector-owned for authoritative v8
+        # Argument results.  Exact-ID fact enrichment remains legacy-only; doing
+        # it here would create a second writer for the same semantic fact.
+        if isinstance(canonical.get("authored_state"), dict):
+            return canonical
         architecture = (
             canonical.get("argument_architecture")
             if isinstance(canonical.get("argument_architecture"), dict)
@@ -1180,6 +1257,100 @@ class ContextBuilder:
         if isinstance(canonical.get("argument_architecture"), dict):
             canonical["argument_architecture"] = architecture
         return canonical
+
+    def _reproject_authoritative_argument_result(
+        self,
+        project_id: str,
+        state: dict[str, Any],
+        *,
+        workflow_id: str | None,
+        facts: list[dict[str, Any]] | None = None,
+        proposal_contract: dict[str, Any] | None = None,
+        argument_graph_seed: dict[str, Any] | None = None,
+        project_subgraph: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Freshly project every v8+ Argument consumer from authored state.
+
+        Persisted graph/matrix/status/evidence fields are caches only.  This
+        helper is the sole ContextBuilder adapter from the persisted/repaired
+        ProducerResult to its current derived consumer view.
+        """
+        raw = (
+            self._repair_override(
+                state,
+                "P-ARGUMENT-ARCHITECTURE",
+                workflow_id=workflow_id,
+            )
+            or self._result(
+                project_id,
+                "P-ARGUMENT-ARCHITECTURE",
+                workflow_id=workflow_id,
+            )
+        )
+        authored = raw.get("authored_state") if isinstance(raw, dict) else None
+        if not isinstance(authored, dict):
+            return None
+
+        if facts is None:
+            internal = self._result(project_id, "P-FACT-EXTRACT", "fact_candidates") or []
+            public = self._approved_public_claims(project_id, workflow_id=workflow_id)
+            facts = [*internal, *public]
+        if proposal_contract is None:
+            proposal_contract = (
+                self._result(
+                    project_id,
+                    "P-PROJECT-DEFINITION-EXTRACT",
+                    "proposal_contract",
+                )
+                or {}
+            )
+        if argument_graph_seed is None:
+            argument_graph_seed = (
+                self._result(
+                    project_id,
+                    "P-PROJECT-DEFINITION-EXTRACT",
+                    "argument_graph_seed",
+                    workflow_id=workflow_id,
+                )
+                or {}
+            )
+        if project_subgraph is None:
+            project_definition = self._result(
+                project_id,
+                "P-PROJECT-DEFINITION-EXTRACT",
+                "project_definition",
+            )
+            project_subgraph = (
+                {
+                    "item_ids": [x["item_id"] for x in project_definition.get("items", [])],
+                    "relation_ids": [
+                        x["relation_id"]
+                        for x in project_definition.get("relations", [])
+                    ],
+                    "items": project_definition.get("items", []),
+                    "relations": project_definition.get("relations", []),
+                }
+                if isinstance(project_definition, dict)
+                else {}
+            )
+
+        projection_envelope = {
+            "schema_version": "2.0",
+            "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+            "prompt_version": str(
+                self.pack.entry("P-ARGUMENT-ARCHITECTURE").get("prompt_version")
+                or "8.0.0"
+            ),
+            "payload": {
+                "proposal_contract": proposal_contract or {},
+                "confirmed_facts": facts or [],
+                "argument_graph_seed": argument_graph_seed or {},
+                "project_subgraph": project_subgraph or {},
+            },
+        }
+        return project_argument_authoritative_state(
+            projection_envelope, copy.deepcopy(authored)
+        )["result"]
 
     @staticmethod
     def _canonicalize_revision_plan_roles(value: Any) -> Any:
@@ -1382,9 +1553,23 @@ class ContextBuilder:
             nested = copy.deepcopy(options["wf3"])
             nested.update({key: value for key, value in options.items() if key != "wf3"})
             options = nested
+        current_argument = self._reproject_authoritative_argument_result(
+            project["id"], state, workflow_id=workflow_id
+        )
         argument_graph = (
-            self._result(project["id"], "P-ARGUMENT-ARCHITECTURE", "argument_architecture", workflow_id=workflow_id)
-            or self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed", workflow_id=workflow_id)
+            (current_argument or {}).get("argument_architecture")
+            or self._result(
+                project["id"],
+                "P-ARGUMENT-ARCHITECTURE",
+                "argument_architecture",
+                workflow_id=workflow_id,
+            )
+            or self._result(
+                project["id"],
+                "P-PROJECT-DEFINITION-EXTRACT",
+                "argument_graph_seed",
+                workflow_id=workflow_id,
+            )
         )
         research_need, origin = build_research_need(
             project_id=project["id"],
@@ -2151,22 +2336,60 @@ class ContextBuilder:
             self._result(project["id"], "P-FACT-EXTRACT", "fact_candidates")
             or []
         )
-        public_claims_for_argument = self._approved_public_claims(project["id"], workflow_id=workflow_id)
+        public_claims_for_argument = self._approved_public_claims(
+            project["id"], workflow_id=workflow_id
+        )
+        internal_facts = internal_facts_for_argument
+        public_claims = public_claims_for_argument
+        facts = [*internal_facts, *public_claims]
+        project_definition = self._result(
+            project["id"], "P-PROJECT-DEFINITION-EXTRACT", "project_definition"
+        )
+        proposal_contract = self._result(
+            project["id"], "P-PROJECT-DEFINITION-EXTRACT", "proposal_contract"
+        )
+        argument_graph_seed = self._result(
+            project["id"],
+            "P-PROJECT-DEFINITION-EXTRACT",
+            "argument_graph_seed",
+            workflow_id=workflow_id,
+        )
+        project_subgraph_for_argument = (
+            {
+                "item_ids": [x["item_id"] for x in project_definition.get("items", [])],
+                "relation_ids": [
+                    x["relation_id"] for x in project_definition.get("relations", [])
+                ],
+                "items": project_definition.get("items", []),
+                "relations": project_definition.get("relations", []),
+            }
+            if isinstance(project_definition, dict)
+            else {}
+        )
         raw_argument_result = (
             self._repair_override(state, "P-ARGUMENT-ARCHITECTURE", workflow_id=workflow_id)
             or self._result(project["id"], "P-ARGUMENT-ARCHITECTURE")
         )
-        canonical_argument_result = self._canonicalize_argument_result_from_sections(
-            raw_argument_result,
-            current_proposal_sections,
+        authoritative_projection = self._reproject_authoritative_argument_result(
+            project["id"],
+            state,
+            workflow_id=workflow_id,
+            facts=facts,
+            proposal_contract=proposal_contract or {},
+            argument_graph_seed=argument_graph_seed or {},
+            project_subgraph=project_subgraph_for_argument,
         )
-        canonical_argument_result = self._bind_argument_result_evidence(
-            canonical_argument_result,
-            [
-                *internal_facts_for_argument,
-                *public_claims_for_argument,
-            ],
-        )
+        if authoritative_projection is not None:
+            canonical_argument_result = authoritative_projection
+        else:
+            # Pre-v8 migration compatibility only. Legacy projections have no
+            # authoritative source and therefore retain the old reconciliation.
+            canonical_argument_result = self._canonicalize_argument_result_from_sections(
+                raw_argument_result, current_proposal_sections
+            )
+            canonical_argument_result = self._bind_argument_result_evidence(
+                canonical_argument_result, facts
+            )
 
         # Producer -> consumer mappings.
         result_map = {
@@ -2215,9 +2438,6 @@ class ContextBuilder:
                 if value is not None:
                     replacements.append((f"payload.{field}", value))
 
-        project_definition = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "project_definition")
-        proposal_contract = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "proposal_contract")
-        argument_graph_seed = self._result(project["id"], "P-PROJECT-DEFINITION-EXTRACT", "argument_graph_seed", workflow_id=workflow_id)
         argument_override = canonical_argument_result
         if isinstance(argument_override, dict):
             argument_graph = (
@@ -2233,9 +2453,6 @@ class ContextBuilder:
                 )
                 or argument_graph_seed
             )
-        internal_facts = internal_facts_for_argument
-        public_claims = public_claims_for_argument
-        facts = [*internal_facts, *public_claims]
         scheme = self._result(project["id"], "P-SCHEME-EXTRACT", "scheme_profile")
         template = self._result(project["id"], "P-TEMPLATE-EXTRACT", "template")
         plan = self._canonicalize_revision_plan_roles(
@@ -2471,7 +2688,10 @@ class ContextBuilder:
                 str((current_section or {}).get("section_id") or "") or None,
             )))
         if "revision_findings" in payload:
-            if prompt_id == "P-ARGUMENT-ARCHITECTURE":
+            producer_revision_findings = (state or {}).get("producer_revision_findings") or {}
+            if prompt_id in producer_revision_findings:
+                findings = list(producer_revision_findings.get(prompt_id) or [])
+            elif prompt_id == "P-ARGUMENT-ARCHITECTURE":
                 findings = list((state or {}).get("argument_revision_findings", []) or [])
             elif prompt_id == "P-REVISION-PLAN":
                 findings = list((state or {}).get("planning_revision_findings", []) or [])

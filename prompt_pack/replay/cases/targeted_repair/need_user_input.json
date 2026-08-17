@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-TARGETED-REPAIR",
-    "prompt_version": "3.4.0",
+    "prompt_version": "8.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -113,7 +113,7 @@
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-TARGETED-REPAIR",
-    "prompt_version": "3.4.0",
+    "prompt_version": "8.0.0",
     "status": "NEED_USER_INPUT",
     "result": {
       "repaired_object": {

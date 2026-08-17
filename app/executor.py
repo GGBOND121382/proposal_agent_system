@@ -7,6 +7,13 @@ import time
 from typing import Any
 
 from .llm import LLMError, ModelGateway, ProviderError
+from .model_semantic_contracts import (
+    SEMANTIC_MODEL_CONTRACT_VERSION,
+    build_semantic_model_input,
+    expand_semantic_model_output,
+    semantic_model_reference_errors,
+    supports_semantic_model_contract,
+)
 from .json_pointer import is_ancestor_or_same, join_pointer, paths_overlap
 from .contract_registry import (
     normalize_registered_enum_aliases_against_schema,
@@ -62,7 +69,7 @@ TRACE_SOURCE_KIND_ALIASES = {
 }
 OUTPUT_NORMALIZER_VERSION = "2026-08-11.v48-path-refs-source-binding-human-gate"
 MODEL_CONTEXT_PROJECTION_VERSION = "2026-08-12.v3-provider-business-metadata-trim"
-MODEL_SYSTEM_PROMPT_VERSION = "2026-08-12.v2-capability-selective-shared-modules"
+MODEL_SYSTEM_PROMPT_VERSION = "2026-08-13.v3-semantic-task-boundary"
 
 _PROVIDER_SOURCE_REF_OMIT_FIELDS = frozenset({
     "document_version_id",
@@ -945,6 +952,11 @@ class PromptExecutor:
             if isinstance(item, dict) and bool(item.get("blocking"))
         ]
         errors: list[str] = []
+        if str(output.get("status") or "").upper() == "NEED_USER_INPUT" and not blocking_questions:
+            errors.append(
+                "/status: NEED_USER_INPUT requires at least one blocking, directly answerable "
+                "user_question; runtime will not create an empty human Gate"
+            )
         for index, finding in enumerate(output.get("findings") or []):
             if not isinstance(finding, dict):
                 continue
@@ -1694,6 +1706,11 @@ class PromptExecutor:
         input_compaction = self._merge_input_compaction(
             input_compaction, provider_projection
         )
+        semantic_model_contract = (
+            str(getattr(self.gateway.settings, "runtime_mode", "")).upper() == "LIVE"
+            and supports_semantic_model_contract(prompt_id)
+            and bool(getattr(self.pack, "has_model_contract", lambda _pid: False)(prompt_id))
+        )
         input_hash = sha256_json(model_envelope)
         route = None
         output: dict[str, Any] | None = None
@@ -1721,14 +1738,51 @@ class PromptExecutor:
                 )
             route = self.router.route(prompt_id, model_envelope, original_environment=original_environment)
             project_config = load_project_config(self.db, project_id)
+
+            provider_call_envelope = provider_envelope
+            if semantic_model_contract:
+                provider_call_envelope = build_semantic_model_input(prompt_id, model_envelope)
+                semantic_input_errors = self.pack.validate_model(prompt_id, "input", provider_call_envelope)
+                if semantic_input_errors:
+                    raise PromptExecutionError(
+                        "Semantic model input projection failed validation",
+                        validation_errors=semantic_input_errors,
+                    )
+                output_schema = self.pack.inlined_model_schema(prompt_id, "output")
+                input_compaction = {
+                    **(input_compaction or {}),
+                    "semantic_model_contract": {
+                        "version": SEMANTIC_MODEL_CONTRACT_VERSION,
+                        "canonical_provider_chars": len(json.dumps(provider_envelope, ensure_ascii=False, separators=(",", ":"))),
+                        "semantic_provider_chars": len(json.dumps(provider_call_envelope, ensure_ascii=False, separators=(",", ":"))),
+                    },
+                }
+            else:
+                output_schema = self.pack.inlined_schema(prompt_id, "output")
+
             if route.environment == "ONLINE_PUBLIC":
-                assert_online_payload_safe(provider_envelope, project_config)
-            output_schema = self.pack.inlined_schema(prompt_id, "output")
-            system_prompt = self._system_prompt(prompt_id, output_schema, provider_envelope)
-            result = await self.gateway.invoke(route, prompt_id, system_prompt, provider_envelope, output_schema)
+                assert_online_payload_safe(provider_call_envelope, project_config)
+            system_prompt = self._system_prompt(
+                prompt_id, output_schema, provider_call_envelope,
+                semantic_model_contract=semantic_model_contract,
+            )
+            result = await self.gateway.invoke(
+                route, prompt_id, system_prompt, provider_call_envelope, output_schema,
+                direct_tool_arguments=semantic_model_contract,
+            )
             raw_response_text = result.raw_text
             try:
-                output = self._normalize_output(prompt_id, result.output, model_envelope)
+                provider_output = result.output
+                if semantic_model_contract:
+                    semantic_output_errors = self.pack.validate_model(prompt_id, "output", provider_output)
+                    semantic_output_errors.extend(semantic_model_reference_errors(prompt_id, model_envelope, provider_output))
+                    if semantic_output_errors:
+                        raise PromptExecutionError(
+                            "Semantic model output validation failed",
+                            validation_errors=semantic_output_errors,
+                        )
+                    provider_output = expand_semantic_model_output(prompt_id, model_envelope, provider_output)
+                output = self._normalize_output(prompt_id, provider_output, model_envelope)
             except PromptExecutionError as exc:
                 raise ProviderError(
                     f"Provider output contract validation failed: {exc}",
@@ -2419,8 +2473,21 @@ class PromptExecutor:
         prompt_id: str,
         output_schema: dict[str, Any],
         envelope: dict[str, Any] | None = None,
+        *,
+        semantic_model_contract: bool | None = None,
     ) -> str:
         entry = self.pack.entry(prompt_id) if hasattr(self.pack, "entry") else {}
+        if semantic_model_contract is None:
+            semantic_model_contract = bool(
+                str(entry.get("model_contract_mode") or "").upper() == "SEMANTIC"
+                and getattr(self.pack, "has_model_contract", lambda _pid: False)(prompt_id)
+            )
+        if semantic_model_contract:
+            if hasattr(self.pack, "shared_prompt_for"):
+                shared_source = self.pack.shared_prompt_for(prompt_id)
+            else:
+                shared_source = self.pack.shared_prompt
+            return str(shared_source).strip() + "\n\n" + self.pack.prompt_text(prompt_id).strip() + "\n"
         schema_properties = output_schema.get("properties") or {}
         prompt_version = str(
             ((schema_properties.get("prompt_version") or {}).get("const"))
