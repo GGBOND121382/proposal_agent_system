@@ -8,6 +8,13 @@ from pathlib import Path
 import pytest
 from types import SimpleNamespace
 
+from app.argument_two_stage_orchestration import (
+    ARGUMENT_DESIGN_STAGE,
+    ARGUMENT_SKELETON_STAGE,
+    ArgumentStageContractError,
+    argument_stage_desired_output_tokens,
+    orchestrate_argument_architecture_two_stage,
+)
 from app.deterministic_repair import apply_deterministic_contract_repairs
 from app.executor import PromptExecutor
 from app.llm import LLMResult
@@ -16,6 +23,13 @@ from app.model_semantic_contracts import (
     _critic_chain_checks,
     build_argument_architecture_critic_model_input,
     build_argument_architecture_model_input,
+    build_argument_skeleton_model_input,
+    argument_skeleton_model_output_errors,
+    build_argument_design_model_input,
+    argument_design_model_output_errors,
+    argument_design_model_reference_errors,
+    assemble_argument_authored_thread,
+    assemble_argument_authored_state,
     build_targeted_repair_model_input,
     expand_argument_architecture_critic_model_output,
     expand_argument_architecture_model_output,
@@ -2084,4 +2098,655 @@ def test_deterministic_defect_key_distinguishes_failure_family_on_same_row():
         "CHAIN_TARGET_SET_MISSING",
     }
     assert len({receipt["defect_key"] for receipt in same_row}) == len(same_row)
+
+
+
+def _flat_skeleton_output(envelope: dict) -> dict:
+    evidence_ids = _available_evidence_ids(envelope)
+    return {
+        "central_proposition": {
+            "statement": "通过显式建模事件影响范围和计划稳定性，可降低动态重规划时延与非必要扰动。",
+            "proposition_type": "TECHNICAL_PRINCIPLE",
+            "falsifiable_or_comparable": True,
+            "boundary_conditions": ["动态订单、交通变化和有限运力场景"],
+            "evidence_ids": evidence_ids,
+        },
+        "scope": {
+            "in_scope": ["运输任务分配、路径与动态重规划"],
+            "out_of_scope": ["部署运维细节作为主文研究内容"],
+        },
+        "research_threads": [
+            {
+                "gap_statement": "静态优化难以同时控制方案质量、响应时间和计划扰动。",
+                "gap_evidence_ids": evidence_ids,
+                "limitation_mechanism_statement": "全量重算没有区分受事件影响与未受影响的决策子结构。",
+                "limitation_mechanism_evidence_ids": evidence_ids,
+                "question_statement": "如何在动态事件下联合控制求解时延、方案质量和计划扰动？",
+                "question_type": "SCIENTIFIC",
+                "answerability": "COMPARABLE",
+                "success_evidence": ["与滚动优化和全量重算基线比较"],
+                "objective_statement": "建立面向动态事件的低扰动运输方案优化方法。",
+                "objective_evidence_ids": evidence_ids,
+                "assumptions": ["事件影响可映射到有限的业务对象与约束集合。"],
+                "falsification_or_comparison_rule": "若不能同时降低时延与非必要扰动，则中心命题不成立。",
+            }
+        ],
+        "evidence_gaps": [],
+        "user_questions": [],
+        "cannot_proceed_reason": None,
+    }
+
+
+def test_argument_skeleton_contract_is_flat_and_unregistered():
+    envelope = _argument_envelope_with_evidence()
+    model_input = build_argument_skeleton_model_input(envelope)
+    assert set(model_input) == {
+        "project_task",
+        "constraints",
+        "evidence_cards",
+        "skeleton_seed",
+        "revision_issues",
+        "human_resolutions",
+    }
+    assert set(model_input["skeleton_seed"] or {}) == {
+        "central_proposition",
+        "boundary_conditions",
+        "scope_in",
+        "scope_out",
+        "existing_chains",
+    }
+    assert "existing_components" not in (model_input["skeleton_seed"] or {})
+    assert "existing_relations" not in (model_input["skeleton_seed"] or {})
+    assert argument_skeleton_model_output_errors(_flat_skeleton_output(envelope)) == []
+
+
+def test_argument_skeleton_contract_rejects_old_nested_design_tree_and_item_wrappers():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    nested = copy.deepcopy(skeleton)
+    nested["research_threads"][0]["work_packages"] = []
+    errors = argument_skeleton_model_output_errors(nested)
+    assert any("Additional properties are not allowed" in error for error in errors)
+
+    wrapped = copy.deepcopy(skeleton)
+    wrapped["research_threads"] = {"item": wrapped["research_threads"]}
+    errors = argument_skeleton_model_output_errors(wrapped)
+    assert any("is not of type 'array'" in error for error in errors)
+
+
+def test_argument_skeleton_schema_has_no_machine_identity_fields_and_bounded_depth():
+    schema = json.loads(
+        (ROOT / "prompt_pack/schemas/model/argument_skeleton_model_output.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    forbidden = {
+        "node_id",
+        "relation_id",
+        "source_id",
+        "target_id",
+        "projection_meta",
+        "source_hash",
+        "context_hash",
+        "json_pointer",
+    }
+
+    max_depth = 0
+    property_names: set[str] = set()
+
+    def visit(node, depth=0):
+        nonlocal max_depth
+        max_depth = max(max_depth, depth)
+        if isinstance(node, dict):
+            props = node.get("properties")
+            if isinstance(props, dict):
+                property_names.update(str(key) for key in props)
+            for key, child in node.items():
+                if key in {"properties", "items", "allOf", "anyOf", "oneOf"}:
+                    visit(child, depth + 1)
+                else:
+                    visit(child, depth)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child, depth + 1)
+
+    visit(schema)
+    assert not (property_names & forbidden)
+    assert max_depth <= 6
+
+
+
+def _flat_design_output(envelope: dict) -> dict:
+    evidence_ids = _available_evidence_ids(envelope)
+    return {
+        "work_packages": [
+            {"thread_index": 0, "work_package_index": 0, "statement": "识别事件影响范围并构造局部重规划问题。", "evidence_ids": evidence_ids}
+        ],
+        "methods": [
+            {"thread_index": 0, "work_package_index": 0, "method_index": 0, "statement": "构建影响子图上的增量优化方法。", "evidence_ids": evidence_ids, "method_type": "ALGORITHM", "assumptions": ["影响范围可从业务依赖关系中识别。"]}
+        ],
+        "theoretical_properties": [
+            {"thread_index": 0, "work_package_index": 0, "method_index": 0, "property_index": 0, "statement": "分析局部更新与全量重算的解质量差异。", "evidence_ids": evidence_ids}
+        ],
+        "evaluations": [
+            {"thread_index": 0, "work_package_index": 0, "method_index": 0, "evaluation_index": 0, "statement": "在动态扰动场景比较重规划时延和计划扰动。", "evidence_ids": evidence_ids, "success_criteria": ["在方案质量可比条件下降低重规划时延和非必要扰动"]}
+        ],
+        "baselines": [
+            {"thread_index": 0, "work_package_index": 0, "method_index": 0, "evaluation_index": 0, "baseline_index": 0, "statement": "全量重新优化基线", "evidence_ids": evidence_ids}
+        ],
+        "ablations": [
+            {"thread_index": 0, "work_package_index": 0, "method_index": 0, "evaluation_index": 0, "ablation_index": 0, "statement": "去除影响范围筛选机制"}
+        ],
+        "innovations": [
+            {"thread_index": 0, "innovation_index": 0, "statement": "面向影响范围的低扰动增量重规划", "evidence_ids": evidence_ids, "contribution": "将变化传播范围显式引入动态运输优化。"}
+        ],
+        "innovation_prior_work": [
+            {"thread_index": 0, "innovation_index": 0, "prior_work_index": 0, "statement": "传统滚动优化通常对完整问题重复求解。", "evidence_ids": evidence_ids}
+        ],
+        "innovation_evaluation_refs": [
+            {"thread_index": 0, "innovation_index": 0, "work_package_index": 0, "method_index": 0, "evaluation_index": 0}
+        ],
+        "foundation": [],
+        "foundation_supports": [],
+        "evidence_gaps": [],
+        "user_questions": [],
+        "cannot_proceed_reason": None,
+    }
+
+
+def test_argument_design_contract_is_flat_frozen_skeleton_input_and_unregistered():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    model_input = build_argument_design_model_input(envelope, skeleton)
+    assert set(model_input) == {
+        "project_task", "constraints", "evidence_cards", "frozen_skeleton",
+        "design_seed", "revision_issues", "human_resolutions",
+    }
+    assert model_input["frozen_skeleton"] == skeleton
+    assert model_input["frozen_skeleton"] is not skeleton
+    assert set(model_input["design_seed"] or {}) == {"existing_components", "existing_relations"}
+    design = _flat_design_output(envelope)
+    assert argument_design_model_output_errors(design) == []
+    assert argument_design_model_reference_errors(design, skeleton) == []
+
+
+def test_argument_design_contract_rejects_nested_tree_item_wrappers_and_skeleton_redefinition():
+    envelope = _argument_envelope_with_evidence()
+    design = _flat_design_output(envelope)
+    nested = copy.deepcopy(design)
+    nested["work_packages"][0]["methods"] = []
+    errors = argument_design_model_output_errors(nested)
+    assert any("Additional properties are not allowed" in error for error in errors)
+
+    wrapped = copy.deepcopy(design)
+    wrapped["methods"] = {"item": wrapped["methods"]}
+    errors = argument_design_model_output_errors(wrapped)
+    assert any("is not of type 'array'" in error for error in errors)
+
+    redefined = copy.deepcopy(design)
+    redefined["central_proposition"] = {"statement": "Stage B must not redefine Stage A"}
+    errors = argument_design_model_output_errors(redefined)
+    assert any("Additional properties are not allowed" in error for error in errors)
+
+
+def test_argument_design_reference_validation_is_local_and_fail_closed():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+
+    broken_thread = copy.deepcopy(design)
+    broken_thread["work_packages"][0]["thread_index"] = 9
+    assert any("thread_index: out of range" in error for error in argument_design_model_reference_errors(broken_thread, skeleton))
+
+    broken_parent = copy.deepcopy(design)
+    broken_parent["methods"][0]["work_package_index"] = 7
+    assert any("unresolved parent index" in error for error in argument_design_model_reference_errors(broken_parent, skeleton))
+
+    duplicate = copy.deepcopy(design)
+    duplicate["methods"].append(copy.deepcopy(duplicate["methods"][0]))
+    assert any("duplicate local index" in error for error in argument_design_model_reference_errors(duplicate, skeleton))
+
+
+def test_argument_design_schema_has_only_flat_local_indexes_and_bounded_depth():
+    schema = json.loads(
+        (ROOT / "prompt_pack/schemas/model/argument_design_model_output.schema.json").read_text(encoding="utf-8")
+    )
+    forbidden = {
+        "node_id", "relation_id", "source_id", "target_id", "projection_meta",
+        "source_hash", "context_hash", "json_pointer", "central_proposition",
+        "scope", "research_threads", "work_packages_nested", "methods_nested",
+    }
+    max_depth = 0
+    property_names: set[str] = set()
+
+    def visit(node, depth=0):
+        nonlocal max_depth
+        max_depth = max(max_depth, depth)
+        if isinstance(node, dict):
+            props = node.get("properties")
+            if isinstance(props, dict):
+                property_names.update(str(key) for key in props)
+            for key, child in node.items():
+                if key in {"properties", "items", "allOf", "anyOf", "oneOf"}:
+                    visit(child, depth + 1)
+                else:
+                    visit(child, depth)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child, depth + 1)
+
+    visit(schema)
+    assert not (property_names & forbidden)
+    assert max_depth <= 5
+
+
+def test_argument_thread_assembler_reconstructs_legacy_authored_thread_without_machine_fields():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    thread = assemble_argument_authored_thread(skeleton, design, 0)
+
+    assert set(thread) == {
+        "gap", "question", "objective", "thread_assumptions",
+        "work_packages", "innovations", "foundation",
+        "falsification_or_comparison_rule",
+    }
+    assert thread["foundation"] == []
+    assert thread["work_packages"][0]["methods"][0]["evaluations"][0]["baselines"][0]["statement"] == "全量重新优化基线"
+    assert thread["innovations"][0]["evaluation_refs"] == [
+        {"work_package_index": 0, "method_index": 0, "evaluation_index": 0}
+    ]
+
+    foundation_design = copy.deepcopy(design)
+    foundation_design["foundation"] = [{
+        "thread_index": 0, "foundation_index": 0,
+        "statement": "已有优化原型可支撑工作包实施。",
+        "evidence_ids": _available_evidence_ids(envelope),
+    }]
+    foundation_design["foundation_supports"] = [{
+        "thread_index": 0, "foundation_index": 0,
+        "work_package_index": 0, "method_index": None,
+    }]
+    supported = assemble_argument_authored_thread(skeleton, foundation_design, 0)
+    assert supported["foundation"][0]["supports"] == [
+        {"work_package_index": 0, "method_index": None}
+    ]
+    rendered = json.dumps(thread, ensure_ascii=False)
+    for forbidden in ("node_id", "edge_id", "graph_id", "projection_meta", "thread_index"):
+        assert forbidden not in rendered
+
+
+def test_argument_thread_assembler_output_is_compatible_with_existing_model_contract_and_projector():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    semantic = {
+        "central_proposition": copy.deepcopy(skeleton["central_proposition"]),
+        "scope": copy.deepcopy(skeleton["scope"]),
+        "research_threads": [assemble_argument_authored_thread(skeleton, design, 0)],
+        "evidence_gaps": copy.deepcopy(skeleton["evidence_gaps"] + design["evidence_gaps"]),
+        "user_questions": copy.deepcopy(skeleton["user_questions"] + design["user_questions"]),
+        "cannot_proceed_reason": design["cannot_proceed_reason"] or skeleton["cannot_proceed_reason"],
+    }
+    assert PACK.validate_model("P-ARGUMENT-ARCHITECTURE", "output", semantic) == []
+    canonical = expand_argument_architecture_model_output(envelope, semantic)
+    assert PACK.validate("P-ARGUMENT-ARCHITECTURE", "output", canonical) == []
+
+
+def test_argument_thread_assembler_is_index_ordered_pure_and_fail_closed():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    design["work_packages"].append({
+        "thread_index": 0, "work_package_index": 2,
+        "statement": "第三工作包", "evidence_ids": _available_evidence_ids(envelope),
+    })
+    design["work_packages"].append({
+        "thread_index": 0, "work_package_index": 1,
+        "statement": "第二工作包", "evidence_ids": _available_evidence_ids(envelope),
+    })
+    original_skeleton = copy.deepcopy(skeleton)
+    original_design = copy.deepcopy(design)
+    thread = assemble_argument_authored_thread(skeleton, design, 0)
+    assert [item["statement"] for item in thread["work_packages"]] == [
+        "识别事件影响范围并构造局部重规划问题。", "第二工作包", "第三工作包"
+    ]
+    assert skeleton == original_skeleton
+    assert design == original_design
+
+    broken = copy.deepcopy(design)
+    broken["methods"][0]["work_package_index"] = 99
+    with pytest.raises(ValueError, match="Invalid Argument Design references"):
+        assemble_argument_authored_thread(skeleton, broken, 0)
+    with pytest.raises(ValueError, match="thread_index out of range"):
+        assemble_argument_authored_thread(skeleton, design, 9)
+
+
+
+def test_argument_authored_state_assembler_reconstructs_complete_legacy_semantics_and_projector_accepts_it():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    authored = assemble_argument_authored_state(skeleton, design)
+
+    assert authored["central_proposition"] == skeleton["central_proposition"]
+    assert authored["scope"] == skeleton["scope"]
+    assert authored["research_threads"] == [
+        assemble_argument_authored_thread(skeleton, design, 0)
+    ]
+    assert authored["evidence_gaps"] == skeleton["evidence_gaps"] + design["evidence_gaps"]
+    assert authored["user_questions"] == skeleton["user_questions"] + design["user_questions"]
+    assert PACK.validate_model("P-ARGUMENT-ARCHITECTURE", "output", authored) == []
+    canonical = expand_argument_architecture_model_output(envelope, authored)
+    assert PACK.validate("P-ARGUMENT-ARCHITECTURE", "output", canonical) == []
+
+
+def test_argument_authored_state_assembler_preserves_all_skeleton_threads_without_design_invention():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    second = copy.deepcopy(skeleton["research_threads"][0])
+    second["gap_statement"] = "第二研究线程缺口"
+    second["question_statement"] = "第二研究线程问题？"
+    second["objective_statement"] = "第二研究线程目标"
+    skeleton["research_threads"].append(second)
+    design = _flat_design_output(envelope)
+
+    original_skeleton = copy.deepcopy(skeleton)
+    original_design = copy.deepcopy(design)
+    authored = assemble_argument_authored_state(skeleton, design)
+    assert len(authored["research_threads"]) == 2
+    assert authored["research_threads"][1]["gap"]["statement"] == "第二研究线程缺口"
+    assert authored["research_threads"][1]["work_packages"] == []
+    assert authored["research_threads"][1]["innovations"] == []
+    assert authored["research_threads"][1]["foundation"] == []
+    assert skeleton == original_skeleton
+    assert design == original_design
+
+
+def test_argument_authored_state_assembler_merges_stage_local_blockers_without_silent_conflict_resolution():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    skeleton["cannot_proceed_reason"] = "Skeleton blocker"
+    design["cannot_proceed_reason"] = "Design blocker"
+    with pytest.raises(ValueError, match="Conflicting cannot_proceed_reason"):
+        assemble_argument_authored_state(skeleton, design)
+
+    design["cannot_proceed_reason"] = "Skeleton blocker"
+    skeleton["evidence_gaps"] = [{
+        "kind": "OTHER", "thread_index": None, "reason": "Skeleton gap",
+        "blocking": False, "suggested_question": None,
+    }]
+    design["evidence_gaps"] = [{
+        "kind": "METRIC_JUSTIFICATION", "thread_index": 0, "reason": "Design gap",
+        "blocking": True, "suggested_question": "请补充指标依据。",
+    }]
+    authored = assemble_argument_authored_state(skeleton, design)
+    assert authored["cannot_proceed_reason"] == "Skeleton blocker"
+    assert [item["reason"] for item in authored["evidence_gaps"]] == ["Skeleton gap", "Design gap"]
+
+
+class _FakeArgumentStageGateway:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def invoke_stage(
+        self,
+        stage,
+        model_input,
+        output_schema,
+        *,
+        retry_context=None,
+        desired_output_tokens,
+    ):
+        self.calls.append({
+            "stage": stage,
+            "model_input": copy.deepcopy(model_input),
+            "output_schema": copy.deepcopy(output_schema),
+            "retry_context": copy.deepcopy(retry_context),
+            "desired_output_tokens": desired_output_tokens,
+        })
+        response = self.responses[len(self.calls) - 1]
+        if callable(response):
+            response = response(stage, model_input, output_schema)
+        return copy.deepcopy(response)
+
+
+def test_argument_two_stage_step4a_happy_path_projects_existing_canonical_output():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([skeleton, design])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK
+    ))
+
+    assert [call["stage"] for call in gateway.calls] == [
+        ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE
+    ]
+    assert [call["desired_output_tokens"] for call in gateway.calls] == [
+        8_192, 65_536
+    ]
+    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == skeleton
+    assert result["skeleton"] == skeleton
+    assert result["design"] == design
+    assert result["authored_state"] == assemble_argument_authored_state(skeleton, design)
+    assert PACK.validate("P-ARGUMENT-ARCHITECTURE", "output", result["canonical_output"]) == []
+
+
+@pytest.mark.parametrize("broken", ["item_wrapper", "lifted_field", "wrong_field", "cardinality"])
+def test_argument_two_stage_step4a_skeleton_failures_are_stage_local_and_never_call_design(broken):
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    if broken == "item_wrapper":
+        candidate = {"item": [skeleton]}
+    else:
+        candidate = copy.deepcopy(skeleton)
+        if broken == "lifted_field":
+            value = candidate["research_threads"][0].pop("gap_statement")
+            candidate["gap_statement"] = value
+        elif broken == "wrong_field":
+            candidate["research_threads"][0]["gap"] = candidate["research_threads"][0].pop("gap_statement")
+        elif broken == "cardinality":
+            candidate["research_threads"] = [
+                copy.deepcopy(candidate["research_threads"][0]) for _ in range(5)
+            ]
+    gateway = _FakeArgumentStageGateway([candidate, _flat_design_output(envelope)])
+
+    with pytest.raises(ArgumentStageContractError) as raised:
+        asyncio.run(orchestrate_argument_architecture_two_stage(
+            envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+        ))
+
+    assert raised.value.stage == ARGUMENT_SKELETON_STAGE
+    assert raised.value.phase == "structure_validation"
+    assert len(gateway.calls) == 1
+
+
+def test_argument_two_stage_step4a_skeleton_unknown_evidence_is_local_reference_failure():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    skeleton["central_proposition"]["evidence_ids"] = ["EV-NOT-PRESENT"]
+    gateway = _FakeArgumentStageGateway([skeleton, _flat_design_output(envelope)])
+
+    with pytest.raises(ArgumentStageContractError) as raised:
+        asyncio.run(orchestrate_argument_architecture_two_stage(
+            envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+        ))
+
+    assert raised.value.stage == ARGUMENT_SKELETON_STAGE
+    assert raised.value.phase == "reference_validation"
+    assert len(gateway.calls) == 1
+
+
+def test_argument_two_stage_step4a_design_reference_failure_keeps_skeleton_frozen():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    design["methods"][0]["work_package_index"] = 9
+    original_skeleton = copy.deepcopy(skeleton)
+    gateway = _FakeArgumentStageGateway([skeleton, design])
+
+    with pytest.raises(ArgumentStageContractError) as raised:
+        asyncio.run(orchestrate_argument_architecture_two_stage(
+            envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+        ))
+
+    assert raised.value.stage == ARGUMENT_DESIGN_STAGE
+    assert raised.value.phase == "reference_validation"
+    assert len(gateway.calls) == 2
+    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == original_skeleton
+    assert skeleton == original_skeleton
+
+
+def test_argument_two_stage_step4a_design_unknown_evidence_is_local_reference_failure():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    design["methods"][0]["evidence_ids"] = ["EV-NOT-PRESENT"]
+    gateway = _FakeArgumentStageGateway([skeleton, design])
+
+    with pytest.raises(ArgumentStageContractError) as raised:
+        asyncio.run(orchestrate_argument_architecture_two_stage(
+            envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+        ))
+
+    assert raised.value.stage == ARGUMENT_DESIGN_STAGE
+    assert raised.value.phase == "reference_validation"
+    assert len(gateway.calls) == 2
+
+
+def test_argument_two_stage_step4a_assembler_failure_is_python_fail_closed_without_extra_model_call():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    skeleton["cannot_proceed_reason"] = "Skeleton blocker"
+    design["cannot_proceed_reason"] = "Design blocker"
+    gateway = _FakeArgumentStageGateway([skeleton, design])
+
+    with pytest.raises(ArgumentStageContractError) as raised:
+        asyncio.run(orchestrate_argument_architecture_two_stage(
+            envelope, stage_gateway=gateway, pack=PACK
+        ))
+
+    assert raised.value.stage == "ASSEMBLER"
+    assert raised.value.phase == "deterministic_assembly"
+    assert len(gateway.calls) == 2
+
+
+def test_argument_two_stage_step4a_skeleton_retry_carries_previous_candidate_and_does_not_call_design_early():
+    envelope = _argument_envelope_with_evidence()
+    valid_skeleton = _flat_skeleton_output(envelope)
+    broken_skeleton = copy.deepcopy(valid_skeleton)
+    broken_skeleton["research_threads"] = {"item": broken_skeleton["research_threads"]}
+    design = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([broken_skeleton, valid_skeleton, design])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+    ))
+
+    assert [call["stage"] for call in gateway.calls] == [
+        ARGUMENT_SKELETON_STAGE, ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE
+    ]
+    retry = gateway.calls[1]["retry_context"]
+    assert retry["attempt"] == 2
+    assert retry["previous_candidate"] == broken_skeleton
+    assert retry["validation_errors"]
+    assert gateway.calls[2]["model_input"]["frozen_skeleton"] == valid_skeleton
+    assert result["skeleton"] == valid_skeleton
+
+
+def test_argument_two_stage_step4a_design_retry_freezes_skeleton_and_carries_local_errors():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    broken_design = _flat_design_output(envelope)
+    broken_design["methods"][0]["work_package_index"] = 9
+    valid_design = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([skeleton, broken_design, valid_design])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+    ))
+
+    assert [call["stage"] for call in gateway.calls] == [
+        ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE, ARGUMENT_DESIGN_STAGE
+    ]
+    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == skeleton
+    assert gateway.calls[2]["model_input"]["frozen_skeleton"] == skeleton
+    retry = gateway.calls[2]["retry_context"]
+    assert retry["attempt"] == 2
+    assert retry["previous_candidate"] == broken_design
+    assert any("unresolved parent index" in error for error in retry["validation_errors"])
+    assert result["design"] == valid_design
+
+
+def test_argument_two_stage_step4a_exhausted_skeleton_retry_never_calls_design():
+    envelope = _argument_envelope_with_evidence()
+    broken = {"item": [_flat_skeleton_output(envelope)]}
+    gateway = _FakeArgumentStageGateway([broken, broken, _flat_design_output(envelope)])
+
+    with pytest.raises(ArgumentStageContractError) as raised:
+        asyncio.run(orchestrate_argument_architecture_two_stage(
+            envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+        ))
+
+    assert raised.value.stage == ARGUMENT_SKELETON_STAGE
+    assert [call["stage"] for call in gateway.calls] == [
+        ARGUMENT_SKELETON_STAGE, ARGUMENT_SKELETON_STAGE
+    ]
+    assert raised.value.candidate == broken
+
+def test_argument_two_stage_step4a_stage_budgets_are_local_and_bounded():
+    assert argument_stage_desired_output_tokens(ARGUMENT_SKELETON_STAGE) == 8_192
+    assert argument_stage_desired_output_tokens(ARGUMENT_DESIGN_STAGE) == 65_536
+    with pytest.raises(ValueError, match="Unknown Argument stage"):
+        argument_stage_desired_output_tokens("FULL_ARGUMENT")
+
+
+def test_argument_two_stage_step4a_flat_contract_cardinality_limits_are_explicit():
+    skeleton_schema = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "prompt_pack"
+            / "schemas"
+            / "model"
+            / "argument_skeleton_model_output.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    design_schema = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "prompt_pack"
+            / "schemas"
+            / "model"
+            / "argument_design_model_output.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert skeleton_schema["properties"]["research_threads"]["maxItems"] == 4
+    assert {
+        name: design_schema["properties"][name]["maxItems"]
+        for name in (
+            "work_packages",
+            "methods",
+            "theoretical_properties",
+            "evaluations",
+            "baselines",
+            "ablations",
+            "innovations",
+            "foundation",
+        )
+    } == {
+        "work_packages": 24,
+        "methods": 48,
+        "theoretical_properties": 96,
+        "evaluations": 96,
+        "baselines": 192,
+        "ablations": 192,
+        "innovations": 32,
+        "foundation": 32,
+    }
 

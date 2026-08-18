@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +17,16 @@ from .executor import (
     PromptExecutor as BasePromptExecutor,
 )
 from .contract_registry import CONTRACT_REGISTRY_VERSION
+from .argument_two_stage_orchestration import (
+    ARGUMENT_DESIGN_STAGE,
+    ARGUMENT_SKELETON_STAGE,
+    ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
+    ArgumentStageContractError,
+    argument_stage_desired_output_tokens,
+    argument_stage_output_schema,
+    argument_stage_prompt_text,
+    orchestrate_argument_architecture_two_stage,
+)
 from .llm import LLMError, MODEL_RESPONSE_PROTOCOL_VERSION
 from .model_semantic_contracts import (
     SEMANTIC_MODEL_CONTRACT_VERSION,
@@ -36,6 +47,224 @@ from .util import new_id, sha256_json, utc_now
 
 class RecoverablePromptExecutionError(PromptExecutionError):
     recoverable = True
+
+
+class _RuntimeArgumentStageGateway:
+    """Adapt one Runtime route/gateway into deterministic stage-local calls."""
+
+    def __init__(
+        self,
+        executor: "RuntimePromptExecutor",
+        *,
+        route: Any,
+        outer_call_key: str,
+        project_config: dict[str, Any] | None = None,
+    ) -> None:
+        self.executor = executor
+        self.route = route
+        self.outer_call_key = outer_call_key
+        self.project_config = copy.deepcopy(project_config or {})
+        self.calls: list[dict[str, Any]] = []
+        self.last_result: Any = None
+        self.last_failure: dict[str, Any] | None = None
+
+    @property
+    def provider_attempts_known_count(self) -> int:
+        return sum(
+            int(item["provider_attempts"])
+            for item in self.calls
+            if isinstance(item.get("provider_attempts"), int)
+        )
+
+    @property
+    def provider_attempt_count(self) -> int | None:
+        if not self.provider_attempts_complete:
+            return None
+        return self.provider_attempts_known_count
+
+    @property
+    def provider_attempts_complete(self) -> bool:
+        return all(
+            item.get("outcome") != "PENDING"
+            and isinstance(item.get("provider_attempts"), int)
+            for item in self.calls
+        )
+
+
+    async def invoke_stage(
+        self,
+        stage: str,
+        model_input: dict[str, Any],
+        output_schema: dict[str, Any],
+        *,
+        retry_context: dict[str, Any] | None = None,
+        desired_output_tokens: int,
+    ) -> dict[str, Any]:
+        attempt = int((retry_context or {}).get("attempt") or 1)
+        stage_envelope = copy.deepcopy(model_input)
+        if retry_context:
+            stage_envelope["retry_context"] = copy.deepcopy(retry_context)
+
+        stage_route = replace(
+            self.route,
+            profile={
+                **copy.deepcopy(self.route.profile),
+                "desired_output_tokens": int(desired_output_tokens),
+            },
+        )
+        # Workflow-level provider retries receive a new outer attempt key.  A
+        # stage that already succeeded must nevertheless keep its exact frozen
+        # candidate, while a stage whose provider call failed must be allowed a
+        # fresh provider attempt.  Prefer a generation-stable key for successful
+        # stage evidence and fall back to an outer-attempt-specific key only
+        # after that stable key is known to contain failed provider evidence.
+        generation_key = self.outer_call_key
+        outer_attempt = None
+        prefix, marker, suffix = self.outer_call_key.rpartition("-attempt-")
+        if marker and suffix.isdigit():
+            generation_key = prefix
+            outer_attempt = int(suffix)
+
+        def retry_stage_key(outer_key: str) -> str:
+            return "call-" + sha256_json(
+                {
+                    "outer_call_key": outer_key,
+                    "contract_version": ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
+                    "stage": stage,
+                    "attempt": attempt,
+                    "retry_after_failed_stable_call": True,
+                }
+            )[:32]
+
+        stable_stage_call_key = "call-" + sha256_json(
+            {
+                "outer_generation_key": generation_key,
+                "contract_version": ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
+                "stage": stage,
+                "attempt": attempt,
+            }
+        )[:32]
+        stage_call_key = stable_stage_call_key
+        store = getattr(self.executor.gateway, "evidence_store", None)
+        has_response = getattr(store, "has_response", lambda _key: False)
+        has_failed_response = getattr(
+            store, "has_failed_response", lambda _key: False
+        )
+        if store is not None and not has_response(stable_stage_call_key):
+            # A successful stage may have been generated under an earlier
+            # outer-attempt-specific key after the stable key had a transient
+            # provider failure.  Reuse the newest such success so later Design
+            # retries never regenerate an already-valid Skeleton.
+            if outer_attempt is not None:
+                for prior_outer_attempt in range(outer_attempt - 1, 0, -1):
+                    prior_key = retry_stage_key(
+                        f"{generation_key}-attempt-{prior_outer_attempt}"
+                    )
+                    if has_response(prior_key):
+                        stage_call_key = prior_key
+                        break
+            if (
+                stage_call_key == stable_stage_call_key
+                and has_failed_response(stable_stage_call_key)
+            ):
+                stage_call_key = retry_stage_key(self.outer_call_key)
+        shared_prompt = self.executor.pack.shared_prompt_for(
+            "P-ARGUMENT-ARCHITECTURE"
+        )
+        stage_system_prompt = (
+            str(shared_prompt).strip()
+            + "\n\n"
+            + argument_stage_prompt_text(stage).strip()
+            + "\n"
+        )
+
+        call_record: dict[str, Any] = {
+            "stage": stage,
+            "attempt": attempt,
+            "call_key": stage_call_key,
+            "desired_output_tokens": int(desired_output_tokens),
+            "stage_input_sha256": sha256_json(stage_envelope),
+            "output_schema_sha256": sha256_json(output_schema),
+            "outcome": "PENDING",
+            "provider_attempts": None,
+        }
+        self.calls.append(call_record)
+        gateway_invoked = False
+
+        try:
+            # Stage inputs are the actual provider-visible payloads.  Apply the
+            # outbound policy here, after semantic projection and retry-context
+            # attachment, so ONLINE_PUBLIC never validates a different object
+            # than the one sent to the gateway.
+            if self.route.environment == "ONLINE_PUBLIC":
+                assert_online_payload_safe(stage_envelope, self.project_config)
+
+            if getattr(self.executor.gateway, "supports_runtime_evidence", False):
+                gateway_invoked = True
+                result = await self.executor.gateway.invoke(
+                    stage_route,
+                    "P-ARGUMENT-ARCHITECTURE",
+                    stage_system_prompt,
+                    stage_envelope,
+                    output_schema,
+                    call_key=stage_call_key,
+                    direct_tool_arguments=True,
+                )
+            else:
+                gateway_invoked = True
+                result = await self.executor.gateway.invoke(
+                    stage_route,
+                    "P-ARGUMENT-ARCHITECTURE",
+                    stage_system_prompt,
+                    stage_envelope,
+                    output_schema,
+                    direct_tool_arguments=True,
+                )
+        except Exception as exc:
+            reported_attempts = getattr(exc, "provider_attempts", None)
+            if isinstance(reported_attempts, int):
+                failed_provider_attempts: int | None = max(0, reported_attempts)
+            elif gateway_invoked:
+                # The gateway/provider was entered, but the exception contract does
+                # not expose a reliable attempt count. Preserve unknown rather than
+                # falsely recording zero provider work.
+                failed_provider_attempts = None
+            else:
+                # Outbound policy failed before the gateway/provider boundary.
+                failed_provider_attempts = 0
+            call_record.update({
+                "outcome": "ERROR",
+                "provider_attempts": failed_provider_attempts,
+                "provider_attempts_complete": failed_provider_attempts is not None,
+                "error_type": type(exc).__name__,
+                "error": redact_secret_text(str(exc)),
+            })
+            self.last_failure = copy.deepcopy(call_record)
+            raise
+
+        self.last_result = result
+        reused_response = bool(getattr(result, "reused_response", False))
+        reported_provider_attempts = int(getattr(result, "provider_attempts", 1) or 0)
+        current_provider_attempts = 0 if reused_response else reported_provider_attempts
+        call_record.update(
+            {
+                "outcome": "SUCCESS",
+                "provider_attempts": current_provider_attempts,
+                "provider_attempts_complete": True,
+                "reported_provider_attempts": reported_provider_attempts,
+                "model_id": getattr(result, "model_id", None),
+                "endpoint_id": getattr(result, "endpoint_id", None),
+                "reused_response": reused_response,
+                "response_contract_mode": getattr(
+                    result, "response_contract_mode", None
+                ),
+                "evidence": copy.deepcopy(
+                    getattr(result, "evidence", {}) or {}
+                ),
+            }
+        )
+        self.last_failure = None
+        return copy.deepcopy(result.output)
 
 
 class RuntimePromptExecutor(BasePromptExecutor):
@@ -71,6 +300,18 @@ class RuntimePromptExecutor(BasePromptExecutor):
             self.runtime_mode == "LIVE"
             and supports_semantic_model_contract(prompt_id)
             and getattr(self.pack, "has_model_contract", lambda _pid: False)(prompt_id)
+        )
+
+    def _uses_argument_two_stage_contract(self, prompt_id: str) -> bool:
+        """P-ARGUMENT-ARCHITECTURE is two-stage whenever LIVE is enabled.
+
+        This deliberately does not depend on the legacy semantic-contract registry:
+        a registry/configuration drift must never silently reactivate the retired
+        one-shot deep Argument producer. Missing stage assets fail when resolved.
+        """
+        return bool(
+            self.runtime_mode == "LIVE"
+            and prompt_id == "P-ARGUMENT-ARCHITECTURE"
         )
 
     @staticmethod
@@ -160,15 +401,20 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     }
                 )
             semantic_model_contract = self._uses_semantic_model_contract(prompt_id)
-            return {
+            argument_two_stage_contract = self._uses_argument_two_stage_contract(prompt_id)
+            spec = {
                 "prompt_text": self.pack.prompt_text(prompt_id),
                 "prompt_entry": entry,
                 "model_profile": profile,
                 "candidate_models": candidate_models,
                 "output_schema": (
-                    self.pack.inlined_model_schema(prompt_id, "output")
-                    if semantic_model_contract
-                    else self.pack.inlined_schema(prompt_id, "output")
+                    None
+                    if argument_two_stage_contract
+                    else (
+                        self.pack.inlined_model_schema(prompt_id, "output")
+                        if semantic_model_contract
+                        else self.pack.inlined_schema(prompt_id, "output")
+                    )
                 ),
                 "semantic_model_contract": {
                     "enabled": semantic_model_contract,
@@ -180,6 +426,25 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "model_system_prompt_version": MODEL_SYSTEM_PROMPT_VERSION,
                 "model_response_protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
             }
+            if argument_two_stage_contract:
+                # The legacy deep semantic prompt/schema are no longer provider
+                # visible for this Producer.  Stage prompts/schemas below own
+                # the request identity so a stale one-stage generation cannot
+                # be replayed after the Runtime switch.
+                spec["prompt_text"] = None
+                spec["output_schema"] = None
+                spec["argument_two_stage_contract"] = {
+                    "version": ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
+                    "stages": {
+                        stage: {
+                            "prompt_text": argument_stage_prompt_text(stage),
+                            "output_schema": argument_stage_output_schema(stage),
+                            "desired_output_tokens": argument_stage_desired_output_tokens(stage),
+                        }
+                        for stage in (ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE)
+                    },
+                }
+            return spec
         except (AttributeError, KeyError, TypeError):
             return {"prompt_id": prompt_id}
 
@@ -750,6 +1015,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
             input_compaction, provider_projection
         )
         semantic_model_contract = self._uses_semantic_model_contract(prompt_id)
+        argument_two_stage_contract = self._uses_argument_two_stage_contract(prompt_id)
         input_hash = sha256_json(model_envelope)
         model_request_spec_hash = self._model_request_spec_hash(prompt_id)
         call_key = self._call_key(
@@ -794,6 +1060,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         provider_output: dict[str, Any] | None = None
         consumed_output: dict[str, Any] | None = None
         result = None
+        stage_gateway: _RuntimeArgumentStageGateway | None = None
         try:
             input_errors = self.pack.validate(prompt_id, "input", envelope)
             if input_errors:
@@ -814,7 +1081,30 @@ class RuntimePromptExecutor(BasePromptExecutor):
             project_config = load_project_config(self.db, project_id)
 
             provider_call_envelope = provider_envelope
-            if semantic_model_contract:
+            if argument_two_stage_contract:
+                # The external Producer remains P-ARGUMENT-ARCHITECTURE, while
+                # provider-visible payloads are built stage-locally by the
+                # deterministic orchestrator.
+                output_schema = self.pack.inlined_schema(prompt_id, "output")
+                input_compaction = {
+                    **(input_compaction or {}),
+                    "argument_two_stage_contract": {
+                        "version": ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
+                        "stages": [ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE],
+                        "desired_output_tokens": {
+                            ARGUMENT_SKELETON_STAGE: argument_stage_desired_output_tokens(
+                                ARGUMENT_SKELETON_STAGE
+                            ),
+                            ARGUMENT_DESIGN_STAGE: argument_stage_desired_output_tokens(
+                                ARGUMENT_DESIGN_STAGE
+                            ),
+                        },
+                        "outer_semantic_retry_issues_ignored": len(
+                            semantic_retry_issues or []
+                        ),
+                    },
+                }
+            elif semantic_model_contract:
                 provider_call_envelope = build_semantic_model_input(prompt_id, model_envelope)
                 provider_call_envelope = self._merge_semantic_retry_issues(
                     prompt_id,
@@ -846,25 +1136,40 @@ class RuntimePromptExecutor(BasePromptExecutor):
             else:
                 output_schema = self.pack.inlined_schema(prompt_id, "output")
 
-            if route.environment == "ONLINE_PUBLIC":
+            if route.environment == "ONLINE_PUBLIC" and not argument_two_stage_contract:
                 assert_online_payload_safe(provider_call_envelope, project_config)
-            system_prompt = self._system_prompt(
-                prompt_id,
-                output_schema,
-                provider_call_envelope,
-                semantic_model_contract=semantic_model_contract,
-            )
-            contract_recovery = self._recoverable_contract_output(
-                project_id=project_id,
-                workflow_id=workflow_id,
-                prompt_id=prompt_id,
-                input_hash=input_hash,
-                model_envelope=model_envelope,
-                quality_context_envelope=quality_context_envelope,
-                project_config=project_config,
-                model_request_spec_hash=model_request_spec_hash,
-                call_key=call_key,
-                recovery_run_id=recovery_run_id,
+            if argument_two_stage_contract:
+                system_prompt = (
+                    f"# {ARGUMENT_TWO_STAGE_CONTRACT_VERSION}\n"
+                    "P-ARGUMENT-ARCHITECTURE is executed internally as "
+                    "SKELETON -> DESIGN -> deterministic assembler -> canonical projector.\n\n"
+                    f"## {ARGUMENT_SKELETON_STAGE}\n"
+                    f"{argument_stage_prompt_text(ARGUMENT_SKELETON_STAGE)}\n\n"
+                    f"## {ARGUMENT_DESIGN_STAGE}\n"
+                    f"{argument_stage_prompt_text(ARGUMENT_DESIGN_STAGE)}"
+                )
+            else:
+                system_prompt = self._system_prompt(
+                    prompt_id,
+                    output_schema,
+                    provider_call_envelope,
+                    semantic_model_contract=semantic_model_contract,
+                )
+            contract_recovery = (
+                None
+                if argument_two_stage_contract
+                else self._recoverable_contract_output(
+                    project_id=project_id,
+                    workflow_id=workflow_id,
+                    prompt_id=prompt_id,
+                    input_hash=input_hash,
+                    model_envelope=model_envelope,
+                    quality_context_envelope=quality_context_envelope,
+                    project_config=project_config,
+                    model_request_spec_hash=model_request_spec_hash,
+                    call_key=call_key,
+                    recovery_run_id=recovery_run_id,
+                )
             )
             if contract_recovery is not None:
                 result = SimpleNamespace(
@@ -883,6 +1188,90 @@ class RuntimePromptExecutor(BasePromptExecutor):
                         "model_request_spec_hash": model_request_spec_hash,
                     },
                     reused_response=True,
+                )
+            elif argument_two_stage_contract:
+                stage_gateway = _RuntimeArgumentStageGateway(
+                    self,
+                    route=route,
+                    outer_call_key=call_key,
+                    project_config=project_config,
+                )
+                try:
+                    staged = await orchestrate_argument_architecture_two_stage(
+                        model_envelope,
+                        stage_gateway=stage_gateway,
+                        pack=self.pack,
+                        max_stage_attempts=2,
+                        stage_input_envelope=provider_envelope,
+                    )
+                except ArgumentStageContractError as exc:
+                    last_stage_result = stage_gateway.last_result
+                    result = SimpleNamespace(
+                        output=None,
+                        raw_text=None,
+                        model_id=(
+                            getattr(last_stage_result, "model_id", None)
+                            or route.model_id
+                        ),
+                        endpoint_id=(
+                            getattr(last_stage_result, "endpoint_id", None)
+                            or route.endpoint_id
+                        ),
+                        evidence={
+                            "argument_two_stage": {
+                                "version": ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
+                                "stage_calls": copy.deepcopy(stage_gateway.calls),
+                                "stage_invocations": len(stage_gateway.calls),
+                                "provider_attempts": stage_gateway.provider_attempt_count,
+                                "provider_attempts_known": stage_gateway.provider_attempts_known_count,
+                                "provider_attempts_complete": stage_gateway.provider_attempts_complete,
+                                "failed_stage": exc.stage,
+                                "failed_phase": exc.phase,
+                            }
+                        },
+                    )
+                    raise PromptExecutionError(
+                        f"Argument two-stage {exc.stage} {exc.phase} failed",
+                        validation_errors=list(exc.errors),
+                    ) from exc
+                last_stage_result = stage_gateway.last_result
+                result = SimpleNamespace(
+                    output=copy.deepcopy(staged["canonical_output"]),
+                    raw_text=None,
+                    model_id=(
+                        getattr(last_stage_result, "model_id", None)
+                        or route.model_id
+                    ),
+                    endpoint_id=(
+                        getattr(last_stage_result, "endpoint_id", None)
+                        or route.endpoint_id
+                    ),
+                    evidence={
+                        "argument_two_stage": {
+                            "version": ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
+                            "stage_calls": copy.deepcopy(stage_gateway.calls),
+                            "stage_invocations": len(stage_gateway.calls),
+                            "provider_attempts": stage_gateway.provider_attempt_count,
+                            "provider_attempts_known": stage_gateway.provider_attempts_known_count,
+                            "provider_attempts_complete": stage_gateway.provider_attempts_complete,
+                            "skeleton_sha256": sha256_json(staged["skeleton"]),
+                            "design_sha256": sha256_json(staged["design"]),
+                            "authored_state_sha256": sha256_json(
+                                staged["authored_state"]
+                            ),
+                        }
+                    },
+                    reused_response=bool(
+                        stage_gateway.calls
+                        and all(
+                            item.get("reused_response")
+                            for item in stage_gateway.calls
+                        )
+                    ),
+                    parse_report={},
+                    response_contract_mode="ARGUMENT_TWO_STAGE",
+                    provider_attempts=stage_gateway.provider_attempt_count,
+                    fallback_reason=None,
                 )
             elif getattr(self.gateway, "supports_runtime_evidence", False):
                 result = await self.gateway.invoke(
@@ -913,7 +1302,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 if contract_recovery is not None:
                     consumed_output = copy.deepcopy(contract_recovery["consumed_output"])
                 else:
-                    if semantic_model_contract:
+                    if semantic_model_contract and not argument_two_stage_contract:
                         semantic_output_errors = self.pack.validate_model(
                             prompt_id, "output", provider_output
                         )
@@ -1075,6 +1464,31 @@ class RuntimePromptExecutor(BasePromptExecutor):
             details = [redact_secret_text(str(item)) for item in (getattr(exc, "validation_errors", []) or [])]
             error = redact_secret_text(str(exc) + ((" | " + "; ".join(details[:20])) if details else ""))
             failure_classification = classify_runtime_failure(exc).to_dict()
+            failure_evidence = copy.deepcopy(
+                getattr(result, "evidence", {}) if result else {}
+            )
+            if argument_two_stage_contract and stage_gateway is not None:
+                two_stage_evidence = failure_evidence.setdefault(
+                    "argument_two_stage", {}
+                )
+                two_stage_evidence.setdefault(
+                    "version", ARGUMENT_TWO_STAGE_CONTRACT_VERSION
+                )
+                two_stage_evidence["stage_calls"] = copy.deepcopy(stage_gateway.calls)
+                two_stage_evidence["stage_invocations"] = len(stage_gateway.calls)
+                two_stage_evidence["provider_attempts"] = (
+                    stage_gateway.provider_attempt_count
+                )
+                two_stage_evidence["provider_attempts_known"] = (
+                    stage_gateway.provider_attempts_known_count
+                )
+                two_stage_evidence["provider_attempts_complete"] = (
+                    stage_gateway.provider_attempts_complete
+                )
+                if stage_gateway.last_failure is not None:
+                    two_stage_evidence["provider_or_outbound_failure"] = (
+                        copy.deepcopy(stage_gateway.last_failure)
+                    )
             persistence_error = self._commit_error(
                 run_id=run_id,
                 call_key=call_key,
@@ -1095,7 +1509,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 error=error,
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
-                evidence=getattr(result, "evidence", {}) if result else {},
+                evidence=failure_evidence,
                 failure_classification=failure_classification,
             )
             if persistence_error:

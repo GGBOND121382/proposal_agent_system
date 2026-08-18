@@ -2,10 +2,10 @@
 
 - 版本：`2.3.0`
 - 校验状态：`PASS`
-- 文件数（不含本清单与校验和文件）：`322`
+- 文件数（不含本清单与校验和文件）：`324`
 - Prompt：`30`
 - Replay：`150`
-- JSON文件：`250`
+- JSON文件：`252`
 - YAML文件：`19`
 - 生成文件 `MANIFEST.md` 与 `SHA256SUMS.txt` 不参与自身校验，避免循环哈希。
 
@@ -270,6 +270,8 @@
 | `schemas/model/argument_architecture_critic_model_output.schema.json` | 12338 | `18e45a4a9f965b0e283eb2e26f6663bcb52b54d3fa8ffdbb366f717f67b32e18` |
 | `schemas/model/argument_architecture_model_input.schema.json` | 7491 | `003aecc32dd0e6a4f08fb8c7e6dcc1946dd1f570774720ed809d9a0d63b19fe1` |
 | `schemas/model/argument_architecture_model_output.schema.json` | 19896 | `e6951234dff1a4b803e3e83648b59bef63819a8f044a69aa307553e6696c3567` |
+| `schemas/model/argument_design_model_output.schema.json` | 14682 | `064db3a2a7eb6b0e3b4b52e762dcea849d37ee101eba75dee2d6b1ba2ff6c735` |
+| `schemas/model/argument_skeleton_model_output.schema.json` | 7339 | `4f8eca3bf8dd7f036fc7a3b3990d6272961c416755e00921f7169c12121d68f4` |
 | `schemas/model/targeted_repair_model_input.schema.json` | 5502 | `510d81d6194f4d0c81035774bdec079b0cdd467768f1f6477f81d3b2692cf8da` |
 | `schemas/model/targeted_repair_model_output.schema.json` | 821 | `fc8490622d84ebe8c8d46b19a6c9c8a085052c7244d91f661a644d825cdbb225` |
 | `schemas/prompts/argument_architecture_critic_input.schema.json` | 23647 | `1b171c5bdd3e6ce0c3be91957af8ef1eee6978888e46e409c57ccf99c0c35e7a` |

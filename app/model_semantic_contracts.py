@@ -765,6 +765,399 @@ def build_argument_architecture_model_input(canonical_envelope: dict[str, Any]) 
 
 
 
+
+def _argument_skeleton_seed(canonical_envelope: dict[str, Any]) -> dict[str, Any] | None:
+    """Project only problem-definition semantics needed by the Skeleton stage."""
+    seed = _design_seed(canonical_envelope)
+    if not isinstance(seed, dict):
+        return None
+    return {
+        "central_proposition": copy.deepcopy(seed.get("central_proposition")),
+        "boundary_conditions": copy.deepcopy(seed.get("boundary_conditions") or []),
+        "scope_in": copy.deepcopy(seed.get("scope_in") or []),
+        "scope_out": copy.deepcopy(seed.get("scope_out") or []),
+        "existing_chains": copy.deepcopy(seed.get("existing_chains") or []),
+    }
+
+
+def build_argument_skeleton_model_input(
+    canonical_envelope: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the unregistered flat Stage-A input without design-stage payload."""
+    base = build_argument_architecture_model_input(canonical_envelope)
+    return {
+        "project_task": copy.deepcopy(base["project_task"]),
+        "constraints": copy.deepcopy(base["constraints"]),
+        "evidence_cards": copy.deepcopy(base["evidence_cards"]),
+        "skeleton_seed": _argument_skeleton_seed(canonical_envelope),
+        "revision_issues": copy.deepcopy(base["revision_issues"]),
+        "human_resolutions": copy.deepcopy(base["human_resolutions"]),
+    }
+
+
+def _argument_skeleton_schema_validator() -> Draft202012Validator:
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "prompt_pack"
+        / "schemas"
+        / "model"
+        / "argument_skeleton_model_output.schema.json"
+    )
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    return Draft202012Validator(schema)
+
+
+def argument_skeleton_model_output_errors(value: Any) -> list[str]:
+    """Validate only the flat Stage-A wire shape; no Runtime registration yet."""
+    errors = sorted(
+        _argument_skeleton_schema_validator().iter_errors(value),
+        key=lambda error: list(error.absolute_path),
+    )
+    rendered: list[str] = []
+    for error in errors:
+        suffix = "/".join(str(token) for token in error.absolute_path)
+        rendered.append(f"/{suffix}: {error.message}" if suffix else f"/: {error.message}")
+    return rendered
+
+
+
+
+def _argument_design_seed(canonical_envelope: dict[str, Any]) -> dict[str, Any] | None:
+    """Project only design-stage semantic hints; problem definition comes from frozen Skeleton."""
+    seed = _design_seed(canonical_envelope)
+    if not isinstance(seed, dict):
+        return None
+    return {
+        "existing_components": copy.deepcopy(seed.get("existing_components") or []),
+        "existing_relations": copy.deepcopy(seed.get("existing_relations") or []),
+    }
+
+
+def build_argument_design_model_input(
+    canonical_envelope: dict[str, Any],
+    skeleton_output: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the unregistered flat Stage-B input with an immutable Stage-A Skeleton."""
+    skeleton_errors = argument_skeleton_model_output_errors(skeleton_output)
+    if skeleton_errors:
+        raise ValueError("Invalid Argument Skeleton: " + "; ".join(skeleton_errors[:6]))
+    base = build_argument_architecture_model_input(canonical_envelope)
+    return {
+        "project_task": copy.deepcopy(base["project_task"]),
+        "constraints": copy.deepcopy(base["constraints"]),
+        "evidence_cards": copy.deepcopy(base["evidence_cards"]),
+        "frozen_skeleton": copy.deepcopy(skeleton_output),
+        "design_seed": _argument_design_seed(canonical_envelope),
+        "revision_issues": copy.deepcopy(base["revision_issues"]),
+        "human_resolutions": copy.deepcopy(base["human_resolutions"]),
+    }
+
+
+def _argument_design_schema_validator() -> Draft202012Validator:
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "prompt_pack"
+        / "schemas"
+        / "model"
+        / "argument_design_model_output.schema.json"
+    )
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    return Draft202012Validator(schema)
+
+
+def argument_design_model_output_errors(value: Any) -> list[str]:
+    """Validate the flat Stage-B wire shape; no Runtime registration yet."""
+    errors = sorted(
+        _argument_design_schema_validator().iter_errors(value),
+        key=lambda error: list(error.absolute_path),
+    )
+    rendered: list[str] = []
+    for error in errors:
+        suffix = "/".join(str(token) for token in error.absolute_path)
+        rendered.append(f"/{suffix}: {error.message}" if suffix else f"/: {error.message}")
+    return rendered
+
+
+def argument_design_model_reference_errors(
+    value: dict[str, Any],
+    skeleton_output: dict[str, Any],
+) -> list[str]:
+    """Validate local flat-record indexes without assembling any canonical tree."""
+    if argument_skeleton_model_output_errors(skeleton_output):
+        return ["/frozen_skeleton: invalid Argument Skeleton"]
+    if argument_design_model_output_errors(value):
+        return []
+
+    thread_count = len(skeleton_output.get("research_threads") or [])
+    errors: list[str] = []
+
+    def keyset(collection: str, keys: tuple[str, ...]) -> set[tuple[int, ...]]:
+        result: set[tuple[int, ...]] = set()
+        for pos, item in enumerate(value.get(collection) or []):
+            key = tuple(int(item[name]) for name in keys)
+            if key in result:
+                errors.append(f"/{collection}/{pos}: duplicate local index {key}")
+            result.add(key)
+        return result
+
+    wp = keyset("work_packages", ("thread_index", "work_package_index"))
+    methods = keyset("methods", ("thread_index", "work_package_index", "method_index"))
+    evals = keyset("evaluations", ("thread_index", "work_package_index", "method_index", "evaluation_index"))
+    innovations = keyset("innovations", ("thread_index", "innovation_index"))
+    foundation = keyset("foundation", ("thread_index", "foundation_index"))
+    keyset("theoretical_properties", ("thread_index", "work_package_index", "method_index", "property_index"))
+    keyset("baselines", ("thread_index", "work_package_index", "method_index", "evaluation_index", "baseline_index"))
+    keyset("ablations", ("thread_index", "work_package_index", "method_index", "evaluation_index", "ablation_index"))
+    keyset("innovation_prior_work", ("thread_index", "innovation_index", "prior_work_index"))
+
+    for collection, rows in ((name, value.get(name) or []) for name in (
+        "work_packages", "methods", "theoretical_properties", "evaluations", "baselines",
+        "ablations", "innovations", "innovation_prior_work", "innovation_evaluation_refs",
+        "foundation", "foundation_supports", "evidence_gaps",
+    )):
+        for pos, item in enumerate(rows):
+            thread_index = item.get("thread_index")
+            if thread_index is not None and not (0 <= int(thread_index) < thread_count):
+                errors.append(f"/{collection}/{pos}/thread_index: out of range")
+
+    def require_parent(collection: str, parent_fields: tuple[str, ...], parents: set[tuple[int, ...]]) -> None:
+        for pos, item in enumerate(value.get(collection) or []):
+            parent = tuple(int(item[name]) for name in parent_fields)
+            if parent not in parents:
+                errors.append(f"/{collection}/{pos}: unresolved parent index {parent}")
+
+    require_parent("methods", ("thread_index", "work_package_index"), wp)
+    for collection in ("theoretical_properties", "evaluations"):
+        require_parent(collection, ("thread_index", "work_package_index", "method_index"), methods)
+    for collection in ("baselines", "ablations"):
+        require_parent(collection, ("thread_index", "work_package_index", "method_index", "evaluation_index"), evals)
+    require_parent("innovation_prior_work", ("thread_index", "innovation_index"), innovations)
+    require_parent("innovation_evaluation_refs", ("thread_index", "innovation_index"), innovations)
+    for pos, item in enumerate(value.get("innovation_evaluation_refs") or []):
+        target = tuple(int(item[name]) for name in ("thread_index", "work_package_index", "method_index", "evaluation_index"))
+        if target not in evals:
+            errors.append(f"/innovation_evaluation_refs/{pos}: unresolved evaluation index {target}")
+    require_parent("foundation_supports", ("thread_index", "foundation_index"), foundation)
+    for pos, item in enumerate(value.get("foundation_supports") or []):
+        if item.get("method_index") is None:
+            target = (int(item["thread_index"]), int(item["work_package_index"]))
+            if target not in wp:
+                errors.append(f"/foundation_supports/{pos}: unresolved work-package index {target}")
+        else:
+            target = (int(item["thread_index"]), int(item["work_package_index"]), int(item["method_index"]))
+            if target not in methods:
+                errors.append(f"/foundation_supports/{pos}: unresolved method index {target}")
+    return errors
+
+
+def assemble_argument_authored_thread(
+    skeleton_output: dict[str, Any],
+    design_output: dict[str, Any],
+    thread_index: int,
+) -> dict[str, Any]:
+    """Deterministically assemble one legacy authored research thread from flat Stage A/B records.
+
+    The function is deliberately pure and unregistered: it validates both wire
+    contracts and all local references, never invents semantic content, and
+    derives only nesting/order from explicit local indexes.
+    """
+    skeleton_errors = argument_skeleton_model_output_errors(skeleton_output)
+    if skeleton_errors:
+        raise ValueError("Invalid Argument Skeleton: " + "; ".join(skeleton_errors[:6]))
+    design_errors = argument_design_model_output_errors(design_output)
+    if design_errors:
+        raise ValueError("Invalid Argument Design: " + "; ".join(design_errors[:6]))
+    reference_errors = argument_design_model_reference_errors(design_output, skeleton_output)
+    if reference_errors:
+        raise ValueError("Invalid Argument Design references: " + "; ".join(reference_errors[:6]))
+
+    threads = skeleton_output.get("research_threads") or []
+    if not isinstance(thread_index, int) or isinstance(thread_index, bool) or not (0 <= thread_index < len(threads)):
+        raise ValueError("thread_index out of range")
+    skeleton_thread = threads[thread_index]
+
+    def rows(collection: str, *index_fields: str) -> list[dict[str, Any]]:
+        selected = [
+            copy.deepcopy(item)
+            for item in design_output.get(collection) or []
+            if int(item.get("thread_index", -1)) == thread_index
+        ]
+        return sorted(
+            selected,
+            key=lambda item: tuple(
+                -1 if item.get(field) is None else int(item[field])
+                for field in index_fields
+            ),
+        )
+
+    work_packages: list[dict[str, Any]] = []
+    for wp in rows("work_packages", "work_package_index"):
+        wp_index = int(wp["work_package_index"])
+        assembled_methods: list[dict[str, Any]] = []
+        for method in rows("methods", "work_package_index", "method_index"):
+            if int(method["work_package_index"]) != wp_index:
+                continue
+            method_index = int(method["method_index"])
+            theoretical_properties = [
+                {"statement": item["statement"], "evidence_ids": copy.deepcopy(item["evidence_ids"])}
+                for item in rows("theoretical_properties", "work_package_index", "method_index", "property_index")
+                if int(item["work_package_index"]) == wp_index and int(item["method_index"]) == method_index
+            ]
+            evaluations: list[dict[str, Any]] = []
+            for evaluation in rows("evaluations", "work_package_index", "method_index", "evaluation_index"):
+                if int(evaluation["work_package_index"]) != wp_index or int(evaluation["method_index"]) != method_index:
+                    continue
+                evaluation_index = int(evaluation["evaluation_index"])
+                baselines = [
+                    {"statement": item["statement"], "evidence_ids": copy.deepcopy(item["evidence_ids"])}
+                    for item in rows("baselines", "work_package_index", "method_index", "evaluation_index", "baseline_index")
+                    if int(item["work_package_index"]) == wp_index
+                    and int(item["method_index"]) == method_index
+                    and int(item["evaluation_index"]) == evaluation_index
+                ]
+                ablations = [
+                    item["statement"]
+                    for item in rows("ablations", "work_package_index", "method_index", "evaluation_index", "ablation_index")
+                    if int(item["work_package_index"]) == wp_index
+                    and int(item["method_index"]) == method_index
+                    and int(item["evaluation_index"]) == evaluation_index
+                ]
+                evaluations.append({
+                    "statement": evaluation["statement"],
+                    "evidence_ids": copy.deepcopy(evaluation["evidence_ids"]),
+                    "baselines": baselines,
+                    "ablations": ablations,
+                    "success_criteria": copy.deepcopy(evaluation["success_criteria"]),
+                })
+            assembled_methods.append({
+                "statement": method["statement"],
+                "evidence_ids": copy.deepcopy(method["evidence_ids"]),
+                "method_type": method["method_type"],
+                "assumptions": copy.deepcopy(method["assumptions"]),
+                "theoretical_properties": theoretical_properties,
+                "evaluations": evaluations,
+            })
+        work_packages.append({
+            "statement": wp["statement"],
+            "evidence_ids": copy.deepcopy(wp["evidence_ids"]),
+            "methods": assembled_methods,
+        })
+
+    innovations: list[dict[str, Any]] = []
+    for innovation in rows("innovations", "innovation_index"):
+        innovation_index = int(innovation["innovation_index"])
+        prior_work = [
+            {"statement": item["statement"], "evidence_ids": copy.deepcopy(item["evidence_ids"])}
+            for item in rows("innovation_prior_work", "innovation_index", "prior_work_index")
+            if int(item["innovation_index"]) == innovation_index
+        ]
+        evaluation_refs = [
+            {
+                "work_package_index": int(item["work_package_index"]),
+                "method_index": int(item["method_index"]),
+                "evaluation_index": int(item["evaluation_index"]),
+            }
+            for item in rows("innovation_evaluation_refs", "innovation_index", "work_package_index", "method_index", "evaluation_index")
+            if int(item["innovation_index"]) == innovation_index
+        ]
+        innovations.append({
+            "statement": innovation["statement"],
+            "evidence_ids": copy.deepcopy(innovation["evidence_ids"]),
+            "contribution": innovation["contribution"],
+            "closest_prior_work": prior_work,
+            "evaluation_refs": evaluation_refs,
+        })
+
+    foundation: list[dict[str, Any]] = []
+    for item in rows("foundation", "foundation_index"):
+        foundation_index = int(item["foundation_index"])
+        supports = [
+            {
+                "work_package_index": int(link["work_package_index"]),
+                "method_index": (None if link.get("method_index") is None else int(link["method_index"])),
+            }
+            for link in rows("foundation_supports", "foundation_index", "work_package_index", "method_index")
+            if int(link["foundation_index"]) == foundation_index
+        ]
+        foundation.append({
+            "statement": item["statement"],
+            "evidence_ids": copy.deepcopy(item["evidence_ids"]),
+            "supports": supports,
+        })
+
+    return {
+        "gap": {
+            "statement": skeleton_thread["gap_statement"],
+            "limitation_mechanism": {
+                "statement": skeleton_thread["limitation_mechanism_statement"],
+                "evidence_ids": copy.deepcopy(skeleton_thread["limitation_mechanism_evidence_ids"]),
+            },
+            "evidence_ids": copy.deepcopy(skeleton_thread["gap_evidence_ids"]),
+        },
+        "question": {
+            "statement": skeleton_thread["question_statement"],
+            "question_type": skeleton_thread["question_type"],
+            "answerability": skeleton_thread["answerability"],
+            "success_evidence": copy.deepcopy(skeleton_thread["success_evidence"]),
+        },
+        "objective": {
+            "statement": skeleton_thread["objective_statement"],
+            "evidence_ids": copy.deepcopy(skeleton_thread["objective_evidence_ids"]),
+        },
+        "thread_assumptions": copy.deepcopy(skeleton_thread["assumptions"]),
+        "work_packages": work_packages,
+        "innovations": innovations,
+        "foundation": foundation,
+        "falsification_or_comparison_rule": skeleton_thread["falsification_or_comparison_rule"],
+    }
+
+
+def assemble_argument_authored_state(
+    skeleton_output: dict[str, Any],
+    design_output: dict[str, Any],
+) -> dict[str, Any]:
+    """Deterministically assemble the complete legacy authored semantic state.
+
+    Stage A exclusively owns the problem definition and thread skeleton. Stage B
+    exclusively owns research-design records. This adapter preserves both wire
+    contracts verbatim, derives only legacy nesting/order, and deliberately does
+    not generate Runtime identities or projection metadata.
+    """
+    skeleton_errors = argument_skeleton_model_output_errors(skeleton_output)
+    if skeleton_errors:
+        raise ValueError("Invalid Argument Skeleton: " + "; ".join(skeleton_errors[:6]))
+    design_errors = argument_design_model_output_errors(design_output)
+    if design_errors:
+        raise ValueError("Invalid Argument Design: " + "; ".join(design_errors[:6]))
+    reference_errors = argument_design_model_reference_errors(design_output, skeleton_output)
+    if reference_errors:
+        raise ValueError("Invalid Argument Design references: " + "; ".join(reference_errors[:6]))
+
+    skeleton_reason = skeleton_output.get("cannot_proceed_reason")
+    design_reason = design_output.get("cannot_proceed_reason")
+    if skeleton_reason and design_reason and skeleton_reason != design_reason:
+        raise ValueError("Conflicting cannot_proceed_reason between Skeleton and Design")
+
+    threads = [
+        assemble_argument_authored_thread(skeleton_output, design_output, thread_index)
+        for thread_index in range(len(skeleton_output.get("research_threads") or []))
+    ]
+    return {
+        "central_proposition": copy.deepcopy(skeleton_output["central_proposition"]),
+        "scope": copy.deepcopy(skeleton_output["scope"]),
+        "research_threads": threads,
+        "evidence_gaps": [
+            *copy.deepcopy(skeleton_output.get("evidence_gaps") or []),
+            *copy.deepcopy(design_output.get("evidence_gaps") or []),
+        ],
+        "user_questions": [
+            *copy.deepcopy(skeleton_output.get("user_questions") or []),
+            *copy.deepcopy(design_output.get("user_questions") or []),
+        ],
+        "cannot_proceed_reason": copy.deepcopy(design_reason or skeleton_reason),
+    }
+
+
 def _evidence_ids_for_source_refs(refs: Iterable[Any], records: dict[str, dict[str, Any]]) -> list[str]:
     """Conservative legacy fallback.
 

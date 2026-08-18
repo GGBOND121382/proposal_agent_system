@@ -295,6 +295,49 @@ def test_minimax_m3_planning_budget_uses_model_capability_not_endpoint_ceiling()
     assert report["output_parameter"] == "max_completion_tokens"
 
 
+def test_argument_two_stage_budgets_reach_minimax_provider_budget_resolver():
+    gateway = _gateway()
+    for desired in (8_192, 65_536):
+        report = gateway._resolve_output_token_budget(
+            _route("MiniMax-M3", desired_output_tokens=desired),
+            "Return one JSON object.",
+            {"project_task": {"objective": "x"}},
+            {"type": "object"},
+        )
+        assert report["desired_output_tokens"] == desired
+        assert report["effective_output_tokens"] == desired
+        assert report["output_parameter"] == "max_completion_tokens"
+
+
+
+
+@pytest.mark.parametrize("desired", [8_192, 65_536])
+def test_argument_two_stage_budgets_reach_minimax_wire_request(monkeypatch, desired):
+    monkeypatch.setenv("TEST_MINIMAX_API_KEY", "secret")
+    _FakeAsyncClient.stream_events = None
+    monkeypatch.setattr("app.llm.httpx.AsyncClient", _FakeAsyncClient)
+
+    result = asyncio.run(
+        _gateway()._invoke_live(
+            _route("MiniMax-M3", desired_output_tokens=desired),
+            "P-TEST",
+            "Return JSON.",
+            {"project_task": {"objective": "x"}},
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"status": {"type": "string"}},
+                "required": ["status"],
+            },
+        )
+    )
+
+    sent = _FakeAsyncClient.captured["json"]
+    assert sent["max_completion_tokens"] == desired
+    assert "max_tokens" not in sent
+    assert result.provider_attempts == 1
+
+
 def test_minimax_m27_highspeed_uses_its_own_model_capability():
     gateway = _gateway()
     report = gateway._resolve_output_token_budget(
