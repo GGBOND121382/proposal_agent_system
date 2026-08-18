@@ -152,6 +152,7 @@ bash scripts/run.sh
 
 ### Windows PowerShell
 
+#### replay模式
 ```powershell
 Copy-Item .env.example .env
 py -m venv .venv
@@ -159,6 +160,11 @@ py -m venv .venv
 pip install -r requirements.txt
 $env:MODEL_RUNTIME_MODE = "REPLAY"
 uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+#### live模式
+```powershell
+py -3 -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --env-file .env
 ```
 
 ### Docker

@@ -98,6 +98,53 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             # cannot suspend an advance call indefinitely.
             await asyncio.sleep(min(remaining, 300.0))
 
+    @staticmethod
+    def _semantic_retry_issues(
+        prompt_id: str,
+        exc: BaseException,
+        *,
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        if prompt_id != "P-ARGUMENT-ARCHITECTURE":
+            return []
+
+        phase = None
+        current: BaseException | None = exc
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            candidate_phase = getattr(current, "provider_phase", None)
+            if candidate_phase:
+                phase = str(candidate_phase)
+                break
+            current = current.__cause__ or current.__context__
+        if phase != "output_structure_validation":
+            return []
+
+        errors = [
+            redact_secret_text(str(item)).strip()
+            for item in (getattr(exc, "validation_errors", []) or [])
+            if str(item).strip()
+        ]
+        unique_errors = list(dict.fromkeys(errors))[: max(0, int(limit))]
+        return [
+            {
+                "problem": (
+                    "上一轮 semantic output 未通过模型契约校验："
+                    + error[:240]
+                ),
+                "severity": "P1",
+                "component": "RESEARCH_DESIGN",
+                "required_action": (
+                    "仅修正该输出契约或引用错误；保持已有事实、范围和其他有效语义不变，"
+                    "并只返回当前 semantic output schema 允许的业务字段。"
+                ),
+                "evidence_ids": [],
+            }
+            for error in unique_errors
+        ]
+
+
     def __init__(self, db, pack, context_builder, executor, research_service, diagram_enrichment=None, quality_manager=None, dependency_preflight=None):
         self.db = db
         self.pack = pack
@@ -767,6 +814,11 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         ) is False:
             raise self._provider_exhaustion_from_checkpoint(persisted_wait)
 
+        semantic_retry_issues = [
+            copy.deepcopy(item)
+            for item in prior_cycle.get("semantic_retry_issues") or []
+            if isinstance(item, dict)
+        ]
         while True:
             in_flight = int(prior_cycle.get("attempt_in_flight") or 0)
             attempt_number = (
@@ -794,6 +846,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 "prompt_id": prompt_id,
                 "section_id": section_id or None,
                 "section_phase": section_phase or None,
+                "semantic_retry_issues": copy.deepcopy(semantic_retry_issues),
                 "phase": "CALLING",
             }
             # Persist the attempt identity before invoking the provider.  If the
@@ -801,14 +854,19 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             # replayed instead of allocating a fresh retry budget.
             self._update(wf, state=state)
             try:
+                execute_kwargs = {
+                    "project_id": wf["project_id"],
+                    "workflow_id": wf["id"],
+                    "original_environment": state.get("original_environment"),
+                    "call_key": attempt_call_key,
+                    "recovery_run_id": recovery_run_id,
+                }
+                if semantic_retry_issues:
+                    execute_kwargs["semantic_retry_issues"] = semantic_retry_issues
                 result = await self.executor.execute(
                     prompt_id,
                     envelope,
-                    project_id=wf["project_id"],
-                    workflow_id=wf["id"],
-                    original_environment=state.get("original_environment"),
-                    call_key=attempt_call_key,
-                    recovery_run_id=recovery_run_id,
+                    **execute_kwargs,
                 )
             except (PromptExecutionError, ValueError, KeyError) as exc:
                 if bool(getattr(exc, "recoverable", False)):
@@ -839,6 +897,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                         or classification.category in retry_categories
                     )
                 )
+                next_semantic_retry_issues = self._semantic_retry_issues(
+                    prompt_id, exc
+                )
+                if next_semantic_retry_issues:
+                    semantic_retry_issues = next_semantic_retry_issues
+                    prior_cycle["semantic_retry_issues"] = copy.deepcopy(
+                        semantic_retry_issues
+                    )
                 if decision.should_retry and not retry_allowed_here:
                     decision = RetryDecision(
                         should_retry=False,
@@ -883,6 +949,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     "exhausted_status": decision.exhausted_status,
                     "last_error": redact_secret_text(str(exc)),
                     "failure_run_id": str(getattr(exc, "run_id", "") or "") or None,
+                    "semantic_retry_issues": copy.deepcopy(semantic_retry_issues),
                     "phase": "FAILED",
                 }
 
@@ -952,6 +1019,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             completed_attempts = attempt_number
             prior_cycle["completed_attempts"] = completed_attempts
             prior_cycle.pop("attempt_in_flight", None)
+            prior_cycle.pop("semantic_retry_issues", None)
             prior_cycle["successful_attempt"] = attempt_number
             contract_repair_metadata = result.get("contract_repair")
             if isinstance(contract_repair_metadata, dict):

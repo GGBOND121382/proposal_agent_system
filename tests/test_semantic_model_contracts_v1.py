@@ -1199,19 +1199,19 @@ def test_unknown_semantic_slots_may_be_empty_but_cannot_pass():
     ) == []
 
 
-def test_empty_foundation_is_a_runtime_readiness_deficiency():
+def test_empty_foundation_is_allowed_when_no_foundation_is_claimed():
     envelope = _argument_envelope_with_evidence()
     semantic = _semantic_argument_output(envelope)
     semantic["research_threads"][0]["foundation"] = []
 
     canonical = expand_argument_architecture_model_output(envelope, semantic)
 
-    assert canonical["status"] == "REVISE"
-    assert canonical["result"]["readiness"]["ready"] is False
+    assert canonical["status"] == "PASS"
+    assert canonical["result"]["readiness"]["ready"] is True
     assert canonical["result"]["research_design_matrix"][0][
         "foundation_evidence_ids"
     ] == []
-    assert any(
+    assert not any(
         item["required_node_type"] == "TEAM_EVIDENCE"
         for item in canonical["result"]["evidence_gap_report"]
     )

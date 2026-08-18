@@ -669,9 +669,6 @@
                     "innovation_ids": {
                       "minItems": 1
                     },
-                    "foundation_evidence_ids": {
-                      "minItems": 1
-                    },
                     "closest_prior_work_ids": {
                       "minItems": 1
                     }

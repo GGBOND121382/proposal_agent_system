@@ -51,6 +51,19 @@ def _argument_matrix_required_fields() -> tuple[str, ...]:
     return tuple(str(item) for item in raw if str(item).strip())
 
 
+def _argument_matrix_optional_fields() -> tuple[str, ...]:
+    raw = _argument_rule_config(_ARGUMENT_MATRIX_RULE_ID).get("optional_fields") or ()
+    return tuple(str(item) for item in raw if str(item).strip())
+
+
+def _argument_matrix_covered_fields() -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (*_argument_matrix_required_fields(), *_argument_matrix_optional_fields())
+        )
+    )
+
+
 def _argument_evidence_config() -> dict[str, Any]:
     return _argument_rule_config(_ARGUMENT_EVIDENCE_RULE_ID)
 
@@ -3437,7 +3450,7 @@ def _matrix_thread_index_by_question(candidate: dict[str, Any]) -> dict[str, int
 
 def _matrix_expected_bindings(candidate: dict[str, Any], research_question_id: str) -> dict[str, set[str]]:
     graph = candidate.get("argument_architecture") or {}
-    required_fields = set(_argument_matrix_required_fields())
+    required_fields = set(_argument_matrix_covered_fields())
     known: dict[str, set[str]] = {field: set() for field in required_fields}
     known["research_question_id"] = {str(research_question_id)} if research_question_id else set()
     node_type_by_id = {
@@ -3528,6 +3541,7 @@ def _critic_chain_checks(
     for spec in _argument_chain_specs():
         chain_type = str(spec.get("chain_type") or "")
         source_field = str(spec.get("source_field") or "")
+        source_presence = str(spec.get("source_presence") or "REQUIRED").upper()
         target_fields = [str(value) for value in spec.get("target_fields") or ()]
         relation = str(spec.get("relation") or "")
         coverage = str(spec.get("coverage") or "BOTH").upper()
@@ -3556,6 +3570,8 @@ def _critic_chain_checks(
                     targets.append(value)
             row_path = f"/result/research_design_matrix/{row_position}"
 
+            if source_presence == "IF_PRESENT" and not row_sources:
+                continue
             if not row_sources:
                 complete = False
                 chain_receipts.append(
@@ -3665,6 +3681,7 @@ def _critic_chain_checks(
                         )
                     )
 
+        optional_source_absent = source_presence == "IF_PRESENT" and not sources
         checks.append(
             {
                 "chain_type": chain_type,
@@ -3672,9 +3689,13 @@ def _critic_chain_checks(
                 "target_ids": targets,
                 "complete": complete,
                 "evidence": (
-                    f"运行时根据同一研究线程内模型明确表达的 {relation} 关系确认该关系链闭合。"
-                    if complete
-                    else f"运行时发现至少一个研究线程缺少所需的显式 {relation} 关系。"
+                    "当前未声明该可选源语义对象，因此该关系链不适用。"
+                    if optional_source_absent
+                    else (
+                        f"运行时根据同一研究线程内模型明确表达的 {relation} 关系确认该关系链闭合。"
+                        if complete
+                        else f"运行时发现至少一个研究线程缺少所需的显式 {relation} 关系。"
+                    )
                 ),
             }
         )
@@ -3688,6 +3709,7 @@ def _critic_design_matrix_checks(
     with_receipts: bool = False,
 ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     required = _argument_matrix_required_fields()
+    covered = _argument_matrix_covered_fields()
     matrix = [
         row for row in candidate.get("research_design_matrix") or [] if isinstance(row, dict)
     ]
@@ -3724,7 +3746,7 @@ def _critic_design_matrix_checks(
     expected_by_question = {
         qid: _matrix_expected_bindings(candidate, qid) for qid in question_ids
     }
-    for field in required:
+    for field in covered:
         expected_type = str(reference_node_types.get(field) or "")
         if not expected_type:
             continue
@@ -3818,7 +3840,7 @@ def _critic_design_matrix_checks(
         missing = [field for field in required if not row.get(field)]
         expected = _matrix_expected_bindings(candidate, research_question_id) if research_question_id in question_index else {}
         mismatched = [
-            field for field in required
+            field for field in covered
             if expected and set(_row_reference_values(row, field)) != set(expected.get(field) or set())
         ]
         incomplete = list(dict.fromkeys([*missing, *mismatched]))
@@ -3949,7 +3971,7 @@ def _graph_thread_memberships(candidate: dict[str, Any]) -> dict[str, set[int]]:
         thread_index = question_index.get(question_id)
         if thread_index is None:
             continue
-        for field in _argument_matrix_required_fields():
+        for field in _argument_matrix_covered_fields():
             for object_id in _row_reference_values(row, field):
                 memberships.setdefault(object_id, set()).add(thread_index)
 

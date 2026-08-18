@@ -1,5 +1,5 @@
-version: 2.9.0
-rule_registry_version: 1.8.0
+version: 2.10.0
+rule_registry_version: 1.9.0
 rules:
   SC-ARGUMENT-ROLE-COMPATIBILITY:
     responsibility: DETERMINISTIC_GUARD
@@ -185,6 +185,7 @@ rules:
         coverage: BOTH
       - chain_type: FOUNDATION_TO_FEASIBILITY
         source_field: foundation_evidence_ids
+        source_presence: IF_PRESENT
         target_fields:
         - work_package_ids
         - method_ids
@@ -203,8 +204,9 @@ rules:
       - method_ids
       - evaluation_ids
       - innovation_ids
-      - foundation_evidence_ids
       - closest_prior_work_ids
+      optional_fields:
+      - foundation_evidence_ids
   SC-ARGUMENT-EVIDENCE-REQUIREMENTS:
     responsibility: DETERMINISTIC_GUARD
     category: ARGUMENT_EVIDENCE

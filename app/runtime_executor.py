@@ -17,6 +17,13 @@ from .executor import (
 )
 from .contract_registry import CONTRACT_REGISTRY_VERSION
 from .llm import LLMError, MODEL_RESPONSE_PROTOCOL_VERSION
+from .model_semantic_contracts import (
+    SEMANTIC_MODEL_CONTRACT_VERSION,
+    build_semantic_model_input,
+    expand_semantic_model_output,
+    semantic_model_reference_errors,
+    supports_semantic_model_contract,
+)
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
 from .output_integrity import TRUSTED_SOURCE_CATALOG_VERSION, attach_trusted_source_catalog
 from .runtime_evidence import EvidenceIntegrityError, InjectedFailure, ModelCallEvidenceStore
@@ -58,6 +65,50 @@ class RuntimePromptExecutor(BasePromptExecutor):
             root = Path(os.getenv("MODEL_CALL_EVIDENCE_DIR", "data/model_calls")).resolve()
             store = ModelCallEvidenceStore(root)
         self.evidence_store = store
+
+    def _uses_semantic_model_contract(self, prompt_id: str) -> bool:
+        return bool(
+            self.runtime_mode == "LIVE"
+            and supports_semantic_model_contract(prompt_id)
+            and getattr(self.pack, "has_model_contract", lambda _pid: False)(prompt_id)
+        )
+
+    @staticmethod
+    def _merge_semantic_retry_issues(
+        prompt_id: str,
+        provider_call_envelope: dict[str, Any],
+        semantic_retry_issues: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        if prompt_id != "P-ARGUMENT-ARCHITECTURE" or not semantic_retry_issues:
+            return provider_call_envelope
+
+        merged = [
+            *(
+                copy.deepcopy(item)
+                for item in provider_call_envelope.get("revision_issues") or []
+                if isinstance(item, dict)
+            ),
+            *(
+                copy.deepcopy(item)
+                for item in semantic_retry_issues
+                if isinstance(item, dict)
+            ),
+        ]
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in merged:
+            key = sha256_json(
+                {
+                    "problem": item.get("problem"),
+                    "required_action": item.get("required_action"),
+                }
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        provider_call_envelope["revision_issues"] = deduped[:12]
+        return provider_call_envelope
 
     def _model_request_spec(self, prompt_id: str) -> dict[str, Any]:
         """Return the provider-visible request contract for one prompt.
@@ -108,12 +159,22 @@ class RuntimePromptExecutor(BasePromptExecutor):
                         "model_capability": capability,
                     }
                 )
+            semantic_model_contract = self._uses_semantic_model_contract(prompt_id)
             return {
                 "prompt_text": self.pack.prompt_text(prompt_id),
                 "prompt_entry": entry,
                 "model_profile": profile,
                 "candidate_models": candidate_models,
-                "output_schema": self.pack.inlined_schema(prompt_id, "output"),
+                "output_schema": (
+                    self.pack.inlined_model_schema(prompt_id, "output")
+                    if semantic_model_contract
+                    else self.pack.inlined_schema(prompt_id, "output")
+                ),
+                "semantic_model_contract": {
+                    "enabled": semantic_model_contract,
+                    "version": SEMANTIC_MODEL_CONTRACT_VERSION if semantic_model_contract else None,
+                    "direct_tool_arguments": semantic_model_contract,
+                },
                 "trusted_source_catalog_contract_version": TRUSTED_SOURCE_CATALOG_VERSION,
                 "model_context_projection_version": MODEL_CONTEXT_PROJECTION_VERSION,
                 "model_system_prompt_version": MODEL_SYSTEM_PROMPT_VERSION,
@@ -565,13 +626,31 @@ class RuntimePromptExecutor(BasePromptExecutor):
             if not isinstance(provider_output, dict):
                 continue
             try:
+                recovery_provider_output = copy.deepcopy(provider_output)
+                if self._uses_semantic_model_contract(prompt_id):
+                    semantic_errors = self.pack.validate_model(
+                        prompt_id, "output", recovery_provider_output
+                    )
+                    semantic_errors.extend(
+                        semantic_model_reference_errors(
+                            prompt_id, model_envelope, recovery_provider_output
+                        )
+                    )
+                    if not semantic_errors:
+                        recovery_provider_output = expand_semantic_model_output(
+                            prompt_id, model_envelope, recovery_provider_output
+                        )
+                    elif self.pack.validate(
+                        prompt_id, "output", recovery_provider_output
+                    ):
+                        continue
                 consumed_output = self._normalize_output(
                     prompt_id,
-                    copy.deepcopy(provider_output),
+                    copy.deepcopy(recovery_provider_output),
                     model_envelope,
                 )
                 self.policy.assert_output_unchanged(
-                    provider_output,
+                    recovery_provider_output,
                     consumed_output,
                     stage="output_normalization",
                 )
@@ -604,7 +683,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "run_id": str(row["id"]),
                 "model_id": row.get("model_id"),
                 "endpoint_id": row.get("endpoint_id"),
-                "provider_output": provider_output,
+                "provider_output": recovery_provider_output,
                 "consumed_output": consumed_output,
                 "guard_report": guard_report,
                 "failed_at": row.get("created_at"),
@@ -630,6 +709,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         original_environment: str | None = None,
         call_key: str | None = None,
         recovery_run_id: str | None = None,
+        semantic_retry_issues: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
         quality_context_envelope = envelope
@@ -669,6 +749,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         input_compaction = self._merge_input_compaction(
             input_compaction, provider_projection
         )
+        semantic_model_contract = self._uses_semantic_model_contract(prompt_id)
         input_hash = sha256_json(model_envelope)
         model_request_spec_hash = self._model_request_spec_hash(prompt_id)
         call_key = self._call_key(
@@ -708,6 +789,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         route = None
         system_prompt = None
         output_schema: dict[str, Any] | None = None
+        provider_call_envelope = provider_envelope
         raw_response_text: str | None = None
         provider_output: dict[str, Any] | None = None
         consumed_output: dict[str, Any] | None = None
@@ -730,10 +812,48 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 )
             route = self.router.route(prompt_id, model_envelope, original_environment=original_environment)
             project_config = load_project_config(self.db, project_id)
+
+            provider_call_envelope = provider_envelope
+            if semantic_model_contract:
+                provider_call_envelope = build_semantic_model_input(prompt_id, model_envelope)
+                provider_call_envelope = self._merge_semantic_retry_issues(
+                    prompt_id,
+                    provider_call_envelope,
+                    semantic_retry_issues,
+                )
+                semantic_input_errors = self.pack.validate_model(
+                    prompt_id, "input", provider_call_envelope
+                )
+                if semantic_input_errors:
+                    raise PromptExecutionError(
+                        "Semantic model input projection failed validation",
+                        validation_errors=semantic_input_errors,
+                    )
+                output_schema = self.pack.inlined_model_schema(prompt_id, "output")
+                input_compaction = {
+                    **(input_compaction or {}),
+                    "semantic_model_contract": {
+                        "version": SEMANTIC_MODEL_CONTRACT_VERSION,
+                        "canonical_provider_chars": len(
+                            json.dumps(provider_envelope, ensure_ascii=False, separators=(",", ":"))
+                        ),
+                        "semantic_provider_chars": len(
+                            json.dumps(provider_call_envelope, ensure_ascii=False, separators=(",", ":"))
+                        ),
+                        "semantic_retry_issue_count": len(semantic_retry_issues or []),
+                    },
+                }
+            else:
+                output_schema = self.pack.inlined_schema(prompt_id, "output")
+
             if route.environment == "ONLINE_PUBLIC":
-                assert_online_payload_safe(provider_envelope, project_config)
-            output_schema = self.pack.inlined_schema(prompt_id, "output")
-            system_prompt = self._system_prompt(prompt_id, output_schema, provider_envelope)
+                assert_online_payload_safe(provider_call_envelope, project_config)
+            system_prompt = self._system_prompt(
+                prompt_id,
+                output_schema,
+                provider_call_envelope,
+                semantic_model_contract=semantic_model_contract,
+            )
             contract_recovery = self._recoverable_contract_output(
                 project_id=project_id,
                 workflow_id=workflow_id,
@@ -769,20 +889,50 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     route,
                     prompt_id,
                     system_prompt,
-                    provider_envelope,
+                    provider_call_envelope,
                     output_schema,
                     call_key=call_key,
+                    direct_tool_arguments=semantic_model_contract,
+                )
+            elif semantic_model_contract:
+                result = await self.gateway.invoke(
+                    route,
+                    prompt_id,
+                    system_prompt,
+                    provider_call_envelope,
+                    output_schema,
+                    direct_tool_arguments=True,
                 )
             else:
-                result = await self.gateway.invoke(route, prompt_id, system_prompt, provider_envelope, output_schema)
+                result = await self.gateway.invoke(
+                    route, prompt_id, system_prompt, provider_call_envelope, output_schema
+                )
             raw_response_text = result.raw_text
             provider_output = copy.deepcopy(result.output)
             try:
-                consumed_output = (
-                    copy.deepcopy(contract_recovery["consumed_output"])
-                    if contract_recovery is not None
-                    else self._normalize_output(prompt_id, provider_output, model_envelope)
-                )
+                if contract_recovery is not None:
+                    consumed_output = copy.deepcopy(contract_recovery["consumed_output"])
+                else:
+                    if semantic_model_contract:
+                        semantic_output_errors = self.pack.validate_model(
+                            prompt_id, "output", provider_output
+                        )
+                        semantic_output_errors.extend(
+                            semantic_model_reference_errors(
+                                prompt_id, model_envelope, provider_output
+                            )
+                        )
+                        if semantic_output_errors:
+                            raise PromptExecutionError(
+                                "Semantic model output validation failed",
+                                validation_errors=semantic_output_errors,
+                            )
+                        provider_output = expand_semantic_model_output(
+                            prompt_id, model_envelope, provider_output
+                        )
+                    consumed_output = self._normalize_output(
+                        prompt_id, provider_output, model_envelope
+                    )
             except PromptExecutionError as exc:
                 raise self._provider_contract_failure(
                     f"Provider output contract validation failed: {exc}",
@@ -870,7 +1020,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 input_hash=input_hash,
                 model_request_spec_hash=model_request_spec_hash,
                 model_envelope=model_envelope,
-                provider_envelope=provider_envelope,
+                provider_envelope=provider_call_envelope,
                 consumed_output=consumed_output,
                 provider_output=provider_output,
                 raw_response_text=raw_response_text,
@@ -935,6 +1085,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 endpoint_id=getattr(result, "endpoint_id", None) or (route.endpoint_id if route else None),
                 input_hash=input_hash,
                 model_envelope=model_envelope,
+                provider_envelope=provider_call_envelope,
                 provider_output=provider_output,
                 raw_response_text=raw_response_text,
                 system_prompt=system_prompt,
