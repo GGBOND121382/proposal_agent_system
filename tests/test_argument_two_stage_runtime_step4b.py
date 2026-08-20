@@ -130,6 +130,10 @@ def test_step4b_runtime_argument_uses_only_two_internal_stage_calls(tmp_path, mo
     assert [call["route"].profile["desired_output_tokens"] for call in gateway.calls] == [
         8_192, 65_536
     ]
+    assert [
+        call["route"].profile["argument_two_stage_internal_stage"]
+        for call in gateway.calls
+    ] == [ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE]
     assert gateway.calls[0]["envelope"].get("skeleton_seed") is not None
     assert "frozen_skeleton" not in gateway.calls[0]["envelope"]
     assert gateway.calls[1]["envelope"]["frozen_skeleton"] == skeleton
@@ -204,7 +208,7 @@ def test_step4b_provider_request_identity_includes_two_stage_contract(tmp_path, 
     spec = executor._model_request_spec("P-ARGUMENT-ARCHITECTURE")
 
     contract = spec["argument_two_stage_contract"]
-    assert contract["version"] == "ARGUMENT_TWO_STAGE_V2"
+    assert contract["version"] == "ARGUMENT_TWO_STAGE_V6"
     assert set(contract["stages"]) == {"SKELETON", "DESIGN"}
     assert contract["stages"]["SKELETON"]["desired_output_tokens"] == 8_192
     assert contract["stages"]["DESIGN"]["desired_output_tokens"] == 65_536
@@ -406,7 +410,7 @@ def test_step4c_live_argument_two_stage_is_independent_of_legacy_semantic_regist
 
     spec = executor._model_request_spec("P-ARGUMENT-ARCHITECTURE")
     assert spec["semantic_model_contract"]["enabled"] is False
-    assert spec["argument_two_stage_contract"]["version"] == "ARGUMENT_TWO_STAGE_V2"
+    assert spec["argument_two_stage_contract"]["version"] == "ARGUMENT_TWO_STAGE_V6"
     assert spec["prompt_text"] is None
     assert spec["output_schema"] is None
 

@@ -110,6 +110,7 @@ class _RuntimeArgumentStageGateway:
             profile={
                 **copy.deepcopy(self.route.profile),
                 "desired_output_tokens": int(desired_output_tokens),
+                "argument_two_stage_internal_stage": stage,
             },
         )
         # Workflow-level provider retries receive a new outer attempt key.  A

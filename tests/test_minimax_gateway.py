@@ -977,3 +977,95 @@ def test_generic_provider_does_not_hide_404_as_response_format_fallback(monkeypa
 
     assert len(_SequencePostClient.requests) == 1
     assert _SequencePostClient.requests[0]["json"]["response_format"]["type"] == "json_schema"
+
+
+def test_audited_gateway_keeps_legacy_argument_15k_guard_but_allows_two_stage_internal_budget(
+    tmp_path, monkeypatch
+):
+    from app.llm import LLMResult
+
+    monkeypatch.setenv("CAPABILITY_ACCEPTANCE_MODE", "false")
+    monkeypatch.setenv("MODEL_CALL_EVIDENCE_DIR", str(tmp_path / "model_calls"))
+
+    async def fake_base_invoke(
+        self,
+        route,
+        prompt_id,
+        system_prompt,
+        envelope,
+        output_schema,
+        *,
+        raw_response_sink=None,
+        direct_tool_arguments=False,
+    ):
+        return LLMResult(
+            output={"status": "PASS"},
+            raw_text='{"status":"PASS"}',
+            model_id=route.model_id,
+            endpoint_id=route.endpoint_id,
+            response_contract_mode="TEST_STRICT_JSON",
+            provider_attempts=1,
+        )
+
+    monkeypatch.setattr(BaseModelGateway, "invoke", fake_base_invoke)
+
+    base = _gateway()
+    gateway = AuditedModelGateway(
+        SimpleNamespace(
+            runtime_mode="LIVE",
+            request_timeout_seconds=240,
+            data_dir=tmp_path,
+        ),
+        base.pack,
+    )
+    large_envelope = {"payload": {"value": "研" * 20_000}}
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"status": {"type": "string"}},
+        "required": ["status"],
+    }
+
+    outer_route = _route("MiniMax-M3", desired_output_tokens=65_536)
+    with pytest.raises(LLMError, match="15000-token preflight limit"):
+        asyncio.run(
+            gateway.invoke(
+                outer_route,
+                "P-ARGUMENT-ARCHITECTURE",
+                "Return JSON.",
+                large_envelope,
+                schema,
+                call_key="call-outer-large-argument",
+                direct_tool_arguments=True,
+            )
+        )
+
+    stage_route = Route(
+        prompt_id=outer_route.prompt_id,
+        environment=outer_route.environment,
+        model_id=outer_route.model_id,
+        endpoint_id=outer_route.endpoint_id,
+        provider_model_name=outer_route.provider_model_name,
+        endpoint=copy.deepcopy(outer_route.endpoint),
+        profile={
+            **copy.deepcopy(outer_route.profile),
+            "argument_two_stage_internal_stage": "DESIGN",
+        },
+    )
+    result = asyncio.run(
+        gateway.invoke(
+            stage_route,
+            "P-ARGUMENT-ARCHITECTURE",
+            "Return JSON.",
+            large_envelope,
+            schema,
+            call_key="call-internal-large-design",
+            direct_tool_arguments=True,
+        )
+    )
+    assert result.output == {"status": "PASS"}
+    request_path, _ = gateway.evidence_store.request_paths("call-internal-large-design")
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    assert request["token_budget"]["estimated_input_tokens"] > 15_000
+    assert request["token_budget"]["effective_output_tokens"] == 65_536
+    assert request["token_budget"]["clamped_by_context"] is False

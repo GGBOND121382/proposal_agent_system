@@ -393,7 +393,7 @@ def _semantic_text_key(value: Any) -> str:
     text = str(value or "").strip()
     text = re.sub(r"^[A-Za-z]+[-_ ]?\d+[：:]\s*", "", text)
     text = re.sub(r"\s+", "", text)
-    text = re.sub(r"[，。；：,:;“”\"'（）()\[\]{}]", "", text)
+    text = re.sub(r"[，。；：！？,:;!?“”\"'（）()\[\]{}]", "", text)
     return text.lower()
 
 
@@ -822,14 +822,60 @@ def argument_skeleton_model_output_errors(value: Any) -> list[str]:
 
 
 
+_ARGUMENT_SKELETON_OWNED_SEED_COMPONENT_TYPES = {
+    "CENTRAL_PROPOSITION",
+    "SCOPE",
+    "GAP",
+    "RESEARCH_GAP",
+    "ROOT_CAUSE",
+    "PROBLEM",
+    "RESEARCH_QUESTION",
+    "QUESTION",
+    "OBJECTIVE",
+    "ASSUMPTION",
+    "BOUNDARY_CONDITION",
+    "FALSIFICATION_RULE",
+}
+
+
 def _argument_design_seed(canonical_envelope: dict[str, Any]) -> dict[str, Any] | None:
-    """Project only design-stage semantic hints; problem definition comes from frozen Skeleton."""
+    """Project Stage-B hints without repeating semantics owned by frozen Skeleton.
+
+    Stage A already owns proposition/scope/gaps/problems/questions/objectives and
+    their boundary assumptions. Repeating those records in ``design_seed`` both
+    weakens the ownership boundary and inflates the LIVE Design request. Preserve
+    every other design hint (including semantic node types such as FORMAL_MODEL or
+    EXPERIMENT_DESIGN). Preserve Design-to-Design relations plus the compact
+    OBJECTIVE→WORK_PACKAGE bridge, because that bridge carries thread-assignment
+    information not otherwise represented by the frozen Skeleton.
+    """
     seed = _design_seed(canonical_envelope)
     if not isinstance(seed, dict):
         return None
+
+    def is_design_side(component_type: Any) -> bool:
+        return str(component_type or "").upper() not in _ARGUMENT_SKELETON_OWNED_SEED_COMPONENT_TYPES
+
+    components = [
+        copy.deepcopy(item)
+        for item in seed.get("existing_components") or []
+        if isinstance(item, dict) and is_design_side(item.get("component_type"))
+    ]
+    def keep_relation(item: dict[str, Any]) -> bool:
+        source_type = str(item.get("source_type") or "").upper()
+        target_type = str(item.get("target_type") or "").upper()
+        if is_design_side(source_type) and is_design_side(target_type):
+            return True
+        return source_type == "OBJECTIVE" and target_type == "WORK_PACKAGE"
+
+    relations = [
+        copy.deepcopy(item)
+        for item in seed.get("existing_relations") or []
+        if isinstance(item, dict) and keep_relation(item)
+    ]
     return {
-        "existing_components": copy.deepcopy(seed.get("existing_components") or []),
-        "existing_relations": copy.deepcopy(seed.get("existing_relations") or []),
+        "existing_components": components,
+        "existing_relations": relations,
     }
 
 
@@ -882,19 +928,42 @@ def argument_design_model_reference_errors(
     value: dict[str, Any],
     skeleton_output: dict[str, Any],
 ) -> list[str]:
-    """Validate local flat-record indexes without assembling any canonical tree."""
+    """Validate every locally resolvable flat-record reference.
+
+    The check is deliberately best-effort when unrelated records still have wire-shape
+    defects: malformed index tuples are left to JSON-Schema validation, while references
+    whose index fields are already well-typed are validated in the same model attempt.
+    This prevents a bounded retry from serially discovering shape and reference defects.
+    """
     if argument_skeleton_model_output_errors(skeleton_output):
         return ["/frozen_skeleton: invalid Argument Skeleton"]
-    if argument_design_model_output_errors(value):
+    if not isinstance(value, dict):
         return []
 
     thread_count = len(skeleton_output.get("research_threads") or [])
     errors: list[str] = []
 
+    def index_tuple(item: Any, keys: tuple[str, ...]) -> tuple[int, ...] | None:
+        if not isinstance(item, dict):
+            return None
+        values: list[int] = []
+        for name in keys:
+            value_at_key = item.get(name)
+            if not isinstance(value_at_key, int) or isinstance(value_at_key, bool):
+                return None
+            values.append(value_at_key)
+        return tuple(values)
+
+    def rows(collection: str) -> list[Any]:
+        value_rows = value.get(collection)
+        return value_rows if isinstance(value_rows, list) else []
+
     def keyset(collection: str, keys: tuple[str, ...]) -> set[tuple[int, ...]]:
         result: set[tuple[int, ...]] = set()
-        for pos, item in enumerate(value.get(collection) or []):
-            key = tuple(int(item[name]) for name in keys)
+        for pos, item in enumerate(rows(collection)):
+            key = index_tuple(item, keys)
+            if key is None:
+                continue
             if key in result:
                 errors.append(f"/{collection}/{pos}: duplicate local index {key}")
             result.add(key)
@@ -910,20 +979,23 @@ def argument_design_model_reference_errors(
     keyset("ablations", ("thread_index", "work_package_index", "method_index", "evaluation_index", "ablation_index"))
     keyset("innovation_prior_work", ("thread_index", "innovation_index", "prior_work_index"))
 
-    for collection, rows in ((name, value.get(name) or []) for name in (
+    for collection in (
         "work_packages", "methods", "theoretical_properties", "evaluations", "baselines",
         "ablations", "innovations", "innovation_prior_work", "innovation_evaluation_refs",
         "foundation", "foundation_supports", "evidence_gaps",
-    )):
-        for pos, item in enumerate(rows):
+    ):
+        for pos, item in enumerate(rows(collection)):
+            if not isinstance(item, dict):
+                continue
             thread_index = item.get("thread_index")
-            if thread_index is not None and not (0 <= int(thread_index) < thread_count):
-                errors.append(f"/{collection}/{pos}/thread_index: out of range")
+            if isinstance(thread_index, int) and not isinstance(thread_index, bool):
+                if not (0 <= thread_index < thread_count):
+                    errors.append(f"/{collection}/{pos}/thread_index: out of range")
 
     def require_parent(collection: str, parent_fields: tuple[str, ...], parents: set[tuple[int, ...]]) -> None:
-        for pos, item in enumerate(value.get(collection) or []):
-            parent = tuple(int(item[name]) for name in parent_fields)
-            if parent not in parents:
+        for pos, item in enumerate(rows(collection)):
+            parent = index_tuple(item, parent_fields)
+            if parent is not None and parent not in parents:
                 errors.append(f"/{collection}/{pos}: unresolved parent index {parent}")
 
     require_parent("methods", ("thread_index", "work_package_index"), wp)
@@ -933,22 +1005,23 @@ def argument_design_model_reference_errors(
         require_parent(collection, ("thread_index", "work_package_index", "method_index", "evaluation_index"), evals)
     require_parent("innovation_prior_work", ("thread_index", "innovation_index"), innovations)
     require_parent("innovation_evaluation_refs", ("thread_index", "innovation_index"), innovations)
-    for pos, item in enumerate(value.get("innovation_evaluation_refs") or []):
-        target = tuple(int(item[name]) for name in ("thread_index", "work_package_index", "method_index", "evaluation_index"))
-        if target not in evals:
+    for pos, item in enumerate(rows("innovation_evaluation_refs")):
+        target = index_tuple(item, ("thread_index", "work_package_index", "method_index", "evaluation_index"))
+        if target is not None and target not in evals:
             errors.append(f"/innovation_evaluation_refs/{pos}: unresolved evaluation index {target}")
     require_parent("foundation_supports", ("thread_index", "foundation_index"), foundation)
-    for pos, item in enumerate(value.get("foundation_supports") or []):
+    for pos, item in enumerate(rows("foundation_supports")):
+        if not isinstance(item, dict):
+            continue
         if item.get("method_index") is None:
-            target = (int(item["thread_index"]), int(item["work_package_index"]))
-            if target not in wp:
+            target = index_tuple(item, ("thread_index", "work_package_index"))
+            if target is not None and target not in wp:
                 errors.append(f"/foundation_supports/{pos}: unresolved work-package index {target}")
         else:
-            target = (int(item["thread_index"]), int(item["work_package_index"]), int(item["method_index"]))
-            if target not in methods:
+            target = index_tuple(item, ("thread_index", "work_package_index", "method_index"))
+            if target is not None and target not in methods:
                 errors.append(f"/foundation_supports/{pos}: unresolved method index {target}")
     return errors
-
 
 def assemble_argument_authored_thread(
     skeleton_output: dict[str, Any],
@@ -1112,6 +1185,56 @@ def assemble_argument_authored_thread(
     }
 
 
+def _dedupe_argument_user_questions(*collections: Iterable[Any]) -> list[dict[str, Any]]:
+    """Keep the first owner of the same user-facing question text.
+
+    Skeleton is passed first by the assembler, so Design cannot silently override
+    the same question with different routing metadata. This is exact deterministic
+    ownership normalization, not fuzzy semantic merging.
+    """
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for collection in collections:
+        for raw in collection or []:
+            if not isinstance(raw, dict):
+                continue
+            key = _semantic_text_key(raw.get("question"))
+            if not key:
+                key = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(copy.deepcopy(raw))
+    return result
+
+
+def _dedupe_argument_evidence_gaps(*collections: Iterable[Any]) -> list[dict[str, Any]]:
+    """Collapse only deterministically identical gap identities.
+
+    The key deliberately requires kind, thread ownership, and the same normalized
+    suggested question (or reason fallback). Near-duplicate prose is preserved for
+    the responsible model stage to resolve rather than guessed away by Python.
+    """
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for collection in collections:
+        for raw in collection or []:
+            if not isinstance(raw, dict):
+                continue
+            semantic = _semantic_text_key(raw.get("suggested_question") or raw.get("reason"))
+            key = (
+                str(raw.get("kind") or ""),
+                str(raw.get("thread_index")),
+                semantic,
+            )
+            if semantic and key in seen:
+                continue
+            if semantic:
+                seen.add(key)
+            result.append(copy.deepcopy(raw))
+    return result
+
+
 def assemble_argument_authored_state(
     skeleton_output: dict[str, Any],
     design_output: dict[str, Any],
@@ -1146,14 +1269,14 @@ def assemble_argument_authored_state(
         "central_proposition": copy.deepcopy(skeleton_output["central_proposition"]),
         "scope": copy.deepcopy(skeleton_output["scope"]),
         "research_threads": threads,
-        "evidence_gaps": [
-            *copy.deepcopy(skeleton_output.get("evidence_gaps") or []),
-            *copy.deepcopy(design_output.get("evidence_gaps") or []),
-        ],
-        "user_questions": [
-            *copy.deepcopy(skeleton_output.get("user_questions") or []),
-            *copy.deepcopy(design_output.get("user_questions") or []),
-        ],
+        "evidence_gaps": _dedupe_argument_evidence_gaps(
+            skeleton_output.get("evidence_gaps") or [],
+            design_output.get("evidence_gaps") or [],
+        ),
+        "user_questions": _dedupe_argument_user_questions(
+            skeleton_output.get("user_questions") or [],
+            design_output.get("user_questions") or [],
+        ),
         "cannot_proceed_reason": copy.deepcopy(design_reason or skeleton_reason),
     }
 
@@ -2752,6 +2875,18 @@ def _evidence_record_is_supported(
         and (not require_quote or bool(str(ref.get("quoted_text") or "").strip()))
         for ref in refs
     )
+
+
+def argument_foundation_eligible_evidence_ids(
+    canonical_envelope: dict[str, Any],
+) -> list[str]:
+    """Return authoritative evidence IDs that may support declared team foundation."""
+    _cards, records = _evidence_records(canonical_envelope)
+    return [
+        evidence_id
+        for evidence_id, record in records.items()
+        if _evidence_record_is_supported(record, source_policy="FOUNDATION")
+    ]
 
 
 def _has_supported_evidence(

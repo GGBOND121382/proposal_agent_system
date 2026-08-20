@@ -13,6 +13,7 @@ from app.argument_two_stage_orchestration import (
     ARGUMENT_SKELETON_STAGE,
     ArgumentStageContractError,
     argument_stage_desired_output_tokens,
+    argument_stage_prompt_text,
     orchestrate_argument_architecture_two_stage,
 )
 from app.deterministic_repair import apply_deterministic_contract_repairs
@@ -2270,6 +2271,53 @@ def test_argument_design_contract_is_flat_frozen_skeleton_input_and_unregistered
     assert argument_design_model_reference_errors(design, skeleton) == []
 
 
+def test_argument_design_seed_excludes_skeleton_owned_semantics_and_keeps_design_hints():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    subgraph = envelope["payload"]["project_subgraph"]
+    subgraph["items"].extend([
+        {
+            "item_id": "WP-SEED",
+            "item_type": "WORK_PACKAGE",
+            "content": {"statement": "工作包种子"},
+            "knowledge_status": "CONFIRMED",
+        },
+        {
+            "item_id": "METHOD-SEED",
+            "item_type": "METHOD",
+            "content": {"statement": "方法种子"},
+            "knowledge_status": "CONFIRMED",
+        },
+    ])
+    subgraph["relations"] = [
+        {
+            "source_item_id": "item-001",
+            "relation_type": "DECOMPOSES_TO",
+            "target_item_id": "WP-SEED",
+            "status": "CONFIRMED",
+        },
+        {
+            "source_item_id": "WP-SEED",
+            "relation_type": "USES",
+            "target_item_id": "METHOD-SEED",
+            "status": "CONFIRMED",
+        },
+    ]
+
+    model_input = build_argument_design_model_input(envelope, skeleton)
+    seed = model_input["design_seed"]
+    component_types = {item["component_type"] for item in seed["existing_components"]}
+    assert "OBJECTIVE" not in component_types
+    assert {"WORK_PACKAGE", "METHOD", "FORMAL_MODEL", "EXPERIMENT_DESIGN", "NOVEL_MECHANISM", "TEAM_EVIDENCE"} <= component_types
+    assert [item["relation"] for item in seed["existing_relations"]] == ["DECOMPOSES_TO", "USES"]
+    assert seed["existing_relations"][0]["source_type"] == "OBJECTIVE"
+    assert seed["existing_relations"][0]["target_type"] == "WORK_PACKAGE"
+    assert all(
+        item["source_type"] != "PROBLEM" and item["target_type"] != "PROBLEM"
+        for item in seed["existing_relations"]
+    )
+
+
 def test_argument_design_contract_rejects_nested_tree_item_wrappers_and_skeleton_redefinition():
     envelope = _argument_envelope_with_evidence()
     design = _flat_design_output(envelope)
@@ -2618,7 +2666,7 @@ def test_argument_two_stage_step4a_design_unknown_evidence_is_local_reference_fa
     assert len(gateway.calls) == 2
 
 
-def test_argument_two_stage_step4a_assembler_failure_is_python_fail_closed_without_extra_model_call():
+def test_argument_two_stage_step4a_conflicting_stage_blockers_fail_at_design_boundary():
     envelope = _argument_envelope_with_evidence()
     skeleton = _flat_skeleton_output(envelope)
     design = _flat_design_output(envelope)
@@ -2628,11 +2676,12 @@ def test_argument_two_stage_step4a_assembler_failure_is_python_fail_closed_witho
 
     with pytest.raises(ArgumentStageContractError) as raised:
         asyncio.run(orchestrate_argument_architecture_two_stage(
-            envelope, stage_gateway=gateway, pack=PACK
+            envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
         ))
 
-    assert raised.value.stage == "ASSEMBLER"
-    assert raised.value.phase == "deterministic_assembly"
+    assert raised.value.stage == ARGUMENT_DESIGN_STAGE
+    assert raised.value.phase == "cross_stage_validation"
+    assert any("conflicts with frozen_skeleton" in error for error in raised.value.errors)
     assert len(gateway.calls) == 2
 
 
@@ -2750,3 +2799,323 @@ def test_argument_two_stage_step4a_flat_contract_cardinality_limits_are_explicit
         "foundation": 32,
     }
 
+
+
+
+def test_argument_two_stage_cross_stage_readiness_conflict_retries_design_only():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    skeleton["user_questions"] = [{
+        "target_area": "RESEARCH_DESIGN",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充正式验收阈值。",
+        "reason": "验收阈值尚未确认。",
+        "answer_shape": "OBJECT",
+        "allowed_values": [],
+        "blocking": True,
+        "priority": "P0",
+    }]
+    broken_design = _flat_design_output(envelope)
+    broken_design["cannot_proceed_reason"] = "验收阈值尚未确认，当前不能继续。"
+    broken_design["user_questions"] = [copy.deepcopy(skeleton["user_questions"][0])]
+    valid_design = _flat_design_output(envelope)
+
+    gateway = _FakeArgumentStageGateway([skeleton, broken_design, valid_design])
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+    ))
+
+    assert [call["stage"] for call in gateway.calls] == [
+        ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE, ARGUMENT_DESIGN_STAGE
+    ]
+    retry = gateway.calls[2]["retry_context"]
+    assert retry["attempt"] == 2
+    assert retry["previous_candidate"] == broken_design
+    assert any("cannot_proceed_reason" in error for error in retry["validation_errors"])
+    assert any("duplicate question indexes" in error for error in retry["validation_errors"])
+    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == skeleton
+    assert gateway.calls[2]["model_input"]["frozen_skeleton"] == skeleton
+    assert result["design"] == valid_design
+    assert PACK.validate_model("P-ARGUMENT-ARCHITECTURE", "output", result["authored_state"]) == []
+
+
+def test_argument_skeleton_prompt_declares_readiness_null_literal_contract():
+    prompt = argument_stage_prompt_text(ARGUMENT_SKELETON_STAGE)
+    assert "blocking=true" in prompt
+    assert "cannot_proceed_reason" in prompt
+    assert "JSON 空值" in prompt
+    assert "无引号" in prompt
+    assert '字符串 `\"null\"`' in prompt
+
+
+def test_argument_two_stage_skeleton_readiness_conflict_retries_before_design():
+    envelope = _argument_envelope_with_evidence()
+    broken = _flat_skeleton_output(envelope)
+    broken["cannot_proceed_reason"] = "需要用户补充信息。"
+    broken["user_questions"] = [{
+        "target_area": "RESEARCH_DESIGN",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充正式验收阈值。",
+        "reason": "验收阈值尚未确认。",
+        "answer_shape": "OBJECT",
+        "allowed_values": [],
+        "blocking": True,
+        "priority": "P0",
+    }]
+    valid = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([broken, valid, design])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+    ))
+    assert [call["stage"] for call in gateway.calls] == [
+        ARGUMENT_SKELETON_STAGE, ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE
+    ]
+    retry = gateway.calls[1]["retry_context"]
+    readiness_errors = [
+        error for error in retry["validation_errors"] if "cannot_proceed_reason" in error
+    ]
+    assert readiness_errors
+    assert "JSON null (without quotes)" in readiness_errors[0]
+    assert 'string "null"' in readiness_errors[0]
+    assert result["skeleton"] == valid
+
+
+def test_argument_authored_state_assembler_dedupes_only_deterministic_question_and_gap_identity():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    skeleton["user_questions"] = [{
+        "target_area": "RESEARCH_DESIGN",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充正式验收阈值。",
+        "reason": "Skeleton owns this question.",
+        "answer_shape": "OBJECT",
+        "allowed_values": [],
+        "blocking": False,
+        "priority": "P1",
+    }]
+    duplicate_question = copy.deepcopy(skeleton["user_questions"][0])
+    duplicate_question["target_area"] = "OTHER"
+    duplicate_question["reason"] = "Design must not override the same question."
+    design["user_questions"] = [duplicate_question]
+
+    skeleton["evidence_gaps"] = [{
+        "kind": "METRIC_JUSTIFICATION",
+        "thread_index": 0,
+        "reason": "正式验收阈值缺失。",
+        "blocking": False,
+        "suggested_question": "请补充正式验收阈值。",
+    }]
+    design["evidence_gaps"] = [
+        {
+            "kind": "METRIC_JUSTIFICATION",
+            "thread_index": 0,
+            "reason": "同一缺口的重复表述。",
+            "blocking": False,
+            "suggested_question": "请补充正式验收阈值！",
+        },
+        {
+            "kind": "METRIC_JUSTIFICATION",
+            "thread_index": 0,
+            "reason": "不同的统计检验信息缺失。",
+            "blocking": False,
+            "suggested_question": "请补充统计检验方法。",
+        },
+    ]
+
+    authored = assemble_argument_authored_state(skeleton, design)
+    assert authored["user_questions"] == skeleton["user_questions"]
+    assert len(authored["evidence_gaps"]) == 2
+    assert authored["evidence_gaps"][0] == skeleton["evidence_gaps"][0]
+    assert authored["evidence_gaps"][1]["suggested_question"] == "请补充统计检验方法。"
+
+
+
+def test_argument_two_stage_design_rejects_unqualified_foundation_before_assembly():
+    envelope = _argument_envelope_with_evidence()
+    envelope["payload"]["confirmed_facts"].append({
+        "claim_id": "E-UNKNOWN-FOUNDATION",
+        "claim_text": "团队基础信息待补，不得作为已确认团队基础。",
+        "claim_type": "FACT",
+        "subject_id": None,
+        "temporal_status": "TIME_INDEPENDENT",
+        "qualifiers": ["UNKNOWN"],
+        "numeric_values": [],
+        "source_refs": [],
+        "knowledge_status": "UNKNOWN",
+        "security_level": "INTERNAL",
+    })
+    skeleton = _flat_skeleton_output(envelope)
+    broken_design = _flat_design_output(envelope)
+    broken_design["foundation"] = [{
+        "thread_index": 0,
+        "foundation_index": 0,
+        "statement": "团队基础为UNKNOWN。",
+        "evidence_ids": ["E-UNKNOWN-FOUNDATION"],
+    }]
+    broken_design["foundation_supports"] = [{
+        "thread_index": 0,
+        "foundation_index": 0,
+        "work_package_index": 0,
+        "method_index": None,
+    }]
+    valid_design = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([skeleton, broken_design, valid_design])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+    ))
+    retry = gateway.calls[2]["retry_context"]
+    assert any("foundation_eligible_evidence_ids" in error for error in retry["validation_errors"])
+    assert gateway.calls[1]["model_input"]["foundation_eligible_evidence_ids"]
+    assert "E-UNKNOWN-FOUNDATION" not in gateway.calls[1]["model_input"]["foundation_eligible_evidence_ids"]
+    assert result["design"]["foundation"] == []
+    assert result["design"]["foundation_supports"] == []
+
+
+
+def test_argument_two_stage_design_combines_foundation_and_cross_stage_feedback_in_one_retry():
+    envelope = _argument_envelope_with_evidence()
+    envelope["payload"]["confirmed_facts"].append({
+        "claim_id": "E-UNKNOWN-COMBINED",
+        "claim_text": "团队基础未知。",
+        "claim_type": "FACT",
+        "subject_id": None,
+        "temporal_status": "TIME_INDEPENDENT",
+        "qualifiers": ["UNKNOWN"],
+        "numeric_values": [],
+        "source_refs": [],
+        "knowledge_status": "UNKNOWN",
+        "security_level": "INTERNAL",
+    })
+    skeleton = _flat_skeleton_output(envelope)
+    skeleton["user_questions"] = [{
+        "target_area": "FOUNDATION_EVIDENCE",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充团队已有基础。",
+        "reason": "团队基础尚未确认。",
+        "answer_shape": "OBJECT",
+        "allowed_values": [],
+        "blocking": True,
+        "priority": "P0",
+    }]
+    skeleton["evidence_gaps"] = [{
+        "kind": "FOUNDATION",
+        "thread_index": 0,
+        "reason": "团队基础尚未确认。",
+        "blocking": True,
+        "suggested_question": "请补充团队已有基础。",
+    }]
+
+    broken = _flat_design_output(envelope)
+    broken["foundation"] = [{
+        "thread_index": 0,
+        "foundation_index": 0,
+        "statement": "团队基础为UNKNOWN。",
+        "evidence_ids": ["E-UNKNOWN-COMBINED"],
+    }]
+    broken["foundation_supports"] = [{
+        "thread_index": 0,
+        "foundation_index": 0,
+        "work_package_index": 0,
+        "method_index": None,
+    }]
+    broken["cannot_proceed_reason"] = "团队基础尚未确认，当前不能继续。"
+    broken["user_questions"] = [copy.deepcopy(skeleton["user_questions"][0])]
+    broken["evidence_gaps"] = [copy.deepcopy(skeleton["evidence_gaps"][0])]
+    valid = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([skeleton, broken, valid])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+    ))
+    retry_errors = gateway.calls[2]["retry_context"]["validation_errors"]
+    assert any("foundation_eligible_evidence_ids" in error for error in retry_errors)
+    assert any("cannot_proceed_reason" in error for error in retry_errors)
+    assert any("duplicate question indexes" in error for error in retry_errors)
+    assert any("duplicate gap indexes" in error for error in retry_errors)
+    assert result["design"] == valid
+
+
+def test_argument_two_stage_design_retry_receives_all_known_shape_and_cross_stage_errors_once():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    skeleton["user_questions"] = [{
+        "target_area": "RESEARCH_DESIGN",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充正式验收阈值。",
+        "reason": "验收阈值尚未确认。",
+        "answer_shape": "OBJECT",
+        "allowed_values": [],
+        "blocking": True,
+        "priority": "P0",
+    }]
+    skeleton["evidence_gaps"] = [{
+        "kind": "METRIC_JUSTIFICATION",
+        "thread_index": 0,
+        "reason": "正式验收阈值缺失。",
+        "blocking": True,
+        "suggested_question": "请补充正式验收阈值。",
+    }]
+
+    broken = _flat_design_output(envelope)
+    # Multiple independent shape defects: enough to exceed the historical six-error slice.
+    broken["work_packages"].extend([{}, {}, {}, {}])
+    broken["methods"].extend([{}, {}, {}, {}])
+    # A separate, structurally well-typed reference defect must be reported in the same attempt.
+    broken["methods"][0]["work_package_index"] = 9
+    # Simultaneous cross-stage defects already knowable from the same candidate.
+    broken["cannot_proceed_reason"] = "验收阈值尚未确认，当前不能继续。"
+    broken["user_questions"] = [copy.deepcopy(skeleton["user_questions"][0])]
+    broken["evidence_gaps"] = [copy.deepcopy(skeleton["evidence_gaps"][0])]
+
+    valid = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([skeleton, broken, valid])
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+    ))
+
+    retry_errors = gateway.calls[2]["retry_context"]["validation_errors"]
+    assert len(retry_errors) > 6
+    assert any("required property" in error for error in retry_errors)
+    assert any("unresolved parent index" in error for error in retry_errors)
+    assert any("cannot_proceed_reason" in error for error in retry_errors)
+    assert any("duplicate question indexes" in error for error in retry_errors)
+    assert any("duplicate gap indexes" in error for error in retry_errors)
+    assert result["design"] == valid
+    assert PACK.validate_model("P-ARGUMENT-ARCHITECTURE", "output", result["authored_state"]) == []
+
+
+def test_argument_two_stage_skeleton_retry_aggregates_shape_reference_and_readiness_errors():
+    envelope = _argument_envelope_with_evidence()
+    broken = _flat_skeleton_output(envelope)
+    broken["unexpected_stage_field"] = "shape defect"
+    broken["central_proposition"]["evidence_ids"] = ["EV-NOT-PRESENT"]
+    question = {
+        "target_area": "RESEARCH_DESIGN",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充正式验收阈值。",
+        "reason": "验收阈值尚未确认。",
+        "answer_shape": "OBJECT",
+        "allowed_values": [],
+        "blocking": True,
+        "priority": "P0",
+    }
+    broken["cannot_proceed_reason"] = "需要用户补充信息。"
+    broken["user_questions"] = [copy.deepcopy(question), copy.deepcopy(question)]
+
+    valid = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([broken, valid, design])
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+    ))
+
+    retry_errors = gateway.calls[1]["retry_context"]["validation_errors"]
+    assert any("Additional properties" in error for error in retry_errors)
+    assert any("EV-NOT-PRESENT" in error for error in retry_errors)
+    assert any("cannot_proceed_reason" in error for error in retry_errors)
+    assert any("duplicate question indexes" in error for error in retry_errors)
+    assert result["skeleton"] == valid

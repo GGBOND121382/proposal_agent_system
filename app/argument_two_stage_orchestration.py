@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from .model_semantic_contracts import (
     argument_design_model_output_errors,
     argument_design_model_reference_errors,
+    argument_foundation_eligible_evidence_ids,
     argument_skeleton_model_output_errors,
     assemble_argument_authored_state,
     build_argument_design_model_input,
@@ -19,7 +20,7 @@ from .model_semantic_contracts import (
 
 ARGUMENT_SKELETON_STAGE = "SKELETON"
 ARGUMENT_DESIGN_STAGE = "DESIGN"
-ARGUMENT_TWO_STAGE_CONTRACT_VERSION = "ARGUMENT_TWO_STAGE_V2"
+ARGUMENT_TWO_STAGE_CONTRACT_VERSION = "ARGUMENT_TWO_STAGE_V6"
 
 # Stage-local ceilings replace the legacy one-size-fits-all 131072-token demand
 # for the internal two-stage Argument producer.  They are intentionally kept
@@ -49,6 +50,9 @@ def argument_stage_prompt_text(stage: str) -> str:
             "不要生成工作包、方法、理论性质、验证、基线、消融、创新点或团队基础；"
             "不要生成机器 ID、关系 ID、Hash 或运行时字段。证据引用只能使用输入已有的 "
             "`evidence_id`。信息不足时如实记录 evidence gap、用户问题或不能继续的原因。"
+            "只要本阶段存在 `blocking=true` 的用户问题，`cannot_proceed_reason` 必须输出 JSON 空值 "
+            "`null`（无引号），不得输出字符串 `\"null\"`；可由用户回答解决的信息缺失用阻断性用户问题表达，"
+            "只有无法通过这些问题解决、因而本阶段确实无法形成骨架时才使用非空 `cannot_proceed_reason`。"
             "若输入包含 `retry_context`，以上一轮 `previous_candidate` 为起点，只修正"
             "`validation_errors` 指出的当前阶段问题，其他已有效语义保持不变。"
         )
@@ -62,7 +66,11 @@ def argument_stage_prompt_text(stage: str) -> str:
             "使用输出契约规定的局部整数索引建立这些语义记录之间的关联；"
             "不要生成机器 ID、关系 ID、Hash 或运行时字段。证据引用只能使用输入已有的 "
             "`evidence_id`。信息不足时允许相应记录为空，并如实记录 evidence gap、"
-            "用户问题或不能继续的原因。若输入包含 `retry_context`，以上一轮 "
+            "用户问题或不能继续的原因；不得重复 `frozen_skeleton` 中已有的问题或缺口。"
+            "`foundation_eligible_evidence_ids` 是团队基础唯一允许使用的证据集合；该集合为空时 "
+            "`foundation` 与 `foundation_supports` 必须为空。只要冻结骨架或本阶段仍存在 "
+            "`blocking=true` 的用户问题，`cannot_proceed_reason` 必须为 `null`，由用户问题表达待补信息。"
+            "若输入包含 `retry_context`，以上一轮 "
             "`previous_candidate` 为起点，只修正 `validation_errors` 指出的当前阶段问题，"
             "其他已有效语义保持不变；任何情况下都不得改写 `frozen_skeleton`。"
         )
@@ -154,12 +162,19 @@ def _skeleton_reference_errors(
     model_input: dict[str, Any], candidate: dict[str, Any]
 ) -> list[str]:
     errors = _stage_evidence_reference_errors(model_input, candidate)
-    thread_count = len(candidate.get("research_threads") or [])
-    for index, gap in enumerate(candidate.get("evidence_gaps") or []):
+    threads = candidate.get("research_threads")
+    thread_count = len(threads) if isinstance(threads, list) else None
+    gaps = candidate.get("evidence_gaps")
+    for index, gap in enumerate(gaps if isinstance(gaps, list) else []):
         if not isinstance(gap, dict):
             continue
         thread_index = gap.get("thread_index")
-        if thread_index is not None and not (0 <= int(thread_index) < thread_count):
+        if (
+            thread_count is not None
+            and isinstance(thread_index, int)
+            and not isinstance(thread_index, bool)
+            and not (0 <= thread_index < thread_count)
+        ):
             errors.append(f"/evidence_gaps/{index}/thread_index: out of range")
     return errors
 
@@ -169,10 +184,139 @@ def _design_reference_errors(
     candidate: dict[str, Any],
     frozen_skeleton: dict[str, Any],
 ) -> list[str]:
-    return [
+    errors = [
         *argument_design_model_reference_errors(candidate, frozen_skeleton),
         *_stage_evidence_reference_errors(model_input, candidate),
     ]
+    eligible = {
+        str(value)
+        for value in model_input.get("foundation_eligible_evidence_ids") or []
+        if str(value).strip()
+    }
+    unsupported_foundation: list[int] = []
+    for index, item in enumerate(candidate.get("foundation") or []):
+        if not isinstance(item, dict):
+            continue
+        evidence_ids = {str(value) for value in item.get("evidence_ids") or []}
+        if not (evidence_ids & eligible):
+            unsupported_foundation.append(index)
+    if unsupported_foundation:
+        errors.append(
+            "/foundation: records at indexes "
+            + str(unsupported_foundation)
+            + " lack any foundation_eligible_evidence_ids; remove unsupported foundation "
+            "records (and their foundation_supports) or replace them with qualified evidence; "
+            "when the eligible set is empty, foundation and foundation_supports must both be empty"
+        )
+    return errors
+
+
+def _normalized_semantic_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    for token in " \t\r\n，。；：！？,:;!?“”\"'（）()[]{}":
+        text = text.replace(token, "")
+    return text
+
+
+def _question_key(item: Any) -> str:
+    if not isinstance(item, dict):
+        return ""
+    return _normalized_semantic_text(item.get("question"))
+
+
+def _gap_key(item: Any) -> tuple[str, str, str] | None:
+    if not isinstance(item, dict):
+        return None
+    semantic = _normalized_semantic_text(
+        item.get("suggested_question") or item.get("reason")
+    )
+    if not semantic:
+        return None
+    return (
+        str(item.get("kind") or ""),
+        str(item.get("thread_index")),
+        semantic,
+    )
+
+
+def _readiness_conflict_errors(
+    candidate: dict[str, Any],
+    *,
+    frozen_skeleton: dict[str, Any] | None = None,
+) -> list[str]:
+    """Validate final readiness invariants while the responsible stage can still retry."""
+    inherited = frozen_skeleton or {}
+    inherited_reason = str(inherited.get("cannot_proceed_reason") or "").strip()
+    candidate_reason = str(candidate.get("cannot_proceed_reason") or "").strip()
+    effective_reason = candidate_reason or inherited_reason
+
+    inherited_questions = [
+        item for item in inherited.get("user_questions") or [] if isinstance(item, dict)
+    ]
+    candidate_questions = [
+        item for item in candidate.get("user_questions") or [] if isinstance(item, dict)
+    ]
+    blocking_exists = any(
+        bool(item.get("blocking"))
+        for item in (*inherited_questions, *candidate_questions)
+    )
+
+    errors: list[str] = []
+    if effective_reason and blocking_exists:
+        errors.append(
+            "/cannot_proceed_reason: must be JSON null (without quotes), never the string \"null\", "
+            "whenever frozen_skeleton or the current stage contains blocking=true user_questions; "
+            "use blocking questions for answerable missing information and reserve "
+            "cannot_proceed_reason for a blocker that cannot be resolved by those questions"
+        )
+    if inherited_reason and candidate_reason and inherited_reason != candidate_reason:
+        errors.append(
+            "/cannot_proceed_reason: conflicts with frozen_skeleton.cannot_proceed_reason"
+        )
+
+    inherited_question_keys = {
+        key for key in (_question_key(item) for item in inherited_questions) if key
+    }
+    seen_questions = set(inherited_question_keys)
+    duplicate_question_indexes: list[int] = []
+    for index, item in enumerate(candidate_questions):
+        key = _question_key(item)
+        if not key:
+            continue
+        if key in seen_questions:
+            duplicate_question_indexes.append(index)
+        else:
+            seen_questions.add(key)
+    if duplicate_question_indexes:
+        owner = "frozen_skeleton/current-stage" if frozen_skeleton is not None else "current-stage"
+        errors.append(
+            "/user_questions: duplicate question indexes "
+            + str(duplicate_question_indexes)
+            + f" are already owned by {owner}; keep only genuinely new questions"
+        )
+
+    inherited_gap_keys = {
+        key
+        for key in (_gap_key(item) for item in inherited.get("evidence_gaps") or [])
+        if key is not None
+    }
+    seen_gap_keys = set(inherited_gap_keys)
+    duplicate_gap_indexes: list[int] = []
+    for index, item in enumerate(candidate.get("evidence_gaps") or []):
+        key = _gap_key(item)
+        if key is None:
+            continue
+        if key in seen_gap_keys:
+            duplicate_gap_indexes.append(index)
+        else:
+            seen_gap_keys.add(key)
+    if duplicate_gap_indexes:
+        errors.append(
+            "/evidence_gaps: duplicate gap indexes "
+            + str(duplicate_gap_indexes)
+            + " repeat an existing deterministic gap identity; keep only genuinely new design-stage gaps"
+        )
+    return errors
 
 
 async def _invoke_validated_stage(
@@ -195,7 +339,7 @@ async def _invoke_validated_stage(
             retry_context = {
                 "attempt": attempt,
                 "previous_candidate": copy.deepcopy(previous_candidate),
-                "validation_errors": copy.deepcopy(previous_errors[:6]),
+                "validation_errors": copy.deepcopy(previous_errors),
             }
         candidate = await stage_gateway.invoke_stage(
             stage,
@@ -207,22 +351,46 @@ async def _invoke_validated_stage(
 
         if stage == ARGUMENT_SKELETON_STAGE:
             shape_errors = argument_skeleton_model_output_errors(candidate)
+            reference_errors = (
+                _skeleton_reference_errors(model_input, candidate)
+                if isinstance(candidate, dict)
+                else []
+            )
+            cross_stage_errors = (
+                _readiness_conflict_errors(candidate)
+                if isinstance(candidate, dict)
+                else []
+            )
+            errors = [*shape_errors, *reference_errors, *cross_stage_errors]
             if shape_errors:
                 phase = "structure_validation"
-                errors = shape_errors
+            elif cross_stage_errors:
+                phase = "cross_stage_validation"
             else:
                 phase = "reference_validation"
-                errors = _skeleton_reference_errors(model_input, candidate)
         elif stage == ARGUMENT_DESIGN_STAGE:
+            if frozen_skeleton is None:
+                raise ValueError("Design stage requires frozen_skeleton")
             shape_errors = argument_design_model_output_errors(candidate)
+            reference_errors = (
+                _design_reference_errors(model_input, candidate, frozen_skeleton)
+                if isinstance(candidate, dict)
+                else []
+            )
+            cross_stage_errors = (
+                _readiness_conflict_errors(
+                    candidate, frozen_skeleton=frozen_skeleton
+                )
+                if isinstance(candidate, dict)
+                else []
+            )
+            errors = [*shape_errors, *reference_errors, *cross_stage_errors]
             if shape_errors:
                 phase = "structure_validation"
-                errors = shape_errors
+            elif cross_stage_errors:
+                phase = "cross_stage_validation"
             else:
-                if frozen_skeleton is None:
-                    raise ValueError("Design stage requires frozen_skeleton")
                 phase = "reference_validation"
-                errors = _design_reference_errors(model_input, candidate, frozen_skeleton)
         else:
             raise ValueError(f"Unknown Argument stage: {stage}")
 
@@ -262,6 +430,9 @@ async def orchestrate_argument_architecture_two_stage(
     )
 
     design_input = build_argument_design_model_input(provider_source, frozen_skeleton)
+    design_input["foundation_eligible_evidence_ids"] = (
+        argument_foundation_eligible_evidence_ids(canonical_envelope)
+    )
     design_candidate = await _invoke_validated_stage(
         stage=ARGUMENT_DESIGN_STAGE,
         model_input=design_input,

@@ -100,9 +100,13 @@ class AuditedModelGateway(BaseModelGateway):
         request_meta = self.evidence_store.write_request(call_key, request_payload)
         self.evidence_store.faults.hit("after_request_persist", call_key, prompt_id=prompt_id)
 
+        is_argument_two_stage_internal = bool(
+            (route.profile or {}).get("argument_two_stage_internal_stage")
+        )
         if (
             str(self.settings.runtime_mode or "").upper() == "LIVE"
             and prompt_id == "P-ARGUMENT-ARCHITECTURE"
+            and not is_argument_two_stage_internal
         ):
             estimated_input_tokens = int(
                 (request_payload.get("token_budget") or {}).get("estimated_input_tokens") or 0
