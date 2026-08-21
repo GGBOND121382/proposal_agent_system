@@ -237,8 +237,8 @@ def _coerce_answer(value: Any, question: dict[str, Any]) -> Any:
                 if isinstance(question.get("options"), list)
                 else None
             )
-        if allowed is None:
-            return normalized
+        if not isinstance(allowed, list) or not allowed:
+            raise ValueError("ENUM 回答必须提供非空 allowed_values")
         exact_matches = [
             item
             for item in allowed
@@ -268,6 +268,10 @@ def _coerce_answer(value: Any, question: dict[str, Any]) -> Any:
         except ValueError as exc:
             raise ValueError(f"无法将回答转换为数值：{value!r}") from exc
     if answer_type in {"OBJECT", "ARRAY"}:
+        if answer_type == "OBJECT" and not isinstance(schema.get("properties"), dict):
+            raise ValueError("OBJECT 回答必须定义 properties schema")
+        if answer_type == "ARRAY" and not isinstance(schema.get("items"), dict):
+            raise ValueError("ARRAY 回答必须定义 items schema")
         if isinstance(value, (dict, list)):
             parsed = copy.deepcopy(value)
         else:

@@ -57,11 +57,61 @@
               "boolean"
             ]
           }
+        },
+        "properties": {
+          "type": "object"
+        },
+        "items": {
+          "type": "object"
         }
       },
       "additionalProperties": false,
       "required": [
         "type"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "ENUM"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "allowed_values"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "OBJECT"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "properties"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "ARRAY"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "items"
+            ]
+          }
+        }
       ]
     },
     "blocking": {
