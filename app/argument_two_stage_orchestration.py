@@ -239,6 +239,187 @@ def _gap_key(item: Any) -> tuple[str, str, str] | None:
     )
 
 
+def _normalize_stage_mechanical_defaults(candidate: Any) -> Any:
+    """Apply only unambiguous stage-boundary defaults on a deep copy.
+
+    Provider evidence remains immutable; validation and deterministic assembly
+    consume a deep copy of the candidate.  Other null-looking strings remain
+    authored values. Missing fields are filled only when the surrounding
+    authored values determine the sole contract-valid value.
+    """
+    normalized = copy.deepcopy(candidate)
+    if not isinstance(normalized, dict):
+        return normalized
+    if (
+        isinstance(normalized.get("cannot_proceed_reason"), str)
+        and normalized["cannot_proceed_reason"] == "null"
+    ):
+        normalized["cannot_proceed_reason"] = None
+
+    questions = normalized.get("user_questions")
+    if isinstance(questions, list):
+        blocking_question_exists = any(
+            isinstance(item, dict) and item.get("blocking") is True
+            for item in questions
+        )
+        if blocking_question_exists and "cannot_proceed_reason" not in normalized:
+            normalized["cannot_proceed_reason"] = None
+        for item in questions:
+            if not isinstance(item, dict) or "allowed_values" in item:
+                continue
+            if str(item.get("question_type") or "") != "CHOICE":
+                item["allowed_values"] = []
+    return normalized
+
+
+def _local_index_tuple(item: Any, fields: tuple[str, ...]) -> tuple[int, ...] | None:
+    if not isinstance(item, dict):
+        return None
+    values: list[int] = []
+    for field in fields:
+        value = item.get(field)
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        values.append(value)
+    return tuple(values)
+
+
+def _normalize_design_mechanical_artifacts(
+    candidate: Any,
+    frozen_skeleton: dict[str, Any],
+) -> Any:
+    """Remove only unambiguous Design-stage mechanical defects.
+
+    The provider response remains immutable.  This function never renumbers a
+    record, guesses an intended parent, or changes semantic text.  Malformed or
+    ambiguous core records remain in the candidate so normal validation can
+    request a model retry.
+    """
+    normalized = copy.deepcopy(candidate)
+    if not isinstance(normalized, dict):
+        return normalized
+
+    def dedupe_owned_rows(
+        collection: str,
+        key_fn: Any,
+    ) -> None:
+        inherited = frozen_skeleton.get(collection)
+        rows = normalized.get(collection)
+        if not isinstance(rows, list):
+            return
+        seen = {
+            key
+            for key in (key_fn(item) for item in inherited or [])
+            if key is not None
+        }
+        kept: list[Any] = []
+        for item in rows:
+            key = key_fn(item)
+            if key is not None and key in seen:
+                continue
+            kept.append(item)
+            if key is not None:
+                seen.add(key)
+        normalized[collection] = kept
+
+    dedupe_owned_rows("user_questions", _question_key)
+    dedupe_owned_rows("evidence_gaps", _gap_key)
+
+    def keyset(collection: str, fields: tuple[str, ...]) -> set[tuple[int, ...]]:
+        rows = normalized.get(collection)
+        if not isinstance(rows, list):
+            return set()
+        return {
+            key
+            for key in (_local_index_tuple(item, fields) for item in rows)
+            if key is not None
+        }
+
+    work_packages = keyset("work_packages", ("thread_index", "work_package_index"))
+    methods = keyset(
+        "methods", ("thread_index", "work_package_index", "method_index")
+    )
+    evaluations = keyset(
+        "evaluations",
+        ("thread_index", "work_package_index", "method_index", "evaluation_index"),
+    )
+    innovations = keyset("innovations", ("thread_index", "innovation_index"))
+    foundation = keyset("foundation", ("thread_index", "foundation_index"))
+
+    def prune_if_resolved_but_missing(
+        collection: str,
+        fields: tuple[str, ...],
+        parents: set[tuple[int, ...]],
+    ) -> None:
+        rows = normalized.get(collection)
+        if not isinstance(rows, list):
+            return
+        normalized[collection] = [
+            item
+            for item in rows
+            if (key := _local_index_tuple(item, fields)) is None or key in parents
+        ]
+
+    # These collections are optional leaves.  An explicitly indexed row whose
+    # parent does not exist cannot be assembled without guessing, so dropping
+    # that row is the only deterministic repair.
+    evaluation_fields = (
+        "thread_index",
+        "work_package_index",
+        "method_index",
+        "evaluation_index",
+    )
+    prune_if_resolved_but_missing("baselines", evaluation_fields, evaluations)
+    prune_if_resolved_but_missing("ablations", evaluation_fields, evaluations)
+    prune_if_resolved_but_missing(
+        "innovation_prior_work",
+        ("thread_index", "innovation_index"),
+        innovations,
+    )
+
+    refs = normalized.get("innovation_evaluation_refs")
+    if isinstance(refs, list):
+        kept_refs: list[Any] = []
+        for item in refs:
+            innovation_key = _local_index_tuple(
+                item, ("thread_index", "innovation_index")
+            )
+            evaluation_key = _local_index_tuple(item, evaluation_fields)
+            if innovation_key is not None and innovation_key not in innovations:
+                continue
+            if evaluation_key is not None and evaluation_key not in evaluations:
+                continue
+            kept_refs.append(item)
+        normalized["innovation_evaluation_refs"] = kept_refs
+
+    supports = normalized.get("foundation_supports")
+    if isinstance(supports, list):
+        kept_supports: list[Any] = []
+        for item in supports:
+            foundation_key = _local_index_tuple(
+                item, ("thread_index", "foundation_index")
+            )
+            if foundation_key is not None and foundation_key not in foundation:
+                continue
+            if isinstance(item, dict) and item.get("method_index") is None:
+                target = _local_index_tuple(
+                    item, ("thread_index", "work_package_index")
+                )
+                if target is not None and target not in work_packages:
+                    continue
+            else:
+                target = _local_index_tuple(
+                    item,
+                    ("thread_index", "work_package_index", "method_index"),
+                )
+                if target is not None and target not in methods:
+                    continue
+            kept_supports.append(item)
+        normalized["foundation_supports"] = kept_supports
+
+    return normalized
+
+
 def _readiness_conflict_errors(
     candidate: dict[str, Any],
     *,
@@ -341,13 +522,18 @@ async def _invoke_validated_stage(
                 "previous_candidate": copy.deepcopy(previous_candidate),
                 "validation_errors": copy.deepcopy(previous_errors),
             }
-        candidate = await stage_gateway.invoke_stage(
+        raw_candidate = await stage_gateway.invoke_stage(
             stage,
             copy.deepcopy(model_input),
             argument_stage_output_schema(stage),
             retry_context=retry_context,
             desired_output_tokens=argument_stage_desired_output_tokens(stage),
         )
+        candidate = _normalize_stage_mechanical_defaults(raw_candidate)
+        if stage == ARGUMENT_DESIGN_STAGE and frozen_skeleton is not None:
+            candidate = _normalize_design_mechanical_artifacts(
+                candidate, frozen_skeleton
+            )
 
         if stage == ARGUMENT_SKELETON_STAGE:
             shape_errors = argument_skeleton_model_output_errors(candidate)
@@ -478,4 +664,3 @@ async def orchestrate_argument_architecture_two_stage(
         "authored_state": copy.deepcopy(authored_state),
         "canonical_output": canonical_output,
     }
-

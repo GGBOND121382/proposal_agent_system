@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 from dataclasses import dataclass
 from typing import Any
+
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
 from .json_pointer import JsonPointerError, format_pointer, parse_pointer
 from .util import sha256_json
@@ -223,50 +227,279 @@ def _answer_map(answers: list[dict[str, Any]] | None) -> dict[str, Any]:
     return mapped
 
 
+_SUPPORTED_ANSWER_TYPES = {
+    "STRING",
+    "LONG_TEXT",
+    "SELECT",
+    "ENUM",
+    "BOOLEAN",
+    "NUMBER",
+    "OBJECT",
+    "ARRAY",
+}
+
+
+def _is_blank_answer(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _parse_boolean(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+    normalized = str(value or "").strip().casefold()
+    if normalized in {"true", "1", "yes", "y", "是", "确认"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "否", "不确认"}:
+        return False
+    raise ValueError(f"无法将回答转换为布尔值：{value!r}")
+
+
+def _parse_number(value: Any) -> int | float:
+    if isinstance(value, bool):
+        raise ValueError(f"无法将回答转换为数值：{value!r}")
+    if isinstance(value, (int, float)):
+        parsed = value
+    else:
+        text = str(value or "").strip()
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(f"无法将回答转换为数值：{value!r}") from exc
+        if not isinstance(parsed, (int, float)) or isinstance(parsed, bool):
+            raise ValueError(f"无法将回答转换为数值：{value!r}")
+    if isinstance(parsed, float) and not math.isfinite(parsed):
+        raise ValueError(f"数值回答必须是有限值：{value!r}")
+    return parsed
+
+
+def _enum_allowed_values(question: dict[str, Any], schema: dict[str, Any]) -> list[Any]:
+    allowed = schema.get("allowed_values")
+    if not isinstance(allowed, list):
+        allowed = question.get("options") if isinstance(question.get("options"), list) else None
+    if not isinstance(allowed, list) or not allowed:
+        raise ValueError("ENUM 回答必须提供非空 allowed_values")
+    return allowed
+
+
+def _coerce_enum_answer(value: Any, allowed: list[Any]) -> Any:
+    exact_matches = [
+        item
+        for item in allowed
+        if type(item) is type(value) and item == value
+    ]
+    if exact_matches:
+        return copy.deepcopy(exact_matches[0])
+
+    # Browser form controls always submit strings.  First recover the type of
+    # scalar enum members, then retain the old textual fallback for legacy API
+    # clients.  Type-sensitive exact matching above keeps [1, "1"] unambiguous.
+    if isinstance(value, str):
+        recovered_matches: list[Any] = []
+        bool_items = [item for item in allowed if isinstance(item, bool)]
+        if bool_items:
+            try:
+                parsed_bool = _parse_boolean(value)
+            except ValueError:
+                pass
+            else:
+                recovered_matches.extend(
+                    item for item in bool_items if item is parsed_bool
+                )
+
+        number_items = [
+            item
+            for item in allowed
+            if isinstance(item, (int, float)) and not isinstance(item, bool)
+        ]
+        if number_items:
+            try:
+                parsed_number = _parse_number(value)
+            except ValueError:
+                pass
+            else:
+                matches = [
+                    item
+                    for item in number_items
+                    if type(item) is type(parsed_number) and item == parsed_number
+                ]
+                if not matches:
+                    matches = [item for item in number_items if item == parsed_number]
+                recovered_matches.extend(matches)
+        if len(recovered_matches) == 1:
+            return copy.deepcopy(recovered_matches[0])
+        if len(recovered_matches) > 1:
+            raise ValueError(f"回答不在允许范围内或存在歧义：{value!r}")
+
+    normalized = "" if value is None else str(value).strip()
+    textual_matches = [
+        item
+        for item in allowed
+        if (
+            ("true" if item is True else "false" if item is False else str(item))
+            == normalized
+        )
+    ]
+    if len(textual_matches) != 1:
+        raise ValueError(f"回答不在允许范围内或存在歧义：{value!r}")
+    return copy.deepcopy(textual_matches[0])
+
+
+def _answer_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Translate the Gate answer dialect into ordinary JSON Schema."""
+
+    translated = copy.deepcopy(schema)
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        raw_type = node.get("type")
+        if isinstance(raw_type, str) and raw_type.upper() in {
+            "STRING", "NUMBER", "BOOLEAN", "OBJECT", "ARRAY", "INTEGER", "NULL"
+        }:
+            node["type"] = raw_type.lower()
+        allowed = node.pop("allowed_values", None)
+        if isinstance(allowed, list) and allowed:
+            node["enum"] = copy.deepcopy(allowed)
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            for child in properties.values():
+                visit(child)
+        items = node.get("items")
+        if isinstance(items, dict):
+            visit(items)
+        for keyword in ("allOf", "anyOf", "oneOf"):
+            children = node.get(keyword)
+            if isinstance(children, list):
+                for child in children:
+                    visit(child)
+
+    visit(translated)
+    return translated
+
+
+def _validate_composite_answer(value: Any, schema: dict[str, Any]) -> None:
+    json_schema = _answer_json_schema(schema)
+    try:
+        validator = Draft202012Validator(json_schema)
+        validator.check_schema(json_schema)
+    except SchemaError as exc:
+        raise ValueError(f"Gate answer_schema 无效：{exc.message}") from exc
+    errors = sorted(validator.iter_errors(value), key=lambda item: list(item.absolute_path))
+    if errors:
+        first = errors[0]
+        location = "/" + "/".join(str(item) for item in first.absolute_path)
+        if location == "/":
+            location = "根值"
+        raise ValueError(f"回答不符合 answer_schema（{location}）：{first.message}")
+
+
+def validate_gate_questions(questions: list[Any]) -> None:
+    """Reject Gate definitions that cannot be rendered or answered safely."""
+
+    seen_ids: set[str] = set()
+    seen_aliases: set[str] = set()
+    for index, raw_question in enumerate(questions):
+        if isinstance(raw_question, str):
+            if not raw_question.strip():
+                raise ValueError(f"Gate 第 {index + 1} 个问题不能为空")
+            continue
+        if not isinstance(raw_question, dict):
+            raise ValueError(f"Gate 第 {index + 1} 个问题必须是字符串或对象")
+
+        question_id = str(
+            raw_question.get("question_id")
+            or raw_question.get("id")
+            or f"question-{index}"
+        ).strip()
+        if not question_id:
+            raise ValueError(f"Gate 第 {index + 1} 个问题缺少 question_id")
+        if question_id in seen_ids:
+            raise ValueError(f"Gate 问题 question_id 重复：{question_id}")
+        seen_ids.add(question_id)
+
+        field_path = str(raw_question.get("field_path") or "").strip()
+        for alias in dict.fromkeys([question_id] + ([field_path] if field_path else [])):
+            if alias in seen_aliases:
+                raise ValueError(f"Gate 问题回答标识重复：{alias}")
+            seen_aliases.add(alias)
+
+        raw_schema = raw_question.get("answer_schema")
+        if raw_schema is not None and not isinstance(raw_schema, dict):
+            raise ValueError(f"Gate 问题 answer_schema 必须是对象：{question_id}")
+        schema = raw_schema if isinstance(raw_schema, dict) else {}
+        answer_type = str(
+            schema.get("type") or raw_question.get("answer_type") or "STRING"
+        ).upper()
+        if answer_type not in _SUPPORTED_ANSWER_TYPES:
+            raise ValueError(f"不支持的 Gate 回答类型：{answer_type}")
+        if answer_type in {"SELECT", "ENUM"}:
+            allowed = _enum_allowed_values(raw_question, schema)
+            for item in allowed:
+                if (
+                    not isinstance(item, (str, int, float, bool))
+                    or item is None
+                    or (isinstance(item, float) and not math.isfinite(item))
+                ):
+                    raise ValueError(
+                        f"Gate ENUM allowed_values 只能包含字符串、有限数值或布尔值：{item!r}"
+                    )
+            for position, item in enumerate(allowed):
+                for previous in allowed[:position]:
+                    same_typed_value = type(item) is type(previous) and item == previous
+                    same_json_number = (
+                        isinstance(item, (int, float))
+                        and not isinstance(item, bool)
+                        and isinstance(previous, (int, float))
+                        and not isinstance(previous, bool)
+                        and item == previous
+                    )
+                    if same_typed_value or same_json_number:
+                        raise ValueError(f"Gate ENUM allowed_values 存在重复值：{item!r}")
+        elif answer_type == "OBJECT":
+            if not isinstance(schema.get("properties"), dict):
+                raise ValueError("OBJECT 回答必须定义 properties schema")
+            try:
+                Draft202012Validator.check_schema(_answer_json_schema(schema))
+            except SchemaError as exc:
+                raise ValueError(f"Gate answer_schema 无效：{exc.message}") from exc
+        elif answer_type == "ARRAY":
+            if not isinstance(schema.get("items"), dict):
+                raise ValueError("ARRAY 回答必须定义 items schema")
+            try:
+                Draft202012Validator.check_schema(_answer_json_schema(schema))
+            except SchemaError as exc:
+                raise ValueError(f"Gate answer_schema 无效：{exc.message}") from exc
+
+        if "default" in raw_question and not _is_blank_answer(raw_question.get("default")):
+            _coerce_answer(raw_question["default"], raw_question)
+        raw_targets = raw_question.get("target_paths")
+        if raw_targets is not None and not isinstance(raw_targets, list):
+            raise ValueError(f"Gate 问题 target_paths 必须是数组：{question_id}")
+        targets = raw_targets or ([field_path] if field_path else [])
+        for target in targets:
+            canonical_target_pointer(target)
+
+
 def _coerce_answer(value: Any, question: dict[str, Any]) -> Any:
     schema = question.get("answer_schema") if isinstance(question.get("answer_schema"), dict) else {}
     answer_type = str(schema.get("type") or question.get("answer_type") or "STRING").upper()
+    if answer_type not in _SUPPORTED_ANSWER_TYPES:
+        raise ValueError(f"不支持的 Gate 回答类型：{answer_type}")
     if answer_type in {"STRING", "LONG_TEXT"}:
-        return "" if value is None else str(value).strip()
+        if not isinstance(value, str):
+            raise ValueError(f"回答类型必须为 {answer_type}")
+        return value.strip()
     if answer_type in {"SELECT", "ENUM"}:
-        normalized = "" if value is None else str(value).strip()
-        allowed = schema.get("allowed_values")
-        if not isinstance(allowed, list):
-            allowed = (
-                question.get("options")
-                if isinstance(question.get("options"), list)
-                else None
-            )
-        if not isinstance(allowed, list) or not allowed:
-            raise ValueError("ENUM 回答必须提供非空 allowed_values")
-        exact_matches = [
-            item
-            for item in allowed
-            if type(item) is type(value) and item == value
-        ]
-        if exact_matches:
-            return copy.deepcopy(exact_matches[0])
-        textual_matches = [item for item in allowed if str(item) == normalized]
-        if len(textual_matches) != 1:
-            raise ValueError(f"回答不在允许范围内或存在歧义：{value!r}")
-        return copy.deepcopy(textual_matches[0])
+        return _coerce_enum_answer(value, _enum_allowed_values(question, schema))
     if answer_type == "BOOLEAN":
-        if isinstance(value, bool):
-            return value
-        normalized = str(value or "").strip().lower()
-        if normalized in {"true", "1", "yes", "y", "是", "确认"}:
-            return True
-        if normalized in {"false", "0", "no", "n", "否", "不确认"}:
-            return False
-        raise ValueError(f"无法将回答转换为布尔值：{value!r}")
+        return _parse_boolean(value)
     if answer_type == "NUMBER":
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return value
-        text = str(value or "").strip()
-        try:
-            return float(text) if "." in text else int(text)
-        except ValueError as exc:
-            raise ValueError(f"无法将回答转换为数值：{value!r}") from exc
+        return _parse_number(value)
     if answer_type in {"OBJECT", "ARRAY"}:
         if answer_type == "OBJECT" and not isinstance(schema.get("properties"), dict):
             raise ValueError("OBJECT 回答必须定义 properties schema")
@@ -282,8 +515,9 @@ def _coerce_answer(value: Any, question: dict[str, Any]) -> Any:
         expected = dict if answer_type == "OBJECT" else list
         if not isinstance(parsed, expected):
             raise ValueError(f"回答类型必须为 {answer_type}")
+        _validate_composite_answer(parsed, schema)
         return parsed
-    return copy.deepcopy(value)
+    raise ValueError(f"不支持的 Gate 回答类型：{answer_type}")
 
 
 def build_human_resolutions(
@@ -335,9 +569,9 @@ def build_human_resolutions(
             )
         value = values.get(question_id, values.get(field_path))
         required = bool(question.get("required") or question.get("blocking"))
-        if value is None and required:
+        if _is_blank_answer(value) and required:
             raise ValueError(f"必须回答：{question.get('prompt') or question.get('question') or question_id}")
-        if value is None:
+        if _is_blank_answer(value):
             continue
         coerced = _coerce_answer(value, question)
         if required and isinstance(coerced, str) and not coerced.strip():

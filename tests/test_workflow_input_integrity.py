@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,8 @@ from app.workflow_input import (
     APPLICATION_GUIDE_INPUT,
     REFERENCE_TEMPLATE_INPUT,
     WorkflowInputRequired,
+    build_human_resolutions,
+    validate_gate_questions,
 )
 from app.workflow_status import should_pause_automatic_advancement
 
@@ -836,8 +840,6 @@ def test_human_gate_rejects_duplicate_question_identity() -> None:
 
 
 def test_enum_human_answer_preserves_boolean_and_numeric_allowed_values() -> None:
-    from app.workflow_input import build_human_resolutions
-
     for answer, allowed in ((False, [True, False]), (0, [0, 1])):
         resolutions = build_human_resolutions(
             gate_id=f"gate-{answer!r}",
@@ -860,6 +862,209 @@ def test_enum_human_answer_preserves_boolean_and_numeric_allowed_values() -> Non
         )
         assert resolutions[0]["answer"] is answer or resolutions[0]["answer"] == answer
         assert type(resolutions[0]["answer"]) is type(answer)
+
+
+@pytest.mark.parametrize(
+    ("submitted", "allowed", "expected", "expected_type"),
+    [
+        ("true", [True, False], True, bool),
+        ("false", [True, False], False, bool),
+        ("1", [0, 1], 1, int),
+        ("2.5", [1.0, 2.5], 2.5, float),
+    ],
+)
+def test_enum_human_answer_recovers_browser_string_types(
+    submitted: str,
+    allowed: list[Any],
+    expected: Any,
+    expected_type: type,
+) -> None:
+    resolutions = build_human_resolutions(
+        gate_id="gate-browser-enum",
+        prompt_id="P-TEST",
+        questions=[
+            {
+                "question_id": "choice",
+                "question": "请选择",
+                "answer_schema": {"type": "ENUM", "allowed_values": allowed},
+                "blocking": True,
+            }
+        ],
+        answers=[{"question_id": "choice", "value": submitted}],
+        decided_by="pytest",
+        decided_role="PROJECT_OWNER",
+    )
+
+    assert resolutions[0]["answer"] == expected
+    assert type(resolutions[0]["answer"]) is expected_type
+
+
+def test_enum_browser_string_is_rejected_when_scalar_recovery_is_ambiguous() -> None:
+    with pytest.raises(ValueError, match="歧义"):
+        build_human_resolutions(
+            gate_id="gate-ambiguous-enum",
+            prompt_id="P-TEST",
+            questions=[
+                {
+                    "question_id": "choice",
+                    "question": "请选择",
+                    "answer_schema": {
+                        "type": "ENUM",
+                        "allowed_values": [True, 1],
+                    },
+                    "blocking": True,
+                }
+            ],
+            answers=[{"question_id": "choice", "value": "1"}],
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )
+
+
+def test_gate_number_accepts_scientific_notation_and_rejects_boolean() -> None:
+    question = {
+        "question_id": "number",
+        "question": "请输入数值",
+        "answer_schema": {"type": "NUMBER"},
+        "blocking": True,
+    }
+    result = build_human_resolutions(
+        gate_id="gate-number",
+        prompt_id="P-TEST",
+        questions=[question],
+        answers=[{"question_id": "number", "value": "1e3"}],
+        decided_by="pytest",
+        decided_role="PROJECT_OWNER",
+    )
+    assert result[0]["answer"] == 1000.0
+
+    with pytest.raises(ValueError, match="数值"):
+        build_human_resolutions(
+            gate_id="gate-number",
+            prompt_id="P-TEST",
+            questions=[question],
+            answers=[{"question_id": "number", "value": True}],
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )
+
+
+def test_gate_optional_blank_answer_is_omitted_but_required_blank_is_rejected() -> None:
+    optional = {
+        "question_id": "optional",
+        "question": "可选补充",
+        "answer_schema": {"type": "STRING"},
+        "blocking": False,
+    }
+    assert build_human_resolutions(
+        gate_id="gate-optional",
+        prompt_id="P-TEST",
+        questions=[optional],
+        answers=[{"question_id": "optional", "value": "   "}],
+        decided_by="pytest",
+        decided_role="PROJECT_OWNER",
+    ) == []
+
+    required = {**optional, "blocking": True}
+    with pytest.raises(ValueError, match="必须回答"):
+        build_human_resolutions(
+            gate_id="gate-required",
+            prompt_id="P-TEST",
+            questions=[required],
+            answers=[{"question_id": "optional", "value": ""}],
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )
+
+
+def test_composite_gate_answer_is_validated_against_nested_schema() -> None:
+    question = {
+        "question_id": "object",
+        "question": "请输入对象",
+        "answer_schema": {
+            "type": "OBJECT",
+            "properties": {"count": {"type": "INTEGER", "minimum": 1}},
+            "required": ["count"],
+            "additionalProperties": False,
+        },
+        "blocking": True,
+    }
+    valid = build_human_resolutions(
+        gate_id="gate-object",
+        prompt_id="P-TEST",
+        questions=[question],
+        answers=[{"question_id": "object", "value": '{"count": 2}'}],
+        decided_by="pytest",
+        decided_role="PROJECT_OWNER",
+    )
+    assert valid[0]["answer"] == {"count": 2}
+
+    with pytest.raises(ValueError, match="answer_schema"):
+        build_human_resolutions(
+            gate_id="gate-object",
+            prompt_id="P-TEST",
+            questions=[question],
+            answers=[{"question_id": "object", "value": '{"count": 0}'}],
+            decided_by="pytest",
+            decided_role="PROJECT_OWNER",
+        )
+
+
+@pytest.mark.parametrize(
+    "questions",
+    [
+        [{"question_id": "bad", "answer_schema": {"type": "UNKNOWN"}}],
+        [
+            {
+                "question_id": "bad",
+                "answer_schema": {"type": "ENUM", "allowed_values": [1, 1.0]},
+            }
+        ],
+        [{"question_id": "bad", "answer_schema": {"type": "OBJECT"}}],
+    ],
+)
+def test_invalid_gate_question_contract_is_rejected_before_persistence(
+    questions: list[dict[str, Any]],
+) -> None:
+    with pytest.raises(ValueError):
+        validate_gate_questions(questions)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
+def test_frontend_gate_decoder_preserves_json_scalar_types() -> None:
+    app_js = Path(__file__).resolve().parents[1] / "app" / "static" / "app.js"
+    script = r"""
+const fs=require('fs');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const start=source.indexOf('function decodeGateAnswer');
+const end=source.indexOf('function collectGateAnswers',start);
+if(start<0||end<0)throw new Error('decodeGateAnswer not found');
+eval(source.slice(start,end));
+const decode=(value,type,required=true)=>decodeGateAnswer({value,dataset:{answerType:type,required:String(required),questionId:'q'}});
+const result={
+  enumTrue:decode('true','ENUM'),
+  enumNumber:decode('2.5','ENUM'),
+  booleanFalse:decode('false','BOOLEAN'),
+  number:decode('1e3','NUMBER'),
+  object:decode('{"count":2}','OBJECT'),
+  optionalBlank:decode('','STRING',false)
+};
+process.stdout.write(JSON.stringify(result));
+"""
+    completed = subprocess.run(
+        [shutil.which("node") or "node", "-e", script, str(app_js)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert result == {
+        "enumTrue": True,
+        "enumNumber": 2.5,
+        "booleanFalse": False,
+        "number": 1000,
+        "object": {"count": 2},
+    }
 
 
 def test_human_answer_cannot_use_both_question_id_and_field_path_aliases() -> None:

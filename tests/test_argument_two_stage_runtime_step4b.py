@@ -214,6 +214,45 @@ def test_step4b_provider_request_identity_includes_two_stage_contract(tmp_path, 
     assert contract["stages"]["DESIGN"]["desired_output_tokens"] == 65_536
     assert contract["stages"]["SKELETON"]["output_schema"]["properties"]["research_threads"]["maxItems"] == 4
 
+
+def test_step4b_stage_call_identity_changes_with_actual_stage_input(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("CAPABILITY_ACCEPTANCE_MODE", "false")
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    executor, gateway = _executor(tmp_path, [skeleton, skeleton])
+    route = _ArgumentRuntimeRouter().route("P-ARGUMENT-ARCHITECTURE", envelope)
+
+    first = _RuntimeArgumentStageGateway(
+        executor,
+        route=route,
+        outer_call_key="call-provider-input-cycle-a-attempt-1",
+    )
+    asyncio.run(first.invoke_stage(
+        ARGUMENT_SKELETON_STAGE,
+        {"skeleton_seed": {"revision": 1}},
+        argument_stage_output_schema(ARGUMENT_SKELETON_STAGE),
+        desired_output_tokens=8_192,
+    ))
+    first_key = gateway.calls[-1]["call_key"]
+
+    second = _RuntimeArgumentStageGateway(
+        executor,
+        route=route,
+        outer_call_key="call-provider-input-cycle-a-attempt-2",
+    )
+    asyncio.run(second.invoke_stage(
+        ARGUMENT_SKELETON_STAGE,
+        {"skeleton_seed": {"revision": 2}},
+        argument_stage_output_schema(ARGUMENT_SKELETON_STAGE),
+        desired_output_tokens=8_192,
+    ))
+    second_key = gateway.calls[-1]["call_key"]
+
+    assert first_key != second_key
+
+
 def test_step4b_stage_call_identity_reuses_success_but_refreshes_failed_stage(
     tmp_path, monkeypatch
 ):
@@ -690,4 +729,3 @@ def test_step4d_original_producer_regeneration_returns_to_two_stage_runtime(tmp_
     assert gateway.calls[2]["envelope"].get("frozen_skeleton") is None
     assert gateway.calls[3]["envelope"]["frozen_skeleton"] == skeleton2
     assert regenerated["output"]["result"]["authored_state"]["central_proposition"] == skeleton2["central_proposition"]
-

@@ -113,6 +113,31 @@ class _RuntimeArgumentStageGateway:
                 "argument_two_stage_internal_stage": stage,
             },
         )
+        shared_prompt = self.executor.pack.shared_prompt_for(
+            "P-ARGUMENT-ARCHITECTURE"
+        )
+        stage_system_prompt = (
+            str(shared_prompt).strip()
+            + "\n\n"
+            + argument_stage_prompt_text(stage).strip()
+            + "\n"
+        )
+        stage_input_sha256 = sha256_json(stage_envelope)
+        output_schema_sha256 = sha256_json(output_schema)
+        stage_request_identity = {
+            "contract_version": ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
+            "stage": stage,
+            "attempt": attempt,
+            "stage_input_sha256": stage_input_sha256,
+            "output_schema_sha256": output_schema_sha256,
+            "system_prompt_sha256": sha256_json(stage_system_prompt),
+            "desired_output_tokens": int(desired_output_tokens),
+            "environment": stage_route.environment,
+            "model_id": stage_route.model_id,
+            "endpoint_id": stage_route.endpoint_id,
+            "provider_model_name": stage_route.provider_model_name,
+            "direct_tool_arguments": True,
+        }
         # Workflow-level provider retries receive a new outer attempt key.  A
         # stage that already succeeded must nevertheless keep its exact frozen
         # candidate, while a stage whose provider call failed must be allowed a
@@ -130,9 +155,7 @@ class _RuntimeArgumentStageGateway:
             return "call-" + sha256_json(
                 {
                     "outer_call_key": outer_key,
-                    "contract_version": ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
-                    "stage": stage,
-                    "attempt": attempt,
+                    "stage_request_identity": stage_request_identity,
                     "retry_after_failed_stable_call": True,
                 }
             )[:32]
@@ -140,9 +163,7 @@ class _RuntimeArgumentStageGateway:
         stable_stage_call_key = "call-" + sha256_json(
             {
                 "outer_generation_key": generation_key,
-                "contract_version": ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
-                "stage": stage,
-                "attempt": attempt,
+                "stage_request_identity": stage_request_identity,
             }
         )[:32]
         stage_call_key = stable_stage_call_key
@@ -169,23 +190,13 @@ class _RuntimeArgumentStageGateway:
                 and has_failed_response(stable_stage_call_key)
             ):
                 stage_call_key = retry_stage_key(self.outer_call_key)
-        shared_prompt = self.executor.pack.shared_prompt_for(
-            "P-ARGUMENT-ARCHITECTURE"
-        )
-        stage_system_prompt = (
-            str(shared_prompt).strip()
-            + "\n\n"
-            + argument_stage_prompt_text(stage).strip()
-            + "\n"
-        )
-
         call_record: dict[str, Any] = {
             "stage": stage,
             "attempt": attempt,
             "call_key": stage_call_key,
             "desired_output_tokens": int(desired_output_tokens),
-            "stage_input_sha256": sha256_json(stage_envelope),
-            "output_schema_sha256": sha256_json(output_schema),
+            "stage_input_sha256": stage_input_sha256,
+            "output_schema_sha256": output_schema_sha256,
             "outcome": "PENDING",
             "provider_attempts": None,
         }

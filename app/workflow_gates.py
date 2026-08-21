@@ -18,6 +18,7 @@ from .workflow_input import (
     build_human_resolutions,
     human_resolution_scope_key,
     section_id_for_run,
+    validate_gate_questions,
 )
 
 
@@ -307,6 +308,7 @@ class WorkflowGateMixin:
         )
         gate_id = new_id("gate")
         questions = copy.deepcopy(list(questions))
+        validate_gate_questions(questions)
         allowed = list(
             GATE_ACTIONS.get(
                 gate_type,

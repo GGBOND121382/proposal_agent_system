@@ -807,6 +807,34 @@ def _argument_skeleton_schema_validator() -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
+def _stable_jsonschema_error_message(error: Any) -> str:
+    """Render JSON-Schema errors independently of mapping insertion order.
+
+    ``jsonschema`` embeds ``repr(error.instance)`` in some messages.  Provider
+    objects preserve wire key order, while audited JSON is persisted with
+    sorted keys.  The two objects are semantically identical but their reprs
+    differ, which used to change retry request identities after evidence
+    replay.  Replace only that embedded representation with canonical JSON.
+    """
+    message = str(error.message)
+    instance = getattr(error, "instance", None)
+    if not isinstance(instance, (dict, list)):
+        return message
+    unstable = repr(instance)
+    if unstable not in message:
+        return message
+    try:
+        stable = json.dumps(
+            instance,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError):
+        return message
+    return message.replace(unstable, stable)
+
+
 def argument_skeleton_model_output_errors(value: Any) -> list[str]:
     """Validate only the flat Stage-A wire shape; no Runtime registration yet."""
     errors = sorted(
@@ -816,7 +844,8 @@ def argument_skeleton_model_output_errors(value: Any) -> list[str]:
     rendered: list[str] = []
     for error in errors:
         suffix = "/".join(str(token) for token in error.absolute_path)
-        rendered.append(f"/{suffix}: {error.message}" if suffix else f"/: {error.message}")
+        message = _stable_jsonschema_error_message(error)
+        rendered.append(f"/{suffix}: {message}" if suffix else f"/: {message}")
     return rendered
 
 
@@ -920,7 +949,8 @@ def argument_design_model_output_errors(value: Any) -> list[str]:
     rendered: list[str] = []
     for error in errors:
         suffix = "/".join(str(token) for token in error.absolute_path)
-        rendered.append(f"/{suffix}: {error.message}" if suffix else f"/: {error.message}")
+        message = _stable_jsonschema_error_message(error)
+        rendered.append(f"/{suffix}: {message}" if suffix else f"/: {message}")
     return rendered
 
 
@@ -3222,9 +3252,22 @@ def _question_target_path(target_area: str) -> str:
 
 def _answer_schema(question: dict[str, Any]) -> dict[str, Any]:
     qt=str(question.get("question_type") or ""); av=list(question.get("allowed_values") or [])
+    # A yes/no choice is semantically Boolean even when a provider labels it
+    # CHOICE.  Projecting it as ENUM made the browser submit "true"/"false"
+    # strings while the runtime expected JSON booleans, and also rendered the
+    # same kind of Gate inconsistently.
+    if qt=="CHOICE" and len(av)==2 and all(isinstance(item,bool) for item in av) and set(av)=={True,False}:
+        return {"type":"BOOLEAN","allowed_values":[]}
     if qt=="CHOICE": return {"type":"ENUM","allowed_values":av}
     if qt=="CONFIRMATION": return {"type":"BOOLEAN","allowed_values":[]}
-    return {"type":str(question.get("answer_shape") or "STRING"),"allowed_values":av}
+    answer_type=str(question.get("answer_shape") or "STRING")
+    # Stage question contracts do not carry OBJECT.properties or ARRAY.items.
+    # Projecting either type directly would create a Gate that cannot satisfy
+    # the canonical user-question contract.  Preserve the authored question and
+    # accept its human answer as text instead of inventing a child schema.
+    if answer_type in {"OBJECT", "ARRAY"}:
+        return {"type":"STRING"}
+    return {"type":answer_type,"allowed_values":av}
 
 
 
