@@ -15,6 +15,7 @@ from .model_semantic_contracts import (
     supports_semantic_model_contract,
 )
 from .json_pointer import is_ancestor_or_same, join_pointer, paths_overlap
+from .gate_answer_contract import widen_gate_questions
 from .contract_registry import (
     normalize_registered_enum_aliases_against_schema,
     repair_field_ownership_against_schema,
@@ -1340,6 +1341,9 @@ class PromptExecutor:
                     validation_errors=reference_errors,
                 )
         if envelope:
+            questions = normalized.get("user_questions")
+            if isinstance(questions, list):
+                normalized["user_questions"] = widen_gate_questions(questions)
             normalized = self._normalize_human_gate_status(normalized)
             human_gate_errors = self._human_gate_contract_errors(normalized)
             if human_gate_errors:

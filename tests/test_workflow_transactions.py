@@ -515,6 +515,45 @@ def test_gate_creation_is_exactly_idempotent_and_replaces_other_open_target(
     ) == {"id": replacement, "target_id": "run-2"}
 
 
+def test_gate_creation_widens_underpowered_boolean_and_enum_controls(
+    tmp_path: Path,
+) -> None:
+    db = _db(tmp_path)
+    engine = _GateEngine(db)
+    gate_id = engine._create_gate(
+        engine.get("workflow-1"),
+        "PROJECT_GAP_RESOLUTION",
+        target_id="run-composite-answers",
+        questions=[
+            {
+                "question_id": "question-open-ended",
+                "question": "模块名称与状态是什么？请给出规模区间。",
+                "target_paths": ["payload.confirmed_facts"],
+                "answer_schema": {"type": "BOOLEAN", "allowed_values": []},
+                "blocking": True,
+            },
+            {
+                "question_id": "question-multi-value",
+                "question": "哪些指标采用离线回放，哪些保留人员实验？",
+                "target_paths": ["payload.project_subgraph"],
+                "answer_schema": {
+                    "type": "ENUM",
+                    "allowed_values": ["速度", "覆盖度", "人员"],
+                },
+                "blocking": True,
+            },
+        ],
+    )
+
+    row = db.fetchone("SELECT questions_json FROM gates WHERE id=?", (gate_id,))
+    questions = json.loads(row["questions_json"])
+
+    assert [question["answer_schema"] for question in questions] == [
+        {"type": "STRING"},
+        {"type": "STRING"},
+    ]
+
+
 def test_gate_decision_rejects_stale_server_context_without_client_hash(
     tmp_path: Path,
 ) -> None:

@@ -1221,7 +1221,9 @@ def test_argument_block_with_questions_preserves_model_status(runtime):
     )
 
     assert normalized["status"] == "BLOCK"
-    assert normalized["user_questions"] == output["user_questions"]
+    expected_question = copy.deepcopy(output["user_questions"][0])
+    expected_question["answer_schema"] = {"type": "STRING"}
+    assert normalized["user_questions"] == [expected_question]
 
 def test_project_definition_normalizer_only_applies_registered_enum_aliases(runtime):
     _, pack, _, _, _, executor, *_ = runtime
@@ -3080,7 +3082,9 @@ def test_runtime_exact_recovery_run_is_not_hidden_by_fifty_newer_failures(
         "action"
     ] == "REPHRASED"
 
-def test_semantic_producer_non_user_deficiency_regenerates_without_gate(runtime):
+def test_semantic_producer_blocking_deficiency_regenerates_without_gate(
+    runtime, monkeypatch
+):
     settings, pack, db, _, _, _, engine, _ = runtime
     project_id = create_project(db, internet=False)
     add_standard_materials(settings, db, project_id)
@@ -3113,6 +3117,12 @@ def test_semantic_producer_non_user_deficiency_regenerates_without_gate(runtime)
     )
     workflow = engine.get(workflow["id"])
     state = workflow["state"]
+    state.setdefault("step_results", {})[str(argument_step)] = {
+        "prompt_id": "P-ARGUMENT-ARCHITECTURE",
+        "run_id": "run-exact-stage0-baseline",
+        "status": "REVISE",
+    }
+    engine._update(workflow, state=state)
 
     revise_output = {
         "result": {
@@ -3130,11 +3140,24 @@ def test_semantic_producer_non_user_deficiency_regenerates_without_gate(runtime)
                     "required_node_type": "TEAM_EVIDENCE",
                     "thread_index": 0,
                     "reason": "研究线程缺少合格研究基础。",
-                    "blocking": False,
+                    "blocking": True,
                     "suggested_source_or_question": (
                         "利用当前材料补充可核验研究基础；没有则保持未知。"
                     ),
-                }
+                },
+                {
+                    "gap_id": "arg-advisory-gap-001",
+                    "defect_key": "MODEL:ADVISORY:0",
+                    "defect_family": "MODEL_DECLARED_GAP",
+                    "finding_code": "RESEARCH_DESIGN_INCOMPLETE",
+                    "semantic_component": "RESEARCH_DESIGN",
+                    "suggested_route": "ORIGINAL_PRODUCER",
+                    "required_node_type": "EVIDENCE",
+                    "thread_index": 0,
+                    "reason": "Optional supporting material may be added later.",
+                    "blocking": False,
+                    "suggested_source_or_question": "Optional follow-up.",
+                },
             ]
         },
         "user_questions": [
@@ -3145,6 +3168,26 @@ def test_semantic_producer_non_user_deficiency_regenerates_without_gate(runtime)
             }
         ],
     }
+
+    state_before_failed_preflight = copy.deepcopy(state)
+    original_build = engine.context_builder.build
+
+    def fail_next_input_preflight(*_args, **_kwargs):
+        raise ValueError("synthetic next-round input failure")
+
+    monkeypatch.setattr(
+        engine.context_builder, "build", fail_next_input_preflight
+    )
+    with pytest.raises(ValueError, match="synthetic next-round input failure"):
+        engine._prepare_semantic_producer_regeneration(
+            workflow,
+            state,
+            producer_prompt="P-ARGUMENT-ARCHITECTURE",
+            output=revise_output,
+        )
+    assert state == state_before_failed_preflight
+    assert engine.get(workflow["id"])["state"] == state_before_failed_preflight
+    monkeypatch.setattr(engine.context_builder, "build", original_build)
 
     first = engine._prepare_semantic_producer_regeneration(
         workflow,
@@ -3167,6 +3210,16 @@ def test_semantic_producer_non_user_deficiency_regenerates_without_gate(runtime)
     assert feedback[0]["semantic_component"] == "FOUNDATION"
     assert feedback[0]["semantic_thread"] == 0
     assert feedback[0]["repair_instruction"]
+    assert pack.validate_common("finding.schema.json", feedback[0]) == []
+    next_envelope = engine.context_builder.build(
+        "P-ARGUMENT-ARCHITECTURE",
+        project_id,
+        workflow_id=workflow["id"],
+        workflow_state=scheduled["state"],
+    )
+    assert pack.validate(
+        "P-ARGUMENT-ARCHITECTURE", "input", next_envelope
+    ) == []
 
     second = engine._prepare_semantic_producer_regeneration(
         scheduled,

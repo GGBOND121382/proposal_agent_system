@@ -11,6 +11,7 @@ from typing import Any, Iterable
 from jsonschema import Draft202012Validator
 
 from .contracts.semantic_contract import get_semantic_contract
+from .gate_answer_contract import semantic_question_answer_schema
 from .json_pointer import (
     JsonPointerError,
     format_pointer,
@@ -682,16 +683,37 @@ def _revision_issues(canonical_envelope: dict[str, Any]) -> list[dict[str, Any]]
 
 def _human_resolutions(canonical_envelope: dict[str, Any]) -> list[dict[str, Any]]:
     payload = canonical_envelope.get("payload") or {}
-    result=[]
+    result = []
     for resolution in payload.get("human_resolutions") or []:
-        if not isinstance(resolution, dict): continue
-        targets = resolution.get("target_paths") or resolution.get("resolved_target_paths") or []
-        if isinstance(targets, str): targets=[targets]
-        answer = resolution.get("answer") if "answer" in resolution else resolution.get("resolved_value") if "resolved_value" in resolution else resolution.get("value")
-        if targets:
-            result.extend({"target": str(t), "answer": copy.deepcopy(answer)} for t in targets)
-        elif resolution.get("question_id"):
-            result.append({"target": f"question:{resolution.get('question_id')}", "answer": copy.deepcopy(answer)})
+        if not isinstance(resolution, dict):
+            continue
+        raw_targets = (
+            resolution.get("target_paths")
+            or resolution.get("resolved_target_paths")
+            or []
+        )
+        targets = [raw_targets] if isinstance(raw_targets, str) else raw_targets
+        if "answer" in resolution:
+            answer = resolution.get("answer")
+        elif "resolved_value" in resolution:
+            answer = resolution.get("resolved_value")
+        else:
+            answer = resolution.get("value")
+        question_id = str(resolution.get("question_id") or "").strip()
+        question = str(resolution.get("question") or "").strip()
+        if not targets and not question_id:
+            continue
+        item = {
+            "target": str(targets[0]) if targets else f"question:{question_id}",
+            "answer": copy.deepcopy(answer),
+        }
+        if question_id:
+            item["question_id"] = question_id
+        if question:
+            item["question"] = question
+        if len(targets) > 1:
+            item["target_paths"] = [str(target) for target in targets]
+        result.append(item)
     return result
 
 
@@ -1309,6 +1331,254 @@ def assemble_argument_authored_state(
         ),
         "cannot_proceed_reason": copy.deepcopy(design_reason or skeleton_reason),
     }
+
+
+def split_argument_authored_state(
+    authored_state: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Invert deterministic Stage-A/B assembly for regeneration baselines.
+
+    This is an internal representation adapter, not a schema migration.  It
+    lets a later Design-only repair reuse the exact accepted Skeleton and a
+    compact thread-local slice of the previous Design instead of asking the
+    model to recreate the whole Stage-0 object.
+    """
+
+    if not isinstance(authored_state, dict):
+        raise ValueError("Argument authored_state baseline must be an object")
+
+    skeleton_questions: list[dict[str, Any]] = []
+    design_questions: list[dict[str, Any]] = []
+    for question in authored_state.get("user_questions") or []:
+        if not isinstance(question, dict):
+            continue
+        target = str(question.get("target_area") or "")
+        destination = (
+            skeleton_questions if target == "PROJECT_SCOPE" else design_questions
+        )
+        destination.append(copy.deepcopy(question))
+
+    cannot_reason = copy.deepcopy(authored_state.get("cannot_proceed_reason"))
+    skeleton: dict[str, Any] = {
+        "central_proposition": copy.deepcopy(authored_state.get("central_proposition")),
+        "scope": copy.deepcopy(authored_state.get("scope")),
+        "research_threads": [],
+        "evidence_gaps": [],
+        "user_questions": skeleton_questions,
+        "cannot_proceed_reason": cannot_reason if skeleton_questions else None,
+    }
+    design: dict[str, Any] = {
+        "work_packages": [],
+        "methods": [],
+        "theoretical_properties": [],
+        "evaluations": [],
+        "baselines": [],
+        "ablations": [],
+        "innovations": [],
+        "innovation_prior_work": [],
+        "innovation_evaluation_refs": [],
+        "foundation": [],
+        "foundation_supports": [],
+        "evidence_gaps": copy.deepcopy(authored_state.get("evidence_gaps") or []),
+        "user_questions": design_questions,
+        "cannot_proceed_reason": None if skeleton_questions else cannot_reason,
+    }
+
+    for thread_index, thread in enumerate(authored_state.get("research_threads") or []):
+        if not isinstance(thread, dict):
+            raise ValueError(f"Argument authored_state thread {thread_index} is invalid")
+        gap = thread.get("gap") or {}
+        limitation = gap.get("limitation_mechanism") or {}
+        question = thread.get("question") or {}
+        objective = thread.get("objective") or {}
+        skeleton["research_threads"].append(
+            {
+                "gap_statement": copy.deepcopy(gap.get("statement")),
+                "gap_evidence_ids": copy.deepcopy(gap.get("evidence_ids") or []),
+                "limitation_mechanism_statement": copy.deepcopy(
+                    limitation.get("statement")
+                ),
+                "limitation_mechanism_evidence_ids": copy.deepcopy(
+                    limitation.get("evidence_ids") or []
+                ),
+                "question_statement": copy.deepcopy(question.get("statement")),
+                "question_type": copy.deepcopy(question.get("question_type")),
+                "answerability": copy.deepcopy(question.get("answerability")),
+                "success_evidence": copy.deepcopy(
+                    question.get("success_evidence") or []
+                ),
+                "objective_statement": copy.deepcopy(objective.get("statement")),
+                "objective_evidence_ids": copy.deepcopy(
+                    objective.get("evidence_ids") or []
+                ),
+                "assumptions": copy.deepcopy(thread.get("thread_assumptions") or []),
+                "falsification_or_comparison_rule": copy.deepcopy(
+                    thread.get("falsification_or_comparison_rule")
+                ),
+            }
+        )
+
+        for work_package_index, work_package in enumerate(
+            thread.get("work_packages") or []
+        ):
+            design["work_packages"].append(
+                {
+                    "thread_index": thread_index,
+                    "work_package_index": work_package_index,
+                    "statement": copy.deepcopy(work_package.get("statement")),
+                    "evidence_ids": copy.deepcopy(
+                        work_package.get("evidence_ids") or []
+                    ),
+                }
+            )
+            for method_index, method in enumerate(work_package.get("methods") or []):
+                design["methods"].append(
+                    {
+                        "thread_index": thread_index,
+                        "work_package_index": work_package_index,
+                        "method_index": method_index,
+                        "statement": copy.deepcopy(method.get("statement")),
+                        "evidence_ids": copy.deepcopy(method.get("evidence_ids") or []),
+                        "method_type": copy.deepcopy(method.get("method_type")),
+                        "assumptions": copy.deepcopy(method.get("assumptions") or []),
+                    }
+                )
+                for property_index, prop in enumerate(
+                    method.get("theoretical_properties") or []
+                ):
+                    design["theoretical_properties"].append(
+                        {
+                            "thread_index": thread_index,
+                            "work_package_index": work_package_index,
+                            "method_index": method_index,
+                            "property_index": property_index,
+                            "statement": copy.deepcopy(prop.get("statement")),
+                            "evidence_ids": copy.deepcopy(prop.get("evidence_ids") or []),
+                        }
+                    )
+                for evaluation_index, evaluation in enumerate(
+                    method.get("evaluations") or []
+                ):
+                    design["evaluations"].append(
+                        {
+                            "thread_index": thread_index,
+                            "work_package_index": work_package_index,
+                            "method_index": method_index,
+                            "evaluation_index": evaluation_index,
+                            "statement": copy.deepcopy(evaluation.get("statement")),
+                            "evidence_ids": copy.deepcopy(
+                                evaluation.get("evidence_ids") or []
+                            ),
+                            "success_criteria": copy.deepcopy(
+                                evaluation.get("success_criteria") or []
+                            ),
+                        }
+                    )
+                    for baseline_index, baseline in enumerate(
+                        evaluation.get("baselines") or []
+                    ):
+                        design["baselines"].append(
+                            {
+                                "thread_index": thread_index,
+                                "work_package_index": work_package_index,
+                                "method_index": method_index,
+                                "evaluation_index": evaluation_index,
+                                "baseline_index": baseline_index,
+                                "statement": copy.deepcopy(baseline.get("statement")),
+                                "evidence_ids": copy.deepcopy(
+                                    baseline.get("evidence_ids") or []
+                                ),
+                            }
+                        )
+                    for ablation_index, ablation in enumerate(
+                        evaluation.get("ablations") or []
+                    ):
+                        design["ablations"].append(
+                            {
+                                "thread_index": thread_index,
+                                "work_package_index": work_package_index,
+                                "method_index": method_index,
+                                "evaluation_index": evaluation_index,
+                                "ablation_index": ablation_index,
+                                "statement": copy.deepcopy(ablation),
+                            }
+                        )
+
+        for innovation_index, innovation in enumerate(thread.get("innovations") or []):
+            design["innovations"].append(
+                {
+                    "thread_index": thread_index,
+                    "innovation_index": innovation_index,
+                    "statement": copy.deepcopy(innovation.get("statement")),
+                    "evidence_ids": copy.deepcopy(innovation.get("evidence_ids") or []),
+                    "contribution": copy.deepcopy(innovation.get("contribution")),
+                }
+            )
+            for prior_work_index, prior_work in enumerate(
+                innovation.get("closest_prior_work") or []
+            ):
+                design["innovation_prior_work"].append(
+                    {
+                        "thread_index": thread_index,
+                        "innovation_index": innovation_index,
+                        "prior_work_index": prior_work_index,
+                        "statement": copy.deepcopy(prior_work.get("statement")),
+                        "evidence_ids": copy.deepcopy(
+                            prior_work.get("evidence_ids") or []
+                        ),
+                    }
+                )
+            for evaluation_ref in innovation.get("evaluation_refs") or []:
+                design["innovation_evaluation_refs"].append(
+                    {
+                        "thread_index": thread_index,
+                        "innovation_index": innovation_index,
+                        "work_package_index": int(
+                            evaluation_ref["work_package_index"]
+                        ),
+                        "method_index": int(evaluation_ref["method_index"]),
+                        "evaluation_index": int(
+                            evaluation_ref["evaluation_index"]
+                        ),
+                    }
+                )
+
+        for foundation_index, foundation in enumerate(thread.get("foundation") or []):
+            design["foundation"].append(
+                {
+                    "thread_index": thread_index,
+                    "foundation_index": foundation_index,
+                    "statement": copy.deepcopy(foundation.get("statement")),
+                    "evidence_ids": copy.deepcopy(foundation.get("evidence_ids") or []),
+                }
+            )
+            for support in foundation.get("supports") or []:
+                design["foundation_supports"].append(
+                    {
+                        "thread_index": thread_index,
+                        "foundation_index": foundation_index,
+                        "work_package_index": int(support["work_package_index"]),
+                        "method_index": (
+                            None
+                            if support.get("method_index") is None
+                            else int(support["method_index"])
+                        ),
+                    }
+                )
+
+    skeleton_errors = argument_skeleton_model_output_errors(skeleton)
+    design_errors = argument_design_model_output_errors(design)
+    reference_errors = argument_design_model_reference_errors(design, skeleton)
+    if skeleton_errors or design_errors or reference_errors:
+        raise ValueError(
+            "Argument authored_state baseline cannot be split: "
+            + "; ".join(
+                [*skeleton_errors, *design_errors, *reference_errors][:12]
+            )
+        )
+    if assemble_argument_authored_state(skeleton, design) != authored_state:
+        raise ValueError("Argument authored_state baseline split is not lossless")
+    return skeleton, design
 
 
 def _evidence_ids_for_source_refs(refs: Iterable[Any], records: dict[str, dict[str, Any]]) -> list[str]:
@@ -3208,7 +3478,11 @@ def _producer_gap_from_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
         "required_node_type": str(receipt.get("required_node_type") or "EVIDENCE"),
         "thread_index": receipt.get("thread_index") if isinstance(receipt.get("thread_index"), int) else None,
         "reason": str(receipt.get("description") or "存在确定性语义缺口。"),
-        "blocking": False,
+        # Deterministic receipt policy is the authority for whether a defect
+        # blocks the producer.  Dropping it here used to turn hard chain/matrix
+        # defects into advisory gaps and made the workflow regenerate the wrong
+        # items.
+        "blocking": bool(receipt.get("blocking", True)),
         "suggested_source_or_question": str(receipt.get("repair_instruction") or "由原 Argument Producer 基于现有事实重新生成该语义部件。"),
         "suggested_route": str(receipt.get("suggested_route") or "ORIGINAL_PRODUCER"),
     }
@@ -3250,24 +3524,9 @@ def _question_target_path(target_area: str) -> str:
     mapping = _question_target_paths()
     return mapping.get(str(target_area), mapping.get("OTHER", "/payload/confirmed_facts"))
 
+
 def _answer_schema(question: dict[str, Any]) -> dict[str, Any]:
-    qt=str(question.get("question_type") or ""); av=list(question.get("allowed_values") or [])
-    # A yes/no choice is semantically Boolean even when a provider labels it
-    # CHOICE.  Projecting it as ENUM made the browser submit "true"/"false"
-    # strings while the runtime expected JSON booleans, and also rendered the
-    # same kind of Gate inconsistently.
-    if qt=="CHOICE" and len(av)==2 and all(isinstance(item,bool) for item in av) and set(av)=={True,False}:
-        return {"type":"BOOLEAN","allowed_values":[]}
-    if qt=="CHOICE": return {"type":"ENUM","allowed_values":av}
-    if qt=="CONFIRMATION": return {"type":"BOOLEAN","allowed_values":[]}
-    answer_type=str(question.get("answer_shape") or "STRING")
-    # Stage question contracts do not carry OBJECT.properties or ARRAY.items.
-    # Projecting either type directly would create a Gate that cannot satisfy
-    # the canonical user-question contract.  Preserve the authored question and
-    # accept its human answer as text instead of inventing a child schema.
-    if answer_type in {"OBJECT", "ARRAY"}:
-        return {"type":"STRING"}
-    return {"type":answer_type,"allowed_values":av}
+    return semantic_question_answer_schema(question)
 
 
 
@@ -3707,6 +3966,7 @@ def _project_argument_architecture_semantic_state(
         seen_gap_keys.add(key)
         deduped_gaps.append(gap)
     gap_report = deduped_gaps
+    blocking_gaps = [gap for gap in gap_report if bool(gap.get("blocking"))]
     blocking_ids = [
         str(gap.get("semantic_object_id") or "")
         for gap in gap_report
@@ -3736,7 +3996,7 @@ def _project_argument_architecture_semantic_state(
         status = "NEED_USER_INPUT"
     elif cannot:
         status = "BLOCK"
-    elif gap_report:
+    elif blocking_gaps:
         status = "REVISE"
     else:
         status = "PASS"

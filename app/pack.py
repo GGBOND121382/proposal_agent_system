@@ -27,6 +27,7 @@ class PromptPack:
         self.shared_prompt = self._load_shared_prompt()
         self._schema_registry = self._build_schema_registry()
         self._structure_validator_cache: dict[tuple[str, str], Draft202012Validator] = {}
+        self._common_validator_cache: dict[str, Draft202012Validator] = {}
 
     def _load_shared_prompt(self) -> str:
         """Load the full legacy shared prompt for compatibility and auditing."""
@@ -176,6 +177,42 @@ class PromptPack:
         for err in errors:
             path = "/" + "/".join(str(x) for x in err.absolute_path)
             result.append(f"{path or '/'}: {err.message}")
+        return result
+
+    def common_validator(self, schema_name: str) -> Draft202012Validator:
+        """Return a validator for one named canonical common object schema."""
+
+        normalized = str(schema_name or "").strip()
+        if not normalized or Path(normalized).name != normalized:
+            raise ValueError(f"invalid common schema name: {schema_name!r}")
+        cached = self._common_validator_cache.get(normalized)
+        if cached is not None:
+            return cached
+        path = (self.root / "schemas" / "common" / normalized).resolve()
+        common_root = (self.root / "schemas" / "common").resolve()
+        if path.parent != common_root or not path.is_file():
+            raise KeyError(f"Unknown common schema: {normalized}")
+        schema = read_json(path)
+        schema["$id"] = path.as_uri()
+        validator = Draft202012Validator(
+            schema,
+            registry=self._schema_registry,
+            format_checker=Draft202012Validator.FORMAT_CHECKER,
+        )
+        self._common_validator_cache[normalized] = validator
+        return validator
+
+    def validate_common(self, schema_name: str, value: Any) -> list[str]:
+        errors = sorted(
+            self.common_validator(schema_name).iter_errors(value),
+            key=lambda error: list(error.absolute_path),
+        )
+        result: list[str] = []
+        for error in errors:
+            suffix = "/".join(str(token) for token in error.absolute_path)
+            result.append(
+                f"/{suffix}: {error.message}" if suffix else f"/: {error.message}"
+            )
         return result
 
     def inlined_model_schema(self, prompt_id: str, kind: str) -> dict[str, Any]:

@@ -1792,7 +1792,7 @@ class ContextBuilder:
             tuple(params),
         )
 
-        selected: list[tuple[int, dict[str, Any], str, frozenset[str]]] = []
+        selected: list[tuple[int, dict[str, Any], tuple[str, str]]] = []
         for row in rows:
             try:
                 payload = json.loads(row.get("content_json") or "{}")
@@ -1830,38 +1830,36 @@ class ContextBuilder:
                 resolution = canonicalize_human_resolution(resolution)
             except ValueError:
                 continue
-            targets = frozenset(
-                str(item).strip()
-                for item in resolution.get("target_paths") or []
-                if str(item).strip()
-            )
             question_id = str(
                 resolution.get("question_id")
                 or resolution.get("resolution_id")
                 or ""
             ).strip()
-            # A later answer supersedes an earlier one when either the logical
-            # question identity is reused or the resolved field overlaps.  This
-            # prevents a revised Gate from injecting both the old target and the
-            # retargeted answer for the same question.
+            question_text = " ".join(
+                str(resolution.get("question") or "").split()
+            )
+            question_identity = (question_id, question_text)
+            # Generated question ids are only positional within one Gate and may
+            # be reused for unrelated questions in a later round. Supersession
+            # therefore requires both the id and normalized question text.
+            # Distinct questions under the same broad payload object remain
+            # independently visible.
             selected = [
                 item
                 for item in selected
-                if item[2] != question_id
-                and not (targets and item[3] and targets.intersection(item[3]))
+                if item[2] != question_identity
             ]
             selected.append(
                 (
                     int(row.get("version") or 0),
                     copy.deepcopy(resolution),
-                    question_id,
-                    targets,
+                    question_identity,
                 )
             )
 
         return [
             resolution
-            for _, resolution, _, _ in sorted(
+            for _, resolution, _ in sorted(
                 selected,
                 key=lambda item: (item[0], str(item[1].get("resolution_id") or "")),
             )

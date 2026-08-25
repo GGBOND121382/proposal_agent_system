@@ -71,6 +71,70 @@ def technical_retry_key(
     return step_key
 
 
+def semantic_gap_revision_finding(
+    gap: dict[str, Any],
+    *,
+    producer_prompt: str,
+    round_number: int,
+    index: int,
+) -> dict[str, Any]:
+    """Project one semantic gap into a complete canonical Finding.
+
+    The model owns the gap description and requested action. Runtime owns the
+    canonical category, route, repair policy, identity and target locator.
+    """
+
+    thread_index = (
+        gap.get("thread_index")
+        if isinstance(gap.get("thread_index"), int)
+        and not isinstance(gap.get("thread_index"), bool)
+        else None
+    )
+    explicit_target = str(
+        gap.get("target_path_or_span") or gap.get("target_path") or ""
+    ).strip()
+    if explicit_target:
+        target_path = explicit_target
+    elif thread_index is not None:
+        target_path = f"/result/research_design_matrix/{thread_index}"
+    else:
+        target_path = "/result/argument_architecture"
+    reason = str(gap.get("reason") or "存在尚未闭合的语义或证据缺口")
+    action = str(
+        gap.get("suggested_source_or_question")
+        or "利用当前可用材料补全该缺口；若证据确实不存在则保持未知，不得虚构。"
+    )
+    return {
+        "finding_instance_id": (
+            f"runtime-semantic-gap-{producer_prompt}-{round_number}-{index}"
+        ),
+        "defect_key": str(gap.get("defect_key") or "") or None,
+        "code": str(
+            gap.get("finding_code") or "RESEARCH_DESIGN_INCOMPLETE"
+        ),
+        "severity": "P1",
+        "category": "ARGUMENT",
+        "target_type": "ARGUMENT_SEMANTIC_COMPONENT",
+        "target_path_or_span": target_path,
+        "description": reason,
+        "evidence_refs": [],
+        # This path deliberately returns to the original producer. It is not a
+        # local targeted-repair operation.
+        "repairable": False,
+        "repair_instruction": action,
+        "semantic_component": str(
+            gap.get("semantic_component") or "RESEARCH_DESIGN"
+        ),
+        "semantic_thread": thread_index,
+        "semantic_review_unit_key": str(
+            gap.get("semantic_review_unit_key") or ""
+        )
+        or None,
+        "suggested_route": "ORIGINAL_PRODUCER",
+        "blocking": True,
+    }
+
+
 class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMixin):
     @staticmethod
     def _retry_not_before(delay_seconds: float) -> str | None:
@@ -863,6 +927,16 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 }
                 if semantic_retry_issues:
                     execute_kwargs["semantic_retry_issues"] = semantic_retry_issues
+                semantic_baseline_runs = state.get(
+                    "semantic_producer_regeneration_baseline_runs"
+                ) or {}
+                semantic_baseline_run_id = str(
+                    semantic_baseline_runs.get(prompt_id) or ""
+                ).strip()
+                if semantic_baseline_run_id:
+                    execute_kwargs["semantic_regeneration_baseline_run_id"] = (
+                        semantic_baseline_run_id
+                    )
                 result = await self.executor.execute(
                     prompt_id,
                     envelope,
@@ -1906,7 +1980,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         gap_report = [
             copy.deepcopy(item)
             for item in (output.get("result") or {}).get("evidence_gap_report") or []
-            if isinstance(item, dict) and not bool(item.get("blocking"))
+            if isinstance(item, dict)
+            and bool(item.get("blocking"))
+            and str(item.get("suggested_route") or "ORIGINAL_PRODUCER").upper()
+            == "ORIGINAL_PRODUCER"
         ]
         if not gap_report:
             return "NOT_APPLICABLE"
@@ -1918,7 +1995,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             limit = 1
         limit = max(0, min(limit, 3))
 
-        rounds = state.setdefault("semantic_producer_regeneration_rounds", {})
+        rounds = state.get("semantic_producer_regeneration_rounds") or {}
         completed = int(rounds.get(producer_prompt) or 0)
         if completed >= limit:
             state["last_error"] = (
@@ -1934,40 +2011,52 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             )
             return "EXHAUSTED"
 
-        feedback: list[dict[str, Any]] = []
-        for index, gap in enumerate(gap_report, 1):
-            reason = str(gap.get("reason") or "存在尚未闭合的语义或证据缺口")
-            action = str(
-                gap.get("suggested_source_or_question")
-                or "利用当前可用材料补全该缺口；若证据确实不存在则保持未知，不得虚构。"
+        round_number = completed + 1
+        feedback = [
+            semantic_gap_revision_finding(
+                gap,
+                producer_prompt=producer_prompt,
+                round_number=round_number,
+                index=index,
             )
-            feedback.append(
-                {
-                    "finding_instance_id": (
-                        f"runtime-semantic-gap-{producer_prompt}-{completed + 1}-{index}"
-                    ),
-                    "defect_key": str(gap.get("defect_key") or ""),
-                    "code": str(gap.get("finding_code") or "RESEARCH_DESIGN_INCOMPLETE"),
-                    "severity": "P1",
-                    "description": reason,
-                    "repair_instruction": action,
-                    "evidence_refs": [],
-                    "semantic_component": str(gap.get("semantic_component") or "RESEARCH_DESIGN"),
-                    "semantic_thread": gap.get("thread_index")
-                    if isinstance(gap.get("thread_index"), int)
-                    else None,
-                    "semantic_review_unit_key": str(gap.get("semantic_review_unit_key") or "") or None,
-                    "suggested_route": str(gap.get("suggested_route") or "ORIGINAL_PRODUCER"),
-                    "blocking": True,
-                }
+            for index, gap in enumerate(gap_report, 1)
+        ]
+        validation_errors: list[str] = []
+        for index, finding in enumerate(feedback):
+            validation_errors.extend(
+                f"/{index}{error}"
+                for error in self.pack.validate_common(
+                    "finding.schema.json", finding
+                )
+            )
+        if validation_errors:
+            raise ValueError(
+                "Runtime generated invalid semantic regeneration findings: "
+                + "; ".join(validation_errors[:20])
             )
 
-        round_number = completed + 1
-        rounds[producer_prompt] = round_number
-        state.setdefault("producer_revision_findings", {})[
+        # Prepare and validate the exact next-round state before committing the
+        # scheduling transition. A malformed adapter output must never be
+        # persisted and discovered only by the following advance call.
+        next_state = copy.deepcopy(state)
+        next_state.setdefault("semantic_producer_regeneration_rounds", {})[
+            producer_prompt
+        ] = round_number
+        next_state.setdefault("producer_revision_findings", {})[
             producer_prompt
         ] = feedback
-        state.setdefault("semantic_producer_regeneration_history", []).append(
+        current_step = int(wf.get("current_step") or 0)
+        current_result = (state.get("step_results") or {}).get(str(current_step)) or {}
+        baseline_run_id = str(current_result.get("run_id") or "").strip()
+        if not baseline_run_id:
+            raise ValueError(
+                f"{producer_prompt} semantic regeneration requires the exact "
+                "persisted baseline run id"
+            )
+        next_state.setdefault("semantic_producer_regeneration_baseline_runs", {}).setdefault(
+            producer_prompt, baseline_run_id
+        )
+        next_state.setdefault("semantic_producer_regeneration_history", []).append(
             {
                 "producer_prompt": producer_prompt,
                 "round": round_number,
@@ -1976,15 +2065,28 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     for item in gap_report
                     if item.get("gap_id")
                 ],
+                "defect_keys": [
+                    str(item.get("defect_key") or "")
+                    for item in gap_report
+                    if item.get("defect_key")
+                ],
+                "baseline_run_id": baseline_run_id,
                 "created_at": utc_now(),
             }
         )
-        del state["semantic_producer_regeneration_history"][:-50]
+        del next_state["semantic_producer_regeneration_history"][:-50]
 
-        current_step = int(wf.get("current_step") or 0)
-        state.setdefault("step_results", {}).pop(str(current_step), None)
-        state.pop("provider_wait", None)
-        self._clear_workflow_repair_rereview(state, producer_prompt)
+        next_state.setdefault("step_results", {}).pop(str(current_step), None)
+        next_state.pop("provider_wait", None)
+        self._clear_workflow_repair_rereview(next_state, producer_prompt)
+        self.context_builder.build(
+            producer_prompt,
+            wf["project_id"],
+            workflow_id=wf["id"],
+            workflow_state=next_state,
+        )
+        state.clear()
+        state.update(next_state)
         self._update(
             wf,
             status=WorkflowStatus.RUNNING.value,
@@ -2969,6 +3071,13 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 producer_revision_findings.pop(prompt_id, None)
                 if not producer_revision_findings:
                     state.pop("producer_revision_findings", None)
+            semantic_baseline_runs = state.get(
+                "semantic_producer_regeneration_baseline_runs"
+            )
+            if isinstance(semantic_baseline_runs, dict):
+                semantic_baseline_runs.pop(prompt_id, None)
+                if not semantic_baseline_runs:
+                    state.pop("semantic_producer_regeneration_baseline_runs", None)
             wf["current_step"] += 1
             self._update(wf, current_step=wf["current_step"], state=state)
             if next_gate:

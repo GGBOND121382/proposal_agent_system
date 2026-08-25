@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from .util import new_id, sha256_json, utc_now
+from .gate_answer_contract import widen_gate_questions
 from .workflow_status import (
     WorkflowStatus,
     clear_terminal_runtime_transients,
@@ -307,7 +308,7 @@ class WorkflowGateMixin:
             for item in (checkpoint_status, checkpoint_step, checkpoint_state)
         )
         gate_id = new_id("gate")
-        questions = copy.deepcopy(list(questions))
+        questions = widen_gate_questions(copy.deepcopy(list(questions)))
         validate_gate_questions(questions)
         allowed = list(
             GATE_ACTIONS.get(

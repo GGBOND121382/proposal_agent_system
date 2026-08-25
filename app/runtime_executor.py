@@ -20,6 +20,7 @@ from .contract_registry import CONTRACT_REGISTRY_VERSION
 from .argument_two_stage_orchestration import (
     ARGUMENT_DESIGN_STAGE,
     ARGUMENT_SKELETON_STAGE,
+    ARGUMENT_STAGE_REPAIR_SUFFIX,
     ARGUMENT_TWO_STAGE_CONTRACT_VERSION,
     ArgumentStageContractError,
     argument_stage_desired_output_tokens,
@@ -101,8 +102,9 @@ class _RuntimeArgumentStageGateway:
         desired_output_tokens: int,
     ) -> dict[str, Any]:
         attempt = int((retry_context or {}).get("attempt") or 1)
+        repair_mode = stage.endswith(ARGUMENT_STAGE_REPAIR_SUFFIX)
         stage_envelope = copy.deepcopy(model_input)
-        if retry_context:
+        if retry_context and not repair_mode:
             stage_envelope["retry_context"] = copy.deepcopy(retry_context)
 
         stage_route = replace(
@@ -113,13 +115,29 @@ class _RuntimeArgumentStageGateway:
                 "argument_two_stage_internal_stage": stage,
             },
         )
-        shared_prompt = self.executor.pack.shared_prompt_for(
-            "P-ARGUMENT-ARCHITECTURE"
+        internal_prompt_id = (
+            "P-TARGETED-REPAIR" if repair_mode else "P-ARGUMENT-ARCHITECTURE"
         )
+        shared_prompt = self.executor.pack.shared_prompt_for(internal_prompt_id)
+        stage_instruction = (
+            self.executor.pack.prompt_text("P-TARGETED-REPAIR")
+            if repair_mode
+            else argument_stage_prompt_text(stage)
+        )
+        if (
+            not repair_mode
+            and (retry_context or {}).get("recovery_mode") == "FULL_STAGE_RETRY"
+        ):
+            stage_instruction += (
+                "\n\n# FULL_STAGE_RETRY\n"
+                "The prior stage response failed validation. Generate one complete stage "
+                "output from the stage input and validation errors. Do not return a partial "
+                "patch; no prior candidate is supplied."
+            )
         stage_system_prompt = (
             str(shared_prompt).strip()
             + "\n\n"
-            + argument_stage_prompt_text(stage).strip()
+            + str(stage_instruction).strip()
             + "\n"
         )
         stage_input_sha256 = sha256_json(stage_envelope)
@@ -215,7 +233,7 @@ class _RuntimeArgumentStageGateway:
                 gateway_invoked = True
                 result = await self.executor.gateway.invoke(
                     stage_route,
-                    "P-ARGUMENT-ARCHITECTURE",
+                    internal_prompt_id,
                     stage_system_prompt,
                     stage_envelope,
                     output_schema,
@@ -226,7 +244,7 @@ class _RuntimeArgumentStageGateway:
                 gateway_invoked = True
                 result = await self.executor.gateway.invoke(
                     stage_route,
-                    "P-ARGUMENT-ARCHITECTURE",
+                    internal_prompt_id,
                     stage_system_prompt,
                     stage_envelope,
                     output_schema,
@@ -780,6 +798,42 @@ class RuntimePromptExecutor(BasePromptExecutor):
             return ""
         return str(metadata.get("run_id") or "").strip()
 
+    def _argument_regeneration_baseline_authored_state(
+        self,
+        *,
+        project_id: str,
+        workflow_id: str | None,
+        run_id: str | None,
+    ) -> dict[str, Any] | None:
+        """Load the exact persisted Stage-0 baseline selected by the workflow."""
+
+        baseline_run_id = str(run_id or "").strip()
+        if not baseline_run_id:
+            return None
+        row = self.db.fetchone(
+            """SELECT output_json FROM prompt_runs
+               WHERE id=? AND project_id=? AND workflow_id IS ?
+                 AND prompt_id='P-ARGUMENT-ARCHITECTURE'""",
+            (baseline_run_id, project_id, workflow_id),
+        )
+        if row is None:
+            raise ValueError(
+                "Argument semantic regeneration baseline run is missing: "
+                + baseline_run_id
+            )
+        try:
+            output = json.loads(row.get("output_json") or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                "Argument semantic regeneration baseline output is invalid JSON"
+            ) from exc
+        authored_state = (output.get("result") or {}).get("authored_state")
+        if not isinstance(authored_state, dict):
+            raise ValueError(
+                "Argument semantic regeneration baseline lacks result.authored_state"
+            )
+        return copy.deepcopy(authored_state)
+
     def _recoverable_contract_output(
         self,
         *,
@@ -987,6 +1041,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         call_key: str | None = None,
         recovery_run_id: str | None = None,
         semantic_retry_issues: list[dict[str, Any]] | None = None,
+        semantic_regeneration_baseline_run_id: str | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
         quality_context_envelope = envelope
@@ -1209,12 +1264,20 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     project_config=project_config,
                 )
                 try:
+                    regeneration_baseline = (
+                        self._argument_regeneration_baseline_authored_state(
+                            project_id=project_id,
+                            workflow_id=workflow_id,
+                            run_id=semantic_regeneration_baseline_run_id,
+                        )
+                    )
                     staged = await orchestrate_argument_architecture_two_stage(
                         model_envelope,
                         stage_gateway=stage_gateway,
                         pack=self.pack,
-                        max_stage_attempts=2,
+                        max_stage_attempts=3,
                         stage_input_envelope=provider_envelope,
+                        regeneration_baseline_authored_state=regeneration_baseline,
                     )
                 except ArgumentStageContractError as exc:
                     last_stage_result = stage_gateway.last_result
@@ -1270,6 +1333,13 @@ class RuntimePromptExecutor(BasePromptExecutor):
                             "design_sha256": sha256_json(staged["design"]),
                             "authored_state_sha256": sha256_json(
                                 staged["authored_state"]
+                            ),
+                            "regeneration_baseline_run_id": (
+                                str(semantic_regeneration_baseline_run_id or "")
+                                or None
+                            ),
+                            "regeneration_merge": copy.deepcopy(
+                                staged.get("regeneration_merge")
                             ),
                         }
                     },

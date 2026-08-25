@@ -54,7 +54,7 @@ def test_argument_revise_with_blocking_user_question_routes_to_need_user_input(h
     )
 
     assert normalized["status"] == "NEED_USER_INPUT"
-    assert normalized["user_questions"] == output["user_questions"]
+    assert normalized["user_questions"][0]["answer_schema"] == {"type": "STRING"}
 
 
 def test_blocking_user_routed_finding_without_question_is_rejected(hardening_runtime):

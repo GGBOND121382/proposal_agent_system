@@ -34,13 +34,14 @@ def _resolution(
     answer: Any,
     target_paths: list[str],
     question_id: str = "question-1",
+    question: str = "confirm",
 ) -> dict[str, Any]:
     return {
         "resolution_id": resolution_id,
         "gate_id": "gate-1",
         "prompt_id": "P-TEST",
         "question_id": question_id,
-        "question": "confirm",
+        "question": question,
         "target_paths": target_paths,
         "answer": answer,
         "decided_by": "pytest",
@@ -604,6 +605,108 @@ def test_retargeted_question_supersedes_its_old_target_path(tmp_path: Path) -> N
 
     assert [(item["target_paths"], item["answer"]) for item in resolutions] == [
         (["/payload/new_target"], "new")
+    ]
+
+
+def test_distinct_questions_sharing_a_target_path_are_all_preserved(
+    tmp_path: Path,
+) -> None:
+    db, builder = _runtime(tmp_path)
+    _insert_resolution(
+        db,
+        artifact_id="artifact-question-a",
+        workflow_id="workflow-1",
+        prompt_id="P-TEST",
+        version=1,
+        resolution=_resolution(
+            resolution_id="resolution-question-a",
+            answer=True,
+            target_paths=["payload.shared_target"],
+            question_id="question-a",
+        ),
+        scope_key="step:0:P-TEST",
+    )
+    _insert_resolution(
+        db,
+        artifact_id="artifact-question-b",
+        workflow_id="workflow-1",
+        prompt_id="P-TEST",
+        version=2,
+        resolution=_resolution(
+            resolution_id="resolution-question-b",
+            answer=False,
+            target_paths=["payload.shared_target"],
+            question_id="question-b",
+        ),
+        scope_key="step:0:P-TEST",
+    )
+    state = {
+        "human_resolution_artifact_ids": {
+            "step:0:P-TEST": ["artifact-question-a", "artifact-question-b"]
+        }
+    }
+
+    resolutions = builder._human_resolutions_for_prompt(
+        state, "P-TEST", "workflow-1"
+    )
+
+    assert [item["question_id"] for item in resolutions] == [
+        "question-a",
+        "question-b",
+    ]
+    assert [item["answer"] for item in resolutions] == [True, False]
+
+
+def test_reused_positional_question_id_does_not_supersede_a_different_question(
+    tmp_path: Path,
+) -> None:
+    db, builder = _runtime(tmp_path)
+    _insert_resolution(
+        db,
+        artifact_id="artifact-gate-round-1",
+        workflow_id="workflow-1",
+        prompt_id="P-TEST",
+        version=1,
+        resolution=_resolution(
+            resolution_id="resolution-gate-round-1",
+            answer=True,
+            target_paths=["payload.shared_target"],
+            question_id="UQ-001",
+            question="是否接受当前研究范围？",
+        ),
+        scope_key="step:0:P-TEST",
+    )
+    _insert_resolution(
+        db,
+        artifact_id="artifact-gate-round-2",
+        workflow_id="workflow-1",
+        prompt_id="P-TEST",
+        version=2,
+        resolution=_resolution(
+            resolution_id="resolution-gate-round-2",
+            answer=False,
+            target_paths=["payload.shared_target"],
+            question_id="UQ-001",
+            question="是否具备人员实验条件？",
+        ),
+        scope_key="step:0:P-TEST",
+    )
+    state = {
+        "human_resolution_artifact_ids": {
+            "step:0:P-TEST": [
+                "artifact-gate-round-1",
+                "artifact-gate-round-2",
+            ]
+        }
+    }
+
+    resolutions = builder._human_resolutions_for_prompt(
+        state, "P-TEST", "workflow-1"
+    )
+
+    assert [item["question"] for item in resolutions] == [
+        "是否接受当前研究范围？",
+        "是否具备人员实验条件？",
     ]
 
 

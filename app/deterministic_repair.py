@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from .gate_answer_contract import widen_gate_question_answer_schema
 from .json_pointer import (
     JsonPointerError,
     is_ancestor_or_same,
@@ -105,6 +106,21 @@ def apply_deterministic_contract_repairs(
             )
             if derived is None:
                 continue
+            question_text = str(
+                questions[index].get("prompt")
+                or questions[index].get("question")
+                or ""
+            ).strip()
+            if question_text:
+                projected_question = copy.deepcopy(questions[index])
+                projected_question.setdefault("answer_schema", {})["type"] = derived
+                projected_question = widen_gate_question_answer_schema(
+                    projected_question
+                )
+                derived = str(
+                    (projected_question.get("answer_schema") or {}).get("type")
+                    or derived
+                )
             if before != derived:
                 _set_existing(repaired, path, derived)
                 changed.append(path)
