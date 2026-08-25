@@ -736,6 +736,293 @@ def merge_argument_stage_repair_candidate(
     return copy.deepcopy(previous_candidate) if merged is _MISSING else merged
 
 
+def _supplement_required_design_parents(
+    merged_candidate: Any,
+    regenerated_candidate: Any,
+) -> Any:
+    """Add only regenerated parent rows required by retained/repaired rows.
+
+    Full-stage regeneration may restore a parent object that was entirely
+    absent from the previous Draft. Existing rows are never replaced here and
+    unrelated newly generated rows are ignored.
+    """
+
+    merged = copy.deepcopy(merged_candidate)
+    if not isinstance(merged, dict) or not isinstance(regenerated_candidate, dict):
+        return merged
+
+    parent_specs: tuple[tuple[str, tuple[str, ...], str, tuple[str, ...]], ...] = (
+        (
+            "methods",
+            ("thread_index", "work_package_index"),
+            "work_packages",
+            ("thread_index", "work_package_index"),
+        ),
+        (
+            "theoretical_properties",
+            ("thread_index", "work_package_index", "method_index"),
+            "methods",
+            ("thread_index", "work_package_index", "method_index"),
+        ),
+        (
+            "evaluations",
+            ("thread_index", "work_package_index", "method_index"),
+            "methods",
+            ("thread_index", "work_package_index", "method_index"),
+        ),
+        (
+            "baselines",
+            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
+            "evaluations",
+            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
+        ),
+        (
+            "ablations",
+            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
+            "evaluations",
+            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
+        ),
+        (
+            "innovation_prior_work",
+            ("thread_index", "innovation_index"),
+            "innovations",
+            ("thread_index", "innovation_index"),
+        ),
+        (
+            "innovation_evaluation_refs",
+            ("thread_index", "innovation_index"),
+            "innovations",
+            ("thread_index", "innovation_index"),
+        ),
+        (
+            "innovation_evaluation_refs",
+            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
+            "evaluations",
+            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
+        ),
+        (
+            "foundation_supports",
+            ("thread_index", "foundation_index"),
+            "foundation",
+            ("thread_index", "foundation_index"),
+        ),
+    )
+
+    # A foundation support targets either a work package or a method depending
+    # on whether method_index is null. Handle that conditional edge separately.
+    conditional_support_specs = (
+        ("work_packages", ("thread_index", "work_package_index"), True),
+        ("methods", ("thread_index", "work_package_index", "method_index"), False),
+    )
+
+    def rows(root: dict[str, Any], collection: str) -> list[Any]:
+        value = root.get(collection)
+        return value if isinstance(value, list) else []
+
+    def append_parent(
+        child: Any,
+        child_fields: tuple[str, ...],
+        parent_collection: str,
+        parent_fields: tuple[str, ...],
+    ) -> bool:
+        key = _local_index_tuple(child, child_fields)
+        if key is None:
+            return False
+        parent_rows = rows(merged, parent_collection)
+        if any(_local_index_tuple(item, parent_fields) == key for item in parent_rows):
+            return False
+        replacement = next(
+            (
+                item
+                for item in rows(regenerated_candidate, parent_collection)
+                if _local_index_tuple(item, parent_fields) == key
+            ),
+            None,
+        )
+        if replacement is None:
+            return False
+        if not isinstance(merged.get(parent_collection), list):
+            merged[parent_collection] = []
+        merged[parent_collection].append(copy.deepcopy(replacement))
+        return True
+
+    # Parent additions can themselves require another parent, so continue to a
+    # fixed point. The schema has a finite acyclic parent graph.
+    while True:
+        changed = False
+        for (
+            child_collection,
+            child_fields,
+            parent_collection,
+            parent_fields,
+        ) in parent_specs:
+            for child in rows(merged, child_collection):
+                changed = append_parent(child, child_fields, parent_collection, parent_fields) or changed
+        for support in rows(merged, "foundation_supports"):
+            if not isinstance(support, dict):
+                continue
+            for (
+                parent_collection,
+                fields,
+                requires_null_method,
+            ) in conditional_support_specs:
+                if (support.get("method_index") is None) != requires_null_method:
+                    continue
+                changed = append_parent(support, fields, parent_collection, fields) or changed
+        if not changed:
+            break
+    return merged
+
+
+def _prepare_full_regeneration_for_scoped_merge(
+    previous_candidate: Any,
+    regenerated_candidate: Any,
+    previous_errors: list[str],
+) -> Any:
+    """Restore valid old rows before aligning a full regenerated collection."""
+
+    prepared = copy.deepcopy(regenerated_candidate)
+    if not isinstance(previous_candidate, dict) or not isinstance(prepared, dict):
+        return prepared
+    scopes = argument_stage_repair_scope_paths(previous_errors)
+    design_keys: dict[str, tuple[str, ...]] = {
+        "work_packages": ("thread_index", "work_package_index"),
+        "methods": ("thread_index", "work_package_index", "method_index"),
+        "theoretical_properties": (
+            "thread_index",
+            "work_package_index",
+            "method_index",
+            "property_index",
+        ),
+        "evaluations": (
+            "thread_index",
+            "work_package_index",
+            "method_index",
+            "evaluation_index",
+        ),
+        "baselines": (
+            "thread_index",
+            "work_package_index",
+            "method_index",
+            "evaluation_index",
+            "baseline_index",
+        ),
+        "ablations": (
+            "thread_index",
+            "work_package_index",
+            "method_index",
+            "evaluation_index",
+            "ablation_index",
+        ),
+        "innovations": ("thread_index", "innovation_index"),
+        "innovation_prior_work": (
+            "thread_index",
+            "innovation_index",
+            "prior_work_index",
+        ),
+        "innovation_evaluation_refs": ("thread_index", "innovation_index"),
+        "foundation": ("thread_index", "foundation_index"),
+        "foundation_supports": ("thread_index", "foundation_index"),
+    }
+
+    def replacement_index(
+        collection: str,
+        old_item: Any,
+        old_index: int,
+        new_rows: list[Any],
+        used: set[int],
+    ) -> int | None:
+        fields = design_keys.get(collection)
+        old_key = _local_index_tuple(old_item, fields) if fields else None
+        if old_key is not None:
+            matches = [
+                index
+                for index, item in enumerate(new_rows)
+                if index not in used and _local_index_tuple(item, fields) == old_key
+            ]
+            if len(matches) == 1:
+                return matches[0]
+
+        if isinstance(old_item, dict):
+            scored: list[tuple[int, int]] = []
+            for index, item in enumerate(new_rows):
+                if index in used or not isinstance(item, dict):
+                    continue
+                score = sum(
+                    1
+                    for key, value in old_item.items()
+                    if key != "thread_index"
+                    and not key.endswith("_index")
+                    and key in item
+                    and item[key] == value
+                )
+                if score:
+                    scored.append((score, index))
+            if scored:
+                best = max(score for score, _index in scored)
+                matches = [index for score, index in scored if score == best]
+                if len(matches) == 1:
+                    return matches[0]
+        # Positional fallback is safe only for collections whose identity is
+        # the list position itself (for example Skeleton research_threads).
+        # Indexed Design records fail closed when neither their key nor their
+        # surviving authored values identify one unique replacement.
+        if fields is None and old_index < len(new_rows) and old_index not in used:
+            return old_index
+        return None
+
+    for collection, previous_rows in previous_candidate.items():
+        if not isinstance(previous_rows, list):
+            continue
+        if (str(collection),) in scopes:
+            continue
+        regenerated_rows = prepared.get(collection)
+        if not isinstance(regenerated_rows, list):
+            regenerated_rows = []
+        errored_indexes = {
+            int(path[1]) for path in scopes if len(path) >= 2 and path[0] == str(collection) and path[1].isdigit()
+        }
+        used: set[int] = set()
+        merged_rows: list[Any] = []
+        for old_index, old_item in enumerate(previous_rows):
+            if old_index not in errored_indexes:
+                merged_rows.append(copy.deepcopy(old_item))
+                continue
+            new_index = replacement_index(str(collection), old_item, old_index, regenerated_rows, used)
+            if new_index is None:
+                continue
+            used.add(new_index)
+            merged_rows.append(copy.deepcopy(regenerated_rows[new_index]))
+        prepared[collection] = merged_rows
+    return prepared
+
+
+def _merge_full_stage_regeneration_candidate(
+    *,
+    stage: str,
+    previous_candidate: Any,
+    regenerated_candidate: Any,
+    previous_errors: list[str],
+    deterministic_defaults: tuple[tuple[tuple[str, ...], Any], ...] = (),
+) -> Any:
+    """Use a full response only for objects that were not already valid."""
+
+    prepared_regeneration = _prepare_full_regeneration_for_scoped_merge(
+        previous_candidate,
+        regenerated_candidate,
+        previous_errors,
+    )
+    merged = merge_argument_stage_repair_candidate(
+        previous_candidate,
+        prepared_regeneration,
+        previous_errors,
+        deterministic_defaults=deterministic_defaults,
+    )
+    if stage == ARGUMENT_DESIGN_STAGE:
+        merged = _supplement_required_design_parents(merged, regenerated_candidate)
+    return merged
+
+
 def _normalized_semantic_text(value: Any) -> str:
     text = str(value or "").strip().lower()
     for token in " \t\r\n，。；：！？,:;!?“”\"'（）()[]{}":
@@ -2093,6 +2380,8 @@ async def _invoke_validated_stage(
     previous_structural_candidate: Any = None
     previous_candidate: Any = None
     previous_errors: list[str] = []
+    previous_retry_errors: list[str] = []
+    previous_defaults: tuple[tuple[tuple[str, ...], Any], ...] = ()
     previous_phase = "structure_validation"
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
@@ -2102,7 +2391,7 @@ async def _invoke_validated_stage(
                 "attempt": attempt,
                 "recovery_mode": "FULL_STAGE_RETRY",
                 "validation_errors": (
-                    list(previous_errors[:20])
+                    list(previous_retry_errors)
                     if _stage_candidate_has_substantive_draft(
                         stage, previous_structural_candidate
                     )
@@ -2124,9 +2413,28 @@ async def _invoke_validated_stage(
             frozen_skeleton=frozen_skeleton,
         )
 
+        if (
+            attempt > 1
+            and _stage_candidate_has_substantive_draft(
+                stage, previous_structural_candidate
+            )
+        ):
+            structural_candidate = _merge_full_stage_regeneration_candidate(
+                stage=stage,
+                previous_candidate=previous_structural_candidate,
+                regenerated_candidate=structural_candidate,
+                previous_errors=previous_errors,
+                deterministic_defaults=previous_defaults,
+            )
+            structural_candidate = _normalize_stage_structural_artifacts(
+                stage,
+                structural_candidate,
+                frozen_skeleton=frozen_skeleton,
+            )
+
         # Defaults belong only to the validation/return projection. They must
         # not be fed back into scoped merge identity on the next attempt.
-        candidate, _ = (
+        candidate, current_defaults = (
             _normalize_stage_mechanical_defaults_with_provenance(
                 structural_candidate
             )
@@ -2153,7 +2461,7 @@ async def _invoke_validated_stage(
             )
             if resolved_reference_errors:
                 structural_candidate = repaired_structural_candidate
-                candidate, _ = (
+                candidate, current_defaults = (
                     _normalize_stage_mechanical_defaults_with_provenance(
                         structural_candidate
                     )
@@ -2175,9 +2483,11 @@ async def _invoke_validated_stage(
             return copy.deepcopy(candidate)
         previous_structural_candidate = copy.deepcopy(structural_candidate)
         previous_candidate = copy.deepcopy(candidate)
-        previous_errors = _bounded_stage_retry_errors(
+        previous_errors = list(errors)
+        previous_retry_errors = _bounded_stage_retry_errors(
             shape_errors, reference_errors, cross_stage_errors
         )
+        previous_defaults = copy.deepcopy(current_defaults)
         previous_phase = phase
 
     raise ArgumentStageContractError(

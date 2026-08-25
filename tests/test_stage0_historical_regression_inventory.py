@@ -72,6 +72,10 @@ HISTORICAL_STAGE0_REGRESSIONS = {
         "tests/test_semantic_model_contracts_v1.py",
         "test_argument_design_reference_validation_is_local_and_fail_closed",
     ),
+    "thirteen_missing_design_parents_preserve_valid_rows": (
+        "tests/test_semantic_model_contracts_v1.py",
+        "test_argument_full_regeneration_replays_thirteen_missing_parent_failures_monotonically",
+    ),
     "foundation_requires_qualified_evidence": (
         "tests/test_semantic_model_contracts_v1.py",
         "test_argument_two_stage_design_rejects_unqualified_foundation_before_assembly",

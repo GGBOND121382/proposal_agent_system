@@ -12,6 +12,7 @@ from app.argument_two_stage_orchestration import (
     ARGUMENT_DESIGN_STAGE,
     ARGUMENT_SKELETON_STAGE,
     ArgumentStageContractError,
+    _merge_full_stage_regeneration_candidate,
     argument_stage_desired_output_tokens,
     argument_stage_prompt_text,
     orchestrate_argument_architecture_two_stage,
@@ -3257,6 +3258,176 @@ def test_argument_two_stage_step4a_design_full_retry_freezes_skeleton_and_carrie
         for error in retry["validation_errors"]
     )
     assert result["design"] == valid_design
+
+
+def test_argument_two_stage_full_design_retry_preserves_previously_valid_rows():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    broken_design = _flat_design_output(envelope)
+    broken_design["work_packages"][0]["statement"] = "Keep the valid prior work package."
+    broken_design["methods"][0]["work_package_index"] = 9
+
+    regenerated_design = _flat_design_output(envelope)
+    regenerated_design["work_packages"][0]["statement"] = "Do not overwrite prior valid content."
+    regenerated_design["methods"][0]["statement"] = "Use the repaired method row."
+    gateway = _FakeArgumentStageGateway(
+        [
+            skeleton,
+            broken_design,
+            regenerated_design,
+        ]
+    )
+
+    result = asyncio.run(
+        orchestrate_argument_architecture_two_stage(envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2)
+    )
+
+    assert result["design"]["work_packages"][0]["statement"] == ("Keep the valid prior work package.")
+    assert result["design"]["methods"][0] == regenerated_design["methods"][0]
+
+
+def test_argument_two_stage_full_design_retry_adds_only_required_missing_parent():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    broken_design = _flat_design_output(envelope)
+    broken_design["work_packages"] = []
+    regenerated_design = _flat_design_output(envelope)
+    regenerated_design["foundation"] = []
+    regenerated_design["foundation_supports"] = []
+    gateway = _FakeArgumentStageGateway(
+        [
+            skeleton,
+            broken_design,
+            regenerated_design,
+        ]
+    )
+
+    result = asyncio.run(
+        orchestrate_argument_architecture_two_stage(envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2)
+    )
+
+    assert result["design"]["work_packages"] == regenerated_design["work_packages"]
+    assert result["design"]["methods"] == broken_design["methods"]
+    assert result["design"]["foundation"] == []
+    assert result["design"]["foundation_supports"] == []
+
+
+def test_argument_full_regeneration_replays_thirteen_missing_parent_failures_monotonically():
+    previous = {
+        "work_packages": [
+            {
+                "thread_index": 0,
+                "work_package_index": index,
+                "statement": f"retained-parent-{index}",
+            }
+            for index in range(3)
+        ],
+        "methods": [
+            {
+                "thread_index": thread_index,
+                "work_package_index": work_package_index,
+                "method_index": 0,
+                "statement": f"retained-method-{thread_index}-{work_package_index}",
+            }
+            for thread_index in range(4)
+            for work_package_index in range(4)
+        ],
+        "foundation": [],
+    }
+    regenerated = copy.deepcopy(previous)
+    regenerated["work_packages"] = [
+        {
+            "thread_index": thread_index,
+            "work_package_index": work_package_index,
+            "statement": f"regenerated-parent-{thread_index}-{work_package_index}",
+        }
+        for thread_index in range(4)
+        for work_package_index in range(4)
+    ]
+    for method in regenerated["methods"]:
+        method["statement"] = "regenerated-" + method["statement"]
+    regenerated["foundation"] = [{"unrelated": "must not be adopted"}]
+    errors = [f"/methods/{index}: unresolved parent index" for index in range(3, 16)]
+
+    merged = _merge_full_stage_regeneration_candidate(
+        stage=ARGUMENT_DESIGN_STAGE,
+        previous_candidate=previous,
+        regenerated_candidate=regenerated,
+        previous_errors=errors,
+    )
+
+    assert len(merged["work_packages"]) == 16
+    assert merged["work_packages"][:3] == previous["work_packages"]
+    assert merged["methods"][:3] == previous["methods"][:3]
+    assert merged["methods"][3:] == regenerated["methods"][3:]
+    assert merged["foundation"] == []
+
+
+def test_argument_full_regeneration_never_uses_an_unrelated_indexed_row_by_position():
+    previous = {
+        "methods": [
+            {
+                "thread_index": 0,
+                "work_package_index": 0,
+                "method_index": 0,
+                "statement": "valid-row",
+            },
+            {
+                "thread_index": 1,
+                "work_package_index": 9,
+                "method_index": 0,
+                "statement": "invalid-row",
+            },
+        ]
+    }
+    regenerated = {
+        "methods": [
+            {
+                "thread_index": 0,
+                "work_package_index": 0,
+                "method_index": 0,
+                "statement": "unrelated-regeneration",
+            }
+        ]
+    }
+
+    merged = _merge_full_stage_regeneration_candidate(
+        stage=ARGUMENT_DESIGN_STAGE,
+        previous_candidate=previous,
+        regenerated_candidate=regenerated,
+        previous_errors=["/methods/1: unresolved parent index"],
+    )
+
+    assert merged["methods"] == previous["methods"][:1]
+
+
+def test_argument_two_stage_later_invalid_full_response_cannot_corrupt_valid_rows():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    broken_design = _flat_design_output(envelope)
+    broken_design["work_packages"][0]["statement"] = "Stable valid content."
+    broken_design["methods"][0]["work_package_index"] = 9
+
+    still_invalid = _flat_design_output(envelope)
+    still_invalid["work_packages"][0]["statement"] = "Rejected overwrite."
+    still_invalid["methods"][0]["work_package_index"] = 8
+    valid_design = _flat_design_output(envelope)
+    valid_design["work_packages"][0]["statement"] = "Another rejected overwrite."
+    gateway = _FakeArgumentStageGateway(
+        [
+            skeleton,
+            broken_design,
+            still_invalid,
+            valid_design,
+        ]
+    )
+
+    result = asyncio.run(
+        orchestrate_argument_architecture_two_stage(envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=3)
+    )
+
+    assert result["design"]["work_packages"][0]["statement"] == ("Stable valid content.")
+    assert result["design"]["methods"][0] == valid_design["methods"][0]
 
 
 def test_argument_two_stage_step4a_exhausted_skeleton_retry_never_calls_design():

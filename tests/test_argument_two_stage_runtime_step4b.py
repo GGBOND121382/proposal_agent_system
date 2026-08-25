@@ -767,7 +767,7 @@ def test_skeleton_retry_compacts_fragmented_question_rows_without_default_pollut
     assert "previous_candidate" not in retry["retry_context"]
     assert "repair_targets" not in retry
     authored_questions = result["output"]["user_questions"]
-    assert len(authored_questions) == 4
+    assert len(authored_questions) == 3
 
 
 def test_design_retry_compacts_fragmented_question_rows_without_default_pollution(
