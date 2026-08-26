@@ -72,9 +72,37 @@ HISTORICAL_STAGE0_REGRESSIONS = {
         "tests/test_semantic_model_contracts_v1.py",
         "test_argument_design_reference_validation_is_local_and_fail_closed",
     ),
-    "thirteen_missing_design_parents_preserve_valid_rows": (
+    "flat_provider_keys_are_rebased_to_nested_positions": (
         "tests/test_semantic_model_contracts_v1.py",
-        "test_argument_full_regeneration_replays_thirteen_missing_parent_failures_monotonically",
+        "test_argument_thread_assembler_rebases_provider_keys_to_nested_positions",
+    ),
+    "foundation_support_keys_are_rebased_with_evaluation_refs": (
+        "tests/test_semantic_model_contracts_v1.py",
+        "test_argument_thread_assembler_rebases_sparse_foundation_support_keys",
+    ),
+    "failed_stage_draft_never_overwrites_later_complete_response": (
+        "tests/test_semantic_model_contracts_v1.py",
+        "test_argument_skeleton_retry_accepts_a_later_complete_candidate_whole",
+    ),
+    "failed_design_draft_is_never_merged_into_a_complete_retry": (
+        "tests/test_semantic_model_contracts_v1.py",
+        "test_argument_two_stage_full_design_retry_never_merges_the_failed_draft",
+    ),
+    "degraded_semantic_regeneration_keeps_the_accepted_baseline": (
+        "tests/test_semantic_model_contracts_v1.py",
+        "test_argument_semantic_regeneration_rejects_whole_candidate_shrinkage",
+    ),
+    "semantic_revise_request_names_complete_output_and_exact_target": (
+        "tests/test_semantic_model_contracts_v1.py",
+        "test_argument_semantic_regeneration_contract_names_complete_output_and_exact_baseline_target",
+    ),
+    "semantic_revise_internal_retry_reuses_accepted_baseline": (
+        "tests/test_semantic_model_contracts_v1.py",
+        "test_argument_semantic_revision_retry_reuses_accepted_baseline_not_failed_response",
+    ),
+    "historical_one_thread_revise_response_keeps_four_thread_baseline": (
+        "tests/test_semantic_model_contracts_v1.py",
+        "test_historical_partial_semantic_revise_response_keeps_four_thread_baseline_whole",
     ),
     "foundation_requires_qualified_evidence": (
         "tests/test_semantic_model_contracts_v1.py",

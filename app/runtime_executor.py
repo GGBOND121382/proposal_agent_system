@@ -134,6 +134,22 @@ class _RuntimeArgumentStageGateway:
                 "output from the stage input and validation errors. Do not return a partial "
                 "patch; no prior candidate is supplied."
             )
+        if (
+            not repair_mode
+            and (retry_context or {}).get("mode") == "WHOLE_DESIGN_REVISE"
+        ):
+            stage_instruction += (
+                "\n\n# WHOLE_DESIGN_REVISE\n"
+                "This is a revision of an accepted complete Design, not a new blank "
+                "generation and not a patch response. `previous_candidate` is the exact "
+                "accepted baseline. Return one COMPLETE_DESIGN containing every collection "
+                "for every `required_thread_indices` entry. Preserve unaffected baseline "
+                "records and semantics; resolve every `exact_revision_targets` item. Total "
+                "and per-thread collection counts must not fall below `baseline_inventory`. "
+                "The runtime rejects the entire response if it is partial, regressive, or "
+                "introduces a new blocking gap. Deterministic targets marked `blocking=true` "
+                "remain blocking even if model-authored evidence gaps or questions say false."
+            )
         stage_system_prompt = (
             str(shared_prompt).strip()
             + "\n\n"

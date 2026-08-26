@@ -285,6 +285,12 @@ def test_step4b_runtime_semantic_regeneration_uses_exact_baseline_and_only_desig
         call["route"].profile["argument_two_stage_internal_stage"]
         for call in gateway.calls
     ] == [ARGUMENT_DESIGN_STAGE]
+    revise_call = gateway.calls[0]
+    retry_context = revise_call["envelope"]["retry_context"]
+    assert retry_context["mode"] == "WHOLE_DESIGN_REVISE"
+    assert retry_context["required_output"] == "COMPLETE_DESIGN"
+    assert retry_context["previous_candidate"] == baseline_design
+    assert "WHOLE_DESIGN_REVISE" in revise_call["system_prompt"]
 
 
 def test_step4b_runtime_design_retry_never_regenerates_skeleton(tmp_path, monkeypatch):
@@ -767,7 +773,10 @@ def test_skeleton_retry_compacts_fragmented_question_rows_without_default_pollut
     assert "previous_candidate" not in retry["retry_context"]
     assert "repair_targets" not in retry
     authored_questions = result["output"]["user_questions"]
-    assert len(authored_questions) == 3
+    assert len(authored_questions) == 4
+    assert [item["question"] for item in authored_questions] == [
+        item["question"] for item in valid_skeleton["user_questions"]
+    ]
 
 
 def test_design_retry_compacts_fragmented_question_rows_without_default_pollution(
@@ -1507,7 +1516,7 @@ def test_step4b_provider_request_identity_includes_two_stage_contract(tmp_path, 
     spec = executor._model_request_spec("P-ARGUMENT-ARCHITECTURE")
 
     contract = spec["argument_two_stage_contract"]
-    assert contract["version"] == "ARGUMENT_TWO_STAGE_V14"
+    assert contract["version"] == "ARGUMENT_TWO_STAGE_V15"
     assert set(contract["stages"]) == {"SKELETON", "DESIGN"}
     assert contract["stages"]["SKELETON"]["desired_output_tokens"] == 8_192
     assert contract["stages"]["DESIGN"]["desired_output_tokens"] == 65_536
@@ -1748,7 +1757,7 @@ def test_step4c_live_argument_two_stage_is_independent_of_legacy_semantic_regist
 
     spec = executor._model_request_spec("P-ARGUMENT-ARCHITECTURE")
     assert spec["semantic_model_contract"]["enabled"] is False
-    assert spec["argument_two_stage_contract"]["version"] == "ARGUMENT_TWO_STAGE_V14"
+    assert spec["argument_two_stage_contract"]["version"] == "ARGUMENT_TWO_STAGE_V15"
     assert spec["prompt_text"] is None
     assert spec["output_schema"] is None
 

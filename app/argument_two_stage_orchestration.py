@@ -26,7 +26,7 @@ from .model_semantic_contracts import (
 ARGUMENT_SKELETON_STAGE = "SKELETON"
 ARGUMENT_DESIGN_STAGE = "DESIGN"
 ARGUMENT_STAGE_REPAIR_SUFFIX = "_REPAIR"
-ARGUMENT_TWO_STAGE_CONTRACT_VERSION = "ARGUMENT_TWO_STAGE_V14"
+ARGUMENT_TWO_STAGE_CONTRACT_VERSION = "ARGUMENT_TWO_STAGE_V15"
 
 # Stage-local ceilings replace the legacy one-size-fits-all 131072-token demand
 # for the internal two-stage Argument producer.  They are intentionally kept
@@ -734,293 +734,6 @@ def merge_argument_stage_repair_candidate(
         scopes=scopes,
     )
     return copy.deepcopy(previous_candidate) if merged is _MISSING else merged
-
-
-def _supplement_required_design_parents(
-    merged_candidate: Any,
-    regenerated_candidate: Any,
-) -> Any:
-    """Add only regenerated parent rows required by retained/repaired rows.
-
-    Full-stage regeneration may restore a parent object that was entirely
-    absent from the previous Draft. Existing rows are never replaced here and
-    unrelated newly generated rows are ignored.
-    """
-
-    merged = copy.deepcopy(merged_candidate)
-    if not isinstance(merged, dict) or not isinstance(regenerated_candidate, dict):
-        return merged
-
-    parent_specs: tuple[tuple[str, tuple[str, ...], str, tuple[str, ...]], ...] = (
-        (
-            "methods",
-            ("thread_index", "work_package_index"),
-            "work_packages",
-            ("thread_index", "work_package_index"),
-        ),
-        (
-            "theoretical_properties",
-            ("thread_index", "work_package_index", "method_index"),
-            "methods",
-            ("thread_index", "work_package_index", "method_index"),
-        ),
-        (
-            "evaluations",
-            ("thread_index", "work_package_index", "method_index"),
-            "methods",
-            ("thread_index", "work_package_index", "method_index"),
-        ),
-        (
-            "baselines",
-            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
-            "evaluations",
-            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
-        ),
-        (
-            "ablations",
-            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
-            "evaluations",
-            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
-        ),
-        (
-            "innovation_prior_work",
-            ("thread_index", "innovation_index"),
-            "innovations",
-            ("thread_index", "innovation_index"),
-        ),
-        (
-            "innovation_evaluation_refs",
-            ("thread_index", "innovation_index"),
-            "innovations",
-            ("thread_index", "innovation_index"),
-        ),
-        (
-            "innovation_evaluation_refs",
-            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
-            "evaluations",
-            ("thread_index", "work_package_index", "method_index", "evaluation_index"),
-        ),
-        (
-            "foundation_supports",
-            ("thread_index", "foundation_index"),
-            "foundation",
-            ("thread_index", "foundation_index"),
-        ),
-    )
-
-    # A foundation support targets either a work package or a method depending
-    # on whether method_index is null. Handle that conditional edge separately.
-    conditional_support_specs = (
-        ("work_packages", ("thread_index", "work_package_index"), True),
-        ("methods", ("thread_index", "work_package_index", "method_index"), False),
-    )
-
-    def rows(root: dict[str, Any], collection: str) -> list[Any]:
-        value = root.get(collection)
-        return value if isinstance(value, list) else []
-
-    def append_parent(
-        child: Any,
-        child_fields: tuple[str, ...],
-        parent_collection: str,
-        parent_fields: tuple[str, ...],
-    ) -> bool:
-        key = _local_index_tuple(child, child_fields)
-        if key is None:
-            return False
-        parent_rows = rows(merged, parent_collection)
-        if any(_local_index_tuple(item, parent_fields) == key for item in parent_rows):
-            return False
-        replacement = next(
-            (
-                item
-                for item in rows(regenerated_candidate, parent_collection)
-                if _local_index_tuple(item, parent_fields) == key
-            ),
-            None,
-        )
-        if replacement is None:
-            return False
-        if not isinstance(merged.get(parent_collection), list):
-            merged[parent_collection] = []
-        merged[parent_collection].append(copy.deepcopy(replacement))
-        return True
-
-    # Parent additions can themselves require another parent, so continue to a
-    # fixed point. The schema has a finite acyclic parent graph.
-    while True:
-        changed = False
-        for (
-            child_collection,
-            child_fields,
-            parent_collection,
-            parent_fields,
-        ) in parent_specs:
-            for child in rows(merged, child_collection):
-                changed = append_parent(child, child_fields, parent_collection, parent_fields) or changed
-        for support in rows(merged, "foundation_supports"):
-            if not isinstance(support, dict):
-                continue
-            for (
-                parent_collection,
-                fields,
-                requires_null_method,
-            ) in conditional_support_specs:
-                if (support.get("method_index") is None) != requires_null_method:
-                    continue
-                changed = append_parent(support, fields, parent_collection, fields) or changed
-        if not changed:
-            break
-    return merged
-
-
-def _prepare_full_regeneration_for_scoped_merge(
-    previous_candidate: Any,
-    regenerated_candidate: Any,
-    previous_errors: list[str],
-) -> Any:
-    """Restore valid old rows before aligning a full regenerated collection."""
-
-    prepared = copy.deepcopy(regenerated_candidate)
-    if not isinstance(previous_candidate, dict) or not isinstance(prepared, dict):
-        return prepared
-    scopes = argument_stage_repair_scope_paths(previous_errors)
-    design_keys: dict[str, tuple[str, ...]] = {
-        "work_packages": ("thread_index", "work_package_index"),
-        "methods": ("thread_index", "work_package_index", "method_index"),
-        "theoretical_properties": (
-            "thread_index",
-            "work_package_index",
-            "method_index",
-            "property_index",
-        ),
-        "evaluations": (
-            "thread_index",
-            "work_package_index",
-            "method_index",
-            "evaluation_index",
-        ),
-        "baselines": (
-            "thread_index",
-            "work_package_index",
-            "method_index",
-            "evaluation_index",
-            "baseline_index",
-        ),
-        "ablations": (
-            "thread_index",
-            "work_package_index",
-            "method_index",
-            "evaluation_index",
-            "ablation_index",
-        ),
-        "innovations": ("thread_index", "innovation_index"),
-        "innovation_prior_work": (
-            "thread_index",
-            "innovation_index",
-            "prior_work_index",
-        ),
-        "innovation_evaluation_refs": ("thread_index", "innovation_index"),
-        "foundation": ("thread_index", "foundation_index"),
-        "foundation_supports": ("thread_index", "foundation_index"),
-    }
-
-    def replacement_index(
-        collection: str,
-        old_item: Any,
-        old_index: int,
-        new_rows: list[Any],
-        used: set[int],
-    ) -> int | None:
-        fields = design_keys.get(collection)
-        old_key = _local_index_tuple(old_item, fields) if fields else None
-        if old_key is not None:
-            matches = [
-                index
-                for index, item in enumerate(new_rows)
-                if index not in used and _local_index_tuple(item, fields) == old_key
-            ]
-            if len(matches) == 1:
-                return matches[0]
-
-        if isinstance(old_item, dict):
-            scored: list[tuple[int, int]] = []
-            for index, item in enumerate(new_rows):
-                if index in used or not isinstance(item, dict):
-                    continue
-                score = sum(
-                    1
-                    for key, value in old_item.items()
-                    if key != "thread_index"
-                    and not key.endswith("_index")
-                    and key in item
-                    and item[key] == value
-                )
-                if score:
-                    scored.append((score, index))
-            if scored:
-                best = max(score for score, _index in scored)
-                matches = [index for score, index in scored if score == best]
-                if len(matches) == 1:
-                    return matches[0]
-        # Positional fallback is safe only for collections whose identity is
-        # the list position itself (for example Skeleton research_threads).
-        # Indexed Design records fail closed when neither their key nor their
-        # surviving authored values identify one unique replacement.
-        if fields is None and old_index < len(new_rows) and old_index not in used:
-            return old_index
-        return None
-
-    for collection, previous_rows in previous_candidate.items():
-        if not isinstance(previous_rows, list):
-            continue
-        if (str(collection),) in scopes:
-            continue
-        regenerated_rows = prepared.get(collection)
-        if not isinstance(regenerated_rows, list):
-            regenerated_rows = []
-        errored_indexes = {
-            int(path[1]) for path in scopes if len(path) >= 2 and path[0] == str(collection) and path[1].isdigit()
-        }
-        used: set[int] = set()
-        merged_rows: list[Any] = []
-        for old_index, old_item in enumerate(previous_rows):
-            if old_index not in errored_indexes:
-                merged_rows.append(copy.deepcopy(old_item))
-                continue
-            new_index = replacement_index(str(collection), old_item, old_index, regenerated_rows, used)
-            if new_index is None:
-                continue
-            used.add(new_index)
-            merged_rows.append(copy.deepcopy(regenerated_rows[new_index]))
-        prepared[collection] = merged_rows
-    return prepared
-
-
-def _merge_full_stage_regeneration_candidate(
-    *,
-    stage: str,
-    previous_candidate: Any,
-    regenerated_candidate: Any,
-    previous_errors: list[str],
-    deterministic_defaults: tuple[tuple[tuple[str, ...], Any], ...] = (),
-) -> Any:
-    """Use a full response only for objects that were not already valid."""
-
-    prepared_regeneration = _prepare_full_regeneration_for_scoped_merge(
-        previous_candidate,
-        regenerated_candidate,
-        previous_errors,
-    )
-    merged = merge_argument_stage_repair_candidate(
-        previous_candidate,
-        prepared_regeneration,
-        previous_errors,
-        deterministic_defaults=deterministic_defaults,
-    )
-    if stage == ARGUMENT_DESIGN_STAGE:
-        merged = _supplement_required_design_parents(merged, regenerated_candidate)
-    return merged
 
 
 def _normalized_semantic_text(value: Any) -> str:
@@ -2381,11 +2094,33 @@ async def _invoke_validated_stage(
     previous_candidate: Any = None
     previous_errors: list[str] = []
     previous_retry_errors: list[str] = []
-    previous_defaults: tuple[tuple[tuple[str, ...], Any], ...] = ()
     previous_phase = "structure_validation"
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
             retry_context = copy.deepcopy(initial_retry_context)
+        elif (
+            stage == ARGUMENT_DESIGN_STAGE
+            and isinstance(initial_retry_context, dict)
+            and initial_retry_context.get("mode") == "WHOLE_DESIGN_REVISE"
+        ):
+            # Semantic regeneration is different from an initial stage retry:
+            # it has an accepted, persisted baseline.  Every provider retry must
+            # therefore restart from that exact baseline, never from the failed
+            # response and never from a blank Design.
+            retry_context = copy.deepcopy(initial_retry_context)
+            retry_context.update(
+                {
+                    "attempt": attempt,
+                    "recovery_mode": "WHOLE_DESIGN_REVISE_RETRY",
+                    "validation_errors": (
+                        list(previous_retry_errors)
+                        if previous_retry_errors
+                        else [
+                            "Previous revision response was unusable; return the complete Design from the accepted baseline."
+                        ]
+                    ),
+                }
+            )
         else:
             retry_context = {
                 "attempt": attempt,
@@ -2413,28 +2148,7 @@ async def _invoke_validated_stage(
             frozen_skeleton=frozen_skeleton,
         )
 
-        if (
-            attempt > 1
-            and _stage_candidate_has_substantive_draft(
-                stage, previous_structural_candidate
-            )
-        ):
-            structural_candidate = _merge_full_stage_regeneration_candidate(
-                stage=stage,
-                previous_candidate=previous_structural_candidate,
-                regenerated_candidate=structural_candidate,
-                previous_errors=previous_errors,
-                deterministic_defaults=previous_defaults,
-            )
-            structural_candidate = _normalize_stage_structural_artifacts(
-                stage,
-                structural_candidate,
-                frozen_skeleton=frozen_skeleton,
-            )
-
-        # Defaults belong only to the validation/return projection. They must
-        # not be fed back into scoped merge identity on the next attempt.
-        candidate, current_defaults = (
+        candidate, _current_defaults = (
             _normalize_stage_mechanical_defaults_with_provenance(
                 structural_candidate
             )
@@ -2461,7 +2175,7 @@ async def _invoke_validated_stage(
             )
             if resolved_reference_errors:
                 structural_candidate = repaired_structural_candidate
-                candidate, current_defaults = (
+                candidate, _current_defaults = (
                     _normalize_stage_mechanical_defaults_with_provenance(
                         structural_candidate
                     )
@@ -2479,6 +2193,15 @@ async def _invoke_validated_stage(
                     frozen_skeleton=frozen_skeleton,
                 )
 
+        revision_errors = _argument_whole_design_revision_errors(
+            candidate,
+            retry_context=retry_context,
+        )
+        if revision_errors:
+            cross_stage_errors = [*cross_stage_errors, *revision_errors]
+            errors = [*errors, *revision_errors]
+            phase = "whole_design_revision_validation"
+
         if not errors:
             return copy.deepcopy(candidate)
         previous_structural_candidate = copy.deepcopy(structural_candidate)
@@ -2487,37 +2210,11 @@ async def _invoke_validated_stage(
         previous_retry_errors = _bounded_stage_retry_errors(
             shape_errors, reference_errors, cross_stage_errors
         )
-        previous_defaults = copy.deepcopy(current_defaults)
         previous_phase = phase
 
     raise ArgumentStageContractError(
         stage, previous_phase, previous_errors, candidate=previous_candidate
     )
-
-
-def _argument_design_thread_slice(
-    design: dict[str, Any], thread_indexes: set[int]
-) -> dict[str, Any]:
-    """Return only the prior Design rows needed by the targeted repair."""
-
-    result = {
-        collection: [
-            copy.deepcopy(item)
-            for item in design.get(collection) or []
-            if isinstance(item, dict) and item.get("thread_index") in thread_indexes
-        ]
-        for collection in _ARGUMENT_DESIGN_THREAD_COLLECTIONS
-    }
-    # Existing advisory gaps/questions are persisted from the baseline during
-    # merge. They are not repair instructions and do not belong in this prompt.
-    result.update(
-        {
-            "evidence_gaps": [],
-            "user_questions": [],
-            "cannot_proceed_reason": None,
-        }
-    )
-    return result
 
 
 def _argument_blocking_gaps(canonical_output: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2541,141 +2238,268 @@ def _argument_gap_signature(gap: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
-def _merge_argument_design_regeneration(
-    canonical_envelope: dict[str, Any],
-    *,
-    frozen_skeleton: dict[str, Any],
+def _argument_design_collection_regressions(
     baseline_design: dict[str, Any],
     candidate_design: dict[str, Any],
-    target_threads: set[int],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Accept only thread-local repairs that reduce hard gaps without shrinkage.
+) -> list[str]:
+    """Report any whole-candidate collection shrinkage, including per thread."""
 
-    Untargeted rows and all prior advisory/user-state records remain byte-for-byte
-    equivalent at the JSON value level. A targeted thread is accepted only when
-    every Design collection retains at least its prior row count and deterministic
-    projection reports fewer blocking gaps for that thread without changing hard
-    gaps outside it.
+    regressions: list[str] = []
+    for collection in _ARGUMENT_DESIGN_THREAD_COLLECTIONS:
+        baseline_rows = [
+            item
+            for item in baseline_design.get(collection) or []
+            if isinstance(item, dict)
+        ]
+        candidate_rows = [
+            item
+            for item in candidate_design.get(collection) or []
+            if isinstance(item, dict)
+        ]
+        if len(candidate_rows) < len(baseline_rows):
+            regressions.append(collection)
+        baseline_threads = {
+            int(item["thread_index"])
+            for item in baseline_rows
+            if isinstance(item.get("thread_index"), int)
+            and not isinstance(item.get("thread_index"), bool)
+        }
+        for thread_index in sorted(baseline_threads):
+            baseline_count = sum(
+                1
+                for item in baseline_rows
+                if item.get("thread_index") == thread_index
+            )
+            candidate_count = sum(
+                1
+                for item in candidate_rows
+                if item.get("thread_index") == thread_index
+            )
+            if candidate_count < baseline_count:
+                regressions.append(f"{collection}:thread={thread_index}")
+    return regressions
+
+
+def _argument_design_inventory(design: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact, deterministic whole-Design inventory for the model."""
+
+    totals: dict[str, int] = {}
+    per_thread: dict[str, dict[str, int]] = {}
+    for collection in _ARGUMENT_DESIGN_THREAD_COLLECTIONS:
+        rows = [
+            item for item in design.get(collection) or [] if isinstance(item, dict)
+        ]
+        totals[collection] = len(rows)
+        for item in rows:
+            thread_index = item.get("thread_index")
+            if not isinstance(thread_index, int) or isinstance(thread_index, bool):
+                continue
+            thread_counts = per_thread.setdefault(str(thread_index), {})
+            thread_counts[collection] = thread_counts.get(collection, 0) + 1
+    return {"totals": totals, "per_thread": per_thread}
+
+
+def _argument_design_revision_targets(
+    baseline_design: dict[str, Any],
+    revision_issues: list[Any],
+) -> list[dict[str, Any]]:
+    """Turn deterministic semantic findings into concise Design targets.
+
+    The special case below is deterministic: the guard says which semantic
+    obligation failed, while the accepted Design supplies the exact evaluation
+    coordinates.  No model-authored IDs or JSON pointers are required.
     """
 
-    merged = copy.deepcopy(baseline_design)
-    baseline_authored = assemble_argument_authored_state(
-        frozen_skeleton, baseline_design
+    evaluations = [
+        item
+        for item in baseline_design.get("evaluations") or []
+        if isinstance(item, dict)
+    ]
+    baselines = [
+        item
+        for item in baseline_design.get("baselines") or []
+        if isinstance(item, dict)
+    ]
+    target_fields = (
+        "thread_index",
+        "work_package_index",
+        "method_index",
+        "evaluation_index",
     )
-    current_output = expand_argument_architecture_model_output(
-        canonical_envelope, baseline_authored
-    )
-    accepted: list[int] = []
-    rejected: list[dict[str, Any]] = []
 
-    for thread_index in sorted(target_threads):
-        regressed_collections = [
-            collection
-            for collection in _ARGUMENT_DESIGN_THREAD_COLLECTIONS
-            if sum(
-                1
-                for item in candidate_design.get(collection) or []
-                if isinstance(item, dict)
-                and item.get("thread_index") == thread_index
-            )
-            < sum(
-                1
-                for item in merged.get(collection) or []
-                if isinstance(item, dict)
-                and item.get("thread_index") == thread_index
-            )
-        ]
-        if regressed_collections:
-            rejected.append(
-                {
-                    "thread_index": thread_index,
-                    "reason": "DESIGN_COLLECTION_SHRINKAGE",
-                    "collections": regressed_collections,
-                }
-            )
-            continue
+    def key(row: dict[str, Any], fields: tuple[str, ...]) -> tuple[Any, ...]:
+        return tuple(row.get(field) for field in fields)
 
-        trial = copy.deepcopy(merged)
-        for collection in _ARGUMENT_DESIGN_THREAD_COLLECTIONS:
-            preserved = [
-                copy.deepcopy(item)
-                for item in trial.get(collection) or []
-                if not (
-                    isinstance(item, dict)
-                    and item.get("thread_index") == thread_index
-                )
-            ]
-            replacement = [
-                copy.deepcopy(item)
-                for item in candidate_design.get(collection) or []
-                if isinstance(item, dict)
-                and item.get("thread_index") == thread_index
-            ]
-            trial[collection] = [*preserved, *replacement]
-
-        try:
-            trial_authored = assemble_argument_authored_state(
-                frozen_skeleton, trial
-            )
-            trial_output = expand_argument_architecture_model_output(
-                canonical_envelope, trial_authored
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            rejected.append(
-                {
-                    "thread_index": thread_index,
-                    "reason": "HYBRID_VALIDATION_FAILED",
-                    "detail": str(exc),
-                }
-            )
-            continue
-
-        before = _argument_blocking_gaps(current_output)
-        after = _argument_blocking_gaps(trial_output)
-        before_local = [
-            item for item in before if item.get("thread_index") == thread_index
-        ]
-        after_local = [
-            item for item in after if item.get("thread_index") == thread_index
-        ]
-        before_elsewhere = {
-            _argument_gap_signature(item)
-            for item in before
-            if item.get("thread_index") != thread_index
-        }
-        after_elsewhere = {
-            _argument_gap_signature(item)
-            for item in after
-            if item.get("thread_index") != thread_index
-        }
-        if len(after_local) >= len(before_local) or after_elsewhere != before_elsewhere:
-            rejected.append(
-                {
-                    "thread_index": thread_index,
-                    "reason": "NO_STRICT_HARD_GAP_IMPROVEMENT",
-                    "blocking_before": len(before_local),
-                    "blocking_after": len(after_local),
-                }
-            )
-            continue
-
-        merged = trial
-        current_output = trial_output
-        accepted.append(thread_index)
-
-    return merged, {
-        "target_threads": sorted(target_threads),
-        "accepted_threads": accepted,
-        "rejected_threads": rejected,
-        "blocking_before": len(
-            _argument_blocking_gaps(
-                expand_argument_architecture_model_output(
-                    canonical_envelope, baseline_authored
-                )
-            )
-        ),
-        "blocking_after": len(_argument_blocking_gaps(current_output)),
+    baseline_support = {
+        key(item, target_fields)
+        for item in baselines
+        if any(str(value).strip() for value in item.get("evidence_ids") or [])
     }
+    targets: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+
+    for issue in revision_issues:
+        if not isinstance(issue, dict):
+            continue
+        thread_index = issue.get("thread")
+        if not isinstance(thread_index, int) or isinstance(thread_index, bool):
+            thread_index = None
+        code = str(issue.get("code") or "").upper()
+        defect_key = str(issue.get("defect_key") or "").upper()
+        component = str(issue.get("component") or "RESEARCH_DESIGN").upper()
+        is_baseline_support = (
+            code == "ARGUMENT_METRIC_JUSTIFICATION_MISSING"
+            and "EVALUATION_BASELINE_SUPPORT" in defect_key
+        )
+
+        if is_baseline_support:
+            missing_evaluations = [
+                item
+                for item in evaluations
+                if (thread_index is None or item.get("thread_index") == thread_index)
+                and key(item, target_fields) not in baseline_support
+            ]
+            for evaluation in missing_evaluations:
+                coordinates = key(evaluation, target_fields)
+                identity = ("EVALUATION_BASELINE_SUPPORT", *coordinates)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                targets.append(
+                    {
+                        "target_kind": "EVALUATION_BASELINE_SUPPORT",
+                        "thread_index": coordinates[0],
+                        "work_package_index": coordinates[1],
+                        "method_index": coordinates[2],
+                        "evaluation_index": coordinates[3],
+                        "required_change": (
+                            "Add at least one representative baseline with non-empty evidence_ids for this evaluation."
+                        ),
+                        "blocking": True,
+                        "route": "ORIGINAL_PRODUCER",
+                    }
+                )
+            if missing_evaluations:
+                continue
+
+        identity = (
+            "SEMANTIC_ISSUE",
+            thread_index,
+            code,
+            component,
+            str(issue.get("review_unit_key") or ""),
+            str(issue.get("problem") or ""),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        targets.append(
+            {
+                "target_kind": "SEMANTIC_ISSUE",
+                "thread_index": thread_index,
+                "finding_code": code or None,
+                "component": component,
+                "review_unit_key": issue.get("review_unit_key"),
+                "problem": str(issue.get("problem") or "").strip(),
+                "required_change": str(issue.get("required_action") or "").strip(),
+                "blocking": True,
+                "route": "ORIGINAL_PRODUCER",
+            }
+        )
+    return targets
+
+
+def _argument_revision_error_messages(
+    targets: list[dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    for target in targets:
+        if target.get("target_kind") == "EVALUATION_BASELINE_SUPPORT":
+            errors.append(
+                "evaluation("
+                f"thread={target.get('thread_index')},"
+                f"work_package={target.get('work_package_index')},"
+                f"method={target.get('method_index')},"
+                f"evaluation={target.get('evaluation_index')}"
+                "): add at least one evidence-backed baseline"
+            )
+            continue
+        errors.append(
+            (
+                f"thread={target.get('thread_index')} "
+                f"component={target.get('component')}: "
+                f"{target.get('required_change') or target.get('problem')}"
+            ).strip()
+        )
+    return errors
+
+
+def _argument_whole_design_revision_errors(
+    candidate_design: dict[str, Any],
+    *,
+    retry_context: dict[str, Any] | None,
+) -> list[str]:
+    """Reject partial or regressive responses before deterministic assembly."""
+
+    if not isinstance(retry_context, dict) or retry_context.get("mode") != "WHOLE_DESIGN_REVISE":
+        return []
+    baseline_design = retry_context.get("previous_candidate")
+    if not isinstance(baseline_design, dict):
+        return ["WHOLE_DESIGN_REVISE requires the accepted previous_candidate"]
+
+    errors = [
+        f"Design collection regressed below accepted baseline: {item}"
+        for item in _argument_design_collection_regressions(
+            baseline_design, candidate_design
+        )
+    ]
+    required_threads = {
+        item
+        for item in retry_context.get("required_thread_indices") or []
+        if isinstance(item, int) and not isinstance(item, bool)
+    }
+    present_threads = {
+        item.get("thread_index")
+        for item in candidate_design.get("work_packages") or []
+        if isinstance(item, dict)
+        and isinstance(item.get("thread_index"), int)
+        and not isinstance(item.get("thread_index"), bool)
+    }
+    for thread_index in sorted(required_threads - present_threads):
+        errors.append(
+            f"Complete Design is missing required thread {thread_index}"
+        )
+
+    baselines = [
+        item
+        for item in candidate_design.get("baselines") or []
+        if isinstance(item, dict)
+    ]
+    for target in retry_context.get("exact_revision_targets") or []:
+        if not isinstance(target, dict) or target.get("target_kind") != "EVALUATION_BASELINE_SUPPORT":
+            continue
+        matched = any(
+            all(
+                item.get(field) == target.get(field)
+                for field in (
+                    "thread_index",
+                    "work_package_index",
+                    "method_index",
+                    "evaluation_index",
+                )
+            )
+            and any(str(value).strip() for value in item.get("evidence_ids") or [])
+            for item in baselines
+        )
+        if not matched:
+            errors.append(
+                "Required evidence-backed baseline still missing for evaluation("
+                f"thread={target.get('thread_index')},"
+                f"work_package={target.get('work_package_index')},"
+                f"method={target.get('method_index')},"
+                f"evaluation={target.get('evaluation_index')})"
+            )
+    return errors
 
 
 async def orchestrate_argument_architecture_two_stage(
@@ -2730,52 +2554,55 @@ async def orchestrate_argument_architecture_two_stage(
     design_input["foundation_eligible_evidence_ids"] = (
         argument_foundation_eligible_evidence_ids(canonical_envelope)
     )
-    target_threads = {
-        int(item["thread"])
-        for item in revision_issues
-        if isinstance(item, dict)
-        and isinstance(item.get("thread"), int)
-        and not isinstance(item.get("thread"), bool)
-    }
-    if design_only_regeneration and not target_threads:
-        target_threads = set(
-            range(len(frozen_skeleton.get("research_threads") or []))
-        )
     initial_design_retry_context = None
     if design_only_regeneration and baseline_design is not None:
+        exact_revision_targets = _argument_design_revision_targets(
+            baseline_design, revision_issues
+        )
         initial_design_retry_context = {
             "attempt": 1,
-            "previous_candidate": _argument_design_thread_slice(
-                baseline_design, target_threads
+            "mode": "WHOLE_DESIGN_REVISE",
+            "required_output": "COMPLETE_DESIGN",
+            "required_thread_indices": list(
+                range(len(frozen_skeleton.get("research_threads") or []))
             ),
-            "validation_errors": [
-                (
-                    f"thread={item.get('thread')}: "
-                    f"{str(item.get('problem') or '').strip()} "
-                    f"Required action: {str(item.get('required_action') or '').strip()}"
-                ).strip()
-                for item in revision_issues
-                if isinstance(item, dict)
+            "previous_candidate": copy.deepcopy(baseline_design),
+            "baseline_inventory": _argument_design_inventory(baseline_design),
+            "exact_revision_targets": exact_revision_targets,
+            "acceptance_rules": [
+                "Return every Design collection for every required thread, not a patch.",
+                "Preserve all unaffected accepted-baseline records and semantics.",
+                "No total or per-thread collection count may shrink below baseline_inventory.",
+                "Resolve every exact_revision_target without introducing a new blocking gap.",
             ],
+            "validation_errors": _argument_revision_error_messages(
+                exact_revision_targets
+            ),
         }
-    design_candidate = await _invoke_validated_stage(
-        stage=ARGUMENT_DESIGN_STAGE,
-        model_input=design_input,
-        stage_gateway=stage_gateway,
-        max_attempts=max_stage_attempts,
-        frozen_skeleton=frozen_skeleton,
-        initial_retry_context=initial_design_retry_context,
-    )
+    revision_stage_rejection: dict[str, Any] | None = None
+    try:
+        design_candidate = await _invoke_validated_stage(
+            stage=ARGUMENT_DESIGN_STAGE,
+            model_input=design_input,
+            stage_gateway=stage_gateway,
+            max_attempts=max_stage_attempts,
+            frozen_skeleton=frozen_skeleton,
+            initial_retry_context=initial_design_retry_context,
+        )
+    except ArgumentStageContractError as exc:
+        if not design_only_regeneration or baseline_design is None:
+            raise
+        # A semantically revised response is optional evidence, whereas the
+        # accepted baseline is durable state.  Exhausting malformed/partial
+        # revision responses must therefore retain the baseline whole instead
+        # of turning a recoverable semantic REVISE into an output-contract crash.
+        design_candidate = copy.deepcopy(baseline_design)
+        revision_stage_rejection = {
+            "phase": exc.phase,
+            "validation_errors": list(exc.errors[:20]),
+        }
 
     regeneration_merge = None
-    if design_only_regeneration and baseline_design is not None:
-        design_candidate, regeneration_merge = _merge_argument_design_regeneration(
-            canonical_envelope,
-            frozen_skeleton=frozen_skeleton,
-            baseline_design=baseline_design,
-            candidate_design=design_candidate,
-            target_threads=target_threads,
-        )
 
     try:
         authored_state = assemble_argument_authored_state(frozen_skeleton, design_candidate)
@@ -2804,7 +2631,6 @@ async def orchestrate_argument_architecture_two_stage(
         regeneration_baseline_authored_state is not None
         and baseline_skeleton is not None
         and baseline_design is not None
-        and not design_only_regeneration
     ):
         baseline_output = expand_argument_architecture_model_output(
             canonical_envelope, regeneration_baseline_authored_state
@@ -2814,17 +2640,25 @@ async def orchestrate_argument_architecture_two_stage(
         candidate_skeleton, candidate_design = split_argument_authored_state(
             authored_state
         )
-        regressed_collections = [
-            collection
-            for collection in _ARGUMENT_DESIGN_THREAD_COLLECTIONS
-            if len(candidate_design.get(collection) or [])
-            < len(baseline_design.get(collection) or [])
-        ]
+        regressed_collections = _argument_design_collection_regressions(
+            baseline_design, candidate_design
+        )
         skeleton_shrank = len(candidate_skeleton.get("research_threads") or []) < len(
             baseline_skeleton.get("research_threads") or []
         )
+        baseline_gap_signatures = {
+            _argument_gap_signature(item) for item in baseline_blocking
+        }
+        candidate_gap_signatures = {
+            _argument_gap_signature(item) for item in candidate_blocking
+        }
+        new_blocking_gaps = sorted(
+            candidate_gap_signatures - baseline_gap_signatures,
+            key=repr,
+        )
         if (
             len(candidate_blocking) >= len(baseline_blocking)
+            or new_blocking_gaps
             or skeleton_shrank
             or regressed_collections
         ):
@@ -2837,15 +2671,21 @@ async def orchestrate_argument_architecture_two_stage(
                 "reason": "NO_STRICT_NON_REGRESSIVE_HARD_GAP_IMPROVEMENT",
                 "blocking_before": len(baseline_blocking),
                 "blocking_after_candidate": len(candidate_blocking),
+                "new_blocking_gaps": new_blocking_gaps,
                 "skeleton_shrank": skeleton_shrank,
                 "regressed_collections": regressed_collections,
             }
+            if revision_stage_rejection is not None:
+                regeneration_merge["stage_rejection"] = copy.deepcopy(
+                    revision_stage_rejection
+                )
         else:
             regeneration_merge = {
                 "accepted": True,
                 "reason": "STRICT_NON_REGRESSIVE_HARD_GAP_IMPROVEMENT",
                 "blocking_before": len(baseline_blocking),
                 "blocking_after": len(candidate_blocking),
+                "new_blocking_gaps": [],
             }
     canonical_errors = pack.validate(
         "P-ARGUMENT-ARCHITECTURE", "output", canonical_output

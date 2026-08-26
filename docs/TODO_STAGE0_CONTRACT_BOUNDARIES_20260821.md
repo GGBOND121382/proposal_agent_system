@@ -23,6 +23,9 @@
 - [ ] 后续 prompt 改造时单独记录请求长度预算，删除对模型无推理价值的哈希、内部 ID 和重复上下文；不得在本次阶段 0 修复中顺带扩大范围。
 - [ ] 盘点其他 canonical 对象是否存在手写不完整字典；优先收敛为集中构造器和公共校验入口，但每一类对象单独评审、单独提交。
 - [ ] 阶段 1 Argument Critic 的最终状态目前仍以“存在任意 finding”判为 `REVISE`；应区分阻断性 finding 与 advisory finding，避免非阻断建议触发整轮返工。位置：`app/model_semantic_contracts.py::_critic_final_status_from_canonical_state`。
+- [ ] 重构 Argument Critic 为轻量语义审查，不再让模型重复完成运行时已经能够确定性完成的机械校验。模型只审查论点价值与可证伪性、方法实质性、创新点区分度、评价方案能否回答研究问题等主观语义；图拓扑、矩阵闭环、ID/引用存在性、证据与基线覆盖、路由、优先级及 `blocking` 等字段继续由运行时生成和校验。
+- [ ] Argument Critic 输入按研究线程或高层语义单元投影，删除要求模型回显全部 `reviewed_unit_keys`、机器 ID、证据 ID 和维度映射的内容；为请求长度设置预算并增加回归断言。只有通过契约校验的 P0/P1 语义 finding 才能阻断阶段 0；Critic 自身连续输出契约失败时应记录为 `REVIEW_UNAVAILABLE`/告警，不得推翻已经通过确定性校验的 Producer 结果。
+- [ ] 将本次 Argument Critic 的六次历史失败请求与响应纳入回归测试，覆盖不存在的 `evidence_ids`、review unit 与 component 不一致、dimension 与失败质量维度不一致等错误。若仍执行模型重试，下一轮必须携带精确的验证反馈，禁止对同一请求进行无反馈的原样重试。
 - [ ] 后续 Critic 路由的 `ORIGINAL_PRODUCER` 重生成目前会整体替换已有 Producer 结果；应建立精确基线、局部修复范围和确定性非退化验收，禁止新候选通过删除既有内容来减少表面问题。位置：`app/workflows.py::_prepare_original_producer_regeneration`。
 - [ ] 章节写作与整稿 acceptance regeneration 也采用整体替换；后续 prompt 开始改造时，应为 `app/workflow_authoring_base.py` 与 `app/full_proposal_sections.py` 增加基线保留、目标范围和非退化校验，并单独评估请求体积。
 - [ ] 为阶段 1 及后续阶段统一“advisory 不阻断、blocking 才返工”的状态不变量，并增加跨 Producer/Critic/acceptance 的契约测试；本次不提前修改这些尚未运行的阶段。

@@ -12,7 +12,6 @@ from app.argument_two_stage_orchestration import (
     ARGUMENT_DESIGN_STAGE,
     ARGUMENT_SKELETON_STAGE,
     ArgumentStageContractError,
-    _merge_full_stage_regeneration_candidate,
     argument_stage_desired_output_tokens,
     argument_stage_prompt_text,
     orchestrate_argument_architecture_two_stage,
@@ -1086,6 +1085,9 @@ def test_revision_card_preserves_required_action_without_json_pointer():
     assert model_input["revision_issues"][0]["component"] == "METHOD"
     assert model_input["revision_issues"][0]["thread"] == 0
     assert model_input["revision_issues"][0]["review_unit_key"] == "FORMAL_MODEL:1"
+    assert model_input["revision_issues"][0]["code"] == "ARGUMENT_METHOD_SUBSTANCE_WEAK"
+    assert model_input["revision_issues"][0]["blocking"] is True
+    assert model_input["revision_issues"][0]["route"] == "ORIGINAL_PRODUCER"
 
 
 def test_argument_human_resolutions_preserve_question_identity_and_typed_answer():
@@ -2617,6 +2619,123 @@ def test_argument_thread_assembler_reconstructs_legacy_authored_thread_without_m
         assert forbidden not in rendered
 
 
+def test_argument_thread_assembler_rebases_provider_keys_to_nested_positions():
+    """Replay the index topologies from the passed and failed 2026-08-25 calls.
+
+    ``call-b90ff459...`` used work-package key 0 independently in every
+    thread. ``call-886f5fb...`` used keys 0, 1, 2, and 3 across the four
+    threads. Both flat outputs are self-consistent and valid. Their authored
+    nested references must therefore be identical and positional.
+    """
+
+    envelope = _argument_envelope_with_evidence()
+    base_skeleton = _flat_skeleton_output(envelope)
+    base_design = _flat_design_output(envelope)
+    skeleton = copy.deepcopy(base_skeleton)
+    skeleton["research_threads"] = [
+        copy.deepcopy(base_skeleton["research_threads"][0]) for _ in range(4)
+    ]
+
+    def four_thread_design(*, provider_global_keys: bool) -> dict:
+        design = {
+            key: [] if isinstance(value, list) else copy.deepcopy(value)
+            for key, value in base_design.items()
+        }
+        thread_collections = (
+            "work_packages",
+            "methods",
+            "theoretical_properties",
+            "evaluations",
+            "baselines",
+            "ablations",
+            "innovations",
+            "innovation_prior_work",
+            "innovation_evaluation_refs",
+        )
+        for thread_index in range(4):
+            work_package_key = thread_index if provider_global_keys else 0
+            for collection in thread_collections:
+                for source in base_design[collection]:
+                    row = copy.deepcopy(source)
+                    row["thread_index"] = thread_index
+                    if "work_package_index" in row:
+                        row["work_package_index"] = work_package_key
+                    design[collection].append(row)
+        return design
+
+    passed_topology = four_thread_design(provider_global_keys=False)
+    failed_topology = four_thread_design(provider_global_keys=True)
+
+    for design in (passed_topology, failed_topology):
+        assert argument_design_model_reference_errors(design, skeleton) == []
+        authored = assemble_argument_authored_state(skeleton, design)
+        assert [
+            thread["innovations"][0]["evaluation_refs"][0]
+            for thread in authored["research_threads"]
+        ] == [
+            {
+                "work_package_index": 0,
+                "method_index": 0,
+                "evaluation_index": 0,
+            }
+        ] * 4
+        assert PACK.validate_model(
+            "P-ARGUMENT-ARCHITECTURE", "output", authored
+        ) == []
+
+
+def test_argument_thread_assembler_rebases_sparse_foundation_support_keys():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    for collection in (
+        "work_packages",
+        "methods",
+        "theoretical_properties",
+        "evaluations",
+        "baselines",
+        "ablations",
+        "innovation_evaluation_refs",
+    ):
+        for row in design[collection]:
+            row["work_package_index"] = 7
+            if "method_index" in row and row["method_index"] is not None:
+                row["method_index"] = 11
+            if "evaluation_index" in row:
+                row["evaluation_index"] = 13
+    design["foundation"] = [{
+        "thread_index": 0,
+        "foundation_index": 4,
+        "statement": "已有优化原型可支撑工作包实施。",
+        "evidence_ids": _available_evidence_ids(envelope),
+    }]
+    design["foundation_supports"] = [
+        {
+            "thread_index": 0,
+            "foundation_index": 4,
+            "work_package_index": 7,
+            "method_index": None,
+        },
+        {
+            "thread_index": 0,
+            "foundation_index": 4,
+            "work_package_index": 7,
+            "method_index": 11,
+        },
+    ]
+
+    assert argument_design_model_reference_errors(design, skeleton) == []
+    thread = assemble_argument_authored_thread(skeleton, design, 0)
+
+    assert thread["innovations"][0]["evaluation_refs"] == [
+        {"work_package_index": 0, "method_index": 0, "evaluation_index": 0}
+    ]
+    assert thread["foundation"][0]["supports"] == [
+        {"work_package_index": 0, "method_index": None},
+        {"work_package_index": 0, "method_index": 0},
+    ]
+
+
 def test_argument_thread_assembler_output_is_compatible_with_existing_model_contract_and_projector():
     envelope = _argument_envelope_with_evidence()
     skeleton = _flat_skeleton_output(envelope)
@@ -2729,10 +2848,21 @@ def test_argument_advisory_gap_does_not_block_stage_zero_but_hard_gap_does():
     incomplete["baselines"] = []
     incomplete["ablations"] = []
     incomplete["innovation_evaluation_refs"] = []
+    incomplete["user_questions"] = [{
+        "target_area": "METRIC_JUSTIFICATION",
+        "question_type": "MISSING_INFORMATION",
+        "question": "Optional metric follow-up?",
+        "reason": "The model marked this follow-up as advisory.",
+        "answer_shape": "STRING",
+        "allowed_values": [],
+        "blocking": False,
+        "priority": "P2",
+    }]
     hard = expand_argument_architecture_model_output(
         envelope, assemble_argument_authored_state(skeleton, incomplete)
     )
     assert hard["status"] == "REVISE"
+    assert all(item["blocking"] is False for item in hard["user_questions"])
     deterministic = [
         item
         for item in hard["result"]["evidence_gap_report"]
@@ -2882,12 +3012,179 @@ def test_argument_semantic_regeneration_freezes_skeleton_and_accepts_only_improv
     assert retry["validation_errors"]
     assert result["skeleton"] == skeleton
     assert result["design"] == complete_design
-    assert result["regeneration_merge"]["accepted_threads"] == [0]
+    assert result["regeneration_merge"]["accepted"] is True
+    assert result["regeneration_merge"]["reason"] == (
+        "STRICT_NON_REGRESSIVE_HARD_GAP_IMPROVEMENT"
+    )
     assert result["regeneration_merge"]["blocking_after"] == 0
     assert result["canonical_output"]["status"] == "PASS"
 
 
-def test_argument_semantic_regeneration_rejects_degraded_or_unimproved_thread():
+def test_argument_semantic_regeneration_contract_names_complete_output_and_exact_baseline_target():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    complete_design = _flat_design_output(envelope)
+    baseline_design = copy.deepcopy(complete_design)
+    baseline_design["baselines"] = []
+    baseline_authored = assemble_argument_authored_state(skeleton, baseline_design)
+    envelope["payload"]["revision_findings"] = [{
+        "code": "ARGUMENT_METRIC_JUSTIFICATION_MISSING",
+        "defect_key": "ARGUMENT:EVALUATION_BASELINE_SUPPORT:0",
+        "description": "The evaluation lacks an evidence-backed baseline.",
+        "repair_instruction": "Add the missing representative baseline.",
+        "severity": "P1",
+        "semantic_component": "EVALUATION",
+        "semantic_thread": 0,
+    }]
+    gateway = _FakeArgumentStageGateway([complete_design])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope,
+        stage_gateway=gateway,
+        pack=PACK,
+        regeneration_baseline_authored_state=baseline_authored,
+    ))
+
+    retry = gateway.calls[0]["retry_context"]
+    assert retry["mode"] == "WHOLE_DESIGN_REVISE"
+    assert retry["required_output"] == "COMPLETE_DESIGN"
+    assert retry["required_thread_indices"] == [0]
+    assert retry["previous_candidate"] == baseline_design
+    assert retry["baseline_inventory"]["totals"]["evaluations"] == 1
+    assert retry["baseline_inventory"]["totals"]["baselines"] == 0
+    assert retry["exact_revision_targets"] == [{
+        "target_kind": "EVALUATION_BASELINE_SUPPORT",
+        "thread_index": 0,
+        "work_package_index": 0,
+        "method_index": 0,
+        "evaluation_index": 0,
+        "required_change": (
+            "Add at least one representative baseline with non-empty evidence_ids for this evaluation."
+        ),
+        "blocking": True,
+        "route": "ORIGINAL_PRODUCER",
+    }]
+    assert retry["validation_errors"] == [
+        "evaluation(thread=0,work_package=0,method=0,evaluation=0): add at least one evidence-backed baseline"
+    ]
+    assert result["design"] == complete_design
+    assert result["canonical_output"]["status"] == "PASS"
+
+
+def test_argument_semantic_revision_retry_reuses_accepted_baseline_not_failed_response():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    complete_design = _flat_design_output(envelope)
+    baseline_design = copy.deepcopy(complete_design)
+    baseline_design["baselines"] = []
+    baseline_authored = assemble_argument_authored_state(skeleton, baseline_design)
+    envelope["payload"]["revision_findings"] = [{
+        "code": "ARGUMENT_METRIC_JUSTIFICATION_MISSING",
+        "defect_key": "ARGUMENT:EVALUATION_BASELINE_SUPPORT:0",
+        "description": "The evaluation lacks an evidence-backed baseline.",
+        "repair_instruction": "Add the missing representative baseline.",
+        "severity": "P1",
+        "semantic_component": "EVALUATION",
+        "semantic_thread": 0,
+    }]
+    partial_response = copy.deepcopy(complete_design)
+    partial_response["work_packages"] = []
+    gateway = _FakeArgumentStageGateway([partial_response, complete_design])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope,
+        stage_gateway=gateway,
+        pack=PACK,
+        max_stage_attempts=2,
+        regeneration_baseline_authored_state=baseline_authored,
+    ))
+
+    first, retry = [item["retry_context"] for item in gateway.calls]
+    assert first["previous_candidate"] == baseline_design
+    assert retry["mode"] == "WHOLE_DESIGN_REVISE"
+    assert retry["recovery_mode"] == "WHOLE_DESIGN_REVISE_RETRY"
+    assert retry["previous_candidate"] == baseline_design
+    assert retry["previous_candidate"] != partial_response
+    assert any("work_packages" in item for item in retry["validation_errors"])
+    assert result["design"] == complete_design
+    assert result["canonical_output"]["status"] == "PASS"
+
+
+def test_historical_partial_semantic_revise_response_keeps_four_thread_baseline_whole():
+    """Replay call-cb9ec738, which returned only thread 0 during REVISE."""
+
+    envelope = _argument_envelope_with_evidence()
+    one_thread_skeleton = _flat_skeleton_output(envelope)
+    one_thread_design = _flat_design_output(envelope)
+    skeleton = copy.deepcopy(one_thread_skeleton)
+    skeleton["research_threads"] = [
+        copy.deepcopy(one_thread_skeleton["research_threads"][0])
+        for _ in range(4)
+    ]
+    design = {
+        key: [] if isinstance(value, list) else copy.deepcopy(value)
+        for key, value in one_thread_design.items()
+    }
+    for thread_index in range(4):
+        for collection, rows in one_thread_design.items():
+            if collection in {"evidence_gaps", "user_questions"} or not isinstance(rows, list):
+                continue
+            for source in rows:
+                row = copy.deepcopy(source)
+                row["thread_index"] = thread_index
+                design[collection].append(row)
+    design["baselines"] = [
+        item for item in design["baselines"] if item["thread_index"] == 0
+    ]
+    baseline_authored = assemble_argument_authored_state(skeleton, design)
+    envelope["payload"]["revision_findings"] = [
+        {
+            "code": "ARGUMENT_METRIC_JUSTIFICATION_MISSING",
+            "defect_key": (
+                f"ARGUMENT:EVALUATION_BASELINE_SUPPORT:{thread_index}"
+            ),
+            "description": "The evaluation lacks an evidence-backed baseline.",
+            "repair_instruction": "Add the missing representative baseline.",
+            "severity": "P1",
+            "semantic_component": "EVALUATION",
+            "semantic_thread": thread_index,
+        }
+        for thread_index in (1, 2, 3)
+    ]
+    historical_response = json.loads(
+        (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "stage0_call_cb9ec738_partial_revise_response.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert len(historical_response["work_packages"]) == 1
+    gateway = _FakeArgumentStageGateway([historical_response])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope,
+        stage_gateway=gateway,
+        pack=PACK,
+        max_stage_attempts=1,
+        regeneration_baseline_authored_state=baseline_authored,
+    ))
+
+    assert result["authored_state"] == baseline_authored
+    assert result["design"] == design
+    assert result["regeneration_merge"]["accepted"] is False
+    assert result["regeneration_merge"]["stage_rejection"]["phase"] in {
+        "structure_validation",
+        "cross_stage_validation",
+        "whole_design_revision_validation",
+    }
+    retry = gateway.calls[0]["retry_context"]
+    assert retry["required_thread_indices"] == [0, 1, 2, 3]
+    assert [
+        target["thread_index"] for target in retry["exact_revision_targets"]
+    ] == [1, 2, 3]
+
+
+def test_argument_semantic_regeneration_rejects_unimproved_whole_candidate():
     envelope = _argument_envelope_with_evidence()
     skeleton = _flat_skeleton_output(envelope)
     complete_design = _flat_design_output(envelope)
@@ -2916,11 +3213,71 @@ def test_argument_semantic_regeneration_rejects_degraded_or_unimproved_thread():
     ))
 
     assert result["design"] == baseline_design
-    assert result["regeneration_merge"]["accepted_threads"] == []
-    assert result["regeneration_merge"]["rejected_threads"][0]["reason"] == (
-        "NO_STRICT_HARD_GAP_IMPROVEMENT"
+    assert result["regeneration_merge"]["accepted"] is False
+    assert result["regeneration_merge"]["reason"] == (
+        "NO_STRICT_NON_REGRESSIVE_HARD_GAP_IMPROVEMENT"
     )
     assert result["canonical_output"]["status"] == "REVISE"
+
+
+def test_argument_semantic_regeneration_rejects_whole_candidate_shrinkage():
+    """Replay the 6-to-18-gap regression without adopting any hybrid state."""
+
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    complete_design = _flat_design_output(envelope)
+    baseline_design = copy.deepcopy(complete_design)
+    baseline_design["evaluations"] = []
+    baseline_design["baselines"] = []
+    baseline_design["ablations"] = []
+    baseline_design["innovation_evaluation_refs"] = []
+    baseline_authored = assemble_argument_authored_state(
+        skeleton, baseline_design
+    )
+    envelope["payload"]["revision_findings"] = [{
+        "description": "The method lacks a validation/evaluation closure.",
+        "repair_instruction": "Regenerate the complete Design.",
+        "severity": "P1",
+        "semantic_component": "EVALUATION",
+        "semantic_thread": 0,
+    }]
+    degraded_design = copy.deepcopy(baseline_design)
+    for collection in (
+        "work_packages",
+        "methods",
+        "theoretical_properties",
+        "innovations",
+        "innovation_prior_work",
+    ):
+        degraded_design[collection] = []
+    gateway = _FakeArgumentStageGateway([degraded_design] * 3)
+
+    result = asyncio.run(
+        orchestrate_argument_architecture_two_stage(
+            envelope,
+            stage_gateway=gateway,
+            pack=PACK,
+            regeneration_baseline_authored_state=baseline_authored,
+        )
+    )
+
+    assert result["authored_state"] == baseline_authored
+    assert result["design"] == baseline_design
+    assert result["regeneration_merge"]["accepted"] is False
+    assert result["regeneration_merge"]["regressed_collections"] == []
+    stage_rejection = result["regeneration_merge"]["stage_rejection"]
+    assert stage_rejection["phase"] == "whole_design_revision_validation"
+    assert any(
+        "work_packages" in error
+        for error in stage_rejection["validation_errors"]
+    )
+    assert all(
+        call["retry_context"]["previous_candidate"] == baseline_design
+        for call in gateway.calls
+    )
+    assert [
+        call["retry_context"].get("recovery_mode") for call in gateway.calls
+    ] == [None, "WHOLE_DESIGN_REVISE_RETRY", "WHOLE_DESIGN_REVISE_RETRY"]
 
 
 def test_argument_two_stage_normalizes_exact_null_string_without_mutating_provider_candidate():
@@ -3260,7 +3617,7 @@ def test_argument_two_stage_step4a_design_full_retry_freezes_skeleton_and_carrie
     assert result["design"] == valid_design
 
 
-def test_argument_two_stage_full_design_retry_preserves_previously_valid_rows():
+def test_argument_two_stage_full_design_retry_never_merges_the_failed_draft():
     envelope = _argument_envelope_with_evidence()
     skeleton = _flat_skeleton_output(envelope)
     broken_design = _flat_design_output(envelope)
@@ -3282,11 +3639,13 @@ def test_argument_two_stage_full_design_retry_preserves_previously_valid_rows():
         orchestrate_argument_architecture_two_stage(envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2)
     )
 
-    assert result["design"]["work_packages"][0]["statement"] == ("Keep the valid prior work package.")
-    assert result["design"]["methods"][0] == regenerated_design["methods"][0]
+    assert result["design"] == regenerated_design
+    assert result["design"]["work_packages"][0]["statement"] == (
+        "Do not overwrite prior valid content."
+    )
 
 
-def test_argument_two_stage_full_design_retry_adds_only_required_missing_parent():
+def test_argument_two_stage_full_design_retry_replaces_the_failed_draft_whole():
     envelope = _argument_envelope_with_evidence()
     skeleton = _flat_skeleton_output(envelope)
     broken_design = _flat_design_output(envelope)
@@ -3306,99 +3665,66 @@ def test_argument_two_stage_full_design_retry_adds_only_required_missing_parent(
         orchestrate_argument_architecture_two_stage(envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2)
     )
 
-    assert result["design"]["work_packages"] == regenerated_design["work_packages"]
-    assert result["design"]["methods"] == broken_design["methods"]
-    assert result["design"]["foundation"] == []
-    assert result["design"]["foundation_supports"] == []
+    assert result["design"] == regenerated_design
 
 
-def test_argument_full_regeneration_replays_thirteen_missing_parent_failures_monotonically():
-    previous = {
-        "work_packages": [
-            {
-                "thread_index": 0,
-                "work_package_index": index,
-                "statement": f"retained-parent-{index}",
-            }
-            for index in range(3)
-        ],
-        "methods": [
-            {
-                "thread_index": thread_index,
-                "work_package_index": work_package_index,
-                "method_index": 0,
-                "statement": f"retained-method-{thread_index}-{work_package_index}",
-            }
-            for thread_index in range(4)
-            for work_package_index in range(4)
-        ],
-        "foundation": [],
-    }
-    regenerated = copy.deepcopy(previous)
-    regenerated["work_packages"] = [
+def test_argument_skeleton_retry_accepts_a_later_complete_candidate_whole():
+    """Replay the failed-Draft/correct-response ordering from call-b4307."""
+
+    envelope = _argument_envelope_with_evidence()
+    broken = _flat_skeleton_output(envelope)
+    broken["evidence_gaps"] = [
         {
-            "thread_index": thread_index,
-            "work_package_index": work_package_index,
-            "statement": f"regenerated-parent-{thread_index}-{work_package_index}",
-        }
-        for thread_index in range(4)
-        for work_package_index in range(4)
+            "kind": "FOUNDATION",
+            "thread_index": 0,
+            "reason": "Known valid gap.",
+            "blocking": True,
+            "suggested_question": "Please provide foundation evidence.",
+        },
+        {
+            "kind": "METRIC_JUSTIFICATION",
+            "thread_index": 4,
+            "reason": "Invalid prior Draft gap.",
+            "blocking": True,
+            "suggested_question": "Please provide metric definitions.",
+        },
     ]
-    for method in regenerated["methods"]:
-        method["statement"] = "regenerated-" + method["statement"]
-    regenerated["foundation"] = [{"unrelated": "must not be adopted"}]
-    errors = [f"/methods/{index}: unresolved parent index" for index in range(3, 16)]
+    corrected = _flat_skeleton_output(envelope)
+    corrected["evidence_gaps"] = [
+        {
+            "kind": "METRIC_JUSTIFICATION",
+            "thread_index": 0,
+            "reason": "Complete regenerated metric gap.",
+            "blocking": True,
+            "suggested_question": "Please confirm metric definitions.",
+        },
+        {
+            "kind": "FOUNDATION",
+            "thread_index": 0,
+            "reason": "Complete regenerated foundation gap.",
+            "blocking": True,
+            "suggested_question": "Please confirm foundation evidence.",
+        },
+    ]
+    design = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([broken, corrected, design])
 
-    merged = _merge_full_stage_regeneration_candidate(
-        stage=ARGUMENT_DESIGN_STAGE,
-        previous_candidate=previous,
-        regenerated_candidate=regenerated,
-        previous_errors=errors,
+    result = asyncio.run(
+        orchestrate_argument_architecture_two_stage(
+            envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=2
+        )
     )
 
-    assert len(merged["work_packages"]) == 16
-    assert merged["work_packages"][:3] == previous["work_packages"]
-    assert merged["methods"][:3] == previous["methods"][:3]
-    assert merged["methods"][3:] == regenerated["methods"][3:]
-    assert merged["foundation"] == []
-
-
-def test_argument_full_regeneration_never_uses_an_unrelated_indexed_row_by_position():
-    previous = {
-        "methods": [
-            {
-                "thread_index": 0,
-                "work_package_index": 0,
-                "method_index": 0,
-                "statement": "valid-row",
-            },
-            {
-                "thread_index": 1,
-                "work_package_index": 9,
-                "method_index": 0,
-                "statement": "invalid-row",
-            },
-        ]
-    }
-    regenerated = {
-        "methods": [
-            {
-                "thread_index": 0,
-                "work_package_index": 0,
-                "method_index": 0,
-                "statement": "unrelated-regeneration",
-            }
-        ]
-    }
-
-    merged = _merge_full_stage_regeneration_candidate(
-        stage=ARGUMENT_DESIGN_STAGE,
-        previous_candidate=previous,
-        regenerated_candidate=regenerated,
-        previous_errors=["/methods/1: unresolved parent index"],
+    assert result["skeleton"]["research_threads"] == corrected["research_threads"]
+    assert result["skeleton"]["evidence_gaps"] == corrected["evidence_gaps"]
+    assert all(
+        item.get("reason") != "Invalid prior Draft gap."
+        for item in result["skeleton"]["evidence_gaps"]
     )
-
-    assert merged["methods"] == previous["methods"][:1]
+    assert result["skeleton"]["evidence_gaps"][0]["thread_index"] == 0
+    assert gateway.calls[1]["retry_context"]["validation_errors"] == [
+        "/evidence_gaps/1/thread_index: out of range"
+    ]
 
 
 def test_argument_two_stage_later_invalid_full_response_cannot_corrupt_valid_rows():
@@ -3426,8 +3752,10 @@ def test_argument_two_stage_later_invalid_full_response_cannot_corrupt_valid_row
         orchestrate_argument_architecture_two_stage(envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=3)
     )
 
-    assert result["design"]["work_packages"][0]["statement"] == ("Stable valid content.")
-    assert result["design"]["methods"][0] == valid_design["methods"][0]
+    assert result["design"] == valid_design
+    assert result["design"]["work_packages"][0]["statement"] == (
+        "Another rejected overwrite."
+    )
 
 
 def test_argument_two_stage_step4a_exhausted_skeleton_retry_never_calls_design():

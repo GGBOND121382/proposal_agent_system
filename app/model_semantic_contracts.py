@@ -668,6 +668,9 @@ def _revision_issues(canonical_envelope: dict[str, Any]) -> list[dict[str, Any]]
             {
                 "problem": problem,
                 "severity": str(finding.get("severity") or "P2"),
+                "code": code or None,
+                "defect_key": str(finding.get("defect_key") or "").strip()
+                or None,
                 "component": component,
                 "thread": finding.get("semantic_thread")
                 if isinstance(finding.get("semantic_thread"), int)
@@ -676,6 +679,10 @@ def _revision_issues(canonical_envelope: dict[str, Any]) -> list[dict[str, Any]]
                 or None,
                 "required_action": required_action,
                 "evidence_ids": list(dict.fromkeys(evidence_ids)),
+                "blocking": bool(finding.get("blocking", True)),
+                "route": str(
+                    finding.get("suggested_route") or "ORIGINAL_PRODUCER"
+                ).upper(),
             }
         )
     return result
@@ -1115,24 +1122,52 @@ def assemble_argument_authored_thread(
             ),
         )
 
+    # Flat Stage-B indexes are record keys, not positions in the nested
+    # authored-state arrays.  Providers may legally use sparse keys or reuse a
+    # global sequence across threads.  Record the deterministic sorted position
+    # of every referenced object while assembling so outgoing nested references
+    # never depend on the provider's choice of key values.
+    work_package_positions: dict[int, int] = {}
+    method_positions: dict[tuple[int, int], int] = {}
+    evaluation_positions: dict[tuple[int, int, int], int] = {}
+
     work_packages: list[dict[str, Any]] = []
-    for wp in rows("work_packages", "work_package_index"):
+    for work_package_position, wp in enumerate(
+        rows("work_packages", "work_package_index")
+    ):
         wp_index = int(wp["work_package_index"])
+        work_package_positions[wp_index] = work_package_position
         assembled_methods: list[dict[str, Any]] = []
-        for method in rows("methods", "work_package_index", "method_index"):
-            if int(method["work_package_index"]) != wp_index:
-                continue
+        matching_methods = [
+            method
+            for method in rows("methods", "work_package_index", "method_index")
+            if int(method["work_package_index"]) == wp_index
+        ]
+        for method_position, method in enumerate(matching_methods):
             method_index = int(method["method_index"])
+            method_positions[(wp_index, method_index)] = method_position
             theoretical_properties = [
                 {"statement": item["statement"], "evidence_ids": copy.deepcopy(item["evidence_ids"])}
                 for item in rows("theoretical_properties", "work_package_index", "method_index", "property_index")
                 if int(item["work_package_index"]) == wp_index and int(item["method_index"]) == method_index
             ]
             evaluations: list[dict[str, Any]] = []
-            for evaluation in rows("evaluations", "work_package_index", "method_index", "evaluation_index"):
-                if int(evaluation["work_package_index"]) != wp_index or int(evaluation["method_index"]) != method_index:
-                    continue
+            matching_evaluations = [
+                evaluation
+                for evaluation in rows(
+                    "evaluations",
+                    "work_package_index",
+                    "method_index",
+                    "evaluation_index",
+                )
+                if int(evaluation["work_package_index"]) == wp_index
+                and int(evaluation["method_index"]) == method_index
+            ]
+            for evaluation_position, evaluation in enumerate(matching_evaluations):
                 evaluation_index = int(evaluation["evaluation_index"])
+                evaluation_positions[
+                    (wp_index, method_index, evaluation_index)
+                ] = evaluation_position
                 baselines = [
                     {"statement": item["statement"], "evidence_ids": copy.deepcopy(item["evidence_ids"])}
                     for item in rows("baselines", "work_package_index", "method_index", "evaluation_index", "baseline_index")
@@ -1176,15 +1211,28 @@ def assemble_argument_authored_thread(
             for item in rows("innovation_prior_work", "innovation_index", "prior_work_index")
             if int(item["innovation_index"]) == innovation_index
         ]
-        evaluation_refs = [
-            {
-                "work_package_index": int(item["work_package_index"]),
-                "method_index": int(item["method_index"]),
-                "evaluation_index": int(item["evaluation_index"]),
-            }
-            for item in rows("innovation_evaluation_refs", "innovation_index", "work_package_index", "method_index", "evaluation_index")
-            if int(item["innovation_index"]) == innovation_index
-        ]
+        evaluation_refs: list[dict[str, int]] = []
+        for item in rows(
+            "innovation_evaluation_refs",
+            "innovation_index",
+            "work_package_index",
+            "method_index",
+            "evaluation_index",
+        ):
+            if int(item["innovation_index"]) != innovation_index:
+                continue
+            wp_index = int(item["work_package_index"])
+            method_index = int(item["method_index"])
+            evaluation_index = int(item["evaluation_index"])
+            evaluation_refs.append(
+                {
+                    "work_package_index": work_package_positions[wp_index],
+                    "method_index": method_positions[(wp_index, method_index)],
+                    "evaluation_index": evaluation_positions[
+                        (wp_index, method_index, evaluation_index)
+                    ],
+                }
+            )
         innovations.append({
             "statement": innovation["statement"],
             "evidence_ids": copy.deepcopy(innovation["evidence_ids"]),
@@ -1196,14 +1244,27 @@ def assemble_argument_authored_thread(
     foundation: list[dict[str, Any]] = []
     for item in rows("foundation", "foundation_index"):
         foundation_index = int(item["foundation_index"])
-        supports = [
-            {
-                "work_package_index": int(link["work_package_index"]),
-                "method_index": (None if link.get("method_index") is None else int(link["method_index"])),
-            }
-            for link in rows("foundation_supports", "foundation_index", "work_package_index", "method_index")
-            if int(link["foundation_index"]) == foundation_index
-        ]
+        supports: list[dict[str, int | None]] = []
+        for link in rows(
+            "foundation_supports",
+            "foundation_index",
+            "work_package_index",
+            "method_index",
+        ):
+            if int(link["foundation_index"]) != foundation_index:
+                continue
+            wp_index = int(link["work_package_index"])
+            method_index = link.get("method_index")
+            supports.append(
+                {
+                    "work_package_index": work_package_positions[wp_index],
+                    "method_index": (
+                        None
+                        if method_index is None
+                        else method_positions[(wp_index, int(method_index))]
+                    ),
+                }
+            )
         foundation.append({
             "statement": item["statement"],
             "evidence_ids": copy.deepcopy(item["evidence_ids"]),
