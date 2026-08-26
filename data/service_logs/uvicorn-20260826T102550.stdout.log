@@ -46,3 +46,5 @@ INFO:     127.0.0.1:16920 - "GET /api/projects/project-8595abee7b9c4047/document
 INFO:     127.0.0.1:16922 - "GET /api/gates?project_id=project-8595abee7b9c4047 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:16921 - "GET /api/workflows?project_id=project-8595abee7b9c4047 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:16923 - "GET /api/runs?project_id=project-8595abee7b9c4047 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41341 - "GET /api/workflows?project_id=project-8595abee7b9c4047 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41341 - "GET /api/workflows?project_id=project-8595abee7b9c4047 HTTP/1.1" 200 OK

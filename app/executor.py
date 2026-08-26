@@ -49,6 +49,10 @@ from .status_ontology import (
     normalize_temporal_status,
 )
 from .util import new_id, sha256_json, utc_now
+from .wf3_contracts import (
+    canonicalize_wf3_producer_status,
+    compact_wf3_research_envelope,
+)
 
 
 SOURCE_TYPE_ALIASES = {
@@ -68,8 +72,8 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-08-11.v48-path-refs-source-binding-human-gate"
-MODEL_CONTEXT_PROJECTION_VERSION = "2026-08-12.v3-provider-business-metadata-trim"
+OUTPUT_NORMALIZER_VERSION = "2026-08-26.v49-wf3-status-invariants"
+MODEL_CONTEXT_PROJECTION_VERSION = "2026-08-26.v4-wf3-research-dedup"
 MODEL_SYSTEM_PROMPT_VERSION = "2026-08-13.v3-semantic-task-boundary"
 
 _PROVIDER_SOURCE_REF_OMIT_FIELDS = frozenset({
@@ -1344,6 +1348,7 @@ class PromptExecutor:
             questions = normalized.get("user_questions")
             if isinstance(questions, list):
                 normalized["user_questions"] = widen_gate_questions(questions)
+            normalized, _ = canonicalize_wf3_producer_status(prompt_id, normalized)
             normalized = self._normalize_human_gate_status(normalized)
             human_gate_errors = self._human_gate_contract_errors(normalized)
             if human_gate_errors:
@@ -1954,6 +1959,11 @@ class PromptExecutor:
         envelope, while the model receives all sections, semantic identities,
         evidence links and bounded excerpts.  The trace records both envelopes.
         """
+        wf3_envelope, wf3_compaction = compact_wf3_research_envelope(
+            prompt_id, envelope
+        )
+        if wf3_compaction is not None:
+            return wf3_envelope, wf3_compaction
         if prompt_id == "P-PROJECT-DEFINITION-EXTRACT":
             original_chars = len(json.dumps(envelope, ensure_ascii=False))
             source_documents = (envelope.get("payload") or {}).get("source_documents") or []

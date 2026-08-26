@@ -30,6 +30,7 @@ from .workflow_defs import CRITIC_PRODUCER, WORKFLOWS
 from .workflow_gates import WorkflowGateMixin
 from .workflow_repair import WorkflowRepairMixin
 from .wf3_input import WorkflowInputRequired
+from .wf3_contracts import WF3_RESEARCH_CRITIC, wf3_critic_routing_report
 from .workflow_status import (
     WorkflowStatus,
     classify_legacy_blocked_error,
@@ -2815,7 +2816,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     ),
                 )
             output = result["output"]
-            if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS" and result["status"] == "PASS":
+            if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS":
                 claim_validation = self.research_service.validate_synthesis(
                     output.get("result") or {},
                     state.get("public_search_results") or {},
@@ -2868,6 +2869,38 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 )
                 self._update(wf, status="BLOCKED_CONTRACT", state=state)
                 return self.get(workflow_id)
+            if (
+                prompt_id == WF3_RESEARCH_CRITIC
+                and effective_status in {"REVISE", "BLOCK"}
+            ):
+                routing = wf3_critic_routing_report(effective_output)
+                state.setdefault("wf3_critic_routing_history", []).append(
+                    {
+                        **routing,
+                        "run_id": str(result.get("run_id") or ""),
+                        "recorded_at": utc_now(),
+                    }
+                )
+                del state["wf3_critic_routing_history"][:-50]
+                if routing["has_non_synthesis_route"]:
+                    self._clear_workflow_repair_rereview(state, prompt_id)
+                    route_counts = ", ".join(
+                        f"{route}={count}"
+                        for route, count in routing["route_counts"].items()
+                        if count
+                    )
+                    state["last_error"] = (
+                        "公开研究 Critic 返回了超出 Synthesis 写权限的阻断项（"
+                        + route_counts
+                        + "）。这些问题必须回到对应的检索或计划边界；"
+                        "系统已保留精确 Finding，未把它们误送给 Synthesis 定向修复。"
+                    )
+                    self._update(
+                        wf,
+                        status=WorkflowStatus.BLOCKED_CONTENT.value,
+                        state=state,
+                    )
+                    return self.get(workflow_id)
             if effective_status == "REVISE":
                 state.setdefault("semantic_failure_history", []).append({
                     **semantic_revise_classification().to_dict(),

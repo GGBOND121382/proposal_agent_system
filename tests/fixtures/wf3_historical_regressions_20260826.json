@@ -1,0 +1,78 @@
+{
+  "schema_version": "1.0",
+  "fixture_scope": "control_plane excerpt derived from immutable full request/response SHA anchors",
+  "project_id": "project-8595abee7b9c4047",
+  "workflow_id": "wf-f29b7e641f4c4987",
+  "cases": {
+    "advisory_only_synthesis": {
+      "run_id": "run-ef65772880274b45",
+      "call_key": "call-f1bdb9d59bf414189b041b675ada170f",
+      "input_sha256": "88416b1cb85e491d3cb29f79a896559371049714349d09ffd79813ef5251513d",
+      "output_sha256": "40a3e12cfd7a34bd55678332c7d4db7039428aa73feda4699fc07474e8062934",
+      "historical_counts": {"findings": 4, "unresolved_items": 4, "user_questions": 2},
+      "output": {
+        "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS",
+        "status": "REVISE",
+        "findings": [
+          {"code": "PUBLIC_SYNTHESIS_UNSOURCED", "blocking": false},
+          {"code": "PUBLIC_SYNTHESIS_OVERGENERALIZED", "blocking": false},
+          {"code": "PUBLIC_SYNTHESIS_SOURCE_CONFLICT", "blocking": false},
+          {"code": "PUBLIC_SYNTHESIS_UNSOURCED", "blocking": false}
+        ],
+        "unresolved_items": [
+          {"item_id": "URI-001", "blocking": false},
+          {"item_id": "URI-002", "blocking": false},
+          {"item_id": "URI-003", "blocking": false},
+          {"item_id": "URI-004", "blocking": false}
+        ],
+        "user_questions": [
+          {"question_id": "uq-001", "blocking": false},
+          {"question_id": "uq-002", "blocking": false}
+        ],
+        "warnings": []
+      }
+    },
+    "critic_cross_capability": {
+      "run_id": "run-de8115e860304095",
+      "call_key": "call-62fd78830efccbf9f056383f694df8a0",
+      "input_sha256": "5399c8efb6a7d5b95148c081d19f369ad1a8db36ece8b2b9d38c300e10ddfe09",
+      "output_sha256": "1b21481dd81b3e6796dd1ff5187dd1315c693b03da0c6431b8209ab42ac222ca",
+      "output": {
+        "prompt_id": "P-PUBLIC-RESEARCH-CRITIC",
+        "status": "REVISE",
+        "findings": [
+          {
+            "code": "PUBLIC_CRITIC_WEAK_SOURCE",
+            "target_type": "retrieved_sources",
+            "target_path_or_span": "payload.retrieved_sources[0] public-src-d076583d1da54399",
+            "description": "Source has been formally withdrawn by authors.",
+            "repair_instruction": "Remove this source from retrieved_sources.",
+            "suggested_route": "ORIGINAL_PRODUCER",
+            "repairable": true,
+            "blocking": true
+          },
+          {
+            "code": "PUBLIC_CRITIC_WEAK_SOURCE",
+            "target_type": "retrieved_sources",
+            "target_path_or_span": "payload.retrieved_sources[2] public-src-7bb1ce9fdc944757",
+            "description": "Astrophysics source is irrelevant to the research questions.",
+            "repair_instruction": "Remove this irrelevant source from retrieved_sources.",
+            "suggested_route": "ORIGINAL_PRODUCER",
+            "repairable": true,
+            "blocking": true
+          },
+          {
+            "code": "PUBLIC_CRITIC_UNSUPPORTED_CLAIM",
+            "target_type": "synthesis_candidate.claims",
+            "target_path_or_span": "payload.synthesis_candidate.claims[*]",
+            "description": "Core research questions need additional sources.",
+            "repair_instruction": "Revise the research plan and run targeted searches.",
+            "suggested_route": "PLANNING_AGENT",
+            "repairable": true,
+            "blocking": false
+          }
+        ]
+      }
+    }
+  }
+}

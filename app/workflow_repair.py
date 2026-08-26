@@ -27,6 +27,7 @@ from .json_pointer import (
 from .output_integrity import attach_trusted_source_catalog
 from .workflow_defs import CRITIC_PRODUCER
 from .contracts.semantic_contract import get_semantic_contract
+from .wf3_contracts import compare_public_search_candidates, summarize_public_search
 
 
 
@@ -679,24 +680,49 @@ class WorkflowRepairMixin:
     async def _run_public_search(self, wf: dict[str, Any], state: dict[str, Any]) -> None:
         mode = self.executor.gateway.settings.runtime_mode
         if mode in {"REPLAY", "MOCK"}:
-            state["public_search_results"] = {"sources": [], "passages": [], "queries": [], "mode": mode}
-            return
-        plan = self._context_result(
-            wf["project_id"],
-            "P-PUBLIC-RESEARCH-PLAN",
-            workflow_id=wf["id"],
-            exact_workflow=True,
-        ) or {}
-        provider = self.executor.gateway.settings.public_search_provider
-        if mode == "SIMULATED" and provider == "disabled":
-            state["public_search_results"] = self.research_service.simulated_search(plan)
-            return
-        state["public_search_results"] = await self.research_service.search(
-            plan,
-            project_id=wf["project_id"],
-            workflow_id=wf["id"],
-            security_level="PUBLIC",
-        )
+            candidate = {
+                "sources": [],
+                "passages": [],
+                "queries": [],
+                "mode": mode,
+            }
+        else:
+            plan = self._context_result(
+                wf["project_id"],
+                "P-PUBLIC-RESEARCH-PLAN",
+                workflow_id=wf["id"],
+                exact_workflow=True,
+            ) or {}
+            provider = self.executor.gateway.settings.public_search_provider
+            if mode == "SIMULATED" and provider == "disabled":
+                candidate = self.research_service.simulated_search(plan)
+            else:
+                candidate = await self.research_service.search(
+                    plan,
+                    project_id=wf["project_id"],
+                    workflow_id=wf["id"],
+                    security_level="PUBLIC",
+                )
+
+        accepted = state.get("public_search_results")
+        if isinstance(accepted, dict) and accepted:
+            comparison = compare_public_search_candidates(accepted, candidate)
+            state.setdefault("public_search_candidate_history", []).append(
+                {
+                    "recorded_at": utc_now(),
+                    "decision": "ACCEPT" if comparison["accepted"] else "REJECT",
+                    **comparison,
+                }
+            )
+            del state["public_search_candidate_history"][:-20]
+            if not comparison["accepted"]:
+                # The full rejected result remains in the immutable Search skill
+                # artifact/archive.  Workflow state retains only its exact hash
+                # and comparison so a large failed candidate cannot replace or
+                # duplicate the accepted context.
+                return
+        state["public_search_results"] = candidate
+        state["public_search_accepted_baseline"] = summarize_public_search(candidate)
 
     @staticmethod
     def _repair_state_key(prompt_id: str, state: dict[str, Any]) -> str:
