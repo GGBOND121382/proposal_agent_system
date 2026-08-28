@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "public_research_plan_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "approved_task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task_type": {
+          "type": "string",
+          "enum": [
+            "PUBLIC_RESEARCH",
+            "PUBLIC_TEMPLATE_ANALYSIS",
+            "GENERIC_LANGUAGE_ASSIST"
+          ]
+        },
+        "task_description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seed_queries": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "allowed_context": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "prohibited_inferences": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "prohibited_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "task_type",
+        "task_description",
+        "seed_queries",
+        "allowed_context",
+        "prohibited_inferences",
+        "prohibited_outputs"
+      ]
+    },
+    "time_constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "end_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "freshness_required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "start_date",
+        "end_date",
+        "freshness_required"
+      ]
+    },
+    "evidence_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "known_public_source_summaries": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "approved_task",
+    "time_constraints",
+    "evidence_requirements",
+    "known_public_source_summaries"
+  ]
+}

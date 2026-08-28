@@ -32,7 +32,10 @@
       "model_profile": "extraction",
       "required_environment": "OFFLINE_LOCAL",
       "executor_role": "Security Review Agent",
-      "next_human_gate": null
+      "next_human_gate": null,
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/safe_online_package_model_input.schema.json",
+      "model_output_schema": "schemas/model/safe_online_package_model_output.schema.json"
     },
     {
       "prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC",
@@ -43,7 +46,10 @@
       "model_profile": "critic",
       "required_environment": "OFFLINE_LOCAL",
       "executor_role": "Critic Agent",
-      "next_human_gate": "OUTBOUND_SECURITY_APPROVAL"
+      "next_human_gate": "OUTBOUND_SECURITY_APPROVAL",
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/safe_online_package_critic_model_input.schema.json",
+      "model_output_schema": "schemas/model/safe_online_package_critic_model_output.schema.json"
     },
     {
       "prompt_id": "P-ONLINE-RESULT-IMPORT-CRITIC",
@@ -54,7 +60,10 @@
       "model_profile": "security_review",
       "required_environment": "OFFLINE_LOCAL",
       "executor_role": "Critic Agent",
-      "next_human_gate": "ONLINE_RESULT_IMPORT_APPROVAL"
+      "next_human_gate": "ONLINE_RESULT_IMPORT_APPROVAL",
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/online_result_import_critic_model_input.schema.json",
+      "model_output_schema": "schemas/model/online_result_import_critic_model_output.schema.json"
     },
     {
       "prompt_id": "P-FINAL-CONFIDENTIALITY-REVIEW",
@@ -76,7 +85,10 @@
       "model_profile": "public_research",
       "required_environment": "ONLINE_PUBLIC",
       "executor_role": "Public Research Agent",
-      "next_human_gate": null
+      "next_human_gate": null,
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/public_research_plan_model_input.schema.json",
+      "model_output_schema": "schemas/model/public_research_plan_model_output.schema.json"
     },
     {
       "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS",
@@ -87,7 +99,10 @@
       "model_profile": "public_research",
       "required_environment": "ONLINE_PUBLIC",
       "executor_role": "Public Research Agent",
-      "next_human_gate": null
+      "next_human_gate": null,
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/public_research_synthesis_model_input.schema.json",
+      "model_output_schema": "schemas/model/public_research_synthesis_model_output.schema.json"
     },
     {
       "prompt_id": "P-PUBLIC-RESEARCH-CRITIC",
@@ -98,7 +113,10 @@
       "model_profile": "public_research",
       "required_environment": "ONLINE_PUBLIC",
       "executor_role": "Critic Agent",
-      "next_human_gate": null
+      "next_human_gate": null,
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/public_research_critic_model_input.schema.json",
+      "model_output_schema": "schemas/model/public_research_critic_model_output.schema.json"
     },
     {
       "prompt_id": "P-SCHEME-EXTRACT",

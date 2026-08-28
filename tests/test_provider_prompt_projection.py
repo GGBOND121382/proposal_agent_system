@@ -141,7 +141,7 @@ def test_wf3_actual_system_prompts_make_runtime_provenance_boundary_unambiguous(
         pack.replay_input("P-PUBLIC-RESEARCH-SYNTHESIS"),
         semantic_model_contract=False,
     )
-    assert "逐结论选择的输入`source_id`" in synthesis
+    assert "只能使用 `evidence_passages` 中可见的 source_id" in synthesis
 
 
 def test_argument_architecture_provider_request_is_materially_smaller_without_weakening_validation_context() -> None:
@@ -293,8 +293,9 @@ def test_shared_skill_modules_are_loaded_only_for_relevant_capabilities() -> Non
     assert "公共研究技能" not in expression_shared
 
     research_shared = pack.shared_prompt_for("P-PUBLIC-RESEARCH-SYNTHESIS")
-    assert "弱模型任务边界" in research_shared
-    assert "公共研究技能" in research_shared
+    assert "语义任务通则" in research_shared
+    assert "弱模型任务边界" not in research_shared
+    assert "公共研究技能" not in research_shared
     assert "Mermaid图形技能" not in research_shared
 
 

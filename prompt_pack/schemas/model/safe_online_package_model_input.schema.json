@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "safe_online_package_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "research_need": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason_online_needed": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desired_output": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "question",
+        "reason_online_needed",
+        "desired_output"
+      ]
+    },
+    "target_task_type": {
+      "type": "string",
+      "enum": [
+        "PUBLIC_RESEARCH",
+        "PUBLIC_TEMPLATE_ANALYSIS",
+        "GENERIC_LANGUAGE_ASSIST"
+      ]
+    },
+    "approved_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed_topics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "forbidden_semantic_categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "allowed_topics",
+        "forbidden_semantic_categories"
+      ]
+    }
+  },
+  "required": [
+    "research_need",
+    "target_task_type",
+    "approved_boundary"
+  ]
+}

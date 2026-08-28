@@ -325,6 +325,37 @@
           "items": {
             "$ref": "../common/human_resolution.schema.json"
           }
+        },
+        "extracted_passages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "passage_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "source_ref": {
+                "$ref": "../common/source_ref.schema.json"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "relevance": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "passage_id",
+              "source_ref",
+              "text",
+              "relevance"
+            ]
+          }
         }
       },
       "additionalProperties": false,

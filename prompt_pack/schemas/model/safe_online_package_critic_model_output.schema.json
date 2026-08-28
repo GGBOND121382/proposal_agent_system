@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "safe_online_package_critic_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "risk_type": {
+            "type": "string",
+            "enum": [
+              "IDENTIFIABLE_PROJECT",
+              "SCOPE_EXCESS",
+              "COMBINATION_REIDENTIFICATION",
+              "MISSING_PROHIBITION"
+            ]
+          },
+          "outbound_field": {
+            "type": "string",
+            "enum": [
+              "task_description",
+              "queries",
+              "allowed_context",
+              "prohibited_inferences",
+              "prohibited_outputs"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_excerpt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required_action": {
+            "type": "string",
+            "enum": [
+              "REDACT",
+              "NARROW_SCOPE",
+              "ADD_PROHIBITION",
+              "BLOCK"
+            ]
+          },
+          "required_redaction": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "risk_type",
+          "outbound_field",
+          "description",
+          "evidence_excerpt",
+          "required_action",
+          "required_redaction"
+        ]
+      }
+    }
+  },
+  "required": [
+    "risk_level",
+    "issues"
+  ]
+}

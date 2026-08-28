@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from .gate_answer_contract import widen_gate_questions
@@ -39,19 +41,18 @@ WF3_FIELD_OWNERSHIP: dict[str, dict[str, tuple[str, ...]]] = {
             "result.task_description",
             "result.queries",
             "result.allowed_context",
-            "result.entity_placeholders",
-            "result.removed_fields",
             "result.prohibited_inferences",
             "result.prohibited_outputs",
-            "result.valid_until",
         ),
         "RUNTIME_DERIVED": (
             "result.package_id",
+            "result.entity_placeholders",
+            "result.valid_until",
             "protocol identity",
             "finding/question IDs",
             "source_refs",
         ),
-        "INPUT_COPIED": ("result.task_type", "allowed topic boundary"),
+        "INPUT_COPIED": ("result.task_type", "result.removed_fields", "allowed topic boundary"),
         "GUARD_CONTROLLED": ("result.security_level", "source metadata", "Gate controls"),
     },
     "P-SAFE-ONLINE-PACKAGE-CRITIC": {
@@ -109,11 +110,12 @@ WF3_FIELD_OWNERSHIP: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "P-PUBLIC-RESEARCH-CRITIC": {
         "MODEL_SEMANTIC": (
-            "result.source_quality_summary",
-            "result.unsupported_claim_ids",
+            "semantic evidence-support issues",
             "result.missing_counterevidence_topics",
         ),
         "RUNTIME_DERIVED": (
+            "result.source_quality_summary",
+            "result.unsupported_claim_ids",
             "finding/question IDs",
             "canonical finding/question paths",
             "capability route",
@@ -125,11 +127,13 @@ WF3_FIELD_OWNERSHIP: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "P-ONLINE-RESULT-IMPORT-CRITIC": {
         "MODEL_SEMANTIC": (
+            "claim import decisions",
+            "semantic import security issues",
+        ),
+        "RUNTIME_DERIVED": (
             "result.import_recommendation",
             "result.accepted_claim_ids",
             "result.rejected_claim_ids",
-        ),
-        "RUNTIME_DERIVED": (
             "finding/question IDs",
             "result.required_user_confirmations",
             "status",
@@ -200,6 +204,46 @@ WF3_PROVIDER_REQUEST_CHAR_BUDGETS: dict[str, int] = {
     "P-ONLINE-RESULT-IMPORT-CRITIC": 105_000,
 }
 
+
+
+WF3_RUNTIME_ONLY_TARGET_PREFIXES = (
+    "/security_context",
+    "/freshness",
+    "/task",
+    "/scope",
+    "/trusted_source_catalog",
+    "/payload/source_summary",
+    "/payload/security_policy",
+    "/payload/deterministic_scan",
+    "/payload/package_candidate/valid_until",
+    "/payload/transfer_manifest",
+    "/payload/result_package/request_hash",
+    "/payload/result_package/manifest_hash",
+    "/result/valid_until",
+)
+
+
+def wf3_safe_package_ttl_days() -> int:
+    raw = str(os.getenv("WF3_SAFE_PACKAGE_TTL_DAYS", "7") or "7").strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("WF3_SAFE_PACKAGE_TTL_DAYS must be an integer between 1 and 30") from exc
+    if value < 1 or value > 30:
+        raise ValueError("WF3_SAFE_PACKAGE_TTL_DAYS must be between 1 and 30")
+    return value
+
+
+def wf3_safe_package_valid_until() -> str:
+    return (datetime.now(timezone.utc).date() + timedelta(days=wf3_safe_package_ttl_days())).isoformat()
+
+
+def _wf3_runtime_only_target(value: Any) -> bool:
+    target = _canonical_target_pointer(value)
+    return any(
+        target == prefix or target.startswith(prefix + "/")
+        for prefix in WF3_RUNTIME_ONLY_TARGET_PREFIXES
+    )
 
 def _stable_machine_id(prefix: str, value: Any, index: int) -> str:
     # The identity must survive harmless array reordering.  ``index`` remains
@@ -336,6 +380,7 @@ def canonicalize_wf3_machine_fields(
             for field, value in (
                 ("package_id", package_id),
                 ("task_type", str(payload.get("target_task_type") or "PUBLIC_RESEARCH")),
+                ("valid_until", wf3_safe_package_valid_until()),
                 ("security_level", "PUBLIC"),
             ):
                 if result.get(field) != value:
@@ -435,11 +480,28 @@ def canonicalize_wf3_machine_fields(
         if not isinstance(finding, dict):
             continue
         finding_code = str(finding.get("code") or "").upper()
-        if prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC" and finding_code in {
+        runtime_only_target = _wf3_runtime_only_target(finding.get("target_path_or_span"))
+        if runtime_only_target:
+            for field, value in (
+                ("blocking", False),
+                ("severity", "P2"),
+                ("category", "SYSTEM"),
+                ("repairable", False),
+                ("suggested_route", "BLOCK"),
+                ("repair_instruction", "由运行时确定性检查处理，不向用户提问。"),
+            ):
+                if finding.get(field) != value:
+                    finding[field] = value
+                    changes.append(f"/findings/{index}/{field}")
+        if (
+            not runtime_only_target
+            and prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC"
+            and finding_code in {
             "IMPORT_PROMPT_INJECTION",
             "IMPORT_SCOPE_VIOLATION",
             "IMPORT_SENSITIVE_INFERENCE",
-        }:
+            }
+        ):
             for field, value in (
                 ("blocking", True),
                 ("severity", "P0"),
@@ -500,7 +562,7 @@ def canonicalize_wf3_machine_fields(
         finding_codes = {
             str(item.get("code") or "").upper()
             for item in normalized.get("findings") or []
-            if isinstance(item, Mapping)
+            if isinstance(item, Mapping) and item.get("blocking") is True
         }
         injection_detected = "IMPORT_PROMPT_INJECTION" in finding_codes
         scope_violation_detected = bool(
@@ -548,7 +610,17 @@ def canonicalize_wf3_machine_fields(
 
     questions = normalized.get("user_questions")
     if isinstance(questions, list):
-        widened = widen_gate_questions(questions)
+        filtered_questions = []
+        for index, question in enumerate(questions):
+            if not isinstance(question, Mapping):
+                filtered_questions.append(question)
+                continue
+            targets = question.get("target_paths") or []
+            if any(_wf3_runtime_only_target(target) for target in targets):
+                changes.append(f"/user_questions/{index}:runtime-owned-question-dropped")
+                continue
+            filtered_questions.append(question)
+        widened = widen_gate_questions(filtered_questions)
         for index, question in enumerate(widened):
             if not isinstance(question, dict):
                 continue
@@ -752,6 +824,8 @@ def wf3_finding_route(finding: Mapping[str, Any]) -> str:
         return "USER"
     if suggested == "PLANNING_AGENT":
         return "PLAN"
+    if any(token in target for token in ("safe_online_package", "package_candidate")):
+        return "PRODUCER"
     if any(
         token in target
         for token in (

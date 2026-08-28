@@ -14,6 +14,7 @@ from app.runtime_context import LiveContextBuilder
 from app.runtime_workflows import RecoverableWorkflowEngine
 from app.util import new_id, sha256_json, utc_now
 from app.wf3_input import WF3_INPUT_GATE_TYPE, normalize_wf3_time_constraints
+from app.wf3_contracts import wf3_safe_package_valid_until
 
 
 class NeverExecutor:
@@ -103,7 +104,7 @@ def test_wf3_gate_resolution_becomes_effective_expiry_and_manifest_approval(
         state=state,
         workflow_id=workflow["id"],
     )
-    assert effective["valid_until"] == "2026-08-28"
+    assert effective["valid_until"] == wf3_safe_package_valid_until()
 
     decided_at = "2026-08-28T11:22:33+08:00"
     decision = {
@@ -354,6 +355,33 @@ def test_wf3_missing_question_creates_user_input_gate_without_model_run(wf3_runt
     assert legacy_resolution["gate_id"] == gate["id"]
     assert legacy_resolution["decided_by"] == "pytest"
     assert legacy_resolution["decided_role"] == "PROJECT_OWNER"
+
+
+def test_wf3_absent_topic_configuration_preserves_default_boundary(wf3_runtime):
+    _, pack, db, builder, engine = wf3_runtime
+    project_id = create_project(db)
+    project = db.fetchone("SELECT config_json FROM projects WHERE id=?", (project_id,))
+    config = json.loads(project["config_json"])
+    config.pop("allowed_public_topics", None)
+    db.execute(
+        "UPDATE projects SET config_json=?,updated_at=? WHERE id=?",
+        (json.dumps(config, ensure_ascii=False), utc_now(), project_id),
+    )
+    mark_wf1_completed(db, project_id)
+    workflow = engine.start(
+        project_id,
+        "WF-3_HYBRID_ONLINE_ASSIST",
+        {"research_need": {"question": "公开研究中人机协同决策有哪些代表性基线？"}},
+    )
+    envelope = builder.build(
+        "P-SAFE-ONLINE-PACKAGE",
+        project_id,
+        workflow_id=workflow["id"],
+        workflow_state=workflow["state"],
+    )
+    assert envelope["payload"]["allowed_topics"] == ["公开学术资料"]
+    assert workflow["state"].get("wf3_input_resolution", {}).get("allowed_topics") in (None, ["公开学术资料"])
+    assert pack.validate("P-SAFE-ONLINE-PACKAGE", "input", envelope) == []
 
 
 def test_wf3_missing_allowed_topics_uses_typed_gate_before_model(wf3_runtime):

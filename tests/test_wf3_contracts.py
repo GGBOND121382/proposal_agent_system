@@ -517,12 +517,14 @@ def test_wf3_field_ownership_covers_six_model_nodes_and_search_without_schema_ch
 
 
 @pytest.mark.parametrize("prompt_id", WF3_PROMPT_IDS)
-def test_wf3_prompts_do_not_delegate_runtime_integrity_or_top_level_provenance_to_model(
+def test_wf3_prompts_delegate_machine_fields_to_semantic_runtime_contract(
     prompt_id,
 ):
     prompt = PACK.prompt_text(prompt_id)
-    assert "顶层`source_refs`固定返回`[]`" in prompt
-    assert "由运行时校验" in prompt
+    entry = PACK.entry(prompt_id)
+    assert entry.get("model_contract_mode") == "SEMANTIC"
+    assert "用户问题" in prompt or "用户问题" in PACK.shared_prompt_for(prompt_id)
+    assert "Hash" in prompt or "Hash" in PACK.shared_prompt_for(prompt_id)
     assert "先验证每个对象的ID、版本、Hash与安全标签" not in prompt
     assert "输出中新增的候选ID必须唯一" not in prompt
     assert "Schema错误、引用错误、Hash过期和安全环境不匹配" not in prompt
@@ -530,8 +532,9 @@ def test_wf3_prompts_do_not_delegate_runtime_integrity_or_top_level_provenance_t
 
 def test_wf3_synthesis_prompt_preserves_only_visible_claim_source_selection():
     prompt = PACK.prompt_text("P-PUBLIC-RESEARCH-SYNTHESIS")
-    assert "每个结论只复制输入中可见的真实`source_id`" in prompt
-    assert "仅逐结论选择的输入`source_id`必须逐字保留" in prompt
+    assert "每个 claim 必须列出直接支撑它的 `source_ids`" in prompt
+    assert "只能使用 `evidence_passages` 中可见的 source_id" in prompt
+    assert "不能用模型记忆补造" in prompt
 
 
 def test_machine_ids_are_stable_when_model_reorders_semantic_rows():

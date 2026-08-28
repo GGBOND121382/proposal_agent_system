@@ -19,6 +19,7 @@ from .privacy import find_sensitive_values
 from .proposal_quality import SECTION_FUNCTION_ROLE_ALIASES
 from .workflow_repair import repair_override_key, producer_consumer_value
 from .model_semantic_contracts import project_argument_authoritative_state
+from .wf3_contracts import wf3_safe_package_valid_until
 from .util import new_id, sha256_json, sha256_text
 from .wf3_input import (
     WF3_INPUT_GATE_TYPE,
@@ -1667,6 +1668,7 @@ class ContextBuilder:
             "need_id": research_need["need_id"],
             "target_task_type": target_task_type,
             "source_item_count": len(source_items),
+            "allowed_topics": list(allowed_topics),
         }
         return {
             "research_need": research_need,
@@ -1681,11 +1683,10 @@ class ContextBuilder:
         for item in source_items:
             if not isinstance(item, dict) or not item.get("object_id"):
                 continue
-            display_name = str(item.get("display_name") or item.get("object_type") or "项目来源对象").strip()
             object_type = str(item.get("object_type") or "SOURCE_OBJECT").strip()
             summary.append({
                 "source_item_id": str(item["object_id"]),
-                "abstracted_summary": f"来源类型：{object_type}；抽象名称：{display_name[:160]}",
+                "abstracted_summary": f"来源类型：{object_type}",
                 "original_security_level": str(item.get("security_level") or "INTERNAL"),
             })
         return summary
@@ -1739,56 +1740,11 @@ class ContextBuilder:
         state: dict[str, Any],
         workflow_id: str | None,
     ) -> dict[str, Any]:
-        """Overlay approved Gate values without mutating the producer artifact."""
+        """Return the runtime-owned effective package without human TTL overlays."""
 
         effective = copy.deepcopy(safe_package)
-        if not workflow_id:
-            return effective
-        index = state.get("human_resolution_artifact_ids") or {}
-        artifact_ids: list[str] = []
-        critic_prompt = "P-SAFE-ONLINE-PACKAGE-CRITIC"
-        for scope_key, values in index.items():
-            if str(scope_key) != critic_prompt and not str(scope_key).endswith(
-                ":" + critic_prompt
-            ):
-                continue
-            for value in values or []:
-                artifact_id = str(value or "").strip()
-                if artifact_id and artifact_id not in artifact_ids:
-                    artifact_ids.append(artifact_id)
-        if not artifact_ids:
-            return effective
-        placeholders = ",".join("?" for _ in artifact_ids)
-        rows = self.db.fetchall(
-            f"""SELECT content_json FROM artifacts
-                WHERE workflow_id=? AND prompt_id=?
-                  AND artifact_type='HUMAN_RESOLUTION' AND status='PASS'
-                  AND id IN ({placeholders})
-                ORDER BY version ASC,created_at ASC,id ASC""",
-            (workflow_id, critic_prompt, *artifact_ids),
-        )
-        valid_until = effective.get("valid_until")
-        for row in rows:
-            try:
-                payload = json.loads(row.get("content_json") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                continue
-            resolution = payload.get("resolution")
-            if not isinstance(resolution, dict):
-                continue
-            targets = {
-                str(item)
-                for item in resolution.get("target_paths") or []
-            }
-            if not targets.intersection(
-                {
-                    "/payload/package_candidate/valid_until",
-                    "/result/valid_until",
-                }
-            ):
-                continue
-            valid_until = resolution.get("answer")
-        effective["valid_until"] = self._wf3_iso_date(valid_until)
+        existing = self._wf3_iso_date(effective.get("valid_until"))
+        effective["valid_until"] = existing or wf3_safe_package_valid_until()
         return effective
 
     def _wf3_outbound_approval(
@@ -2824,6 +2780,14 @@ class ContextBuilder:
                 }))
         if "approved_safe_package" in payload and safe_package:
             replacements.append(("payload.approved_safe_package", self._object_ref(safe_package.get("package_id", new_id("online")), "SAFE_ONLINE_PACKAGE", "PUBLIC", sha256_json(safe_package), "批准的在线任务包")))
+            if prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC":
+                replacements.append(("payload.approved_safe_package_content", {
+                    "task_description": safe_package.get("task_description", "公开资料检索"),
+                    "queries": list(safe_package.get("queries") or []),
+                    "allowed_context": list(safe_package.get("allowed_context") or []),
+                    "prohibited_inferences": list(safe_package.get("prohibited_inferences") or []),
+                    "prohibited_outputs": list(safe_package.get("prohibited_outputs") or []),
+                }))
         if "result_package" in payload and research_synthesis:
             source_ids = sorted({
                 str(ref.get("source_id"))
@@ -3029,13 +2993,16 @@ class ContextBuilder:
                 replacements.append(("payload.task_instruction", objective))
         if "recipient_scope" in payload:
             replacements.append(("payload.recipient_scope", config.get("recipient_scope", ["内部用户"])))
-        if "allowed_topics" in payload:
+        if "allowed_topics" in payload and prompt_id != "P-SAFE-ONLINE-PACKAGE":
             wf3_options = state.get("options") if isinstance(state.get("options"), dict) else {}
             nested_wf3 = wf3_options.get("wf3") if isinstance(wf3_options.get("wf3"), dict) else {}
+            wf3_resolution = state.get("wf3_input_resolution") if isinstance(state.get("wf3_input_resolution"), dict) else {}
             approved_topics = (
                 wf3_options.get("allowed_public_topics")
                 or nested_wf3.get("allowed_public_topics")
                 or config.get("allowed_public_topics")
+                or wf3_resolution.get("allowed_topics")
+                or payload.get("allowed_topics")
                 or []
             )
             replacements.append(("payload.allowed_topics", approved_topics))
@@ -3046,10 +3013,12 @@ class ContextBuilder:
         if search_results:
             if "retrieved_sources" in payload:
                 replacements.append(("payload.retrieved_sources", search_results.get("sources", [])))
-            if "extracted_passages" in payload:
+            if "extracted_passages" in payload or prompt_id == "P-PUBLIC-RESEARCH-CRITIC":
                 replacements.append(("payload.extracted_passages", search_results.get("passages", [])))
             if "public_sources" in payload:
                 replacements.append(("payload.public_sources", search_results.get("sources", [])))
+            if prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC":
+                replacements.append(("payload.public_source_passages", search_results.get("passages", [])))
 
         for path, value in replacements:
             self._set_path_if_valid(
