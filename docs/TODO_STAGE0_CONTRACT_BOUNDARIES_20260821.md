@@ -30,6 +30,64 @@
 - [ ] 章节写作与整稿 acceptance regeneration 也采用整体替换；后续 prompt 开始改造时，应为 `app/workflow_authoring_base.py` 与 `app/full_proposal_sections.py` 增加基线保留、目标范围和非退化校验，并单独评估请求体积。
 - [ ] 为阶段 1 及后续阶段统一“advisory 不阻断、blocking 才返工”的状态不变量，并增加跨 Producer/Critic/acceptance 的契约测试；本次不提前修改这些尚未运行的阶段。
 
+## 2026-08-28 仍未关闭的问题
+
+以下事项是在 WF-3 v51 边界修复和历史失败响应回放之后仍然存在的问题。它们不应被描述为“已经解决”，也不得通过放宽 canonical schema 掩盖。
+
+### 本轮已经关闭的确定性故障（2026-08-28）
+
+- [x] WF-3 创建时固定完整检索时间窗；Plan 的 `time_scope` 由运行时从该输入复制，且在接受 Plan 基线前复用 Search 的严格校验器。
+- [x] Plan 查询条数与执行器上限统一为 12，禁止计划被静默截断。
+- [x] SearXNG 不再丢弃返回的发布日期、作者、出版者和 DOI；本机 LIVE 配置改为 hybrid 学术多源 + SearXNG。
+- [x] 严格检索容量在最低覆盖数之外保留 20%（至少 5 条）余量，避免一次抓取失败或去重就必然失败。
+- [x] Synthesis 的 provider 投影对 passage 正文采用固定总预算，保留全部来源身份；完整归档仍用于确定性质量校验。
+- [x] Public Search 在线程中执行，不再同步阻塞 Web 事件循环。
+- [x] Safe Package Critic 的人工 `valid_until` 回答会形成有效下游包；Import transfer manifest 使用真实外发审批人、审批时间和有效期，不再写死。
+- [x] Import Critic 的注入/越界布尔值及命中后的 Claim 拒绝分区由运行时根据安全 Finding 确定性投影。
+
+以上项目均未修改 schema；本地 WF-3、检索、依赖预检和 provider 投影回归已通过。仍需下面列出的 LIVE 闭环验证，不能把本地通过表述为真实调用已经通过。
+
+### P0：Prompt Pack 的 Replay 契约仍阻塞全量验证
+
+- [ ] 修复 Replay fixture 中不合法的 OBJECT 回答定义。当前约 30 份输出 fixture 仍使用 `answer_schema={"type":"OBJECT","allowed_values":[]}`，但共享契约要求 OBJECT 明确定义 `properties`；因此 `py prompt_pack/tools/validate_pack.py` 仍不能全量通过。
+- [ ] 先盘点受影响 fixture 的真实语义，再迁移 fixture 或在输入边界执行有依据的确定性规范化；禁止把未知 OBJECT 静默改成 STRING，也禁止为了兼容旧 fixture 而削弱共享 schema。
+- [ ] 将此次问题加入跨工作流回归测试，至少覆盖：合法 OBJECT、缺少 `properties` 的旧 fixture、不可无损迁移的输入，以及迁移后 Prompt Pack 全量审计。
+
+验收条件：
+
+- `py prompt_pack/tools/validate_pack.py` 全量通过；
+- Prompt Contract 语义测试和审计测试均通过；
+- canonical schema 未修改、未放宽；
+- 不合法 fixture 不再被误报成 WF-3 模型输出问题。
+
+### P0：WF-3 最新改动尚未完成 LIVE 闭环验证
+
+- [ ] 基于最新代码重建一个 WF-3 工作流并执行真实 LIVE 验证；当前只完成了历史失败响应回放和本地契约测试，尚不能据此宣称最新流程已经在真实提供方调用下通过。
+- [ ] LIVE 验证时保存每个节点的完整 provider request、原始 response、规范化结果、校验错误和最终路由，确认模型看到的是精简后的请求，而不是旧工作流中已经固化的旧 prompt/input snapshot。
+- [ ] 在宣称修复完成前验证六个节点的真实执行顺序、Gate 行为、来源引用归属和最终持久化结果；不得只以单个响应可解析作为通过依据。
+
+### P0：提供方失败证据矩阵尚未覆盖完整
+
+- [ ] 在 WF-3 六个模型节点补齐网关级失败注入：空流、截断 JSON、非法 JSON、非对象响应及缺字段响应。现有测试已经覆盖部分非对象/缺字段/未知来源情形，但尚未证明所有节点在空流和截断场景下都能保存完整原始证据。
+- [ ] 断言失败时同时保留 provider request envelope、原始 response/stream 片段、解析错误、canonical 校验错误、重试序号和最终状态，避免再次出现“只有长度、没有完整请求或响应”的证据包。
+
+### P1：WF-3 Critic 的跨节点回退仍未自动闭环
+
+- [ ] Critic 已能识别 `RETRIEVAL`/`PLAN` 类问题并避免错误地交给 Synthesis 修复，但尚未实现基于反馈自动回退并重跑 Search/Plan 的完整协议。
+- [ ] 后续实现必须明确：问题归属、允许修改的节点、接受基线、非退化条件、最大重试次数和失败后的可见状态；不得用 Synthesis 全量重生成掩盖上游检索或计划缺口。
+
+### P1：检索覆盖率和停止条件仍需校准
+
+- [ ] 为 WF-3 建立可解释的覆盖验收：相关工作数量、全文可得率、来源类型/数据库多样性、主题维度覆盖和检索饱和度；当前规则还不足以稳定避免“结果太少且偏窄”。
+- [ ] 使用既有项目输入和历史请求/响应做基线评测，区分查询规划不足、数据源受限、召回过滤过严、全文获取失败和 Synthesis 丢失，不得只调大 top-k 或重试次数。
+- [ ] 将覆盖不足作为明确、可路由的问题暴露给用户或上游节点；不得全部写成 `blocking=false` 后静默进入下一阶段。
+
+### P1：模型侧仍承担 canonical 形状的兼容占位成本
+
+- [ ] 当前运行时已经接管来源 ID、引用归属等机械字段的最终值，但模型输出仍需遵守完整 canonical 形状，并为部分运行时字段返回约定占位值。这消除了“让模型猜 ID”，但尚未消除占位字段和完整 schema 带来的请求/输出负担。
+- [ ] 后续评估单独的 provider-facing 语义投影：模型只返回语义内容，运行时再构造 canonical 对象。该改造必须保持持久化 schema 不变，并逐节点回放历史请求/响应后再启用。
+- [ ] 为各节点记录 system prompt、用户输入、schema 和预估输出的独立长度预算，防止后续修复再次让 prompt 隐性膨胀。
+
 ## 不变量
 
 - 不修改 schema。

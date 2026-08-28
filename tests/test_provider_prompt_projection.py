@@ -14,6 +14,14 @@ from app.pack import PromptPack
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WF3_MODEL_PROMPTS = (
+    "P-SAFE-ONLINE-PACKAGE",
+    "P-SAFE-ONLINE-PACKAGE-CRITIC",
+    "P-PUBLIC-RESEARCH-PLAN",
+    "P-PUBLIC-RESEARCH-SYNTHESIS",
+    "P-PUBLIC-RESEARCH-CRITIC",
+    "P-ONLINE-RESULT-IMPORT-CRITIC",
+)
 
 
 def _executor() -> tuple[PromptExecutor, PromptPack]:
@@ -105,6 +113,35 @@ def test_provider_contract_projection_is_schema_valid_for_every_prompt_and_busin
             assert "span_start" not in ref, prompt_id
             assert "span_end" not in ref, prompt_id
             assert ref.get("source_id"), prompt_id
+
+
+def test_wf3_actual_system_prompts_make_runtime_provenance_boundary_unambiguous() -> None:
+    executor, pack = _executor()
+    for prompt_id in WF3_MODEL_PROMPTS:
+        validation = attach_trusted_source_catalog(pack.replay_input(prompt_id))
+        _, provider, _, _ = _two_stage_projection(executor, validation)
+        system_prompt = executor._system_prompt(
+            prompt_id,
+            pack.inlined_schema(prompt_id, "output"),
+            provider,
+            semantic_model_contract=False,
+        )
+
+        assert "顶层source_refs返回[]" in system_prompt, prompt_id
+        assert "新建ID填runtime" in system_prompt, prompt_id
+        assert "不要计算Hash或把路径当source_id" in system_prompt, prompt_id
+        assert "trusted_source_catalog" not in system_prompt, prompt_id
+        assert "trusted_source_catalog" not in json.dumps(provider, ensure_ascii=False), prompt_id
+        assert "先验证每个对象的ID、版本、Hash与安全标签" not in system_prompt, prompt_id
+
+    synthesis = pack.prompt_text("P-PUBLIC-RESEARCH-SYNTHESIS")
+    assert "result.claims[].source_refs" in executor._system_prompt(
+        "P-PUBLIC-RESEARCH-SYNTHESIS",
+        pack.inlined_schema("P-PUBLIC-RESEARCH-SYNTHESIS", "output"),
+        pack.replay_input("P-PUBLIC-RESEARCH-SYNTHESIS"),
+        semantic_model_contract=False,
+    )
+    assert "逐结论选择的输入`source_id`" in synthesis
 
 
 def test_argument_architecture_provider_request_is_materially_smaller_without_weakening_validation_context() -> None:

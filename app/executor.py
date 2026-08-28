@@ -18,6 +18,7 @@ from .json_pointer import is_ancestor_or_same, join_pointer, paths_overlap
 from .gate_answer_contract import widen_gate_questions
 from .contract_registry import (
     normalize_registered_enum_aliases_against_schema,
+    normalize_exact_null_literals,
     repair_field_ownership_against_schema,
     required_null_container_errors,
     synchronize_required_mirrored_arrays,
@@ -50,8 +51,12 @@ from .status_ontology import (
 )
 from .util import new_id, sha256_json, utc_now
 from .wf3_contracts import (
+    canonicalize_wf3_critic_control,
+    canonicalize_wf3_machine_fields,
     canonicalize_wf3_producer_status,
     compact_wf3_research_envelope,
+    wf3_output_semantic_errors,
+    wf3_provider_request_budget_report,
 )
 
 
@@ -72,9 +77,9 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-08-26.v49-wf3-status-invariants"
+OUTPUT_NORMALIZER_VERSION = "2026-08-27.v51-wf3-runtime-provenance"
 MODEL_CONTEXT_PROJECTION_VERSION = "2026-08-26.v4-wf3-research-dedup"
-MODEL_SYSTEM_PROMPT_VERSION = "2026-08-13.v3-semantic-task-boundary"
+MODEL_SYSTEM_PROMPT_VERSION = "2026-08-13.v4-wf3-contract-retry-feedback"
 
 _PROVIDER_SOURCE_REF_OMIT_FIELDS = frozenset({
     "document_version_id",
@@ -123,6 +128,26 @@ class PromptExecutor:
                 ensure_quality_guard_observer(self.quality_guard)
             except QualityGuardContractError as exc:
                 raise PromptExecutionError(str(exc)) from exc
+
+    @staticmethod
+    def _contract_retry_feedback_prompt(validation_errors: list[str]) -> str:
+        """Render bounded validation feedback without replaying a bad candidate."""
+
+        errors = [
+            redact_secret_text(str(item)).strip()[:500]
+            for item in validation_errors
+            if str(item).strip()
+        ]
+        errors = list(dict.fromkeys(errors))[:12]
+        if not errors:
+            return ""
+        rendered = "\n".join(f"- {item}" for item in errors)
+        return (
+            "\n\n# 上一轮输出的精确契约错误\n"
+            "上一轮候选已被拒绝，不是可复用基线。请重新返回完整对象，并只修正下列错误；"
+            "不要复制上一轮候选，也不要删除与错误无关的业务内容。\n"
+            f"{rendered}"
+        )
 
     @staticmethod
     def _provider_contract_failure(
@@ -1149,6 +1174,22 @@ class PromptExecutor:
             )
 
         normalized = copy.deepcopy(output)
+        normalized, null_literal_report = normalize_exact_null_literals(
+            normalized, output_schema
+        )
+        if null_literal_report.get("normalized_count"):
+            normalized.setdefault("warnings", []).append(
+                "SYSTEM_EXACT_NULL_LITERAL_NORMALIZATION: "
+                + ", ".join(null_literal_report.get("paths") or [])
+            )
+        normalized, wf3_machine_report = canonicalize_wf3_machine_fields(
+            prompt_id, normalized, envelope
+        )
+        if wf3_machine_report:
+            normalized.setdefault("warnings", []).append(
+                "SYSTEM_WF3_MACHINE_FIELD_PROJECTION: "
+                f"{wf3_machine_report['change_count']}"
+            )
         normalized, ownership_report = repair_field_ownership_against_schema(
             normalized,
             output_schema,
@@ -1349,6 +1390,7 @@ class PromptExecutor:
             if isinstance(questions, list):
                 normalized["user_questions"] = widen_gate_questions(questions)
             normalized, _ = canonicalize_wf3_producer_status(prompt_id, normalized)
+            normalized, _ = canonicalize_wf3_critic_control(prompt_id, normalized)
             normalized = self._normalize_human_gate_status(normalized)
             human_gate_errors = self._human_gate_contract_errors(normalized)
             if human_gate_errors:
@@ -1544,6 +1586,12 @@ class PromptExecutor:
     ) -> None:
         """Validate cross-field business invariants without mutating output."""
 
+        wf3_errors = wf3_output_semantic_errors(prompt_id, envelope, output)
+        if wf3_errors:
+            raise PromptExecutionError(
+                "WF-3 output failed cross-list identity validation",
+                validation_errors=wf3_errors,
+            )
         if prompt_id != "P-TARGETED-REPAIR":
             return
         requested = [
@@ -1674,6 +1722,7 @@ class PromptExecutor:
         project_id: str,
         workflow_id: str | None = None,
         original_environment: str | None = None,
+        contract_retry_feedback: list[str] | None = None,
     ) -> dict[str, Any]:
         run_id = new_id("run")
         started = time.perf_counter()
@@ -1689,6 +1738,9 @@ class PromptExecutor:
         provider_envelope, provider_business_projection = self._prepare_provider_envelope(
             provider_contract_envelope
         )
+        # Keep the exact provider-visible payload separate from the full
+        # validation envelope so both success and failure traces are auditable.
+        provider_call_envelope = provider_envelope
         provider_projection = {
             "strategy": "TWO_STAGE_PROVIDER_BUSINESS_PROJECTION",
             "projection_version": MODEL_CONTEXT_PROJECTION_VERSION,
@@ -1748,7 +1800,6 @@ class PromptExecutor:
             route = self.router.route(prompt_id, model_envelope, original_environment=original_environment)
             project_config = load_project_config(self.db, project_id)
 
-            provider_call_envelope = provider_envelope
             if semantic_model_contract:
                 provider_call_envelope = build_semantic_model_input(prompt_id, model_envelope)
                 semantic_input_errors = self.pack.validate_model(prompt_id, "input", provider_call_envelope)
@@ -1775,6 +1826,27 @@ class PromptExecutor:
                 prompt_id, output_schema, provider_call_envelope,
                 semantic_model_contract=semantic_model_contract,
             )
+            if contract_retry_feedback:
+                system_prompt += self._contract_retry_feedback_prompt(
+                    contract_retry_feedback
+                )
+            wf3_budget = wf3_provider_request_budget_report(
+                prompt_id, system_prompt, provider_call_envelope
+            )
+            if wf3_budget:
+                input_compaction = {
+                    **(input_compaction or {}),
+                    "wf3_request_budget": wf3_budget,
+                }
+                if not wf3_budget["within_budget"]:
+                    raise PromptExecutionError(
+                        "WF-3 provider request exceeds its deterministic node budget",
+                        validation_errors=[
+                            "/provider_request: "
+                            f"{wf3_budget['provider_visible_chars']} chars exceeds "
+                            f"{wf3_budget['limit_chars']} for {prompt_id}"
+                        ],
+                    )
             result = await self.gateway.invoke(
                 route, prompt_id, system_prompt, provider_call_envelope, output_schema,
                 direct_tool_arguments=semantic_model_contract,
@@ -1868,6 +1940,7 @@ class PromptExecutor:
                 result.model_id, result.endpoint_id, duration_ms, status, None,
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
+                provider_request_envelope=provider_call_envelope,
             )
             return {
                 "run_id": run_id,
@@ -1891,6 +1964,7 @@ class PromptExecutor:
                 duration_ms, "ERROR", error,
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
+                provider_request_envelope=provider_call_envelope,
             )
             raise PromptExecutionError(
                 error, validation_errors=details, run_id=run_id
@@ -1936,6 +2010,7 @@ class PromptExecutor:
                 error,
                 quality_context_envelope=quality_context_envelope if input_compaction else None,
                 input_compaction=input_compaction,
+                provider_request_envelope=provider_call_envelope,
             )
             raise PromptExecutionError(error, run_id=run_id) from exc
 
@@ -2531,6 +2606,44 @@ class PromptExecutor:
             "# 人工输入约束\n"
             "payload.human_resolutions若非空即为已确认回答，只能在其target_paths和当前任务范围内使用。"
         )
+        wf3_boundary = ""
+        if prompt_id in {
+            "P-SAFE-ONLINE-PACKAGE",
+            "P-SAFE-ONLINE-PACKAGE-CRITIC",
+            "P-PUBLIC-RESEARCH-PLAN",
+            "P-PUBLIC-RESEARCH-SYNTHESIS",
+            "P-PUBLIC-RESEARCH-CRITIC",
+            "P-ONLINE-RESULT-IMPORT-CRITIC",
+        }:
+            wf3_boundary = (
+                "# WF-3 字段所有权\n"
+                "只判断研究、安全和证据语义。顶层source_refs返回[]；新建ID填runtime。"
+                "这些字段及协议常量、来源元数据、优先级和控制状态均由运行时覆盖。"
+                "不要计算Hash或把路径当source_id；Finding.evidence_refs可使用payload.<字段>路径。"
+            )
+        if prompt_id == "P-SAFE-ONLINE-PACKAGE":
+            wf3_boundary += (
+                "payload.allowed_topics非空时即为本工作流已确认的外发主题边界；"
+                "外发审批由下一固定Gate处理，不得询问是否进入该Gate。"
+            )
+        if prompt_id == "P-PUBLIC-RESEARCH-CRITIC":
+            wf3_boundary += (
+                "本节点只审查四类语义：来源是否实质支持论断、是否过度概括、"
+                "是否遗漏关键反证、研究问题是否真正得到回答。"
+                "不要复查ID存在性、Hash、年份边界、重复项、查询覆盖、manifest或安全标签；"
+                "这些由输入中的确定性报告和运行时校验负责。Critic PASS只表示语义审查通过，"
+                "不表示文献覆盖已经饱和。"
+            )
+        if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS":
+            wf3_boundary += (
+                "result.claims[].source_refs只需逐字复制retrieved_sources或extracted_passages中的source_id；"
+                "其余来源元数据由运行时覆盖。"
+            )
+        if prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC":
+            wf3_boundary += (
+                "只判断已验证公开Claim的导入语义；不得重新执行文献覆盖审查。"
+                "Claim ID分区、required confirmation ID及安全控制结果由运行时校验或构造。"
+            )
         if hasattr(self.pack, "shared_prompt_for"):
             shared_source = self.pack.shared_prompt_for(prompt_id)
         else:
@@ -2548,6 +2661,7 @@ class PromptExecutor:
             + runtime_boundary
             + "\n\n"
             + human_boundary
+            + ("\n\n" + wf3_boundary if wf3_boundary else "")
             + "\n\n# 运行时强制输出Schema\n"
             + json.dumps(output_schema, ensure_ascii=False, separators=(",", ":"))
         )
@@ -2565,7 +2679,7 @@ class PromptExecutor:
         )
         self.db.audit("PROMPT_EXECUTED", project_id=project_id, object_id=run_id, metadata={"prompt_id": prompt_id, "status": status, "input_hash": input_hash, "duration_ms": duration_ms})
 
-    def _save_artifact(self, project_id: str, workflow_id: str | None, prompt_id: str, output: dict[str, Any], envelope: dict[str, Any], system_prompt: str | None, raw_response_text: str | None, output_schema: dict[str, Any] | None, environment: str | None, model_id: str | None, endpoint_id: str | None, duration_ms: int, status: str, error: str | None, *, quality_context_envelope: dict[str, Any] | None = None, input_compaction: dict[str, Any] | None = None) -> None:
+    def _save_artifact(self, project_id: str, workflow_id: str | None, prompt_id: str, output: dict[str, Any], envelope: dict[str, Any], system_prompt: str | None, raw_response_text: str | None, output_schema: dict[str, Any] | None, environment: str | None, model_id: str | None, endpoint_id: str | None, duration_ms: int, status: str, error: str | None, *, quality_context_envelope: dict[str, Any] | None = None, input_compaction: dict[str, Any] | None = None, provider_request_envelope: dict[str, Any] | None = None) -> None:
         row = self.db.fetchone("SELECT COALESCE(MAX(version),0) AS v FROM artifacts WHERE project_id=? AND prompt_id=? AND artifact_type='PROMPT_OUTPUT'", (project_id, prompt_id))
         version = int(row["v"]) + 1 if row else 1
         security_level = envelope.get("security_context", {}).get("input_max_security_level", "INTERNAL")
@@ -2581,9 +2695,10 @@ class PromptExecutor:
             version=version, output=output,
             quality_context_envelope=quality_context_envelope,
             input_compaction=input_compaction,
+            provider_request_envelope=provider_request_envelope,
         )
 
-    def _save_trace(self, project_id: str, workflow_id: str | None, prompt_id: str, envelope: dict[str, Any], system_prompt: str | None, raw_response_text: str | None, output_schema: dict[str, Any] | None, environment: str | None, model_id: str | None, endpoint_id: str | None, duration_ms: int, status: str, error: str | None, *, version: int | None = None, output: dict[str, Any] | None = None, quality_context_envelope: dict[str, Any] | None = None, input_compaction: dict[str, Any] | None = None) -> None:
+    def _save_trace(self, project_id: str, workflow_id: str | None, prompt_id: str, envelope: dict[str, Any], system_prompt: str | None, raw_response_text: str | None, output_schema: dict[str, Any] | None, environment: str | None, model_id: str | None, endpoint_id: str | None, duration_ms: int, status: str, error: str | None, *, version: int | None = None, output: dict[str, Any] | None = None, quality_context_envelope: dict[str, Any] | None = None, input_compaction: dict[str, Any] | None = None, provider_request_envelope: dict[str, Any] | None = None) -> None:
         if version is None:
             row = self.db.fetchone("SELECT COALESCE(MAX(version),0) AS v FROM artifacts WHERE project_id=? AND prompt_id=? AND artifact_type='PROMPT_TRACE'", (project_id, prompt_id))
             version = int(row["v"]) + 1 if row else 1
@@ -2598,7 +2713,17 @@ class PromptExecutor:
             "model_id": model_id,
             "endpoint_id": endpoint_id,
             "system_prompt": system_prompt,
+            # ``input_envelope`` is kept for compatibility. Its explicit label
+            # prevents it from being mistaken for the smaller provider payload.
             "input_envelope": envelope,
+            "input_envelope_kind": "VALIDATION_ENVELOPE",
+            "validation_envelope": envelope,
+            "provider_request_envelope": provider_request_envelope,
+            "provider_request_hash": (
+                sha256_json(provider_request_envelope)
+                if provider_request_envelope is not None
+                else None
+            ),
             "quality_context_envelope": quality_context_envelope,
             "quality_context_hash": sha256_json(quality_context_envelope) if quality_context_envelope is not None else None,
             "input_compaction": input_compaction,

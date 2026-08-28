@@ -28,6 +28,12 @@ from .output_integrity import attach_trusted_source_catalog
 from .workflow_defs import CRITIC_PRODUCER
 from .contracts.semantic_contract import get_semantic_contract
 from .wf3_contracts import compare_public_search_candidates, summarize_public_search
+from .research import PublicResearchPlanError
+from .skills.research_execution import (
+    ResearchExecutionContractError,
+    build_plan_lock,
+    validate_plan_transition,
+)
 
 
 
@@ -693,6 +699,38 @@ class WorkflowRepairMixin:
                 workflow_id=wf["id"],
                 exact_workflow=True,
             ) or {}
+            candidate_lock = build_plan_lock(plan)
+            approved_lock = state.get("public_research_plan_lock")
+            if isinstance(approved_lock, dict) and approved_lock:
+                try:
+                    next_lock = validate_plan_transition(
+                        approved_lock,
+                        plan,
+                        allow_additive=True,
+                    )
+                except ResearchExecutionContractError as exc:
+                    raise PublicResearchPlanError(
+                        str(exc),
+                        details={
+                            "code": exc.code,
+                            **exc.details,
+                            "approved_plan_hash": approved_lock.get("plan_hash"),
+                            "candidate_plan_hash": candidate_lock.get("plan_hash"),
+                        },
+                    ) from exc
+                if next_lock.get("plan_hash") != approved_lock.get("plan_hash"):
+                    state.setdefault("public_research_plan_lock_history", []).append(
+                        {
+                            "recorded_at": utc_now(),
+                            "from_plan_hash": approved_lock.get("plan_hash"),
+                            "to_plan_hash": next_lock.get("plan_hash"),
+                            "transition": "ADDITIVE_PLAN_DELTA",
+                        }
+                    )
+                    del state["public_research_plan_lock_history"][:-20]
+                state["public_research_plan_lock"] = next_lock
+            else:
+                state["public_research_plan_lock"] = candidate_lock
             provider = self.executor.gateway.settings.public_search_provider
             if mode == "SIMULATED" and provider == "disabled":
                 candidate = self.research_service.simulated_search(plan)

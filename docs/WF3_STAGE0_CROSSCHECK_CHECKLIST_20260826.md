@@ -420,6 +420,34 @@ WF-3 当前情况：`部分存在`。
 - [ ] 六个 WF-3 模型节点的空流、截断、非对象、残缺行和字段错位故障注入矩阵尚未全部完成。
 - [ ] Coverage gate 的来源数量、全文比例、来源多样性和 saturation 阈值尚未优化。
 
+## 11. 2026-08-27 第二轮清单收口
+
+本轮继续遵守“不修改任何 schema、不做 LIVE 调用”的边界，并完成以下项目：
+
+- [x] 为六个模型节点和 Public Search 建立可执行字段归属表 `WF3_FIELD_OWNERSHIP`；模型只提供语义候选，协议常量、稳定 ID、输入复制字段、来源元数据、Gate 控制字段和最终状态由运行时投影或校验。
+- [x] 稳定 ID 不再包含数组位置；同一语义对象仅因数组重排不会改变 ID。问题 target path 在生成稳定 question ID 前统一成 JSON Pointer。
+- [x] 固定字符串 `"null"` 只在 schema 明确允许 JSON null 的路径转换；大小写变体、带空格值和普通文本中的 `null` 不转换。Safe Package、Plan 和 Synthesis 的业务 nullable 字段已有回归。
+- [x] 三份 2026-08-26 LIVE Safe Package 失败响应已用当前规范化器回放，`answer_schema.required`、`payload.security_context` 和 `payload.source_items[n]` 三类错误均可确定性处理，且最终 strict schema errors 为 0。
+- [x] 六个 WF-3 模型节点已参数化覆盖非对象、空对象、残缺容器和输出自授权未知来源；错误保留精确 JSON 路径。
+- [x] Research Critic 的 source/claim 列表以及 Import Critic 的 accepted/rejected/confirmation 列表均只接受输入可信命名空间；导入 Claim 必须形成无重复、无交集、无遗漏的完整分区，合法 source ID 放入 claim ID 列表也不能通过。
+- [x] WF-3 provider 结构重试只追加有界、去重的精确 validation errors；不附加完整失败候选，不把失败候选写成 baseline，成功后清除 checkpoint 中的反馈。
+- [x] 六个模型节点分别设置 provider-visible 字符预算；历史请求的 system/envelope/provider-visible 字符数已写入 `tests/fixtures/wf3_historical_regressions_20260826.json` 并受回归测试保护。
+- [x] Critic 的控制状态和 verdict 由 canonical blocking finding/question 推导；advisory-only Critic 不能触发 REVISE，blocking PASS 不能放行，无可执行路由的阻断项进入 BLOCK。
+- [x] Research Critic Prompt 明确只审查实质支持、过度概括、关键反证和问题回答度；ID、Hash、年份、重复、查询覆盖、manifest 和安全标签由确定性层负责。Critic PASS 不再代表 corpus saturation PASS。
+- [x] Plan、Search、Synthesis 均具备“完整候选 + 非退化验收 + exact accepted baseline + rejected candidate 留档”规则，不做任意 JSON 融合。Plan 冻结研究问题顺序和 query binding；Synthesis 不允许静默丢失已验证 Claim、来源绑定、比较主题、局限或冲突。
+- [x] Plan 写入 accepted baseline 前验证所有研究问题被合法 query index 覆盖；Synthesis 候选先做 Claim—来源绑定预检。已有 baseline 时，预检失败候选落盘但不能替换 baseline。
+- [x] ContextBuilder 按 workflow state 中的精确 accepted run ID 读取 Plan/Synthesis；同时验证 persisted output hash，禁止“按最新时间”误取 rejected candidate。
+- [x] WF-3 Gate 的浏览器字符串到 BOOLEAN、NUMBER、OBJECT、ARRAY 的确定性转换已覆盖 `true/false/是/否`、数值字符串和 JSON 字符串；同 target path 的多轮问题仍按稳定 question ID 分开保存，并保留问题文本、类型化答案和目标语境。
+- [x] 模型输出规范化版本提升为 `v50`，确保部署后历史 BLOCKED_CONTRACT checkpoint 能按新的本地规范化规则安全重验，而不是无提示沿用旧版本。
+
+验证结果：WF-3、Gate、输出容器、检索 Skill 和 provider 投影专项共 `180 passed`；WF-3 SIMULATED 完整消费链及全工作流 DOCX 集成另有 `2 passed`。完整仓库套件首先被既有 `G0_REGISTRY_IDENTITY_DRIFT` 阻断（当前 registry digest `8ab91d...`，冻结治理值 `73ad0e...`），排除 F 治理组后又遇到与 WF-3 无关的 WF-4 14 章节集成夹具 150 秒超时。上述两项未通过修改 schema 或放宽治理基线掩盖。
+
+仍需独立处理、但不属于本轮 WF-3 Stage 0 合同收口的事项：
+
+- [ ] Critic 的 RETRIEVAL/PLAN 路由自动回退执行协议；当前已正确识别、保留精确 Finding 并阻止错误送入 Synthesis，但不会伪造已经重新检索。
+- [ ] F 治理清单中的 prompt registry 冻结 digest 与当前代码基线对齐；这需要单独审计 prompt registry 变更来源，不能在本轮顺手改治理哈希。
+- [ ] WF-4 全量章节集成测试的性能/超时问题；与 WF-3 逻辑无直接依赖。
+
 本轮离线验证：
 
 - `tests/test_wf3_contracts.py`、provider 投影专项：`14 passed`；
@@ -427,3 +455,20 @@ WF-3 当前情况：`部分存在`。
 - 严格 LIVE 输入构建 + SIMULATED provider 的 WF-1 至 WF-5 全流程：通过；
 - `compileall` 与 `git diff --check`：通过；
 - schema 文件修改数：`0`；LIVE 模型调用数：`0`。
+
+## 12. 2026-08-27 第三轮：真实 Provider 契约与来源归属收口
+
+本轮针对 LIVE 运行 `wf-a0b3416dcff5401f` 的三次 Safe Package 失败继续收口，仍然不修改任何 schema：
+
+- [x] 查明完整校验 Envelope 中虽有 `trusted_source_catalog`，但正常执行器在调用 Provider 前会确定性移除该目录；此前日志中的 `input_envelope` 实际是校验上下文，不是模型真实收到的请求。
+- [x] 六个 WF-3 模型节点的顶层 `source_refs` 改为运行时所有：模型值无论为空、字段路径、真实输入 ID 或虚构 ID，都会被忽略；运行时按各节点实际消费的顶层业务输入生成可信来源并补全元数据。
+- [x] 六份 Prompt 统一要求顶层 `source_refs=[]`，不再要求模型检查 Hash、版本、Schema、环境或引用存在性，也不再要求模型生成新机器 ID；schema 必填的新 ID 使用 `runtime` 兼容占位并由运行时覆盖。
+- [x] Synthesis 只保留必要的语义来源选择：`result.claims[].source_refs[].source_id` 必须逐字复制 `retrieved_sources` 或 `extracted_passages` 中可见的真实来源 ID；Hash、权威等级、安全标签、Span 等元数据仍由运行时绑定。
+- [x] Finding 中 provider 可见的 `payload.<field>` 证据路径由运行时绑定到所属输入对象的 canonical ID；目标路径确定性转为 JSON Pointer。
+- [x] `PROMPT_TRACE` 同时保存并明确标注 `validation_envelope` 与 `provider_request_envelope`，后者就是实际传给模型的请求，并单独保存 Hash；兼容字段 `input_envelope` 明确标注为 `VALIDATION_ENVELOPE`。
+- [x] 将 `run-bbace040b0ad4a17`、`run-4a8258310e274e4a`、`run-9d4263fe9ee84396` 中出现的真实错误来源形式加入回归。三份完整数据库响应离线回放分别得到 `NEED_USER_INPUT`、`NEED_USER_INPUT`、`PASS`，strict schema 和 WF-3 语义错误均为 0。
+- [x] 输出规范化版本升级为 `v51-wf3-runtime-provenance`，使旧的来源契约失败 checkpoint 能识别新规范化边界。
+
+验证结果：WF-3、Provider 投影、重试恢复、工作流状态与事务相关测试共 `233 passed`；`compileall` 与 `git diff --check` 通过；schema 文件修改数为 `0`，LIVE 模型调用数为 `0`。
+
+仓库全量 Prompt Pack 校验仍被此前已经存在的 Replay fixture 问题阻断：多份 `missing_input.json` 使用 `answer_schema={"type":"OBJECT","allowed_values":[]}`，而当前共享契约要求 OBJECT 提供 `properties`。该问题跨越全部工作流且涉及 schema/fixture 治理，本轮按“不修改 schema、不过分扩大范围”的边界没有顺手处理；它不是上述 WF-3 修改产生的失败。

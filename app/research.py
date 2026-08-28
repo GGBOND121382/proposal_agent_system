@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
 from .skills.executor import SkillExecutionError, SkillExecutor
 from .skills.research_audit import verify_research_archive
 from .skills.research_claims import validate_public_claims
+from .skills.research_validation import write_synthesis_validation_bundle
 from .util import sha256_json, sha256_text, write_json
 from .logistics_application_content import REF_CATALOG as LOGISTICS_REF_CATALOG
 from .transport_optimization_application_content import REF_CATALOG as TRANSPORT_REF_CATALOG
@@ -189,7 +191,8 @@ class PublicResearchService:
         if self.skill_executor is None:
             raise PublicResearchConfigurationError("Public research skill executor is not configured")
         try:
-            result = self.skill_executor.execute(
+            result = await asyncio.to_thread(
+                self.skill_executor.execute,
                 "public_research.archive",
                 {
                     "provider": self.settings.public_search_provider,
@@ -197,9 +200,15 @@ class PublicResearchService:
                     "record_file": self.settings.public_research_record_file,
                     "connector_file": self.settings.public_research_connector_file,
                     "max_results": self.settings.public_search_max_results,
-                    # LIVE capability runs enforce the complete C1 plan contract. Replay,
-                    # mock and simulated orchestration remain backward compatible.
+                    # LIVE capability runs enforce the complete C1 plan contract and
+                    # the proposal related-work sufficiency profile. Replay/mock remain
+                    # backward compatible with the legacy existential coverage checks.
                     "require_structured_plan": str(self.settings.runtime_mode).upper() == "LIVE",
+                    "research_quality_profile": (
+                        "proposal_related_work"
+                        if str(self.settings.runtime_mode).upper() == "LIVE"
+                        else "legacy"
+                    ),
                     "plan": plan,
                 },
                 project_id=project_id,
@@ -230,6 +239,13 @@ class PublicResearchService:
             report_path = report_dir / f"claim-binding-{sha256_json(synthesis)[:16]}.json"
             write_json(report_path, report)
             report["report_path"] = str(report_path)
+        validation_bundle_dir = research_output.get("validation_bundle_dir")
+        if validation_bundle_dir:
+            write_synthesis_validation_bundle(
+                validation_bundle_dir=validation_bundle_dir,
+                synthesis=synthesis,
+                claim_validation=report,
+            )
         return report
 
     @staticmethod

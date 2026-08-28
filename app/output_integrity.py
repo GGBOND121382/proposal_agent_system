@@ -701,6 +701,15 @@ def _catalog_alias_index(envelope: Mapping[str, Any] | None) -> dict[str, set[st
         if not source_id or not object_path:
             continue
         aliases[object_path].add(source_id)
+        # Array paths have one unambiguous dot and bracket spelling. Accepting
+        # both is representation normalization, not semantic repair.
+        bracket_path = re.sub(r"\.(\d+)(?=\.|$)", r"[\1]", object_path)
+        aliases[bracket_path].add(source_id)
+        # Models sometimes prefix root protocol objects with ``payload.``.
+        # Register that spelling only in this catalog-derived alias map; the
+        # resolver still requires one unique existing source.
+        if not object_path.startswith("payload."):
+            aliases[f"payload.{object_path}"].add(source_id)
         leaf = object_path.rsplit(".", 1)[-1]
         if leaf and not leaf.isdigit():
             aliases[leaf].add(source_id)

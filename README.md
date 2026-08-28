@@ -207,6 +207,12 @@ OFFLINE_GENERAL_MODEL=...
 OFFLINE_CRITIC_MODEL=...
 ```
 
+启动命令：
+cd D:\VSCodeWorkspace\proposal_agent_system
+$env:MODEL_RUNTIME_MODE="LIVE"
+$env:PUBLIC_SEARCH_PROVIDER="academic"
+py -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8080
+
 离线端点应部署在不联网的受控环境。系统不会把离线失败自动回退到在线模型。
 
 ## 在线公共研究

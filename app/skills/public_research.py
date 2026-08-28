@@ -5,6 +5,7 @@ import hashlib
 import ipaddress
 import json
 import mimetypes
+import re
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
@@ -367,6 +368,21 @@ class PublicResearchArchiveSkill:
                     for item in results[: min(10, max_results)]:
                         if not isinstance(item, dict):
                             continue
+                        raw_authors = item.get("authors") or item.get("author") or []
+                        if isinstance(raw_authors, str):
+                            authors = [
+                                value.strip()
+                                for value in re.split(r"[,;|]", raw_authors)
+                                if value.strip()
+                            ]
+                        elif isinstance(raw_authors, list):
+                            authors = [
+                                str(value.get("name") if isinstance(value, dict) else value).strip()
+                                for value in raw_authors
+                                if str(value.get("name") if isinstance(value, dict) else value).strip()
+                            ]
+                        else:
+                            authors = []
                         query_candidates.append(
                             {
                                 "title": str(item.get("title") or "").strip(),
@@ -374,6 +390,21 @@ class PublicResearchArchiveSkill:
                                 "excerpt": str(item.get("content") or item.get("snippet") or "").strip(),
                                 "matched_query": query,
                                 "engine": item.get("engine"),
+                                "published_at": (
+                                    item.get("publishedDate")
+                                    or item.get("published_date")
+                                    or item.get("pubdate")
+                                    or item.get("date")
+                                ),
+                                "authors": authors,
+                                "publisher": (
+                                    item.get("publisher")
+                                    or item.get("journal")
+                                    or item.get("source")
+                                ),
+                                "doi": item.get("doi"),
+                                "citation_count": item.get("citation_count"),
+                                "is_retracted": bool(item.get("is_retracted", False)),
                             }
                         )
                 except PublicResearchConfigurationError:

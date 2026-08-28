@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import json
+import re
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any
 
 from .util import sha256_json
@@ -20,6 +23,7 @@ DEFAULT_REASON_ONLINE_NEEDED = (
 DEFAULT_DESIRED_OUTPUT = (
     "返回带来源绑定的代表性公开资料、方法或基线、评价指标、适用边界及可用于申请书论证的结论摘要。"
 )
+DEFAULT_RESEARCH_LOOKBACK_YEARS = 5
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,67 @@ def _nested_options(options: dict[str, Any] | None) -> dict[str, Any]:
         merged.update(nested)
         return merged
     return source
+
+
+def normalize_wf3_time_constraints(
+    options: dict[str, Any] | None,
+    *,
+    reference_date: date | datetime | str | None = None,
+) -> dict[str, Any]:
+    """Return a complete, deterministic WF-3 research time window.
+
+    The model is not responsible for choosing this machine/input-owned boundary.
+    Missing bounds are filled from the workflow creation date; malformed or
+    reversed explicit bounds fail at workflow creation instead of much later in
+    the public-search skill.
+    """
+
+    source = _nested_options(options)
+    raw = source.get("time_constraints")
+    raw = raw if isinstance(raw, dict) else {}
+    if isinstance(reference_date, datetime):
+        today = reference_date.date()
+    elif isinstance(reference_date, date):
+        today = reference_date
+    elif isinstance(reference_date, str) and reference_date.strip():
+        try:
+            today = date.fromisoformat(reference_date.strip()[:10])
+        except ValueError as exc:
+            raise ValueError("WF-3 reference_date must be an ISO date") from exc
+    else:
+        today = date.today()
+
+    def parse_bound(name: str) -> date | None:
+        value = _clean_text(raw.get(name))
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"WF-3 time_constraints.{name} must be an ISO date (YYYY-MM-DD)"
+            ) from exc
+
+    start = parse_bound("start_date")
+    end = parse_bound("end_date") or today
+    if start is None:
+        try:
+            start = end.replace(year=end.year - DEFAULT_RESEARCH_LOOKBACK_YEARS)
+        except ValueError:
+            # 29 February has no counterpart in most lookback years.
+            start = end.replace(
+                year=end.year - DEFAULT_RESEARCH_LOOKBACK_YEARS,
+                day=28,
+            )
+    if start > end:
+        raise ValueError(
+            "WF-3 time_constraints.start_date must not be later than end_date"
+        )
+    return {
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "freshness_required": bool(raw.get("freshness_required", True)),
+    }
 
 
 def normalize_target_task_type(value: Any) -> str:
@@ -219,6 +284,45 @@ def input_gate_questions() -> list[dict[str, Any]]:
     ]
 
 
+def allowed_topics_gate_questions() -> list[dict[str, Any]]:
+    """Return the deterministic approval boundary for an outbound topic set."""
+
+    return [
+        {
+            "question_id": "wf3-allowed-public-topics",
+            "prompt": "允许本次工作流对外检索哪些公开主题？",
+            "target_paths": ["payload.allowed_topics"],
+            "answer_schema": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "required": True,
+            "placeholder": "例如：[\"人机协同决策\", \"可审计决策流程\"]",
+        }
+    ]
+
+
+def _topic_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        raw_values = value
+    else:
+        text = _clean_text(value)
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        raw_values = (
+            parsed
+            if isinstance(parsed, list)
+            else re.split(r"[\r\n,，;；]+", text)
+        )
+    topics: list[str] = []
+    for raw in raw_values:
+        topic = _clean_text(raw)
+        if topic and topic not in topics:
+            topics.append(topic)
+    return topics
+
+
 def _answer_map(answers: list[dict[str, Any]] | None) -> dict[str, Any]:
     mapped: dict[str, Any] = {}
     for item in answers or []:
@@ -252,20 +356,26 @@ def options_from_gate_answers(
             values.get(_clean_text(question.get("field_path")), question.get("default")),
         )
 
-    question = _clean_text(value_for("wf3-research-question"))
-    if not question:
-        raise ValueError("必须填写需要联网检索并核验的公开研究问题")
-    reason = _clean_text(value_for("wf3-reason-online-needed")) or DEFAULT_REASON_ONLINE_NEEDED
-    desired = _clean_text(value_for("wf3-desired-output")) or DEFAULT_DESIRED_OUTPUT
-    target_task_type = normalize_target_task_type(value_for("wf3-target-task-type"))
-
     options = copy.deepcopy(current_options or {})
     previous_need = options.get("research_need") if isinstance(options.get("research_need"), dict) else {}
-    options["research_need"] = {
-        "need_id": _clean_text(previous_need.get("need_id")),
-        "question": question,
-        "reason_online_needed": reason,
-        "desired_output": desired,
-    }
-    options["target_task_type"] = target_task_type
+    if "wf3-research-question" in by_id:
+        question = _clean_text(value_for("wf3-research-question"))
+        if not question:
+            raise ValueError("必须填写需要联网检索并核验的公开研究问题")
+        reason = _clean_text(value_for("wf3-reason-online-needed")) or DEFAULT_REASON_ONLINE_NEEDED
+        desired = _clean_text(value_for("wf3-desired-output")) or DEFAULT_DESIRED_OUTPUT
+        options["research_need"] = {
+            "need_id": _clean_text(previous_need.get("need_id")),
+            "question": question,
+            "reason_online_needed": reason,
+            "desired_output": desired,
+        }
+        options["target_task_type"] = normalize_target_task_type(
+            value_for("wf3-target-task-type")
+        )
+    if "wf3-allowed-public-topics" in by_id:
+        topics = _topic_list(value_for("wf3-allowed-public-topics"))
+        if not topics:
+            raise ValueError("必须至少填写一个允许对外检索的公开主题")
+        options["allowed_public_topics"] = topics
     return options

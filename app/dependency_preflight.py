@@ -633,7 +633,7 @@ class RuntimeDependencyPreflight:
         if mode in {"REPLAY", "MOCK"} or (mode == "SIMULATED" and provider == "disabled"):
             report.checks.append({"name": "PUBLIC_SEARCH", "status": "SKIP", "reason": f"runtime mode {mode}"})
             return report
-        allowed = {"searxng", "connector", "recorded"}
+        allowed = {"searxng", "connector", "recorded", "academic", "hybrid"}
         if provider == "disabled":
             report.issues.append(
                 DependencyIssue(
@@ -654,7 +654,7 @@ class RuntimeDependencyPreflight:
                 )
             )
             return report
-        if provider == "searxng":
+        if provider in {"searxng", "hybrid"}:
             if not str(self.settings.public_search_base_url or "").strip():
                 report.issues.append(
                     DependencyIssue(
@@ -1019,7 +1019,7 @@ class RuntimeDependencyPreflight:
                         )
         search = self._search_report()
         report.extend(search)
-        if self.settings.public_search_provider == "searxng" and not search.blocking_issues:
+        if self.settings.public_search_provider in {"searxng", "hybrid"} and not search.blocking_issues:
             try:
                 params = {
                     "q": "proposal agent preflight",

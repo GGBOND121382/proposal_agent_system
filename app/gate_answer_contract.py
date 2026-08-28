@@ -127,6 +127,18 @@ def widen_gate_question_answer_schema(question: Any) -> Any:
     schema = normalized.get("answer_schema")
     if not isinstance(schema, dict):
         return normalized
+    # ``answer_schema`` is a deliberately small Gate-control dialect, not an
+    # arbitrary JSON Schema container. Providers nevertheless tend to emit
+    # ordinary JSON Schema keywords such as ``required`` and
+    # ``additionalProperties`` for OBJECT answers. Keeping those keywords
+    # makes the question definition fail before the user sees the Gate, while
+    # silently dropping them would narrow the requested answer semantics.
+    # Free text is the only deterministic, capacity-preserving representation
+    # available without changing the persisted schema.
+    supported_keys = {"type", "allowed_values", "properties", "items"}
+    if any(key not in supported_keys for key in schema):
+        normalized["answer_schema"] = {"type": "STRING"}
+        return normalized
     answer_type = str(schema.get("type") or "").upper()
     question_text = normalized.get("prompt") or normalized.get("question")
     incomplete_object = answer_type == "OBJECT" and not isinstance(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -40,10 +41,54 @@ def source_category(record: dict[str, Any]) -> str:
     return "OTHER"
 
 
-def coverage_report(records: list[dict[str, Any]], plan: dict[str, Any]) -> dict[str, Any]:
+def _record_queries(record: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    verification = record.get("verification") if isinstance(record.get("verification"), dict) else {}
+    for raw in verification.get("matched_queries") or []:
+        value = str(raw or "").strip()
+        if value and value not in values:
+            values.append(value)
+    matched = str(record.get("matched_query") or "").strip()
+    if matched and matched not in values:
+        values.append(matched)
+    return values
+
+
+def _record_providers(record: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    verification = record.get("verification") if isinstance(record.get("verification"), dict) else {}
+    for raw in verification.get("discovery_providers") or []:
+        value = str(raw or "").strip().lower()
+        if value and value not in values:
+            values.append(value)
+    single = str(verification.get("discovery_provider") or "").strip().lower()
+    if single and single not in values:
+        values.append(single)
+    return values
+
+
+def _author_team_key(record: dict[str, Any]) -> str:
+    authors = [str(item or "").strip().lower() for item in record.get("authors") or [] if str(item or "").strip()]
+    return "|".join(authors[:3])
+
+
+def _is_review_source(record: dict[str, Any]) -> bool:
+    searchable = f"{record.get('title', '')}\n{record.get('excerpt', '')}".lower()
+    terms = ("systematic review", "literature review", "survey", "review", "综述", "系统评价")
+    return any(term in searchable for term in terms)
+
+
+def coverage_report(
+    records: list[dict[str, Any]],
+    plan: dict[str, Any],
+    *,
+    quality_profile: str = "legacy",
+    min_sources_per_query: int = 3,
+) -> dict[str, Any]:
+    queries = list(plan.get("queries") or [])
     by_query: dict[str, dict[str, Any]] = {}
-    for query in plan.get("queries", []):
-        matched = [record for record in records if record.get("matched_query") == query]
+    for query in queries:
+        matched = [record for record in records if query in _record_queries(record)]
         by_query[query] = {
             "source_count": len(matched),
             "authoritative_source_count": sum(1 for record in matched if int(record.get("authority_rank") or 0) >= 80),
@@ -53,15 +98,122 @@ def coverage_report(records: list[dict[str, Any]], plan: dict[str, Any]) -> dict
     baselines = [record for record in records if record.get("supports_baseline")]
     limitations = [record for record in records if record.get("supports_limitation")]
     uncovered = [query for query, item in by_query.items() if item["source_count"] == 0]
+
     dimensions = {
         "recent_work": {"status": "PASS" if recent else "INSUFFICIENT", "source_ids": [r["source_id"] for r in recent]},
         "comparable_baselines": {"status": "PASS" if baselines else "INSUFFICIENT", "source_ids": [r["source_id"] for r in baselines]},
         "limitation_mechanisms": {"status": "PASS" if limitations else "INSUFFICIENT", "source_ids": [r["source_id"] for r in limitations]},
     }
+
+    profile = str(quality_profile or "legacy").strip().lower()
+    if profile != "proposal_related_work":
+        return {
+            "status": "PASS" if not uncovered and all(item["status"] == "PASS" for item in dimensions.values()) else "INSUFFICIENT",
+            "quality_profile": profile or "legacy",
+            "by_query": by_query,
+            "uncovered_queries": uncovered,
+            "shallow_queries": [],
+            "dimensions": dimensions,
+        }
+
+    # Proposal related-work research needs breadth, depth, and diversity.  The old
+    # existential checks (>=1 recent/baseline/limitation source) remain available in
+    # legacy mode for replay/backward compatibility but are not sufficient here.
+    query_min = max(1, min(int(min_sources_per_query), 8))
+    query_count = len(queries)
+    source_min = max(10, query_count * query_min) if query_count else 10
+    peer_or_official = [
+        record for record in records
+        if record.get("source_category") in {"PEER_REVIEWED_PAPER", "OFFICIAL_STANDARD", "GOVERNMENT"}
+    ]
+    reviews = [record for record in records if _is_review_source(record)]
+    providers = sorted({provider for record in records for provider in _record_providers(record)})
+    publishers = sorted({str(record.get("publisher") or "").strip().lower() for record in records if str(record.get("publisher") or "").strip()})
+    author_teams = sorted({key for record in records if (key := _author_team_key(record))})
+    shallow = [query for query, item in by_query.items() if item["source_count"] < query_min]
+    authoritative_total = sum(1 for record in records if int(record.get("authority_rank") or 0) >= 80)
+
+    provider_counts: dict[str, float] = {}
+    for record in records:
+        record_providers = _record_providers(record)
+        if not record_providers:
+            continue
+        weight = 1.0 / len(record_providers)
+        for provider in record_providers:
+            provider_counts[provider] = provider_counts.get(provider, 0.0) + weight
+    provider_concentration = (max(provider_counts.values()) / len(records)) if records and provider_counts else 1.0
+
+    dimensions.update({
+        "query_depth": {
+            "status": "PASS" if not shallow and bool(queries) else "INSUFFICIENT",
+            "minimum_sources_per_query": query_min,
+            "shallow_queries": shallow,
+        },
+        "source_volume": {
+            "status": "PASS" if len(records) >= source_min else "INSUFFICIENT",
+            "source_count": len(records),
+            "minimum_source_count": source_min,
+        },
+        "peer_reviewed_or_official": {
+            "status": "PASS" if len(peer_or_official) >= max(4, query_count) else "INSUFFICIENT",
+            "source_ids": [record["source_id"] for record in peer_or_official],
+            "minimum_source_count": max(4, query_count),
+        },
+        "review_synthesis": {
+            "status": "PASS" if reviews else "INSUFFICIENT",
+            "source_ids": [record["source_id"] for record in reviews],
+        },
+        "author_team_diversity": {
+            "status": "PASS" if len(author_teams) >= 3 else "INSUFFICIENT",
+            "distinct_author_teams": len(author_teams),
+        },
+        "publisher_diversity": {
+            "status": "PASS" if len(publishers) >= 3 else "INSUFFICIENT",
+            "distinct_publishers": len(publishers),
+        },
+        "discovery_provider_diversity": {
+            # Connector imports may not expose their upstream search-engine identity.
+            # In that case publisher/category diversity remains enforceable and this
+            # dimension is explicitly marked unobserved rather than making connector
+            # mode impossible to pass.
+            "status": "PASS" if not providers or len(providers) >= 2 else "INSUFFICIENT",
+            "providers": providers,
+            "observed": bool(providers),
+        },
+        "provider_concentration": {
+            "status": "PASS" if not provider_counts or provider_concentration <= 0.8 else "INSUFFICIENT",
+            "provider_counts": provider_counts,
+            "observed": bool(provider_counts),
+            "max_share": round(provider_concentration, 4) if provider_counts else None,
+            "maximum_allowed_share": 0.8,
+        },
+        "authoritative_depth": {
+            "status": "PASS" if authoritative_total >= max(4, query_count) else "INSUFFICIENT",
+            "authoritative_source_count": authoritative_total,
+            "minimum_source_count": max(4, query_count),
+        },
+        "recent_work": {
+            "status": "PASS" if len(recent) >= max(3, query_count) else "INSUFFICIENT",
+            "source_ids": [r["source_id"] for r in recent],
+            "minimum_source_count": max(3, query_count),
+        },
+        "comparable_baselines": {
+            "status": "PASS" if len(baselines) >= 2 else "INSUFFICIENT",
+            "source_ids": [r["source_id"] for r in baselines],
+            "minimum_source_count": 2,
+        },
+        "limitation_mechanisms": {
+            "status": "PASS" if len(limitations) >= 2 else "INSUFFICIENT",
+            "source_ids": [r["source_id"] for r in limitations],
+            "minimum_source_count": 2,
+        },
+    })
     return {
         "status": "PASS" if not uncovered and all(item["status"] == "PASS" for item in dimensions.values()) else "INSUFFICIENT",
+        "quality_profile": "proposal_related_work",
         "by_query": by_query,
         "uncovered_queries": uncovered,
+        "shallow_queries": shallow,
         "dimensions": dimensions,
     }
 
@@ -136,12 +288,24 @@ def _write_csv(path: Path, records: list[dict[str, Any]]) -> None:
         writer.writerows(records)
 
 
-def upgrade_archive_result(result, normalized_plan: dict[str, Any], plan_validation: dict[str, Any], duplicate_issues: list[dict[str, Any]]):
+def upgrade_archive_result(
+    result,
+    normalized_plan: dict[str, Any],
+    plan_validation: dict[str, Any],
+    duplicate_issues: list[dict[str, Any]],
+    *,
+    quality_profile: str = "legacy",
+    selection_report: dict[str, Any] | None = None,
+    execution_report: dict[str, Any] | None = None,
+    min_sources_per_query: int = 3,
+):
     manifest_path = Path(result.output["archive_manifest"])
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     records = list(manifest.get("records") or [])
     issues: list[dict[str, Any]] = []
     warnings = list(result.output.get("warnings") or []) + list(plan_validation.get("warnings") or [])
+    if selection_report:
+        issues.extend(list(selection_report.get("issues") or []))
     for warning in result.output.get("warnings") or []:
         url, _, message = str(warning).partition(": ")
         issues.append({"type": "SOURCE_FETCH_FAILURE", "url": url, "message": message or str(warning)})
@@ -158,6 +322,11 @@ def upgrade_archive_result(result, normalized_plan: dict[str, Any], plan_validat
             })
 
     current_year = datetime.now(timezone.utc).year
+    scope_years = [
+        int(value)
+        for value in re.findall(r"(?:19|20)\d{2}", str(normalized_plan.get("time_scope") or ""))
+    ]
+    recent_reference_year = max(scope_years) if scope_years else current_year
     unique_records: list[dict[str, Any]] = []
     seen_content: dict[str, str] = {}
     for record in records:
@@ -184,7 +353,7 @@ def upgrade_archive_result(result, normalized_plan: dict[str, Any], plan_validat
         record["published_year"] = year
         searchable = f"{record.get('title', '')}\n{record.get('excerpt', '')}"
         record["accessed_at"] = record.get("retrieved_at") or utc_now()
-        record["is_recent"] = bool(year and year >= current_year - 5)
+        record["is_recent"] = bool(year and year >= recent_reference_year - 5)
         record["supports_baseline"] = _contains_any(searchable, _BASELINE_TERMS)
         record["supports_limitation"] = _contains_any(searchable, _LIMITATION_TERMS)
         record["evidence_layers"] = {
@@ -195,7 +364,7 @@ def upgrade_archive_result(result, normalized_plan: dict[str, Any], plan_validat
         unique_records.append(record)
 
     unique_records.sort(key=lambda item: (-int(item.get("authority_rank") or 0), -(item.get("published_year") or 0), item.get("canonical_url") or ""))
-    coverage = coverage_report(unique_records, normalized_plan)
+    coverage = coverage_report(unique_records, normalized_plan, quality_profile=quality_profile, min_sources_per_query=min_sources_per_query)
     for query in coverage["uncovered_queries"]:
         issues.append({"type": "EVIDENCE_GAP", "code": "QUERY_UNCOVERED", "query": query})
     for dimension, item in coverage["dimensions"].items():
@@ -214,6 +383,9 @@ def upgrade_archive_result(result, normalized_plan: dict[str, Any], plan_validat
         "issues": issues,
         "issue_count": len(issues),
         "coverage": coverage,
+        "research_quality_profile": str(quality_profile or "legacy"),
+        "selection_report": selection_report,
+        "execution_report": execution_report,
         "connector_response_sha256": connector_hash,
     })
     write_json(manifest_path, manifest)
@@ -235,8 +407,11 @@ def upgrade_archive_result(result, normalized_plan: dict[str, Any], plan_validat
             "source_id": record["source_id"], "title": record.get("title"), "url": record.get("url"),
             "canonical_url": record.get("canonical_url"), "doi": record.get("doi"), "source_type": record.get("source_category"),
             "authority_rank": record.get("authority_rank"), "published_at": record.get("published_at"), "is_recent": record.get("is_recent"),
-            "matched_query": record.get("matched_query"), "snapshot_sha256": record.get("snapshot_sha256"),
+            "matched_query": record.get("matched_query"), "matched_queries": _record_queries(record),
+            "discovery_providers": _record_providers(record), "snapshot_sha256": record.get("snapshot_sha256"),
             "text_sha256": record.get("text_sha256"), "excerpt": record.get("excerpt"),
+            "text_length": record.get("text_length"),
+            "full_text_available": bool(int(record.get("text_length") or 0) >= 1000),
         })
     verification = verify_research_archive(manifest_path)
     if verification["status"] != "PASS":
@@ -248,6 +423,8 @@ def upgrade_archive_result(result, normalized_plan: dict[str, Any], plan_validat
         "sources": sources, "passages": passages, "queries": normalized_plan["queries"],
         "normalized_plan": normalized_plan, "plan_validation": plan_validation,
         "source_catalog": catalog, "coverage": coverage, "issues": issues,
+        "research_quality_profile": str(quality_profile or "legacy"),
+        "selection_report": selection_report, "execution_report": execution_report,
         "archive_verification": verification, "warnings": warnings,
     })
     result.warnings = warnings

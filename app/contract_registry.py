@@ -590,6 +590,58 @@ def required_null_container_errors(
     return errors
 
 
+def normalize_exact_null_literals(
+    value: Any,
+    schema: Mapping[str, Any] | None,
+) -> tuple[Any, dict[str, Any]]:
+    """Convert only the exact string ``"null"`` where JSON null is allowed.
+
+    The conversion is schema-directed and representation-only. Case variants,
+    surrounding whitespace and occurrences inside ordinary prose are preserved.
+    """
+
+    normalized = copy.deepcopy(value)
+    changes: list[str] = []
+
+    def allows_null(node_schema: Mapping[str, Any]) -> bool:
+        declared = node_schema.get("type")
+        if declared == "null":
+            return True
+        if isinstance(declared, list) and "null" in declared:
+            return True
+        if None in list(node_schema.get("enum") or []):
+            return True
+        return any(
+            isinstance(branch, Mapping) and allows_null(branch)
+            for key in ("anyOf", "oneOf")
+            for branch in (node_schema.get(key) or [])
+        )
+
+    def visit(node: Any, node_schema: Mapping[str, Any], path: tuple[str, ...]) -> Any:
+        if node == "null" and allows_null(node_schema):
+            changes.append("/" + "/".join(path))
+            return None
+        if isinstance(node, dict):
+            properties = node_schema.get("properties")
+            properties = properties if isinstance(properties, Mapping) else {}
+            for key in list(node):
+                child_schema = properties.get(key)
+                if isinstance(child_schema, Mapping):
+                    node[key] = visit(node[key], child_schema, (*path, str(key)))
+            return node
+        if isinstance(node, list):
+            item_schema = node_schema.get("items")
+            if isinstance(item_schema, Mapping):
+                for index, item in enumerate(node):
+                    node[index] = visit(item, item_schema, (*path, str(index)))
+            return node
+        return node
+
+    if isinstance(schema, Mapping):
+        normalized = visit(normalized, schema, ())
+    return normalized, {"normalized_count": len(changes), "paths": changes}
+
+
 def normalize_against_schema(
     value: Any,
     schema: Mapping[str, Any],

@@ -29,8 +29,16 @@ from .workflow_authoring import WorkflowAuthoringMixin
 from .workflow_defs import CRITIC_PRODUCER, WORKFLOWS
 from .workflow_gates import WorkflowGateMixin
 from .workflow_repair import WorkflowRepairMixin
-from .wf3_input import WorkflowInputRequired
-from .wf3_contracts import WF3_RESEARCH_CRITIC, wf3_critic_routing_report
+from .wf3_input import WorkflowInputRequired, normalize_wf3_time_constraints
+from .wf3_contracts import (
+    WF3_RESEARCH_CRITIC,
+    compare_wf3_plan_candidates,
+    compare_wf3_synthesis_candidates,
+    summarize_wf3_plan,
+    summarize_wf3_synthesis,
+    wf3_plan_preflight_errors,
+    wf3_critic_routing_report,
+)
 from .workflow_status import (
     WorkflowStatus,
     classify_legacy_blocked_error,
@@ -137,6 +145,115 @@ def semantic_gap_revision_finding(
 
 
 class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMixin):
+    def _wf3_accept_complete_candidate(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        prompt_id: str,
+        result: dict[str, Any],
+        *,
+        candidate_preflight_errors: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Keep the exact accepted Plan/Synthesis baseline on regression.
+
+        No JSON fusion is performed.  Every new full candidate remains in the
+        immutable prompt evidence, while workflow consumers are pinned to the
+        accepted run until a complete candidate passes deterministic
+        non-regression checks.
+        """
+
+        handlers = {
+            "P-PUBLIC-RESEARCH-PLAN": (
+                compare_wf3_plan_candidates,
+                summarize_wf3_plan,
+            ),
+            "P-PUBLIC-RESEARCH-SYNTHESIS": (
+                compare_wf3_synthesis_candidates,
+                summarize_wf3_synthesis,
+            ),
+        }
+        if prompt_id not in handlers or str(result.get("status") or "") != "PASS":
+            return result
+        baselines = state.setdefault("wf3_accepted_model_baselines", {})
+        baseline = baselines.get(prompt_id)
+        candidate_output = result.get("output") or {}
+        compare, summarize = handlers[prompt_id]
+        preflight_errors = list(candidate_preflight_errors or [])
+        preflight_errors.extend(
+            wf3_plan_preflight_errors(candidate_output)
+            if prompt_id == "P-PUBLIC-RESEARCH-PLAN"
+            else []
+        )
+        if not isinstance(baseline, dict) or not baseline.get("run_id"):
+            if preflight_errors:
+                raise PromptExecutionError(
+                    f"WF-3 {prompt_id} candidate failed next-step preflight",
+                    validation_errors=preflight_errors,
+                )
+            baselines[prompt_id] = {
+                "run_id": str(result.get("run_id") or ""),
+                "output_hash": sha256_json(candidate_output),
+                "accepted_at": utc_now(),
+                "summary": summarize(candidate_output),
+            }
+            return result
+        baseline_run_id = str(baseline.get("run_id") or "")
+        if baseline_run_id == str(result.get("run_id") or ""):
+            return result
+        row = self.db.fetchone(
+            """SELECT status,output_json,output_hash FROM prompt_runs
+               WHERE id=? AND project_id=? AND workflow_id=? AND prompt_id=?
+                 AND output_json IS NOT NULL""",
+            (baseline_run_id, wf["project_id"], wf["id"], prompt_id),
+        )
+        if not row:
+            raise PromptExecutionError(
+                f"WF-3 accepted baseline is missing for {prompt_id}: {baseline_run_id}"
+            )
+        accepted_output = json.loads(row["output_json"])
+        if not isinstance(accepted_output, dict):
+            raise PromptExecutionError(
+                f"WF-3 accepted baseline is not an object: {baseline_run_id}"
+            )
+        comparison = compare(accepted_output, candidate_output)
+        if preflight_errors:
+            comparison["accepted"] = False
+            comparison.setdefault("regressions", []).insert(
+                0, "NEXT_STEP_PREFLIGHT_FAILED"
+            )
+            comparison["preflight_errors"] = list(preflight_errors)
+        state.setdefault("wf3_model_candidate_history", []).append(
+            {
+                "prompt_id": prompt_id,
+                "baseline_run_id": baseline_run_id,
+                "candidate_run_id": str(result.get("run_id") or ""),
+                "candidate_output_hash": sha256_json(candidate_output),
+                "decision": "ACCEPT" if comparison["accepted"] else "REJECT",
+                "comparison": comparison,
+                "recorded_at": utc_now(),
+            }
+        )
+        del state["wf3_model_candidate_history"][:-30]
+        if comparison["accepted"]:
+            baselines[prompt_id] = {
+                "run_id": str(result.get("run_id") or ""),
+                "output_hash": sha256_json(candidate_output),
+                "accepted_at": utc_now(),
+                "summary": summarize(candidate_output),
+                "supersedes_run_id": baseline_run_id,
+            }
+            return result
+        fallback = copy.deepcopy(result)
+        fallback["run_id"] = baseline_run_id
+        fallback["status"] = str(row.get("status") or accepted_output.get("status") or "PASS")
+        fallback["output"] = accepted_output
+        fallback["wf3_rejected_candidate"] = {
+            "run_id": str(result.get("run_id") or ""),
+            "output_hash": sha256_json(candidate_output),
+            "regressions": list(comparison.get("regressions") or []),
+        }
+        return fallback
+
     @staticmethod
     def _retry_not_before(delay_seconds: float) -> str | None:
         if delay_seconds <= 0:
@@ -208,6 +325,45 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             }
             for error in unique_errors
         ]
+
+    @staticmethod
+    def _contract_retry_feedback(
+        prompt_id: str,
+        exc: BaseException,
+        *,
+        limit: int = 12,
+    ) -> list[str]:
+        """Return exact bounded validation feedback for WF-3 regeneration."""
+
+        if prompt_id not in {
+            "P-SAFE-ONLINE-PACKAGE",
+            "P-SAFE-ONLINE-PACKAGE-CRITIC",
+            "P-PUBLIC-RESEARCH-PLAN",
+            "P-PUBLIC-RESEARCH-SYNTHESIS",
+            "P-PUBLIC-RESEARCH-CRITIC",
+            "P-ONLINE-RESULT-IMPORT-CRITIC",
+        }:
+            return []
+        phase = ""
+        current: BaseException | None = exc
+        seen: set[int] = set()
+        validation_errors: list[str] = []
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if not phase and getattr(current, "provider_phase", None):
+                phase = str(getattr(current, "provider_phase"))
+            for item in getattr(current, "validation_errors", None) or []:
+                value = redact_secret_text(str(item)).strip()
+                if value:
+                    validation_errors.append(value[:500])
+            current = current.__cause__ or current.__context__
+        if phase not in {
+            "output_structure_validation",
+            "output_schema_validation",
+            "output_semantic_validation",
+        }:
+            return []
+        return list(dict.fromkeys(validation_errors))[: max(0, int(limit))]
 
 
     def __init__(self, db, pack, context_builder, executor, research_service, diagram_enrichment=None, quality_manager=None, dependency_preflight=None):
@@ -884,6 +1040,11 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             for item in prior_cycle.get("semantic_retry_issues") or []
             if isinstance(item, dict)
         ]
+        contract_retry_feedback = [
+            str(item)
+            for item in prior_cycle.get("contract_retry_feedback") or []
+            if str(item).strip()
+        ]
         while True:
             in_flight = int(prior_cycle.get("attempt_in_flight") or 0)
             attempt_number = (
@@ -912,6 +1073,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 "section_id": section_id or None,
                 "section_phase": section_phase or None,
                 "semantic_retry_issues": copy.deepcopy(semantic_retry_issues),
+                "contract_retry_feedback": list(contract_retry_feedback),
                 "phase": "CALLING",
             }
             # Persist the attempt identity before invoking the provider.  If the
@@ -928,6 +1090,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 }
                 if semantic_retry_issues:
                     execute_kwargs["semantic_retry_issues"] = semantic_retry_issues
+                if contract_retry_feedback:
+                    execute_kwargs["contract_retry_feedback"] = list(
+                        contract_retry_feedback
+                    )
                 semantic_baseline_runs = state.get(
                     "semantic_producer_regeneration_baseline_runs"
                 ) or {}
@@ -980,6 +1146,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     prior_cycle["semantic_retry_issues"] = copy.deepcopy(
                         semantic_retry_issues
                     )
+                next_contract_feedback = self._contract_retry_feedback(
+                    prompt_id, exc
+                )
+                if next_contract_feedback:
+                    contract_retry_feedback = next_contract_feedback
+                    prior_cycle["contract_retry_feedback"] = list(
+                        contract_retry_feedback
+                    )
                 if decision.should_retry and not retry_allowed_here:
                     decision = RetryDecision(
                         should_retry=False,
@@ -1025,6 +1199,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     "last_error": redact_secret_text(str(exc)),
                     "failure_run_id": str(getattr(exc, "run_id", "") or "") or None,
                     "semantic_retry_issues": copy.deepcopy(semantic_retry_issues),
+                    "contract_retry_feedback": list(contract_retry_feedback),
                     "phase": "FAILED",
                 }
 
@@ -1095,6 +1270,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             prior_cycle["completed_attempts"] = completed_attempts
             prior_cycle.pop("attempt_in_flight", None)
             prior_cycle.pop("semantic_retry_issues", None)
+            prior_cycle.pop("contract_retry_feedback", None)
             prior_cycle["successful_attempt"] = attempt_number
             contract_repair_metadata = result.get("contract_repair")
             if isinstance(contract_repair_metadata, dict):
@@ -1881,16 +2057,22 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 f"同一项目已有未结束的 {workflow_type} 工作流：{active_parent['id']} "
                 f"（{active_parent['status']}）。请继续或取消该工作流，不要并发启动重复实例。"
             )
-        workflow_id = new_id("wf")
         now = utc_now()
+        resolved_options = copy.deepcopy(options or {})
+        if workflow_type == "WF-3_HYBRID_ONLINE_ASSIST":
+            resolved_options["time_constraints"] = normalize_wf3_time_constraints(
+                resolved_options,
+                reference_date=now,
+            )
+        workflow_id = new_id("wf")
         prerequisite_bindings, missing_prerequisites = self._resolve_prerequisite_workflows(
             project_id,
             workflow_type,
-            options or {},
+            resolved_options,
         )
         state = {
             "workflow_type": workflow_type,
-            "options": options or {},
+            "options": resolved_options,
             "step_results": {},
             "repair_attempts": {},
             "public_search_results": None,
@@ -1906,7 +2088,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             state["last_error"] = prerequisite_error
             state["waiting_prerequisite"] = True
         elif self.dependency_preflight is not None:
-            report = self._workflow_dependency_report(project_id, workflow_type, options or {})
+            report = self._workflow_dependency_report(project_id, workflow_type, resolved_options)
             if report is not None and report.blocking_issues:
                 status = WorkflowStatus.WAITING_CONFIGURATION.value
                 state["configuration_wait"] = {
@@ -2775,6 +2957,42 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 self._update(wf, status=status, state=state)
                 return self.get(workflow_id)
 
+            candidate_preflight_errors: list[str] = []
+            if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS":
+                candidate_claim_validation = self.research_service.validate_synthesis(
+                    (result.get("output") or {}).get("result") or {},
+                    state.get("public_search_results") or {},
+                )
+                state["public_claim_validation"] = candidate_claim_validation
+                if candidate_claim_validation.get("status") != "PASS":
+                    candidate_preflight_errors = [
+                        (
+                            str(item.get("target_path") or item.get("path") or "/result/claims")
+                            + ": "
+                            + str(item.get("code") or "PUBLIC_CLAIM_INVALID")
+                        )
+                        for item in candidate_claim_validation.get("findings", [])
+                    ]
+            try:
+                result = self._wf3_accept_complete_candidate(
+                    wf,
+                    state,
+                    prompt_id,
+                    result,
+                    candidate_preflight_errors=candidate_preflight_errors,
+                )
+            except PromptExecutionError as exc:
+                state["last_error"] = redact_secret_text(str(exc))
+                state["wf3_candidate_preflight_errors"] = [
+                    redact_secret_text(str(item))
+                    for item in (exc.validation_errors or [])
+                ]
+                self._update(
+                    wf,
+                    status=WorkflowStatus.BLOCKED_CONTRACT.value,
+                    state=state,
+                )
+                return self.get(workflow_id)
             state["step_results"][str(wf["current_step"])] = {"prompt_id": prompt_id, "run_id": result["run_id"], "status": result["status"]}
             if prompt_id == "P-FINAL-CONFIDENTIALITY-REVIEW":
                 payload = envelope.get("payload") or {}

@@ -44,6 +44,7 @@ from .runtime_failures import classify_runtime_failure, persistence_safe_failure
 from .security import RoutingDenied
 from .secret_redaction import redact_secrets, redact_secret_text
 from .util import new_id, sha256_json, utc_now
+from .wf3_contracts import wf3_provider_request_budget_report
 
 
 class RecoverablePromptExecutionError(PromptExecutionError):
@@ -1057,6 +1058,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
         call_key: str | None = None,
         recovery_run_id: str | None = None,
         semantic_retry_issues: list[dict[str, Any]] | None = None,
+        contract_retry_feedback: list[str] | None = None,
         semantic_regeneration_baseline_run_id: str | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
@@ -1238,6 +1240,27 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     provider_call_envelope,
                     semantic_model_contract=semantic_model_contract,
                 )
+                if contract_retry_feedback:
+                    system_prompt += self._contract_retry_feedback_prompt(
+                        contract_retry_feedback
+                    )
+                wf3_budget = wf3_provider_request_budget_report(
+                    prompt_id, system_prompt, provider_call_envelope
+                )
+                if wf3_budget:
+                    input_compaction = {
+                        **(input_compaction or {}),
+                        "wf3_request_budget": wf3_budget,
+                    }
+                    if not wf3_budget["within_budget"]:
+                        raise PromptExecutionError(
+                            "WF-3 provider request exceeds its deterministic node budget",
+                            validation_errors=[
+                                "/provider_request: "
+                                f"{wf3_budget['provider_visible_chars']} chars exceeds "
+                                f"{wf3_budget['limit_chars']} for {prompt_id}"
+                            ],
+                        )
             contract_recovery = (
                 None
                 if argument_two_stage_contract
@@ -1696,6 +1719,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
         }
 
     def _trace_payload(self, **kwargs: Any) -> dict[str, Any]:
+        provider_request_envelope = (
+            kwargs.get("provider_envelope") or kwargs["model_envelope"]
+        )
         return {
             "prompt_id": kwargs["prompt_id"],
             "version": kwargs["version"],
@@ -1709,10 +1735,14 @@ class RuntimePromptExecutor(BasePromptExecutor):
             # The provider-visible projection is recorded separately so audit/recovery
             # semantics remain stable while outbound context can stay lean.
             "input_envelope": kwargs["model_envelope"],
-            "provider_input_envelope": kwargs.get("provider_envelope") or kwargs["model_envelope"],
-            "provider_input_sha256": sha256_json(
-                kwargs.get("provider_envelope") or kwargs["model_envelope"]
-            ),
+            "input_envelope_kind": "VALIDATION_ENVELOPE",
+            "validation_envelope": kwargs["model_envelope"],
+            # Keep the old names for evidence-bundle compatibility while
+            # exposing an unambiguous name for the exact provider request.
+            "provider_input_envelope": provider_request_envelope,
+            "provider_input_sha256": sha256_json(provider_request_envelope),
+            "provider_request_envelope": provider_request_envelope,
+            "provider_request_sha256": sha256_json(provider_request_envelope),
             "quality_context_envelope": kwargs.get("quality_context_envelope"),
             "quality_context_hash": sha256_json(kwargs["quality_context_envelope"]) if kwargs.get("quality_context_envelope") is not None else None,
             "input_compaction": kwargs.get("input_compaction"),

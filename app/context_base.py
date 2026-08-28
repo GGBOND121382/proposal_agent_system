@@ -4,6 +4,7 @@ import copy
 import json
 import re
 from contextvars import ContextVar
+from datetime import date, datetime
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -22,9 +23,11 @@ from .util import new_id, sha256_json, sha256_text
 from .wf3_input import (
     WF3_INPUT_GATE_TYPE,
     WorkflowInputRequired,
+    allowed_topics_gate_questions,
     build_research_need,
     input_gate_questions,
     normalize_target_task_type,
+    normalize_wf3_time_constraints,
 )
 from .workflow_input import (
     APPLICATION_GUIDE_INPUT,
@@ -782,6 +785,41 @@ class ContextBuilder:
         """
         active_workflow_id = self._resolve_workflow_id(workflow_id)
         if active_workflow_id:
+            workflow_row = self.db.fetchone(
+                "SELECT project_id,state_json FROM workflows WHERE id=?",
+                (active_workflow_id,),
+            )
+            if workflow_row and str(workflow_row.get("project_id")) == str(project_id):
+                try:
+                    workflow_state = json.loads(workflow_row.get("state_json") or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    workflow_state = {}
+                baseline = (workflow_state.get("wf3_accepted_model_baselines") or {}).get(
+                    prompt_id
+                )
+                if isinstance(baseline, dict) and baseline.get("run_id"):
+                    baseline_row = self.db.fetchone(
+                        """SELECT output_json,output_hash FROM prompt_runs
+                           WHERE id=? AND project_id=? AND workflow_id=? AND prompt_id=?
+                             AND status='PASS' AND output_json IS NOT NULL""",
+                        (
+                            str(baseline["run_id"]),
+                            project_id,
+                            active_workflow_id,
+                            prompt_id,
+                        ),
+                    )
+                    if not baseline_row:
+                        raise ValueError(
+                            f"WF-3 accepted baseline run is missing: {baseline['run_id']}"
+                        )
+                    decoded = json.loads(baseline_row["output_json"])
+                    expected_hash = str(baseline.get("output_hash") or "")
+                    if expected_hash and sha256_json(decoded) != expected_hash:
+                        raise ValueError(
+                            f"WF-3 accepted baseline hash mismatch: {baseline['run_id']}"
+                        )
+                    return decoded
             accepted_source_ids = (
                 [active_workflow_id]
                 if exact_workflow
@@ -1590,6 +1628,30 @@ class ContextBuilder:
                     "请通过用户输入门禁补充研究问题；系统不会将 Schema 占位值发送给模型。"
                 ),
             )
+        topic_boundary_declared = (
+            "allowed_public_topics" in options
+            or "allowed_public_topics" in config
+        )
+        allowed_topics = [
+            str(item).strip()
+            for item in (
+                options.get("allowed_public_topics")
+                or config.get("allowed_public_topics")
+                or ([] if topic_boundary_declared else ["公开学术资料"])
+            )
+            if str(item).strip()
+        ]
+        if not allowed_topics:
+            raise WorkflowInputRequired(
+                "P-SAFE-ONLINE-PACKAGE",
+                gate_type=WF3_INPUT_GATE_TYPE,
+                missing_paths=["payload.allowed_topics"],
+                questions=allowed_topics_gate_questions(),
+                message=(
+                    "WF-3 尚未获得本次工作流允许对外检索的公开主题。"
+                    "该审批边界由人工 Gate 确认，不交给模型推断。"
+                ),
+            )
         source_items = options.get("source_items") if isinstance(options.get("source_items"), list) else None
         if source_items is None:
             source_items = self._wf3_source_items(project, docs, workflow_id=workflow_id)
@@ -1610,6 +1672,7 @@ class ContextBuilder:
             "research_need": research_need,
             "source_items": source_items,
             "target_task_type": target_task_type,
+            "allowed_topics": allowed_topics,
         }
 
     @staticmethod
@@ -1647,12 +1710,117 @@ class ContextBuilder:
 
     @staticmethod
     def _wf3_time_constraints(options: dict[str, Any]) -> dict[str, Any]:
-        raw = options.get("time_constraints") if isinstance(options.get("time_constraints"), dict) else {}
-        return {
-            "start_date": raw.get("start_date"),
-            "end_date": raw.get("end_date"),
-            "freshness_required": bool(raw.get("freshness_required", True)),
-        }
+        return normalize_wf3_time_constraints(options)
+
+    @staticmethod
+    def _wf3_iso_date(value: Any) -> str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        chinese = re.fullmatch(r"(\d{4})年(\d{1,2})月(\d{1,2})日", text)
+        if chinese:
+            parsed = date(
+                int(chinese.group(1)),
+                int(chinese.group(2)),
+                int(chinese.group(3)),
+            )
+            return parsed.isoformat()
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
+        except ValueError as exc:
+            raise ValueError(
+                "WF-3 valid_until must be an ISO date/date-time or YYYY年M月D日"
+            ) from exc
+
+    def _wf3_effective_safe_package(
+        self,
+        safe_package: dict[str, Any],
+        *,
+        state: dict[str, Any],
+        workflow_id: str | None,
+    ) -> dict[str, Any]:
+        """Overlay approved Gate values without mutating the producer artifact."""
+
+        effective = copy.deepcopy(safe_package)
+        if not workflow_id:
+            return effective
+        index = state.get("human_resolution_artifact_ids") or {}
+        artifact_ids: list[str] = []
+        critic_prompt = "P-SAFE-ONLINE-PACKAGE-CRITIC"
+        for scope_key, values in index.items():
+            if str(scope_key) != critic_prompt and not str(scope_key).endswith(
+                ":" + critic_prompt
+            ):
+                continue
+            for value in values or []:
+                artifact_id = str(value or "").strip()
+                if artifact_id and artifact_id not in artifact_ids:
+                    artifact_ids.append(artifact_id)
+        if not artifact_ids:
+            return effective
+        placeholders = ",".join("?" for _ in artifact_ids)
+        rows = self.db.fetchall(
+            f"""SELECT content_json FROM artifacts
+                WHERE workflow_id=? AND prompt_id=?
+                  AND artifact_type='HUMAN_RESOLUTION' AND status='PASS'
+                  AND id IN ({placeholders})
+                ORDER BY version ASC,created_at ASC,id ASC""",
+            (workflow_id, critic_prompt, *artifact_ids),
+        )
+        valid_until = effective.get("valid_until")
+        for row in rows:
+            try:
+                payload = json.loads(row.get("content_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            resolution = payload.get("resolution")
+            if not isinstance(resolution, dict):
+                continue
+            targets = {
+                str(item)
+                for item in resolution.get("target_paths") or []
+            }
+            if not targets.intersection(
+                {
+                    "/payload/package_candidate/valid_until",
+                    "/result/valid_until",
+                }
+            ):
+                continue
+            valid_until = resolution.get("answer")
+        effective["valid_until"] = self._wf3_iso_date(valid_until)
+        return effective
+
+    def _wf3_outbound_approval(
+        self,
+        workflow_id: str | None,
+    ) -> dict[str, str] | None:
+        if not workflow_id:
+            return None
+        row = self.db.fetchone(
+            """SELECT decision_json,updated_at FROM gates
+               WHERE workflow_id=? AND gate_type='OUTBOUND_SECURITY_APPROVAL'
+                 AND status='APPROVED'
+               ORDER BY updated_at DESC,created_at DESC LIMIT 1""",
+            (workflow_id,),
+        )
+        if not row:
+            raise ValueError(
+                "WF-3 import manifest requires an approved outbound security Gate"
+            )
+        try:
+            decision = json.loads(row.get("decision_json") or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("WF-3 outbound approval decision is invalid") from exc
+        decided_by = str(decision.get("decided_by") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", decided_by):
+            decided_by = "approver-" + sha256_text(decided_by)[:20]
+        decided_at = str(
+            decision.get("decided_at") or row.get("updated_at") or ""
+        ).strip()
+        if not decided_at:
+            raise ValueError("WF-3 outbound approval has no decision timestamp")
+        return {"approved_by": decided_by, "approved_at": decided_at}
 
     @staticmethod
     def _wf3_evidence_requirements(options: dict[str, Any]) -> list[str]:
@@ -2114,6 +2282,7 @@ class ContextBuilder:
                 ("payload.research_need", wf3_payload["research_need"]),
                 ("payload.source_items", wf3_payload["source_items"]),
                 ("payload.target_task_type", wf3_payload["target_task_type"]),
+                ("payload.allowed_topics", wf3_payload["allowed_topics"]),
             ])
         if prompt_id == "P-SAFE-ONLINE-PACKAGE-CRITIC":
             wf3_payload = self._wf3_online_assist_payload(
@@ -2485,8 +2654,18 @@ class ContextBuilder:
         if prompt_id == "P-FINAL-CONFIDENTIALITY-REVIEW":
             self._assert_final_candidate_integrity(content_candidates)
         content = content_candidates[-1]["candidate"] if content_candidates else (self._result(project["id"], "P-EXPRESSION-POLISH") or self._result(project["id"], "P-WRITE-CONTENT"))
-        safe_package = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE")
-        research_synthesis = self._result(project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS")
+        safe_package = self._result(
+            project["id"], "P-SAFE-ONLINE-PACKAGE", workflow_id=workflow_id
+        )
+        if isinstance(safe_package, dict):
+            safe_package = self._wf3_effective_safe_package(
+                safe_package,
+                state=state,
+                workflow_id=workflow_id,
+            )
+        research_synthesis = self._result(
+            project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS", workflow_id=workflow_id
+        )
 
         if "proposal_contract" in payload and proposal_contract:
             replacements.append(("payload.proposal_contract", proposal_contract))
@@ -2668,14 +2847,20 @@ class ContextBuilder:
             }
             replacements.append(("payload.result_package", result_package))
             if "transfer_manifest" in payload:
-                replacements.append(("payload.transfer_manifest", {
-                    "package_id": package_id,
-                    "request_hash": request_hash,
-                    "content_hash": result_package["manifest_hash"],
-                    "approved_by": "outbound-security-approval",
-                    "approved_at": "2026-01-01T00:00:00Z",
-                    "expires_at": None,
-                }))
+                approval = self._wf3_outbound_approval(workflow_id)
+                if approval is None:
+                    # Replay/schema fixtures have no workflow Gate. Preserve their
+                    # recorded manifest instead of inventing approval provenance.
+                    approval = None
+                else:
+                    replacements.append(("payload.transfer_manifest", {
+                        "package_id": package_id,
+                        "request_hash": request_hash,
+                        "content_hash": result_package["manifest_hash"],
+                        "approved_by": approval["approved_by"],
+                        "approved_at": approval["approved_at"],
+                        "expires_at": safe_package.get("valid_until") if safe_package else None,
+                    }))
         if "trace_links" in payload and content_candidates:
             replacements.append(("payload.trace_links", [link for item in content_candidates for link in item["candidate"].get("trace_links", [])]))
         elif "trace_links" in payload and content:
@@ -2845,7 +3030,15 @@ class ContextBuilder:
         if "recipient_scope" in payload:
             replacements.append(("payload.recipient_scope", config.get("recipient_scope", ["内部用户"])))
         if "allowed_topics" in payload:
-            replacements.append(("payload.allowed_topics", config.get("allowed_public_topics", ["公开政策", "公开学术资料"])))
+            wf3_options = state.get("options") if isinstance(state.get("options"), dict) else {}
+            nested_wf3 = wf3_options.get("wf3") if isinstance(wf3_options.get("wf3"), dict) else {}
+            approved_topics = (
+                wf3_options.get("allowed_public_topics")
+                or nested_wf3.get("allowed_public_topics")
+                or config.get("allowed_public_topics")
+                or []
+            )
+            replacements.append(("payload.allowed_topics", approved_topics))
         if "prohibited_fields" in payload:
             replacements.append(("payload.prohibited_fields", config.get("prohibited_external_fields", [])))
 

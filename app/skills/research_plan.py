@@ -81,6 +81,74 @@ def candidate_identity(candidate: dict[str, Any]) -> tuple[str, str]:
     return "title", f"{title_key(candidate.get('title'))}|{title_key(candidate.get('publisher'))}"
 
 
+def _merge_unique_values(*values: Any) -> list[str]:
+    merged: list[str] = []
+    for raw_values in values:
+        if isinstance(raw_values, str):
+            raw_values = [raw_values]
+        for raw in raw_values or []:
+            value = str(raw or "").strip()
+            if value and value not in merged:
+                merged.append(value)
+    return merged
+
+
+def _merge_duplicate_candidate(original: dict[str, Any], duplicate: dict[str, Any]) -> None:
+    """Preserve multi-query/provider evidence when the same work is rediscovered.
+
+    Deduplication must collapse archive identity, not erase retrieval provenance.  A DOI
+    returned for several approved queries therefore remains bound to every query, and a
+    work seen through several scholarly providers keeps all provider identities.
+    """
+
+    matched = _merge_unique_values(
+        original.get("matched_queries"),
+        [original.get("matched_query")],
+        duplicate.get("matched_queries"),
+        [duplicate.get("matched_query")],
+    )
+    if matched:
+        original["matched_queries"] = matched
+        original["matched_query"] = matched[0]
+    providers = _merge_unique_values(
+        original.get("discovery_providers"),
+        [original.get("academic_provider")],
+        duplicate.get("discovery_providers"),
+        [duplicate.get("academic_provider")],
+    )
+    if providers:
+        original["discovery_providers"] = providers
+    original["authors"] = _merge_unique_values(original.get("authors"), duplicate.get("authors"))
+    for field in ("abstract", "excerpt", "content_text"):
+        first = str(original.get(field) or "")
+        second = str(duplicate.get(field) or "")
+        if len(second) > len(first):
+            original[field] = duplicate.get(field)
+    try:
+        original["citation_count"] = max(
+            int(original.get("citation_count") or 0),
+            int(duplicate.get("citation_count") or 0),
+        )
+    except (TypeError, ValueError):
+        pass
+    original["is_retracted"] = bool(original.get("is_retracted")) or bool(duplicate.get("is_retracted"))
+    verification = dict(original.get("verification") or {})
+    duplicate_verification = dict(duplicate.get("verification") or {})
+    verification["matched_queries"] = _merge_unique_values(
+        verification.get("matched_queries"),
+        duplicate_verification.get("matched_queries"),
+        matched,
+    )
+    verification["discovery_providers"] = _merge_unique_values(
+        verification.get("discovery_providers"),
+        [verification.get("discovery_provider")],
+        duplicate_verification.get("discovery_providers"),
+        [duplicate_verification.get("discovery_provider")],
+        providers,
+    )
+    original["verification"] = verification
+
+
 def deduplicate_candidates(candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     kept: list[dict[str, Any]] = []
     duplicates: list[dict[str, Any]] = []
@@ -99,12 +167,15 @@ def deduplicate_candidates(candidates: list[dict[str, Any]]) -> tuple[list[dict[
                 second_year = parse_year(candidate.get("published_at"))
                 if first_year and second_year and first_year != second_year:
                     conflict_fields.append("published_year")
+            _merge_duplicate_candidate(original, candidate)
             duplicates.append({
                 "reason": f"DUPLICATE_{key[0].upper()}",
                 "identity": key[1],
                 "kept_url": original.get("url"),
                 "duplicate_url": candidate.get("url"),
                 "conflict_fields": conflict_fields,
+                "merged_query_count": len(original.get("matched_queries") or []),
+                "merged_provider_count": len(original.get("discovery_providers") or []),
             })
             continue
         seen[key] = len(kept)
@@ -164,6 +235,9 @@ def _query_text(item: Any) -> str:
     if isinstance(item, dict):
         return str(item.get("query") or item.get("query_text") or item.get("text") or "").strip()
     return ""
+
+
+MAX_RESEARCH_QUERIES = 12
 
 
 def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -284,6 +358,15 @@ def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[
 
     if not queries:
         findings.append({"code": "RESEARCH_PLAN_NO_QUERY", "severity": "P0", "message": "No executable query."})
+    if strict and len(queries) > MAX_RESEARCH_QUERIES:
+        findings.append({
+            "code": "RESEARCH_PLAN_TOO_MANY_QUERIES",
+            "severity": "P1",
+            "message": (
+                f"At most {MAX_RESEARCH_QUERIES} executable queries are supported; "
+                f"received {len(queries)}."
+            ),
+        })
     if not questions:
         if strict:
             findings.append({"code": "RESEARCH_PLAN_NO_QUESTION", "severity": "P1", "message": "Research questions are required."})

@@ -107,6 +107,35 @@ def test_searxng_results_are_interleaved_to_preserve_query_coverage(monkeypatch)
     ]
 
 
+def test_searxng_bibliographic_metadata_is_not_discarded(monkeypatch):
+    class MetadataClient(_Client):
+        def get(self, _endpoint, *, params):
+            return _Response(
+                [
+                    {
+                        "title": "Metadata-rich result",
+                        "url": "https://doi.org/10.1000/example",
+                        "content": "public abstract",
+                        "engine": "openairepublications",
+                        "publishedDate": "2025-05-06",
+                        "authors": [{"name": "A. Author"}, {"name": "B. Author"}],
+                        "journal": "Journal of Reliable Research",
+                        "doi": "10.1000/example",
+                    }
+                ]
+            )
+
+    monkeypatch.setattr(public_research.httpx, "Client", MetadataClient)
+    candidates, failures = PublicResearchArchiveSkill(_settings())._search_searxng(
+        ["metadata query"], 10
+    )
+    assert failures == []
+    assert candidates[0]["published_at"] == "2025-05-06"
+    assert candidates[0]["authors"] == ["A. Author", "B. Author"]
+    assert candidates[0]["publisher"] == "Journal of Reliable Research"
+    assert candidates[0]["doi"] == "10.1000/example"
+
+
 def test_all_searxng_query_timeouts_are_retrieval_not_configuration(monkeypatch):
     _Client.calls = []
     _Client.fail_queries = {"query-one", "query-two"}
