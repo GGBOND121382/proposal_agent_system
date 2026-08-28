@@ -24,12 +24,26 @@ def _contains_any(text: str, terms: set[str]) -> bool:
 def source_category(record: dict[str, Any]) -> str:
     domain = str(record.get("domain") or urlparse(str(record.get("final_url") or record.get("url") or "")).netloc).lower()
     publisher = str(record.get("publisher") or "").lower()
+    title = str(record.get("title") or "").lower()
+    declared = str(record.get("source_type") or "").strip().upper()
+    publication_status = str(record.get("publication_status") or "").strip().upper()
+
     if any(token in domain for token in ("iso.org", "iec.ch", "rfc-editor.org", "itu.int", "standards.")):
         return "OFFICIAL_STANDARD"
     if domain.endswith(".gov") or domain.endswith(".gov.cn") or ".gov." in domain:
         return "GOVERNMENT"
-    if record.get("doi") or any(token in domain for token in ("doi.org", "ieeexplore.ieee.org", "dl.acm.org", "springer.com", "sciencedirect.com")):
-        return "PEER_REVIEWED_PAPER"
+    if any(term in f"{title} {publisher} {domain}" for term in ("preprint", "research square", "ssrn", "arxiv")) or publication_status == "PREPRINT":
+        return "ACADEMIC_PREPRINT"
+    if any(term in title for term in ("decision letter", "editorial", "corrigendum", "erratum", "retraction notice")) or publication_status == "EDITORIAL":
+        return "EDITORIAL"
+
+    trusted_declared = {
+        "PEER_REVIEWED_PAPER", "CONFERENCE_PAPER", "BOOK_CHAPTER", "BOOK",
+        "REPORT", "DATASET", "THESIS", "ACADEMIC_PREPRINT", "EDITORIAL",
+        "SCHOLARLY_PUBLICATION_UNVERIFIED",
+    }
+    if declared in trusted_declared:
+        return declared
     if any(token in domain for token in ("arxiv.org", "openreview.net", "semanticscholar.org")):
         return "ACADEMIC_REPOSITORY"
     if domain.endswith(".edu") or domain.endswith(".edu.cn") or "ac.cn" in domain:
@@ -38,6 +52,10 @@ def source_category(record: dict[str, Any]) -> str:
         return "TECHNICAL_DOCUMENTATION"
     if any(token in publisher for token in ("ministry", "commission", "department", "研究院", "委员会", "政府")):
         return "GOVERNMENT"
+    if record.get("doi"):
+        # A DOI proves persistent identity, not peer review.  Without provider-level
+        # publication metadata keep the source usable but do not grant authority 90.
+        return "SCHOLARLY_PUBLICATION_UNVERIFIED"
     return "OTHER"
 
 
@@ -52,6 +70,15 @@ def _record_queries(record: dict[str, Any]) -> list[str]:
     if matched and matched not in values:
         values.append(matched)
     return values
+
+
+def _record_query_qualifies(record: dict[str, Any], query: str) -> bool:
+    verification = record.get("verification") if isinstance(record.get("verification"), dict) else {}
+    relevance = verification.get("semantic_relevance_by_query") if isinstance(verification.get("semantic_relevance_by_query"), dict) else {}
+    assessment = relevance.get(query) if isinstance(relevance.get(query), dict) else None
+    if assessment is None:
+        return True
+    return bool(assessment.get("qualifies_for_coverage")) or str(assessment.get("label") or "") in {"DIRECT", "SUPPORTING"}
 
 
 def _record_providers(record: dict[str, Any]) -> list[str]:
@@ -84,15 +111,21 @@ def coverage_report(
     *,
     quality_profile: str = "legacy",
     min_sources_per_query: int = 3,
+    retrieval_health: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     queries = list(plan.get("queries") or [])
     by_query: dict[str, dict[str, Any]] = {}
     for query in queries:
-        matched = [record for record in records if query in _record_queries(record)]
+        matched = [
+            record for record in records
+            if query in _record_queries(record) and _record_query_qualifies(record, query)
+        ]
+        authoritative = [record for record in matched if int(record.get("authority_rank") or 0) >= 80]
         by_query[query] = {
             "source_count": len(matched),
-            "authoritative_source_count": sum(1 for record in matched if int(record.get("authority_rank") or 0) >= 80),
+            "authoritative_source_count": len(authoritative),
             "source_ids": [record["source_id"] for record in matched],
+            "authoritative_source_ids": [record["source_id"] for record in authoritative],
         }
     recent = [record for record in records if record.get("is_recent")]
     baselines = [record for record in records if record.get("supports_baseline")]
@@ -124,13 +157,14 @@ def coverage_report(
     source_min = max(10, query_count * query_min) if query_count else 10
     peer_or_official = [
         record for record in records
-        if record.get("source_category") in {"PEER_REVIEWED_PAPER", "OFFICIAL_STANDARD", "GOVERNMENT"}
+        if record.get("source_category") in {"PEER_REVIEWED_PAPER", "CONFERENCE_PAPER", "OFFICIAL_STANDARD", "GOVERNMENT"}
     ]
     reviews = [record for record in records if _is_review_source(record)]
     providers = sorted({provider for record in records for provider in _record_providers(record)})
     publishers = sorted({str(record.get("publisher") or "").strip().lower() for record in records if str(record.get("publisher") or "").strip()})
     author_teams = sorted({key for record in records if (key := _author_team_key(record))})
     shallow = [query for query, item in by_query.items() if item["source_count"] < query_min]
+    authority_shallow = [query for query, item in by_query.items() if item["authoritative_source_count"] < 1]
     authoritative_total = sum(1 for record in records if int(record.get("authority_rank") or 0) >= 80)
 
     provider_counts: dict[str, float] = {}
@@ -148,6 +182,11 @@ def coverage_report(
             "status": "PASS" if not shallow and bool(queries) else "INSUFFICIENT",
             "minimum_sources_per_query": query_min,
             "shallow_queries": shallow,
+        },
+        "query_authoritative_depth": {
+            "status": "PASS" if not authority_shallow and bool(queries) else "INSUFFICIENT",
+            "minimum_authoritative_sources_per_query": 1,
+            "shallow_queries": authority_shallow,
         },
         "source_volume": {
             "status": "PASS" if len(records) >= source_min else "INSUFFICIENT",
@@ -186,6 +225,14 @@ def coverage_report(
             "observed": bool(provider_counts),
             "max_share": round(provider_concentration, 4) if provider_counts else None,
             "maximum_allowed_share": 0.8,
+        },
+        "retrieval_health": {
+            "status": (
+                "PASS"
+                if not retrieval_health or retrieval_health.get("status") in {"PASS", "UNOBSERVED"}
+                else "INSUFFICIENT"
+            ),
+            "health": retrieval_health or {"status": "UNOBSERVED"},
         },
         "authoritative_depth": {
             "status": "PASS" if authoritative_total >= max(4, query_count) else "INSUFFICIENT",
@@ -298,6 +345,7 @@ def upgrade_archive_result(
     selection_report: dict[str, Any] | None = None,
     execution_report: dict[str, Any] | None = None,
     min_sources_per_query: int = 3,
+    retrieval_health: dict[str, Any] | None = None,
 ):
     manifest_path = Path(result.output["archive_manifest"])
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -344,11 +392,20 @@ def upgrade_archive_result(
             "OFFICIAL_STANDARD": 98,
             "GOVERNMENT": 94,
             "PEER_REVIEWED_PAPER": 90,
-            "ACADEMIC_REPOSITORY": 78,
-            "TECHNICAL_DOCUMENTATION": 72,
-            "OTHER": 60,
+            "CONFERENCE_PAPER": 88,
+            "BOOK_CHAPTER": 76,
+            "BOOK": 74,
+            "ACADEMIC_PREPRINT": 72,
+            "ACADEMIC_REPOSITORY": 70,
+            "REPORT": 72,
+            "THESIS": 68,
+            "SCHOLARLY_PUBLICATION_UNVERIFIED": 68,
+            "TECHNICAL_DOCUMENTATION": 66,
+            "DATASET": 60,
+            "EDITORIAL": 52,
+            "OTHER": 55,
         }[record["source_category"]]
-        record["authority_rank"] = max(int(record.get("authority_rank") or 0), category_rank)
+        record["authority_rank"] = category_rank
         year = parse_year(record.get("published_at"))
         record["published_year"] = year
         searchable = f"{record.get('title', '')}\n{record.get('excerpt', '')}"
@@ -364,7 +421,13 @@ def upgrade_archive_result(
         unique_records.append(record)
 
     unique_records.sort(key=lambda item: (-int(item.get("authority_rank") or 0), -(item.get("published_year") or 0), item.get("canonical_url") or ""))
-    coverage = coverage_report(unique_records, normalized_plan, quality_profile=quality_profile, min_sources_per_query=min_sources_per_query)
+    coverage = coverage_report(
+        unique_records,
+        normalized_plan,
+        quality_profile=quality_profile,
+        min_sources_per_query=min_sources_per_query,
+        retrieval_health=retrieval_health,
+    )
     for query in coverage["uncovered_queries"]:
         issues.append({"type": "EVIDENCE_GAP", "code": "QUERY_UNCOVERED", "query": query})
     for dimension, item in coverage["dimensions"].items():
@@ -386,6 +449,7 @@ def upgrade_archive_result(
         "research_quality_profile": str(quality_profile or "legacy"),
         "selection_report": selection_report,
         "execution_report": execution_report,
+        "retrieval_health": retrieval_health or {"status": "UNOBSERVED"},
         "connector_response_sha256": connector_hash,
     })
     write_json(manifest_path, manifest)
@@ -406,6 +470,7 @@ def upgrade_archive_result(
         catalog.append({
             "source_id": record["source_id"], "title": record.get("title"), "url": record.get("url"),
             "canonical_url": record.get("canonical_url"), "doi": record.get("doi"), "source_type": record.get("source_category"),
+            "publication_status": record.get("publication_status"), "publication_kind": record.get("publication_kind"), "venue": record.get("venue"),
             "authority_rank": record.get("authority_rank"), "published_at": record.get("published_at"), "is_recent": record.get("is_recent"),
             "matched_query": record.get("matched_query"), "matched_queries": _record_queries(record),
             "discovery_providers": _record_providers(record), "snapshot_sha256": record.get("snapshot_sha256"),
@@ -425,6 +490,7 @@ def upgrade_archive_result(
         "source_catalog": catalog, "coverage": coverage, "issues": issues,
         "research_quality_profile": str(quality_profile or "legacy"),
         "selection_report": selection_report, "execution_report": execution_report,
+        "retrieval_health": retrieval_health or {"status": "UNOBSERVED"},
         "archive_verification": verification, "warnings": warnings,
     })
     result.warnings = warnings

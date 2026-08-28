@@ -979,6 +979,7 @@ rules:
         - protected_section_ids
         - read_only_object_ids
         - read_only_section_ids
+        - reference_only_claim_ids
         - rejected_claim_ids
         - relation_ids
         - required_evidence_ids

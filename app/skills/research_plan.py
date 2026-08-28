@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -64,6 +65,54 @@ def normalize_doi(value: Any, url: str = "") -> str | None:
 def parse_year(value: Any) -> int | None:
     match = re.search(r"(?:19|20)\d{2}", str(value or ""))
     return int(match.group(0)) if match else None
+
+
+def parse_date(value: Any) -> tuple[date | None, str]:
+    """Parse a public-source date and preserve the precision of the evidence."""
+
+    text = str(value or "").strip()
+    match = re.search(r"((?:19|20)\d{2})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])", text)
+    if match:
+        try:
+            return date.fromisoformat(match.group(0)), "DAY"
+        except ValueError:
+            pass
+    match = re.search(r"((?:19|20)\d{2})-(0[1-9]|1[0-2])", text)
+    if match:
+        try:
+            return date(int(match.group(1)), int(match.group(2)), 1), "MONTH"
+        except ValueError:
+            pass
+    year = parse_year(text)
+    if year:
+        return date(year, 1, 1), "YEAR"
+    return None, "UNKNOWN"
+
+
+def parse_time_scope_bounds(value: Any) -> tuple[date | None, date | None]:
+    """Return exact inclusive bounds when the plan carries exact dates.
+
+    Year-only legacy scopes remain supported as full calendar years.
+    """
+
+    text = str(value or "").strip()
+    iso_dates = re.findall(r"(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])", text)
+    parsed: list[date] = []
+    for raw in iso_dates:
+        try:
+            parsed.append(date.fromisoformat(raw))
+        except ValueError:
+            continue
+    if len(parsed) >= 2:
+        return min(parsed), max(parsed)
+    if len(parsed) == 1:
+        return parsed[0], parsed[0]
+
+    years = [int(item) for item in re.findall(r"(?:19|20)\d{2}", text)]
+    if not years:
+        return None, None
+    start_year, end_year = min(years), max(years)
+    return date(start_year, 1, 1), date(end_year, 12, 31)
 
 
 def title_key(value: Any) -> str:
@@ -132,6 +181,9 @@ def _merge_duplicate_candidate(original: dict[str, Any], duplicate: dict[str, An
     except (TypeError, ValueError):
         pass
     original["is_retracted"] = bool(original.get("is_retracted")) or bool(duplicate.get("is_retracted"))
+    for field in ("source_type", "publication_status", "publication_kind", "venue"):
+        if not original.get(field) and duplicate.get(field):
+            original[field] = duplicate.get(field)
     verification = dict(original.get("verification") or {})
     duplicate_verification = dict(duplicate.get("verification") or {})
     verification["matched_queries"] = _merge_unique_values(
@@ -146,6 +198,15 @@ def _merge_duplicate_candidate(original: dict[str, Any], duplicate: dict[str, An
         [duplicate_verification.get("discovery_provider")],
         providers,
     )
+    relevance_rank = {"OFF_TOPIC": 0, "TANGENTIAL": 1, "SUPPORTING": 2, "DIRECT": 3}
+    relevance = dict(verification.get("semantic_relevance_by_query") or {})
+    for query, assessment in (duplicate_verification.get("semantic_relevance_by_query") or {}).items():
+        current = relevance.get(query) if isinstance(relevance.get(query), dict) else {}
+        candidate = assessment if isinstance(assessment, dict) else {}
+        if relevance_rank.get(str(candidate.get("label") or "OFF_TOPIC"), 0) > relevance_rank.get(str(current.get("label") or "OFF_TOPIC"), 0):
+            relevance[query] = candidate
+    if relevance:
+        verification["semantic_relevance_by_query"] = relevance
     original["verification"] = verification
 
 

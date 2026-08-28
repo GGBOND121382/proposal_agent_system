@@ -21,7 +21,7 @@ from .json_pointer import (
 )
 
 
-SEMANTIC_MODEL_CONTRACT_VERSION = "2026-08-28.v10-wf3-semantic-boundary"
+SEMANTIC_MODEL_CONTRACT_VERSION = "2026-08-28.v11-wf3-import-policy"
 SEMANTIC_PROMPTS = frozenset({
     "P-ARGUMENT-ARCHITECTURE",
     "P-ARGUMENT-ARCHITECTURE-CRITIC",
@@ -3194,60 +3194,171 @@ def expand_public_research_critic_model_output(canonical_envelope: dict[str, Any
     return output
 
 
+_WF3_PROMPT_INJECTION_TARGETS = {
+    "CRITIC_AGENT",
+    "MODEL_ROLE",
+    "SYSTEM_RULES",
+    "TOOL_BEHAVIOR",
+    "OUTPUT_CONSTRAINT",
+    "HIDDEN_CONTEXT",
+}
+_WF3_PROMPT_INJECTION_CONTROL_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE | re.DOTALL)
+    for pattern in (
+        r"\b(?:ignore|disregard|forget|override|bypass)\b.{0,100}\b(?:instruction|rule|prompt|policy|system|developer)\b",
+        r"\b(?:system|developer)\s+(?:prompt|message|instruction)s?\b",
+        r"\b(?:act as|pretend to be|you are now)\b",
+        r"\b(?:respond|reply|output|return)\b.{0,80}\b(?:only|json|schema|format)\b",
+        r"\b(?:call|invoke|use)\b.{0,80}\b(?:tool|function|api)\b",
+        r"\b(?:execute|run)\b.{0,80}\b(?:command|code|script|shell)\b",
+        r"\b(?:reveal|show|print|leak|expose)\b.{0,100}\b(?:system prompt|hidden instruction|developer message|secret)\b",
+        r"(?:忽略|无视|覆盖|绕过).{0,40}(?:指令|规则|提示词|系统消息|开发者消息|安全策略)",
+        r"(?:你现在是|扮演|假装成为).{0,40}(?:助手|模型|智能体|系统)",
+        r"(?:调用|使用).{0,40}(?:工具|函数|接口|API)",
+        r"(?:执行|运行).{0,40}(?:命令|代码|脚本|Shell)",
+        r"(?:输出|返回|回复).{0,40}(?:JSON|格式|模式|仅仅|只能)",
+        r"(?:泄露|显示|打印|暴露).{0,40}(?:系统提示词|隐藏指令|开发者消息|秘密)",
+    )
+)
+
+
+def _wf3_prompt_injection_corroborated(issue: Mapping[str, Any]) -> bool:
+    """Return True only for a structurally supported control-plane instruction.
+
+    The semantic critic may *suspect* prompt injection, but it does not own the
+    P0/blocking decision.  Runtime requires a declared control target, a concrete
+    requested behavior, and lexical evidence of an instruction that attempts to
+    alter model/agent/tool/output control.  Rhetorical academic prose therefore
+    remains an auditable observation rather than a workflow-wide security block.
+    """
+
+    target = str(issue.get("instruction_target") or "").strip().upper()
+    requested_behavior = str(issue.get("requested_behavior") or "").strip()
+    evidence_excerpt = str(issue.get("evidence_excerpt") or "").strip()
+    if target not in _WF3_PROMPT_INJECTION_TARGETS:
+        return False
+    if not requested_behavior or not evidence_excerpt:
+        return False
+    evidence = f"{evidence_excerpt}\n{requested_behavior}"
+    return any(pattern.search(evidence) for pattern in _WF3_PROMPT_INJECTION_CONTROL_PATTERNS)
+
+
 def expand_online_result_import_critic_model_output(canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:
     output = _wf3_canonical_base(canonical_envelope, "P-ONLINE-RESULT-IMPORT-CRITIC")
-    decisions = {str(item.get("claim_id")): str(item.get("decision")) for item in semantic_output.get("claim_decisions") or [] if isinstance(item, Mapping)}
+    decisions = {
+        str(item.get("claim_id")): str(item.get("decision"))
+        for item in semantic_output.get("claim_decisions") or []
+        if isinstance(item, Mapping)
+    }
     findings: list[dict[str, Any]] = []
-    blocked = False
-    unsourced: set[str] = set()
+    forced_reject: set[str] = set()
+    hard_blocked = False
+    package_review_required = False
+
     for issue in semantic_output.get("security_issues") or []:
         if not isinstance(issue, Mapping):
             continue
         issue_type = str(issue.get("issue_type") or "")
         claim_id = str(issue.get("claim_id") or "").strip()
-        if issue_type == "UNSOURCED_CLAIM" and claim_id:
-            unsourced.add(claim_id)
-        code, blocking, severity = {
-            "PROMPT_INJECTION": ("IMPORT_PROMPT_INJECTION", True, "P0"),
-            "SCOPE_VIOLATION": ("IMPORT_SCOPE_VIOLATION", True, "P0"),
-            "SENSITIVE_INFERENCE": ("IMPORT_SENSITIVE_INFERENCE", True, "P0"),
-            "UNSOURCED_CLAIM": ("IMPORT_UNSOURCED_CLAIM", False, "P2"),
-        }.get(issue_type, ("IMPORT_SEMANTIC_REVIEW", True, "P1"))
-        blocked = blocked or blocking
+        target_path = (
+            f"/payload/result_package/claims/{claim_id}"
+            if claim_id
+            else "/payload/result_package/claims"
+        )
+
+        if issue_type == "PROMPT_INJECTION":
+            if _wf3_prompt_injection_corroborated(issue):
+                hard_blocked = True
+                code, blocking, severity = "IMPORT_PROMPT_INJECTION", True, "P0"
+                route, repairable = "BLOCK", False
+                repair_instruction = "阻止导入并移除含控制型指令的公开来源后重新审查。"
+            else:
+                # Model-only suspicion is retained for audit but cannot create a
+                # P0/global reject.  This is deliberately distinct from a
+                # runtime-corroborated injection finding.
+                code, blocking, severity = "IMPORT_PROMPT_INJECTION_SUSPECTED", False, "P2"
+                route, repairable = "ORIGINAL_PRODUCER", False
+                repair_instruction = "保留为语义安全观察；未获运行时控制指令证据，不升级为阻断。"
+        elif issue_type in {"SCOPE_VIOLATION", "SENSITIVE_INFERENCE"}:
+            code = "IMPORT_SCOPE_VIOLATION" if issue_type == "SCOPE_VIOLATION" else "IMPORT_SENSITIVE_INFERENCE"
+            if claim_id:
+                # A claim-local semantic boundary issue rejects only that claim.
+                forced_reject.add(claim_id)
+                blocking, severity = False, "P2"
+                route, repairable = "ORIGINAL_PRODUCER", False
+                repair_instruction = "仅排除该越界/敏感推断 claim；其余 claim 继续独立审查。"
+            else:
+                # A package-level semantic boundary issue must be regenerated,
+                # but is not a model-owned P0 hard security block.
+                package_review_required = True
+                blocking, severity = True, "P1"
+                route, repairable = "ORIGINAL_PRODUCER", True
+                repair_instruction = "修订公开研究综合以恢复批准范围边界后重新审查。"
+        elif issue_type == "UNSOURCED_CLAIM":
+            if claim_id:
+                forced_reject.add(claim_id)
+            code, blocking, severity = "IMPORT_UNSOURCED_CLAIM", False, "P2"
+            route, repairable = "ORIGINAL_PRODUCER", False
+            repair_instruction = "不导入该无充分来源支持的 claim。"
+        else:
+            code, blocking, severity = "IMPORT_SEMANTIC_REVIEW", False, "P2"
+            route, repairable = "ORIGINAL_PRODUCER", False
+            repair_instruction = "保留为非阻断语义观察。"
+
         findings.append(_wf3_finding(
             code=code,
             category="SECURITY" if issue_type != "UNSOURCED_CLAIM" else "EVIDENCE",
             target_type="PUBLIC_CLAIM_IMPORT",
-            target_path=f"/payload/result_package/claims/{claim_id}" if claim_id else "/payload/result_package/claims",
+            target_path=target_path,
             description=str(issue.get("description") or "导入候选存在语义风险。"),
-            repair_instruction="阻止导入并返回本地审查。" if blocking else "不导入该无充分来源支持的 claim。",
-            route="BLOCK" if blocking else "ORIGINAL_PRODUCER",
+            repair_instruction=repair_instruction,
+            route=route,
             blocking=blocking,
             severity=severity,
             evidence_refs=[],
-            repairable=not blocking,
+            repairable=repairable,
         ))
-    accepted = [claim_id for claim_id, decision in decisions.items() if decision == "IMPORT_PUBLIC_CLAIM" and claim_id not in unsourced]
-    reference_only = [claim_id for claim_id, decision in decisions.items() if decision == "REFERENCE_ONLY" and claim_id not in unsourced]
-    rejected = [claim_id for claim_id, decision in decisions.items() if decision == "REJECT" or claim_id in unsourced]
-    if blocked:
+
+    accepted = [
+        claim_id for claim_id, decision in decisions.items()
+        if decision == "IMPORT_PUBLIC_CLAIM" and claim_id not in forced_reject
+    ]
+    reference_only = [
+        claim_id for claim_id, decision in decisions.items()
+        if decision == "REFERENCE_ONLY" and claim_id not in forced_reject
+    ]
+    rejected = [
+        claim_id for claim_id, decision in decisions.items()
+        if decision == "REJECT" or claim_id in forced_reject
+    ]
+
+    if hard_blocked:
         accepted = []
+        reference_only = []
         rejected = list(decisions)
         recommendation = "REJECT"
+    elif package_review_required:
+        recommendation = "RETURN_FOR_REVIEW"
     elif accepted:
         recommendation = "IMPORT_PUBLIC_CLAIM_CANDIDATES"
     elif reference_only:
         recommendation = "IMPORT_REFERENCE_ONLY"
     else:
         recommendation = "RETURN_FOR_REVIEW" if decisions else "REJECT"
+
     output["findings"] = findings
-    output["status"] = "BLOCK" if blocked else "PASS"
+    output["status"] = "BLOCK" if hard_blocked else ("REVISE" if package_review_required else "PASS")
     output["result"] = {
         "import_recommendation": recommendation,
         "accepted_claim_ids": accepted,
+        "reference_only_claim_ids": reference_only,
         "rejected_claim_ids": rejected,
-        "prompt_injection_detected": any(str(item.get("issue_type")) == "PROMPT_INJECTION" for item in semantic_output.get("security_issues") or [] if isinstance(item, Mapping)),
-        "scope_violation_detected": any(str(item.get("issue_type")) in {"SCOPE_VIOLATION", "SENSITIVE_INFERENCE"} for item in semantic_output.get("security_issues") or [] if isinstance(item, Mapping)),
+        "prompt_injection_detected": hard_blocked,
+        "scope_violation_detected": any(
+            str(item.get("issue_type")) in {"SCOPE_VIOLATION", "SENSITIVE_INFERENCE"}
+            for item in semantic_output.get("security_issues") or []
+            if isinstance(item, Mapping)
+        ),
         "required_user_confirmations": [],
     }
     return output

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import math
 import re
+from calendar import monthrange
 from collections import Counter
+from datetime import date
 from typing import Any
 from urllib.parse import urlparse
 
-from .research_plan import deduplicate_candidates, parse_year
+from .research_plan import deduplicate_candidates, parse_date, parse_time_scope_bounds, parse_year
+from .research_quality import assess_candidate_relevance, build_query_relevance_profiles
 
 _GENERIC_LATIN = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into", "is", "of", "on", "or", "the", "to", "using", "via", "with",
@@ -25,11 +28,25 @@ def _latin_tokens(value: Any) -> set[str]:
     }
 
 
-def _year_bounds(time_scope: Any) -> tuple[int | None, int | None]:
-    years = [int(value) for value in re.findall(r"(?:19|20)\d{2}", str(time_scope or ""))]
-    if not years:
-        return None, None
-    return min(years), max(years)
+
+def _time_scope_status(value: Any, start: date | None, end: date | None) -> tuple[str, str]:
+    published, precision = parse_date(value)
+    if published is None or (start is None and end is None):
+        return "UNKNOWN", precision
+    interval_start = published
+    interval_end = published
+    if precision == "MONTH":
+        interval_end = date(published.year, published.month, monthrange(published.year, published.month)[1])
+    elif precision == "YEAR":
+        interval_end = date(published.year, 12, 31)
+    if start and interval_end < start:
+        return "OUTSIDE", precision
+    if end and interval_start > end:
+        return "OUTSIDE", precision
+    if (start and interval_start < start) or (end and interval_end > end):
+        return "UNCERTAIN", precision
+    return "INSIDE", precision
+
 
 
 def _candidate_queries(candidate: dict[str, Any]) -> list[str]:
@@ -96,7 +113,10 @@ def _score(candidate: dict[str, Any], query: str, *, end_year: int | None) -> fl
         recency_bonus = max(0.0, 8.0 - 1.2 * max(0, end_year - year))
     title = str(candidate.get("title") or "").lower()
     review_bonus = 6.0 if any(term in title for term in _REVIEW_TERMS) else 0.0
-    return round(45.0 * alignment + doi_bonus + peer_bonus + abstract_bonus + citation_bonus + recency_bonus + review_bonus, 4)
+    verification = candidate.get("verification") if isinstance(candidate.get("verification"), dict) else {}
+    assessment = (verification.get("semantic_relevance_by_query") or {}).get(query) or {}
+    relevance_bonus = {"DIRECT": 18.0, "SUPPORTING": 8.0}.get(str(assessment.get("label") or ""), 0.0)
+    return round(45.0 * alignment + doi_bonus + peer_bonus + abstract_bonus + citation_bonus + recency_bonus + review_bonus + relevance_bonus, 4)
 
 
 def screen_and_select_candidates(
@@ -106,12 +126,15 @@ def screen_and_select_candidates(
     max_results: int,
     strict: bool,
     min_per_query: int = 3,
+    enforce_semantic_relevance: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Reject clearly invalid/off-scope results and build a deterministic diverse shortlist."""
 
     queries = list(normalized_plan.get("queries") or [])
     approved = set(queries)
-    start_year, end_year = _year_bounds(normalized_plan.get("time_scope"))
+    start_date, end_date = parse_time_scope_bounds(normalized_plan.get("time_scope"))
+    end_year = end_date.year if end_date else None
+    relevance_profiles = build_query_relevance_profiles(normalized_plan)
     screened: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
 
@@ -128,20 +151,29 @@ def screen_and_select_candidates(
         searchable = f"{title} {candidate.get('abstract', '')} {candidate.get('excerpt', '')}".lower()
         if bool(candidate.get("is_retracted")) or any(term in searchable for term in _RETRACT_TERMS):
             reasons.append("RETRACTED_OR_WITHDRAWN")
-        year = parse_year(candidate.get("published_at"))
-        if strict and year and start_year and year < start_year:
-            reasons.append("OUTSIDE_TIME_SCOPE")
-        if strict and year and end_year and year > end_year:
+        time_status, date_precision = _time_scope_status(candidate.get("published_at"), start_date, end_date)
+        if strict and time_status == "OUTSIDE":
             reasons.append("OUTSIDE_TIME_SCOPE")
 
-        alignment_values = []
-        for query in matched_queries or ([str(candidate.get("matched_query") or "")] if candidate.get("matched_query") else []):
-            alignment, query_size, text_size = _query_alignment(query, candidate)
-            alignment_values.append(alignment)
-            # Only reject a clear same-script miss.  Cross-language pairs and sparse
-            # metadata become low-score candidates rather than false hard negatives.
-            if strict and query_size >= 4 and text_size >= 8 and alignment == 0.0:
-                reasons.append("CLEAR_LEXICAL_OFF_TOPIC")
+        original_matched_queries = list(matched_queries)
+        relevance_by_query: dict[str, dict[str, Any]] = {}
+        qualifying_queries: list[str] = []
+        for query in original_matched_queries or ([str(candidate.get("matched_query") or "")] if candidate.get("matched_query") else []):
+            assessment = assess_candidate_relevance(query, candidate, relevance_profiles)
+            relevance_by_query[query] = assessment
+            if assessment.get("qualifies_for_coverage"):
+                qualifying_queries.append(query)
+        if strict and enforce_semantic_relevance and original_matched_queries and not qualifying_queries:
+            labels = {str(item.get("label") or "") for item in relevance_by_query.values()}
+            reasons.append("CLEAR_LEXICAL_OFF_TOPIC" if labels == {"OFF_TOPIC"} else "LOW_SEMANTIC_RELEVANCE")
+        elif strict and not enforce_semantic_relevance:
+            # Preserve the legacy Track-C behavior: only reject an obvious same-script
+            # lexical miss when enough text exists to make that judgement safely.
+            for query in original_matched_queries:
+                alignment, query_size, text_size = _query_alignment(query, candidate)
+                if query_size >= 4 and text_size >= 8 and alignment == 0.0:
+                    reasons.append("CLEAR_LEXICAL_OFF_TOPIC")
+                    break
         reasons = list(dict.fromkeys(reasons))
         if reasons:
             issues.append(
@@ -151,11 +183,16 @@ def screen_and_select_candidates(
                     "reason_codes": reasons,
                     "title": title,
                     "url": url,
-                    "matched_queries": matched_queries,
+                    "matched_queries": original_matched_queries,
+                    "semantic_relevance_by_query": relevance_by_query,
+                    "time_scope_status": time_status,
+                    "published_date_precision": date_precision,
                 }
             )
             continue
 
+        if strict and enforce_semantic_relevance and qualifying_queries:
+            matched_queries = list(dict.fromkeys(qualifying_queries))
         if not matched_queries:
             matched = str(candidate.get("matched_query") or "").strip()
             matched_queries = [matched] if matched else []
@@ -166,7 +203,11 @@ def screen_and_select_candidates(
         candidate["discovery_providers"] = providers
         verification = dict(candidate.get("verification") or {})
         verification["matched_queries"] = matched_queries
+        verification["discovery_matched_queries"] = original_matched_queries
         verification["discovery_providers"] = providers
+        verification["semantic_relevance_by_query"] = relevance_by_query
+        verification["time_scope_status"] = time_status
+        verification["published_date_precision"] = date_precision
         candidate["verification"] = verification
         per_query_scores = {
             query: _score(candidate, query, end_year=end_year)
@@ -175,7 +216,12 @@ def screen_and_select_candidates(
         }
         candidate["selection_score"] = max(per_query_scores.values(), default=0.0)
         candidate["selection_scores_by_query"] = per_query_scores
-        candidate["screening"] = {"status": "PASS", "matched_queries": matched_queries}
+        candidate["screening"] = {
+            "status": "PASS",
+            "matched_queries": matched_queries,
+            "semantic_relevance_by_query": relevance_by_query,
+            "time_scope_status": time_status,
+        }
         screened.append(candidate)
 
     deduplicated, duplicate_issues = deduplicate_candidates(screened)
@@ -262,8 +308,15 @@ def screen_and_select_candidates(
             if bound_query in coverage_counts:
                 coverage_counts[bound_query] += 1
 
+    relevance_counts: Counter[str] = Counter()
+    for candidate in deduplicated:
+        verification = candidate.get("verification") if isinstance(candidate.get("verification"), dict) else {}
+        for assessment in (verification.get("semantic_relevance_by_query") or {}).values():
+            if isinstance(assessment, dict):
+                relevance_counts[str(assessment.get("label") or "UNKNOWN")] += 1
+
     selection_report = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "status": "PASS" if selected else "INSUFFICIENT",
         "input_candidate_count": len(candidates),
         "screened_candidate_count": len(screened),
@@ -272,7 +325,10 @@ def screen_and_select_candidates(
         "configured_max_results": int(max_results),
         "effective_max_results": effective_limit,
         "min_per_query": int(min_per_query),
+        "semantic_relevance_enforced": bool(enforce_semantic_relevance),
         "selected_by_query": coverage_counts,
+        "semantic_relevance_counts": dict(sorted(relevance_counts.items())),
+        "query_relevance_profiles": relevance_profiles,
         "issues": issues,
     }
     return selected, selection_report

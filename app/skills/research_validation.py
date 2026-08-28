@@ -54,6 +54,9 @@ def _source_catalog(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "canonical_url": record.get("canonical_url"),
                 "doi": record.get("doi"),
                 "source_category": record.get("source_category"),
+                "publication_status": record.get("publication_status"),
+                "publication_kind": record.get("publication_kind"),
+                "venue": record.get("venue"),
                 "authority_rank": record.get("authority_rank"),
                 "publisher": record.get("publisher"),
                 "authors": list(record.get("authors") or []),
@@ -61,6 +64,9 @@ def _source_catalog(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "published_year": record.get("published_year"),
                 "matched_query": record.get("matched_query"),
                 "matched_queries": _record_queries(record),
+                "semantic_relevance_by_query": dict((record.get("verification") or {}).get("semantic_relevance_by_query") or {}),
+                "time_scope_status": (record.get("verification") or {}).get("time_scope_status"),
+                "published_date_precision": (record.get("verification") or {}).get("published_date_precision"),
                 "discovery_providers": _record_providers(record),
                 "is_recent": bool(record.get("is_recent")),
                 "supports_baseline": bool(record.get("supports_baseline")),
@@ -96,6 +102,7 @@ def _quality_summary(
                 rejection_reasons[str(reason)] += 1
 
     source_categories = Counter(str(record.get("source_category") or "UNKNOWN") for record in records)
+    publication_statuses = Counter(str(record.get("publication_status") or "UNKNOWN") for record in records)
     providers = Counter()
     for record in records:
         row_providers = _record_providers(record)
@@ -159,6 +166,7 @@ def _quality_summary(
         },
         "discovery": {
             "providers": list((discovery_manifest or {}).get("providers") or []),
+            "retrieval_health": (coverage_value.get("dimensions") or {}).get("retrieval_health", {}).get("health", {"status": "UNOBSERVED"}),
             "provider_candidate_counts": discovery_provider_counts,
             "candidate_counts_by_query": discovery_query_counts,
             "failure_count": len((discovery_manifest or {}).get("failures") or []),
@@ -167,10 +175,12 @@ def _quality_summary(
         "screening": {
             "issue_counts": dict(sorted(screening_issue_codes.items())),
             "rejection_reason_counts": dict(sorted(rejection_reasons.items())),
+            "semantic_relevance_counts": dict(selection.get("semantic_relevance_counts") or {}),
         },
         "accepted_sources": {
             "source_count": len(records),
             "source_categories": dict(sorted(source_categories.items())),
+            "publication_statuses": dict(sorted(publication_statuses.items())),
             "discovery_provider_occurrences": dict(sorted(providers.items())),
             "distinct_publishers": len(publishers),
             "publishers": publishers,

@@ -970,6 +970,7 @@ class SimulatedLLM:
         claims = envelope.get("payload", {}).get("result_package", {}).get("claims", [])
         base["result"]["import_recommendation"] = "IMPORT_REFERENCE_ONLY"
         base["result"]["accepted_claim_ids"] = [str(item.get("claim_id")) for item in claims if item.get("claim_id")]
+        base["result"]["reference_only_claim_ids"] = []
         base["result"]["rejected_claim_ids"] = []
         return base
 

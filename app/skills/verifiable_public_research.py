@@ -21,6 +21,7 @@ from .research_execution import (
 )
 from .research_plan import deduplicate_candidates, normalize_and_validate_plan
 from .research_screening import screen_and_select_candidates
+from .research_quality import build_retrieval_health
 from .research_validation import write_validation_bundle
 from ..util import safe_filename, utc_now, write_json
 
@@ -30,6 +31,7 @@ _STRICT_RESEARCH: ContextVar[bool] = ContextVar("research_strict_execution", def
 _SELECTION_REPORT: ContextVar[dict[str, Any] | None] = ContextVar("research_selection_report", default=None)
 _EXECUTION_REPORT: ContextVar[dict[str, Any] | None] = ContextVar("research_execution_report", default=None)
 _EFFECTIVE_MAX_RESULTS: ContextVar[int] = ContextVar("research_effective_max_results", default=40)
+_QUALITY_PROFILE: ContextVar[str] = ContextVar("research_quality_profile", default="legacy")
 
 
 class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
@@ -226,6 +228,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         token_selection = _SELECTION_REPORT.set(None)
         token_execution = _EXECUTION_REPORT.set(None)
         token_max = _EFFECTIVE_MAX_RESULTS.set(effective_max)
+        token_quality = _QUALITY_PROFILE.set(quality_profile)
         discovery_file: Path | None = None
         discovery_manifest: dict[str, Any] | None = None
         try:
@@ -248,6 +251,11 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                     details={"code": exc.code, **exc.details},
                 ) from exc
 
+            retrieval_health = build_retrieval_health(
+                discovery_manifest,
+                retrieval_provider=original_provider,
+                queries=list(normalized_plan.get("queries") or []),
+            )
             result = upgrade_archive_result(
                 result,
                 normalized_plan,
@@ -257,6 +265,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                 selection_report=_SELECTION_REPORT.get(),
                 execution_report=_EXECUTION_REPORT.get(),
                 min_sources_per_query=self._minimum_results_per_query(),
+                retrieval_health=retrieval_health,
             )
             if original_provider in {"academic", "hybrid"}:
                 manifest_path = Path(result.output["archive_manifest"])
@@ -269,10 +278,12 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                 )
                 manifest["discovery_input"] = str(discovery_file) if discovery_file else None
                 manifest["discovery_providers"] = list((discovery_manifest or {}).get("providers") or [])
+                manifest["retrieval_health"] = retrieval_health
                 write_json(manifest_path, manifest)
                 result.output["mode"] = manifest["retrieval_mode"]
                 result.output["discovery_input"] = manifest["discovery_input"]
                 result.output["discovery_providers"] = manifest["discovery_providers"]
+                result.output["retrieval_health"] = retrieval_health
 
             # Persist the quality-observation bundle before the sufficiency gate can
             # raise. An INSUFFICIENT run is exactly the run that needs the best audit
@@ -312,6 +323,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             _SELECTION_REPORT.reset(token_selection)
             _EXECUTION_REPORT.reset(token_execution)
             _EFFECTIVE_MAX_RESULTS.reset(token_max)
+            _QUALITY_PROFILE.reset(token_quality)
 
     @staticmethod
     def _deduplicate(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -330,6 +342,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             max_results=_EFFECTIVE_MAX_RESULTS.get(),
             strict=strict,
             min_per_query=self._minimum_results_per_query(),
+            enforce_semantic_relevance=(strict and _QUALITY_PROFILE.get() == "proposal_related_work"),
         )
         _SELECTION_REPORT.set(report)
         # Screening performs identity dedup before archive selection.  Re-emit those

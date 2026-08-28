@@ -41,6 +41,14 @@
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           }
         },
+        "reference_only_claim_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
         "rejected_claim_ids": {
           "type": "array",
           "items": {
@@ -68,6 +76,7 @@
       "required": [
         "import_recommendation",
         "accepted_claim_ids",
+        "reference_only_claim_ids",
         "rejected_claim_ids",
         "prompt_injection_detected",
         "scope_violation_detected",

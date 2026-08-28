@@ -80,6 +80,7 @@ _PROTOCOL_ID_FIELDS = {
 }
 _REFERENCE_ARRAY_FIELDS = {
     "accepted_claim_ids",
+    "reference_only_claim_ids",
     "rejected_claim_ids",
     "unsupported_claim_ids",
     "checked_item_ids",

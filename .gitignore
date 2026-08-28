@@ -16,6 +16,8 @@ data/exports/*
 !data/exports/.gitkeep
 data/diagram_artifacts/
 data/research_archive/
+data/research_discovery_inputs/
+data/wf3_validation/
 data/model_calls/
 recovery_evidence/*.log
 recovery_evidence/g0/

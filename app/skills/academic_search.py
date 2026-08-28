@@ -3,13 +3,17 @@ from __future__ import annotations
 import math
 import os
 import re
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
 import httpx
 
 from ..util import new_id, utc_now
-from .research_plan import normalize_doi, parse_year
+from .research_plan import normalize_doi, parse_time_scope_bounds
 
 
 ACADEMIC_PROVIDERS = ("openalex", "crossref", "semantic_scholar")
@@ -18,12 +22,6 @@ ACADEMIC_PROVIDERS = ("openalex", "crossref", "semantic_scholar")
 class AcademicDiscoveryError(RuntimeError):
     pass
 
-
-def _year_bounds(time_scope: Any) -> tuple[int | None, int | None]:
-    years = [int(value) for value in re.findall(r"(?:19|20)\d{2}", str(time_scope or ""))]
-    if not years:
-        return None, None
-    return min(years), max(years)
 
 
 def _clean_abstract(value: Any) -> str:
@@ -67,6 +65,81 @@ def _author_names(values: Any) -> list[str]:
     return result[:20]
 
 
+_PREPRINT_HINTS = ("preprint", "research square", "ssrn", "arxiv")
+_EDITORIAL_HINTS = ("decision letter", "editorial", "correction to", "corrigendum", "erratum", "retraction notice")
+
+
+def _publication_profile(provider: str, raw: dict[str, Any], title: str, publisher: str) -> tuple[str, str, str]:
+    """Return (source_type, publication_status, publication_kind)."""
+
+    lowered = f"{title} {publisher}".lower()
+    if any(term in lowered for term in _EDITORIAL_HINTS):
+        return "EDITORIAL", "EDITORIAL", "editorial"
+    if any(term in lowered for term in _PREPRINT_HINTS):
+        return "ACADEMIC_PREPRINT", "PREPRINT", "preprint"
+
+    if provider == "openalex":
+        work_type = str(raw.get("type") or "").lower()
+        primary = raw.get("primary_location") if isinstance(raw.get("primary_location"), dict) else {}
+        source = primary.get("source") if isinstance(primary.get("source"), dict) else {}
+        source_type = str(source.get("type") or "").lower()
+        raw_type = str(primary.get("raw_type") or "").lower()
+        version = str(primary.get("version") or "").lower()
+        if work_type == "preprint" or "preprint" in raw_type or version in {"submittedversion", "acceptedversion"}:
+            return "ACADEMIC_PREPRINT", "PREPRINT", work_type or raw_type or "preprint"
+        if work_type in {"book-chapter", "book-section"}:
+            return "BOOK_CHAPTER", "PUBLISHED_NON_PEER", work_type
+        if work_type in {"book", "monograph"}:
+            return "BOOK", "PUBLISHED_NON_PEER", work_type
+        if work_type in {"report", "report-component"}:
+            return "REPORT", "PUBLISHED_NON_PEER", work_type
+        if work_type in {"dataset"}:
+            return "DATASET", "NON_ARTICLE", work_type
+        if work_type in {"dissertation"}:
+            return "THESIS", "PUBLISHED_NON_PEER", work_type
+        if work_type in {"editorial", "letter", "paratext"} or bool(raw.get("is_paratext")):
+            return "EDITORIAL", "EDITORIAL", work_type or "paratext"
+        if source_type in {"conference", "conference-series"} or "proceedings" in raw_type:
+            return "CONFERENCE_PAPER", "PEER_REVIEWED", work_type or raw_type or "conference"
+        if source_type == "journal" and bool(primary.get("is_published", True)):
+            return "PEER_REVIEWED_PAPER", "PEER_REVIEWED", work_type or "article"
+        return "SCHOLARLY_PUBLICATION_UNVERIFIED", "UNKNOWN", work_type or source_type or "unknown"
+
+    if provider == "crossref":
+        work_type = str(raw.get("type") or "").lower()
+        subtype = str(raw.get("subtype") or "").lower()
+        if subtype == "preprint" or work_type == "posted-content":
+            return "ACADEMIC_PREPRINT", "PREPRINT", subtype or work_type
+        if work_type in {"proceedings-article", "proceedings"}:
+            return "CONFERENCE_PAPER", "PEER_REVIEWED", work_type
+        if work_type == "journal-article":
+            return "PEER_REVIEWED_PAPER", "PEER_REVIEWED", work_type
+        if work_type in {"book-chapter", "book-section"}:
+            return "BOOK_CHAPTER", "PUBLISHED_NON_PEER", work_type
+        if work_type in {"report", "report-component"}:
+            return "REPORT", "PUBLISHED_NON_PEER", work_type
+        if work_type in {"dataset"}:
+            return "DATASET", "NON_ARTICLE", work_type
+        if work_type in {"dissertation"}:
+            return "THESIS", "PUBLISHED_NON_PEER", work_type
+        return "SCHOLARLY_PUBLICATION_UNVERIFIED", "UNKNOWN", work_type or subtype or "unknown"
+
+    if provider == "semantic_scholar":
+        kinds = {str(item or "").lower() for item in raw.get("publicationTypes") or []}
+        if "review" in kinds or "journalarticle" in kinds:
+            return "PEER_REVIEWED_PAPER", "PEER_REVIEWED", "journal"
+        if "conference" in kinds:
+            return "CONFERENCE_PAPER", "PEER_REVIEWED", "conference"
+        if "book" in kinds or "bookchapter" in kinds:
+            return "BOOK_CHAPTER", "PUBLISHED_NON_PEER", "book"
+        if "dataset" in kinds:
+            return "DATASET", "NON_ARTICLE", "dataset"
+        return "SCHOLARLY_PUBLICATION_UNVERIFIED", "UNKNOWN", ",".join(sorted(kinds)) or "unknown"
+
+    return "SCHOLARLY_PUBLICATION_UNVERIFIED", "UNKNOWN", "unknown"
+
+
+
 def _candidate(
     *,
     query: str,
@@ -80,6 +153,10 @@ def _candidate(
     published_at: Any = None,
     citation_count: Any = None,
     is_retracted: bool = False,
+    source_type: str | None = None,
+    publication_status: str | None = None,
+    publication_kind: str | None = None,
+    venue: str | None = None,
     raw: Any = None,
 ) -> dict[str, Any] | None:
     title = str(title or "").strip()
@@ -106,7 +183,10 @@ def _candidate(
         "content_text": body or title,
         "matched_query": query,
         "matched_queries": [query],
-        "source_type": "PEER_REVIEWED_PAPER",
+        "source_type": str(source_type or "SCHOLARLY_PUBLICATION_UNVERIFIED"),
+        "publication_status": str(publication_status or "UNKNOWN"),
+        "publication_kind": str(publication_kind or "unknown"),
+        "venue": str(venue or publisher or provider).strip(),
         "academic_provider": provider,
         "citation_count": max(0, citations),
         "is_retracted": bool(is_retracted),
@@ -134,6 +214,59 @@ class AcademicSearchClient:
     def __init__(self, settings):
         self.settings = settings
         self.timeout = max(1, int(getattr(settings, "research_fetch_timeout_seconds", 45)))
+        self.semantic_scholar_min_interval_seconds = self._environment_float(
+            "SEMANTIC_SCHOLAR_MIN_INTERVAL_SECONDS", 1.05, minimum=0.0, maximum=60.0
+        )
+        self.semantic_scholar_max_retries = self._environment_int(
+            "SEMANTIC_SCHOLAR_MAX_RETRIES", 3, minimum=0, maximum=10
+        )
+        self.semantic_scholar_max_retry_after_seconds = self._environment_float(
+            "SEMANTIC_SCHOLAR_MAX_RETRY_AFTER_SECONDS", 60.0, minimum=1.0, maximum=600.0
+        )
+        self._semantic_scholar_request_lock = threading.Lock()
+        self._semantic_scholar_next_request_at = 0.0
+
+    @staticmethod
+    def _environment_float(name: str, default: float, *, minimum: float, maximum: float) -> float:
+        raw = os.getenv(name, "").strip()
+        if not raw:
+            return default
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise AcademicDiscoveryError(f"{name} must be a number, got {raw!r}") from exc
+        if not minimum <= value <= maximum:
+            raise AcademicDiscoveryError(f"{name} must be between {minimum} and {maximum}, got {value}")
+        return value
+
+    @staticmethod
+    def _environment_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+        raw = os.getenv(name, "").strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise AcademicDiscoveryError(f"{name} must be an integer, got {raw!r}") from exc
+        if not minimum <= value <= maximum:
+            raise AcademicDiscoveryError(f"{name} must be between {minimum} and {maximum}, got {value}")
+        return value
+
+    @staticmethod
+    def _retry_after_seconds(value: str | None) -> float | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return max(0.0, float(text))
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(text)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
 
     def _get_json(self, url: str, *, params: dict[str, Any], headers: dict[str, str] | None = None) -> dict[str, Any]:
         request_headers = {
@@ -149,13 +282,59 @@ class AcademicSearchClient:
             raise AcademicDiscoveryError(f"Academic provider returned non-object JSON: {url}")
         return payload
 
+    def _get_semantic_scholar_json(
+        self,
+        *,
+        params: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Serialize S2 calls and retry only explicit rate-limit responses.
+
+        Semantic Scholar API keys start at one request per second across all
+        endpoints.  The lock prevents the multi-provider discovery pool from
+        turning one WF-3 batch into a burst of concurrent S2 requests.
+        """
+
+        with self._semantic_scholar_request_lock:
+            for attempt in range(self.semantic_scholar_max_retries + 1):
+                delay = self._semantic_scholar_next_request_at - time.monotonic()
+                if delay > 0:
+                    time.sleep(delay)
+
+                request_started_at = time.monotonic()
+                self._semantic_scholar_next_request_at = (
+                    request_started_at + self.semantic_scholar_min_interval_seconds
+                )
+                try:
+                    return self._get_json(
+                        self.SEMANTIC_SCHOLAR_URL,
+                        params=params,
+                        headers=headers,
+                    )
+                except httpx.HTTPStatusError as exc:
+                    response = exc.response
+                    if response.status_code != 429 or attempt >= self.semantic_scholar_max_retries:
+                        raise
+                    retry_after = self._retry_after_seconds(response.headers.get("Retry-After"))
+                    exponential_backoff = float(2**attempt)
+                    cooldown = min(
+                        self.semantic_scholar_max_retry_after_seconds,
+                        max(self.semantic_scholar_min_interval_seconds, retry_after or 0.0, exponential_backoff),
+                    )
+                    self._semantic_scholar_next_request_at = max(
+                        self._semantic_scholar_next_request_at,
+                        time.monotonic() + cooldown,
+                    )
+
+        raise AcademicDiscoveryError("Semantic Scholar retry loop ended unexpectedly")
+
     def search_openalex(self, query: str, limit: int, time_scope: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        start_year, end_year = _year_bounds(time_scope)
+        start_date, end_date = parse_time_scope_bounds(time_scope)
         filters: list[str] = []
-        if start_year:
-            filters.append(f"from_publication_date:{start_year}-01-01")
-        if end_year:
-            filters.append(f"to_publication_date:{end_year}-12-31")
+        if start_date:
+            filters.append(f"from_publication_date:{start_date.isoformat()}")
+        if end_date:
+            filters.append(f"to_publication_date:{end_date.isoformat()}")
         params: dict[str, Any] = {"search": query, "per-page": min(max(1, limit), 50)}
         if filters:
             params["filter"] = ",".join(filters)
@@ -169,6 +348,8 @@ class AcademicSearchClient:
                 continue
             primary = item.get("primary_location") if isinstance(item.get("primary_location"), dict) else {}
             source = primary.get("source") if isinstance(primary.get("source"), dict) else {}
+            publisher = source.get("display_name") or (item.get("host_venue", {}).get("display_name") if isinstance(item.get("host_venue"), dict) else None) or "OpenAlex"
+            source_type, publication_status, publication_kind = _publication_profile("openalex", item, str(item.get("display_name") or item.get("title") or ""), str(publisher))
             candidate = _candidate(
                 query=query,
                 provider="openalex",
@@ -177,10 +358,14 @@ class AcademicSearchClient:
                 abstract=_openalex_abstract(item.get("abstract_inverted_index")),
                 doi=item.get("doi"),
                 authors=item.get("authorships") or [],
-                publisher=source.get("display_name") or item.get("host_venue", {}).get("display_name") if isinstance(item.get("host_venue"), dict) else source.get("display_name"),
+                publisher=publisher,
                 published_at=item.get("publication_date") or item.get("publication_year"),
                 citation_count=item.get("cited_by_count"),
                 is_retracted=bool(item.get("is_retracted")),
+                source_type=source_type,
+                publication_status=publication_status,
+                publication_kind=publication_kind,
+                venue=source.get("display_name") or publisher,
                 raw=item,
             )
             if candidate:
@@ -188,12 +373,12 @@ class AcademicSearchClient:
         return values, payload
 
     def search_crossref(self, query: str, limit: int, time_scope: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        start_year, end_year = _year_bounds(time_scope)
+        start_date, end_date = parse_time_scope_bounds(time_scope)
         filters: list[str] = []
-        if start_year:
-            filters.append(f"from-pub-date:{start_year}-01-01")
-        if end_year:
-            filters.append(f"until-pub-date:{end_year}-12-31")
+        if start_date:
+            filters.append(f"from-pub-date:{start_date.isoformat()}")
+        if end_date:
+            filters.append(f"until-pub-date:{end_date.isoformat()}")
         params: dict[str, Any] = {
             "query.bibliographic": query,
             "rows": min(max(1, limit), 50),
@@ -229,6 +414,7 @@ class AcademicSearchClient:
             url = str(item.get("URL") or "")
             update_type = str(item.get("subtype") or "").lower()
             retracted = "retract" in update_type or "retract" in title.lower()
+            source_type, publication_status, publication_kind = _publication_profile("crossref", item, title, str(publisher or ""))
             candidate = _candidate(
                 query=query,
                 provider="crossref",
@@ -241,6 +427,10 @@ class AcademicSearchClient:
                 published_at=published_at,
                 citation_count=item.get("is-referenced-by-count"),
                 is_retracted=retracted,
+                source_type=source_type,
+                publication_status=publication_status,
+                publication_kind=publication_kind,
+                venue=publisher,
                 raw=item,
             )
             if candidate:
@@ -248,27 +438,28 @@ class AcademicSearchClient:
         return values, payload
 
     def search_semantic_scholar(self, query: str, limit: int, time_scope: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        start_year, end_year = _year_bounds(time_scope)
+        start_date, end_date = parse_time_scope_bounds(time_scope)
         params: dict[str, Any] = {
             "query": query,
             "limit": min(max(1, limit), 100),
-            "fields": "title,url,abstract,year,authors,venue,externalIds,publicationDate,citationCount,isOpenAccess,openAccessPdf",
+            "fields": "title,url,abstract,year,authors,venue,externalIds,publicationDate,citationCount,isOpenAccess,openAccessPdf,publicationTypes,journal",
         }
-        if start_year or end_year:
-            lower = start_year or 1900
-            upper = end_year or 2100
+        if start_date or end_date:
+            lower = start_date.year if start_date else 1900
+            upper = end_date.year if end_date else 2100
             params["year"] = f"{lower}-{upper}"
         headers = {}
         api_key = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
         if api_key:
             headers["x-api-key"] = api_key
-        payload = self._get_json(self.SEMANTIC_SCHOLAR_URL, params=params, headers=headers)
+        payload = self._get_semantic_scholar_json(params=params, headers=headers)
         values: list[dict[str, Any]] = []
         for item in payload.get("data") or []:
             if not isinstance(item, dict):
                 continue
             external = item.get("externalIds") if isinstance(item.get("externalIds"), dict) else {}
             open_pdf = item.get("openAccessPdf") if isinstance(item.get("openAccessPdf"), dict) else {}
+            source_type, publication_status, publication_kind = _publication_profile("semantic_scholar", item, str(item.get("title") or ""), str(item.get("venue") or ""))
             candidate = _candidate(
                 query=query,
                 provider="semantic_scholar",
@@ -280,6 +471,10 @@ class AcademicSearchClient:
                 publisher=item.get("venue") or "Semantic Scholar",
                 published_at=item.get("publicationDate") or item.get("year"),
                 citation_count=item.get("citationCount"),
+                source_type=source_type,
+                publication_status=publication_status,
+                publication_kind=publication_kind,
+                venue=item.get("venue") or ((item.get("journal") or {}).get("name") if isinstance(item.get("journal"), dict) else None),
                 raw=item,
             )
             if candidate:

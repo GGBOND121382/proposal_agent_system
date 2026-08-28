@@ -133,13 +133,14 @@ WF3_FIELD_OWNERSHIP: dict[str, dict[str, tuple[str, ...]]] = {
         "RUNTIME_DERIVED": (
             "result.import_recommendation",
             "result.accepted_claim_ids",
+            "result.reference_only_claim_ids",
             "result.rejected_claim_ids",
             "finding/question IDs",
             "result.required_user_confirmations",
             "status",
             "source_refs",
         ),
-        "INPUT_COPIED": ("result accepted/rejected canonical claim IDs",),
+        "INPUT_COPIED": ("result accepted/reference-only/rejected canonical claim IDs",),
         "GUARD_CONTROLLED": ("injection/scope report", "source manifest", "Gate controls"),
     },
 }
@@ -496,11 +497,7 @@ def canonicalize_wf3_machine_fields(
         if (
             not runtime_only_target
             and prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC"
-            and finding_code in {
-            "IMPORT_PROMPT_INJECTION",
-            "IMPORT_SCOPE_VIOLATION",
-            "IMPORT_SENSITIVE_INFERENCE",
-            }
+            and finding_code == "IMPORT_PROMPT_INJECTION"
         ):
             for field, value in (
                 ("blocking", True),
@@ -559,14 +556,20 @@ def canonicalize_wf3_machine_fields(
             changes.append(f"/findings/{index}/severity")
 
     if prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC" and isinstance(result, dict):
-        finding_codes = {
+        all_finding_codes = {
+            str(item.get("code") or "").upper()
+            for item in normalized.get("findings") or []
+            if isinstance(item, Mapping)
+            and not _wf3_runtime_only_target(item.get("target_path_or_span"))
+        }
+        blocking_finding_codes = {
             str(item.get("code") or "").upper()
             for item in normalized.get("findings") or []
             if isinstance(item, Mapping) and item.get("blocking") is True
         }
-        injection_detected = "IMPORT_PROMPT_INJECTION" in finding_codes
+        injection_detected = "IMPORT_PROMPT_INJECTION" in blocking_finding_codes
         scope_violation_detected = bool(
-            finding_codes
+            all_finding_codes
             & {"IMPORT_SCOPE_VIOLATION", "IMPORT_SENSITIVE_INFERENCE"}
         )
         for field, value in (
@@ -576,7 +579,7 @@ def canonicalize_wf3_machine_fields(
             if result.get(field) != value:
                 result[field] = value
                 changes.append(f"/result/{field}")
-        if injection_detected or scope_violation_detected:
+        if injection_detected:
             package = payload.get("result_package")
             package = package if isinstance(package, Mapping) else {}
             claim_ids = [
@@ -587,6 +590,7 @@ def canonicalize_wf3_machine_fields(
             for field, value in (
                 ("import_recommendation", "REJECT"),
                 ("accepted_claim_ids", []),
+                ("reference_only_claim_ids", []),
                 ("rejected_claim_ids", claim_ids),
             ):
                 if result.get(field) != value:
@@ -1125,15 +1129,25 @@ def wf3_output_semantic_errors(
             if isinstance(item, Mapping) and item.get("claim_id")
         ]
         accepted = [str(item) for item in result.get("accepted_claim_ids") or []]
+        reference_only = [str(item) for item in result.get("reference_only_claim_ids") or []]
         rejected = [str(item) for item in result.get("rejected_claim_ids") or []]
-        overlap = sorted(set(accepted) & set(rejected))
-        if overlap:
-            errors.append(
-                "/result: accepted_claim_ids and rejected_claim_ids overlap: "
-                + ", ".join(overlap)
-            )
-        unknown = sorted((set(accepted) | set(rejected)) - set(claim_ids))
-        missing = sorted(set(claim_ids) - (set(accepted) | set(rejected)))
+        classified_sets = {
+            "accepted_claim_ids": set(accepted),
+            "reference_only_claim_ids": set(reference_only),
+            "rejected_claim_ids": set(rejected),
+        }
+        overlaps: list[str] = []
+        names = list(classified_sets)
+        for left_index, left_name in enumerate(names):
+            for right_name in names[left_index + 1:]:
+                shared = sorted(classified_sets[left_name] & classified_sets[right_name])
+                if shared:
+                    overlaps.append(f"{left_name}<->{right_name}: " + ", ".join(shared))
+        if overlaps:
+            errors.append("/result: claim classification lists overlap: " + "; ".join(overlaps))
+        classified = set().union(*classified_sets.values())
+        unknown = sorted(classified - set(claim_ids))
+        missing = sorted(set(claim_ids) - classified)
         if unknown:
             errors.append(
                 "/result: claim IDs not present in payload.result_package.claims: "
@@ -1141,13 +1155,16 @@ def wf3_output_semantic_errors(
             )
         if missing:
             errors.append(
-                "/result: input claims not classified as accepted or rejected: "
+                "/result: input claims not classified as accepted, reference-only, or rejected: "
                 + ", ".join(missing)
             )
-        if len(accepted) != len(set(accepted)):
-            errors.append("/result/accepted_claim_ids: duplicate claim IDs")
-        if len(rejected) != len(set(rejected)):
-            errors.append("/result/rejected_claim_ids: duplicate claim IDs")
+        for field_name, values in (
+            ("accepted_claim_ids", accepted),
+            ("reference_only_claim_ids", reference_only),
+            ("rejected_claim_ids", rejected),
+        ):
+            if len(values) != len(set(values)):
+                errors.append(f"/result/{field_name}: duplicate claim IDs")
         expected_confirmations = {
             str(item.get("question_id"))
             for item in output.get("user_questions") or []
