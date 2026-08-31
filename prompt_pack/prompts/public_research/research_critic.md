@@ -17,7 +17,7 @@
 1. `UNSUPPORTED_CLAIM`：claim 的实质内容没有被所绑定公开证据支持；
 2. `OVERGENERALIZED_CLAIM`：证据支持较窄，但 claim 扩大了对象、条件、因果性、普遍性或强度；
 3. `MISSING_COUNTEREVIDENCE`：现有 passages 中已经出现重要反证/限制，但综合结果没有体现；
-4. `UNANSWERED_RESEARCH_QUESTION`：已有综合仍没有回答某个研究问题。
+4. `UNANSWERED_RESEARCH_QUESTION`：已有综合仍没有回答某个研究问题。若该问题已经列在 `research_sufficiency.research_gaps` 中，ResearchGap 是运行时确定的事实；你可以指出它仍未回答，但不得要求模型凭现有证据补造答案。
 
 引用输入中已有的 `claim_id`、research question index 和 source_id；不要创造新 ID。`source_comparisons`、`declared_conflicts` 与 `declared_limitations` 共同构成被审综合结果中已经表达的跨来源一致性、冲突、反证与限制；判断 `MISSING_COUNTEREVIDENCE` 时必须同时检查这三类内容，避免要求同一反证重复出现。
 

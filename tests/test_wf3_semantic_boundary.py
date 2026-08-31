@@ -17,7 +17,12 @@ from app.model_semantic_contracts import (
 from app.output_integrity import attach_trusted_source_catalog
 from app.pack import PromptPack
 from app.runtime_context import LiveContextBuilder
-from app.wf3_contracts import canonicalize_wf3_machine_fields, wf3_safe_package_valid_until
+from app.wf3_contracts import (
+    WF3PreModelGuardError,
+    canonicalize_wf3_machine_fields,
+    enforce_wf3_pre_model_guards,
+    wf3_safe_package_valid_until,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +31,7 @@ WF3 = (
     "P-SAFE-ONLINE-PACKAGE",
     "P-SAFE-ONLINE-PACKAGE-CRITIC",
     "P-PUBLIC-RESEARCH-PLAN",
+    "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
     "P-PUBLIC-RESEARCH-SYNTHESIS",
     "P-PUBLIC-RESEARCH-CRITIC",
     "P-ONLINE-RESULT-IMPORT-CRITIC",
@@ -81,6 +87,32 @@ def test_safe_package_model_never_sees_source_items_or_runtime_security_config()
     assert "project_id" not in text
 
 
+
+
+def test_safe_package_critic_missing_approved_boundary_is_runtime_contract_failure() -> None:
+    envelope = _envelope("P-SAFE-ONLINE-PACKAGE-CRITIC")
+    envelope["payload"]["security_policy"]["allowed_public_topics"] = []
+    with pytest.raises(WF3PreModelGuardError, match="WF3_APPROVED_BOUNDARY_MISSING") as exc_info:
+        enforce_wf3_pre_model_guards("P-SAFE-ONLINE-PACKAGE-CRITIC", envelope)
+    assert exc_info.value.wf3_guard_kind == "CONTRACT"
+
+
+def test_safe_package_critic_failed_deterministic_scan_blocks_before_semantic_review() -> None:
+    envelope = _envelope("P-SAFE-ONLINE-PACKAGE-CRITIC")
+    envelope["payload"]["allowed_topics"] = ["公开人机协同研究"]
+    envelope["payload"]["security_policy"]["allowed_public_topics"] = ["公开人机协同研究"]
+    envelope["payload"]["deterministic_scan"] = {
+        "passed": False,
+        "matched_rules": ["PROJECT_NAME:/result/task_description"],
+        "redacted_fields": [],
+    }
+    with pytest.raises(WF3PreModelGuardError, match="WF3_DETERMINISTIC_SCAN_FAILED") as exc_info:
+        enforce_wf3_pre_model_guards("P-SAFE-ONLINE-PACKAGE-CRITIC", envelope)
+    assert exc_info.value.wf3_guard_kind == "CONTENT"
+    assert exc_info.value.wf3_guard_details["matched_rules"] == [
+        "PROJECT_NAME:/result/task_description"
+    ]
+
 def test_safe_package_critic_sees_only_outbound_semantics_not_ttl_or_node_topology() -> None:
     envelope = _envelope("P-SAFE-ONLINE-PACKAGE-CRITIC")
     envelope["payload"]["source_summary"][0]["abstracted_summary"] = "PROJECT_BRIEF_内部文件名"
@@ -90,7 +122,7 @@ def test_safe_package_critic_sees_only_outbound_semantics_not_ttl_or_node_topolo
     assert PACK.validate_model("P-SAFE-ONLINE-PACKAGE-CRITIC", "input", model_input) == []
     for forbidden in ("PROJECT_BRIEF", "source_summary", "security_policy", "valid_until", "OFFLINE_LOCAL", "internet_access_allowed"):
         assert forbidden not in text
-    assert set(model_input) == {"outbound_candidate", "approved_boundary", "deterministic_scan_receipt"}
+    assert set(model_input) == {"outbound_candidate", "approved_boundary"}
 
 
 def test_plan_model_input_is_approved_task_semantics_not_package_identity() -> None:
@@ -199,7 +231,8 @@ def test_research_critic_receives_source_comparisons_as_part_of_reviewed_object(
     }]
     model_input = build_semantic_model_input("P-PUBLIC-RESEARCH-CRITIC", envelope)
     assert PACK.validate_model("P-PUBLIC-RESEARCH-CRITIC", "input", model_input) == []
-    assert model_input["source_comparisons"] == envelope["payload"]["synthesis_candidate"]["source_comparisons"]
+    assert model_input["source_comparisons"][0]["source_ids"] == ["S001", "S002"]
+    assert model_input["source_comparisons"][0]["topic"] == envelope["payload"]["synthesis_candidate"]["source_comparisons"][0]["topic"]
 
 
 def test_import_model_sees_approved_task_claims_and_snippets_without_manifest_hash_or_raw_text() -> None:
@@ -309,6 +342,32 @@ def test_safe_critic_semantic_issue_routes_back_to_producer_without_user_gate() 
     assert normalized["user_questions"] == []
     assert normalized["findings"][0]["suggested_route"] == "ORIGINAL_PRODUCER"
 
+
+
+
+def test_safe_critic_model_block_suggestion_cannot_directly_create_p0_control() -> None:
+    envelope = _envelope("P-SAFE-ONLINE-PACKAGE-CRITIC")
+    semantic = {
+        "risk_level": "CRITICAL",
+        "issues": [{
+            "risk_type": "IDENTIFIABLE_PROJECT",
+            "outbound_field": "task_description",
+            "description": "外发文本仍含可识别线索",
+            "evidence_excerpt": "specific internal clue",
+            "required_action": "BLOCK",
+            "required_redaction": "删除可识别线索",
+        }],
+    }
+    expanded = expand_semantic_model_output(
+        "P-SAFE-ONLINE-PACKAGE-CRITIC", envelope, semantic
+    )
+    finding = expanded["findings"][0]
+    assert expanded["status"] == "REVISE"
+    assert expanded["result"]["verdict"] == "REVISE"
+    assert finding["severity"] == "P1"
+    assert finding["suggested_route"] == "ORIGINAL_PRODUCER"
+    assert finding["repairable"] is True
+    assert finding["blocking"] is True
 
 def test_safe_package_machine_fields_are_created_by_runtime_not_semantic_model(monkeypatch) -> None:
     monkeypatch.setenv("WF3_SAFE_PACKAGE_TTL_DAYS", "7")
@@ -425,6 +484,55 @@ def test_import_runtime_corroborated_control_instruction_can_still_block() -> No
     assert expanded["findings"][0]["blocking"] is True
 
 
+
+
+def test_import_unsourced_model_issue_cannot_override_existing_deterministic_source_binding() -> None:
+    envelope = _import_envelope_with_claim_ids("claim-a")
+    source_ref = copy.deepcopy(envelope["payload"]["public_sources"][0])
+    envelope["payload"]["result_package"]["claims"][0]["claim_text"] = "公开证据支持该结论。"
+    envelope["payload"]["result_package"]["claims"][0]["source_refs"] = [source_ref]
+    semantic = {
+        "claim_decisions": [
+            {"claim_id": "claim-a", "decision": "IMPORT_PUBLIC_CLAIM", "reason": "supported"},
+        ],
+        "security_issues": [{
+            "issue_type": "UNSOURCED_CLAIM",
+            "claim_id": "claim-a",
+            "description": "模型误认为该 claim 没有来源。",
+            "evidence_excerpt": "公开证据支持该结论。",
+        }],
+    }
+    expanded = expand_semantic_model_output(
+        "P-ONLINE-RESULT-IMPORT-CRITIC", envelope, semantic
+    )
+    assert expanded["status"] == "PASS"
+    assert expanded["result"]["accepted_claim_ids"] == ["claim-a"]
+    assert expanded["result"]["rejected_claim_ids"] == []
+    assert expanded["findings"][0]["code"] == "IMPORT_UNSOURCED_CLAIM_SUSPECTED"
+    assert expanded["findings"][0]["blocking"] is False
+
+
+def test_import_unsourced_issue_rejects_claim_only_when_binding_is_actually_missing() -> None:
+    envelope = _import_envelope_with_claim_ids("claim-a")
+    semantic = {
+        "claim_decisions": [
+            {"claim_id": "claim-a", "decision": "IMPORT_PUBLIC_CLAIM", "reason": "model candidate"},
+        ],
+        "security_issues": [{
+            "issue_type": "UNSOURCED_CLAIM",
+            "claim_id": "claim-a",
+            "description": "claim has no source binding",
+            "evidence_excerpt": "claim-a",
+        }],
+    }
+    expanded = expand_semantic_model_output(
+        "P-ONLINE-RESULT-IMPORT-CRITIC", envelope, semantic
+    )
+    assert expanded["status"] == "PASS"
+    assert expanded["result"]["accepted_claim_ids"] == []
+    assert expanded["result"]["rejected_claim_ids"] == ["claim-a"]
+    assert expanded["findings"][0]["code"] == "IMPORT_UNSOURCED_CLAIM"
+
 def test_import_claim_local_scope_issue_rejects_only_that_claim() -> None:
     envelope = _import_envelope_with_claim_ids("claim-a", "claim-b")
     semantic = {
@@ -446,3 +554,168 @@ def test_import_claim_local_scope_issue_rejects_only_that_claim() -> None:
     assert expanded["result"]["rejected_claim_ids"] == ["claim-a"]
     assert expanded["result"]["scope_violation_detected"] is True
     assert expanded["findings"][0]["blocking"] is False
+
+
+
+def test_degraded_synthesis_uses_short_source_alias_and_preserves_gap_limitation() -> None:
+    envelope = _envelope("P-PUBLIC-RESEARCH-SYNTHESIS")
+    envelope["payload"]["research_sufficiency"] = {
+        "schema_version": "1.0",
+        "status": "DEGRADED",
+        "coverage_status": "INSUFFICIENT",
+        "research_gaps": [{
+            "gap_id": "research-gap-001",
+            "scope": "QUERY",
+            "query_id": "query-001",
+            "query": "feedback loop decision systems",
+            "linked_question_indexes": [0],
+            "gap_types": ["DEPTH", "AUTHORITY"],
+            "source_count": 1,
+            "required_source_count": 3,
+            "authoritative_source_count": 0,
+            "required_authoritative_source_count": 1,
+            "source_ids": ["src-001"],
+            "authoritative_source_ids": [],
+            "description": "Only one qualifying public source is available.",
+        }],
+        "blocking_reasons": [],
+        "retrieval_health_status": "PASS",
+        "may_continue": True,
+    }
+    model_input = build_semantic_model_input("P-PUBLIC-RESEARCH-SYNTHESIS", envelope)
+    assert model_input["research_sufficiency"]["status"] == "DEGRADED"
+    assert model_input["evidence_passages"][0]["source_id"] == "S001"
+    semantic = {
+        "claims": [{"claim_text": "公开证据显示该主题已有初步研究。", "source_ids": ["S001"], "qualifiers": []}],
+        "source_comparisons": [],
+        "conflicts": [],
+        "limitations": [],
+        "coverage_summary": "Only partial evidence is available.",
+    }
+    assert PACK.validate_model("P-PUBLIC-RESEARCH-SYNTHESIS", "output", semantic) == []
+    expanded = expand_semantic_model_output("P-PUBLIC-RESEARCH-SYNTHESIS", envelope, semantic)
+    assert expanded["result"]["claims"][0]["source_refs"][0]["source_id"] == "src-001"
+    assert any("RESEARCH_GAP[research-gap-001]" in item for item in expanded["result"]["limitations"])
+    assert "DEGRADED" in expanded["result"]["coverage_summary"]
+
+
+def test_known_research_gap_turns_unanswered_question_into_nonblocking_observation() -> None:
+    envelope = _envelope("P-PUBLIC-RESEARCH-CRITIC")
+    envelope["payload"]["extracted_passages"] = _passages()
+    envelope["payload"]["research_sufficiency"] = {
+        "schema_version": "1.0",
+        "status": "DEGRADED",
+        "coverage_status": "INSUFFICIENT",
+        "research_gaps": [{
+            "gap_id": "research-gap-001",
+            "scope": "QUERY",
+            "query_id": "query-001",
+            "query": "feedback loop decision systems",
+            "linked_question_indexes": [0],
+            "gap_types": ["DEPTH"],
+            "source_count": 1,
+            "required_source_count": 3,
+            "authoritative_source_count": 1,
+            "required_authoritative_source_count": 1,
+            "source_ids": ["src-001"],
+            "authoritative_source_ids": ["src-001"],
+            "description": "Direct evidence is shallow.",
+        }],
+        "blocking_reasons": [],
+        "retrieval_health_status": "PASS",
+        "may_continue": True,
+    }
+    semantic = {
+        "issues": [{
+            "issue_type": "UNANSWERED_RESEARCH_QUESTION",
+            "claim_id": None,
+            "question_index": 0,
+            "description": "The available public evidence is insufficient to answer this question fully.",
+            "evidence_source_ids": [],
+            "repair_instruction": "Do not invent additional evidence.",
+        }],
+        "missing_counterevidence_topics": [],
+    }
+    expanded = expand_semantic_model_output("P-PUBLIC-RESEARCH-CRITIC", envelope, semantic)
+    assert expanded["status"] == "PASS"
+    finding = expanded["findings"][0]
+    assert finding["code"] == "PUBLIC_CRITIC_ACKNOWLEDGED_RESEARCH_GAP"
+    assert finding["blocking"] is False
+    assert finding["severity"] == "P2"
+
+
+def test_unanswered_question_without_known_gap_remains_blocking() -> None:
+    envelope = _envelope("P-PUBLIC-RESEARCH-CRITIC")
+    envelope["payload"]["extracted_passages"] = _passages()
+    envelope["payload"]["research_sufficiency"] = {
+        "schema_version": "1.0",
+        "status": "SUFFICIENT",
+        "coverage_status": "PASS",
+        "research_gaps": [],
+        "blocking_reasons": [],
+        "retrieval_health_status": "PASS",
+        "may_continue": True,
+    }
+    semantic = {
+        "issues": [{
+            "issue_type": "UNANSWERED_RESEARCH_QUESTION",
+            "claim_id": None,
+            "question_index": 0,
+            "description": "The synthesis failed to answer a covered research question.",
+            "evidence_source_ids": [],
+            "repair_instruction": "Use the available evidence to answer it.",
+        }],
+        "missing_counterevidence_topics": [],
+    }
+    expanded = expand_semantic_model_output("P-PUBLIC-RESEARCH-CRITIC", envelope, semantic)
+    assert expanded["status"] == "REVISE"
+    assert expanded["findings"][0]["blocking"] is True
+
+
+
+def test_plan_scope_critic_reviews_final_queries_against_same_approved_boundary() -> None:
+    envelope = _envelope("P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC")
+    model_input = build_semantic_model_input("P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC", envelope)
+    assert PACK.validate_model("P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC", "input", model_input) == []
+    assert model_input["approved_boundary"]["allowed_topics"] == envelope["payload"]["approved_boundary"]["allowed_topics"]
+    assert model_input["executable_queries"][0]["query"] == envelope["payload"]["executable_queries"][0]["query"]
+
+    semantic = {"issues": [{
+        "query_index": 0,
+        "issue_type": "OUTSIDE_APPROVED_SCOPE",
+        "description": "The query expands beyond the approved public research topic.",
+        "evidence_excerpt": model_input["executable_queries"][0]["query"],
+    }]}
+    assert PACK.validate_model("P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC", "output", semantic) == []
+    expanded = expand_semantic_model_output("P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC", envelope, semantic)
+    assert expanded["status"] == "REVISE"
+    assert expanded["result"]["rejected_query_indexes"] == [0]
+    assert expanded["findings"][0]["suggested_route"] == "ORIGINAL_PRODUCER"
+    assert expanded["findings"][0]["blocking"] is True
+
+
+def test_research_plan_model_receives_only_semantic_scope_revision_notes() -> None:
+    envelope = _envelope("P-PUBLIC-RESEARCH-PLAN")
+    _add_plan_content(envelope)
+    envelope["payload"]["revision_findings"] = [{
+        "finding_instance_id": "finding-1",
+        "code": "PUBLIC_RESEARCH_QUERY_SCOPE_EXCESS",
+        "severity": "P1",
+        "category": "SECURITY",
+        "target_type": "PUBLIC_RESEARCH_QUERY",
+        "target_path_or_span": "/payload/executable_queries/0/query",
+        "description": "The first query exceeds the approved topic boundary.",
+        "evidence_refs": [],
+        "repairable": False,
+        "repair_instruction": "Narrow the query to the approved public topic.",
+        "suggested_route": "ORIGINAL_PRODUCER",
+        "blocking": True,
+    }]
+    model_input = build_semantic_model_input("P-PUBLIC-RESEARCH-PLAN", envelope)
+    assert model_input["scope_revision_notes"] == [{
+        "description": "The first query exceeds the approved topic boundary.",
+        "repair_instruction": "Narrow the query to the approved public topic.",
+    }]
+    text = json.dumps(model_input, ensure_ascii=False)
+    assert "finding_instance_id" not in text
+    assert "target_path_or_span" not in text

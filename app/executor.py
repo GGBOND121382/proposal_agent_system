@@ -55,6 +55,7 @@ from .wf3_contracts import (
     canonicalize_wf3_machine_fields,
     canonicalize_wf3_producer_status,
     compact_wf3_research_envelope,
+    enforce_wf3_pre_model_guards,
     wf3_output_semantic_errors,
     wf3_provider_request_budget_report,
 )
@@ -1801,6 +1802,7 @@ class PromptExecutor:
             project_config = load_project_config(self.db, project_id)
 
             if semantic_model_contract:
+                enforce_wf3_pre_model_guards(prompt_id, model_envelope)
                 provider_call_envelope = build_semantic_model_input(prompt_id, model_envelope)
                 semantic_input_errors = self.pack.validate_model(prompt_id, "input", provider_call_envelope)
                 if semantic_input_errors:

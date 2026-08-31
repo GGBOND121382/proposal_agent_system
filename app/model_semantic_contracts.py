@@ -21,7 +21,7 @@ from .json_pointer import (
 )
 
 
-SEMANTIC_MODEL_CONTRACT_VERSION = "2026-08-28.v11-wf3-import-policy"
+SEMANTIC_MODEL_CONTRACT_VERSION = "2026-08-31.v14-wf4-reference-graph"
 SEMANTIC_PROMPTS = frozenset({
     "P-ARGUMENT-ARCHITECTURE",
     "P-ARGUMENT-ARCHITECTURE-CRITIC",
@@ -29,6 +29,7 @@ SEMANTIC_PROMPTS = frozenset({
     "P-SAFE-ONLINE-PACKAGE",
     "P-SAFE-ONLINE-PACKAGE-CRITIC",
     "P-PUBLIC-RESEARCH-PLAN",
+    "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
     "P-PUBLIC-RESEARCH-SYNTHESIS",
     "P-PUBLIC-RESEARCH-CRITIC",
     "P-ONLINE-RESULT-IMPORT-CRITIC",
@@ -56,6 +57,24 @@ def _argument_chain_specs() -> tuple[dict[str, Any], ...]:
 def _argument_matrix_required_fields() -> tuple[str, ...]:
     raw = _argument_rule_config(_ARGUMENT_MATRIX_RULE_ID).get("required_fields") or ()
     return tuple(str(item) for item in raw if str(item).strip())
+
+
+def argument_evidence_binding_specs(stage: str | None = None) -> tuple[dict[str, Any], ...]:
+    """Return the authoritative Stage-wire -> canonical evidence binding registry.
+
+    Evidence reference validation, deterministic invalid-reference removal and
+    wire/canonical closure tests all consume this one registry.  A model selects
+    evidence semantically; Runtime owns reference-domain identity and validity.
+    """
+    raw = _argument_rule_config(_ARGUMENT_EVIDENCE_RULE_ID).get("bindings") or ()
+    specs = tuple(dict(item) for item in raw if isinstance(item, Mapping))
+    if stage is None:
+        return specs
+    stage_name = str(stage or "").upper()
+    return tuple(
+        item for item in specs
+        if str(item.get("stage") or "").upper() == stage_name
+    )
 
 
 def _argument_matrix_optional_fields() -> tuple[str, ...]:
@@ -178,6 +197,69 @@ def _critic_allowed_target_components() -> dict[str, set[str]]:
 
 def _critic_deterministic_failure_score() -> int:
     return int(_argument_critic_taxonomy().get("deterministic_failure_score") or 1)
+
+
+def _critic_semantic_failure_max_score() -> float:
+    try:
+        return float(_argument_critic_taxonomy().get("semantic_failure_max_score") or 2)
+    except (TypeError, ValueError):
+        return 2.0
+
+
+def _critic_semantic_issue_policy(code: str) -> dict[str, Any]:
+    policies = dict(_argument_critic_taxonomy().get("semantic_issue_policy_by_code") or {})
+    raw = policies.get(str(code)) or {}
+    if not isinstance(raw, Mapping):
+        raw = {}
+    route = str(raw.get("route") or "ORIGINAL_PRODUCER").upper()
+    if route not in {"ARGUMENT_ARCHITECTURE_AGENT", "ORIGINAL_PRODUCER", "USER", "BLOCK"}:
+        route = "ORIGINAL_PRODUCER"
+    severity = str(raw.get("severity") or "P1").upper()
+    if severity not in {"P0", "P1", "P2", "P3"}:
+        severity = "P1"
+    return {
+        "severity": severity,
+        "route": route,
+        "blocking": bool(raw.get("blocking", True)),
+        "repairable": bool(raw.get("repairable", route == "ARGUMENT_ARCHITECTURE_AGENT")),
+    }
+
+
+def _critic_dimension_for_issue(code: str, component: str | None) -> str:
+    candidates = [
+        dimension
+        for dimension, codes in _critic_dimension_issue_codes().items()
+        if str(code) in codes
+    ]
+    if not candidates:
+        return "ARGUMENT_CHAIN"
+    if len(candidates) == 1:
+        return candidates[0]
+    semantic_component = str(component or "").upper()
+    if (
+        semantic_component in {"CENTRAL_PROPOSITION", "SCOPE"}
+        and "CENTRAL_THESIS" in candidates
+    ):
+        return "CENTRAL_THESIS"
+    if (
+        semantic_component in {"METHOD", "ASSUMPTION", "THEORETICAL_PROPERTY"}
+        and "METHOD_SUBSTANCE" in candidates
+    ):
+        return "METHOD_SUBSTANCE"
+    if "ARGUMENT_CHAIN" in candidates:
+        return "ARGUMENT_CHAIN"
+    return candidates[0]
+
+
+def _critic_issue_needs_user_input(issue: Mapping[str, Any]) -> bool:
+    # `resolution=USER_INPUT` is retained only as a backwards-compatible model
+    # hint.  Canonical routing is Runtime-owned.
+    return bool(issue.get("needs_user_input")) or str(issue.get("resolution") or "").upper() == "USER_INPUT"
+
+
+def _critic_issue_requires_structure_change(issue: Mapping[str, Any]) -> bool:
+    # `resolution=REGENERATE` is retained only for old replay/model outputs.
+    return bool(issue.get("requires_structure_change")) or str(issue.get("resolution") or "").upper() == "REGENERATE"
 
 
 def _producer_gap_kind_policy(kind: str) -> dict[str, Any]:
@@ -903,15 +985,13 @@ _ARGUMENT_SKELETON_OWNED_SEED_COMPONENT_TYPES = {
 
 
 def _argument_design_seed(canonical_envelope: dict[str, Any]) -> dict[str, Any] | None:
-    """Project Stage-B hints without repeating semantics owned by frozen Skeleton.
+    """Project compact Stage-B hints without repeating Skeleton-owned semantics.
 
-    Stage A already owns proposition/scope/gaps/problems/questions/objectives and
-    their boundary assumptions. Repeating those records in ``design_seed`` both
-    weakens the ownership boundary and inflates the LIVE Design request. Preserve
-    every other design hint (including semantic node types such as FORMAL_MODEL or
-    EXPERIMENT_DESIGN). Preserve Design-to-Design relations plus the compact
-    OBJECTIVE→WORK_PACKAGE bridge, because that bridge carries thread-assignment
-    information not otherwise represented by the frozen Skeleton.
+    ``seed_key`` is a request-local semantic handle, not a canonical object ID.  It
+    lets relation hints refer to a component once instead of copying long source
+    and target statements into every relation.  If an endpoint was deliberately
+    filtered because Stage A owns it (notably OBJECTIVE), its semantic statement
+    remains inline so no information is lost.
     """
     seed = _design_seed(canonical_envelope)
     if not isinstance(seed, dict):
@@ -920,11 +1000,23 @@ def _argument_design_seed(canonical_envelope: dict[str, Any]) -> dict[str, Any] 
     def is_design_side(component_type: Any) -> bool:
         return str(component_type or "").upper() not in _ARGUMENT_SKELETON_OWNED_SEED_COMPONENT_TYPES
 
-    components = [
+    raw_components = [
         copy.deepcopy(item)
         for item in seed.get("existing_components") or []
         if isinstance(item, dict) and is_design_side(item.get("component_type"))
     ]
+    components: list[dict[str, Any]] = []
+    endpoint_to_key: dict[tuple[str, str], str] = {}
+    for index, item in enumerate(raw_components, start=1):
+        seed_key = f"S{index:03d}"
+        component_type = str(item.get("component_type") or "")
+        statement = str(item.get("statement") or "")
+        compact = copy.deepcopy(item)
+        compact["seed_key"] = seed_key
+        components.append(compact)
+        if component_type and statement:
+            endpoint_to_key[(component_type, statement)] = seed_key
+
     def keep_relation(item: dict[str, Any]) -> bool:
         source_type = str(item.get("source_type") or "").upper()
         target_type = str(item.get("target_type") or "").upper()
@@ -932,16 +1024,95 @@ def _argument_design_seed(canonical_envelope: dict[str, Any]) -> dict[str, Any] 
             return True
         return source_type == "OBJECTIVE" and target_type == "WORK_PACKAGE"
 
-    relations = [
-        copy.deepcopy(item)
-        for item in seed.get("existing_relations") or []
-        if isinstance(item, dict) and keep_relation(item)
-    ]
+    relations: list[dict[str, Any]] = []
+    for item in seed.get("existing_relations") or []:
+        if not isinstance(item, dict) or not keep_relation(item):
+            continue
+        source_type = str(item.get("source_type") or "")
+        target_type = str(item.get("target_type") or "")
+        source_statement = str(item.get("source_statement") or "")
+        target_statement = str(item.get("target_statement") or "")
+        relation = {
+            "source_type": source_type,
+            "relation": str(item.get("relation") or ""),
+            "target_type": target_type,
+        }
+        source_key = endpoint_to_key.get((source_type, source_statement))
+        target_key = endpoint_to_key.get((target_type, target_statement))
+        if source_key:
+            relation["source_key"] = source_key
+        elif source_statement:
+            relation["source_statement"] = source_statement
+        if target_key:
+            relation["target_key"] = target_key
+        elif target_statement:
+            relation["target_statement"] = target_statement
+        relations.append(relation)
     return {
         "existing_components": components,
         "existing_relations": relations,
     }
 
+
+def _argument_design_frozen_skeleton(skeleton_output: dict[str, Any]) -> dict[str, Any]:
+    """Return the smallest read-only Stage-A semantic view needed by DESIGN.
+
+    Runtime retains the complete Stage-A wire object for validation and assembly.
+    DESIGN only needs the proposition/scope/thread semantics plus already-declared
+    gaps/questions so it can avoid rewriting or duplicating them.  Per-thread
+    provenance arrays remain grouped by semantic role in a compact inherited
+    evidence object because DESIGN receives the full evidence-card pool separately.
+    """
+    proposition = skeleton_output.get("central_proposition") if isinstance(skeleton_output.get("central_proposition"), dict) else {}
+    scope = skeleton_output.get("scope") if isinstance(skeleton_output.get("scope"), dict) else {}
+
+    compact_threads: list[dict[str, Any]] = []
+    for thread_index, thread in enumerate(skeleton_output.get("research_threads") or []):
+        if not isinstance(thread, dict):
+            continue
+
+        def evidence_values(field: str) -> list[str]:
+            values: list[str] = []
+            for evidence_id in thread.get(field) or []:
+                value = str(evidence_id or "").strip()
+                if value and value not in values:
+                    values.append(value)
+            return values
+
+        inherited_evidence = {
+            "gap": evidence_values("gap_evidence_ids"),
+            "limitation_mechanism": evidence_values(
+                "limitation_mechanism_evidence_ids"
+            ),
+            "objective": evidence_values("objective_evidence_ids"),
+        }
+        compact_threads.append({
+            "thread_index": thread_index,
+            "gap_statement": str(thread.get("gap_statement") or ""),
+            "limitation_mechanism_statement": str(thread.get("limitation_mechanism_statement") or ""),
+            "question_statement": str(thread.get("question_statement") or ""),
+            "question_type": str(thread.get("question_type") or ""),
+            "answerability": str(thread.get("answerability") or ""),
+            "success_evidence": copy.deepcopy(thread.get("success_evidence") or []),
+            "objective_statement": str(thread.get("objective_statement") or ""),
+            "assumptions": copy.deepcopy(thread.get("assumptions") or []),
+            "falsification_or_comparison_rule": str(thread.get("falsification_or_comparison_rule") or ""),
+            "inherited_evidence": inherited_evidence,
+        })
+
+    return {
+        "central_proposition": {
+            "statement": str(proposition.get("statement") or ""),
+            "proposition_type": str(proposition.get("proposition_type") or ""),
+            "falsifiable_or_comparable": bool(proposition.get("falsifiable_or_comparable")),
+            "boundary_conditions": copy.deepcopy(proposition.get("boundary_conditions") or []),
+        },
+        "scope": copy.deepcopy(scope),
+        "research_threads": compact_threads,
+        "evidence_gaps": copy.deepcopy(skeleton_output.get("evidence_gaps") or []),
+        "user_questions": copy.deepcopy(skeleton_output.get("user_questions") or []),
+        "cannot_proceed_reason": copy.deepcopy(skeleton_output.get("cannot_proceed_reason")),
+    }
 
 def build_argument_design_model_input(
     canonical_envelope: dict[str, Any],
@@ -956,7 +1127,7 @@ def build_argument_design_model_input(
         "project_task": copy.deepcopy(base["project_task"]),
         "constraints": copy.deepcopy(base["constraints"]),
         "evidence_cards": copy.deepcopy(base["evidence_cards"]),
-        "frozen_skeleton": copy.deepcopy(skeleton_output),
+        "frozen_skeleton": _argument_design_frozen_skeleton(skeleton_output),
         "design_seed": _argument_design_seed(canonical_envelope),
         "revision_issues": copy.deepcopy(base["revision_issues"]),
         "human_resolutions": copy.deepcopy(base["human_resolutions"]),
@@ -1043,6 +1214,47 @@ def argument_design_model_reference_errors(
     keyset("baselines", ("thread_index", "work_package_index", "method_index", "evaluation_index", "baseline_index"))
     keyset("ablations", ("thread_index", "work_package_index", "method_index", "evaluation_index", "ablation_index"))
     keyset("innovation_prior_work", ("thread_index", "innovation_index", "prior_work_index"))
+
+    def exact_relation_duplicates(
+        collection: str,
+        keys: tuple[str, ...],
+        *,
+        nullable_fields: frozenset[str] = frozenset(),
+    ) -> None:
+        seen: set[tuple[Any, ...]] = set()
+        for pos, item in enumerate(rows(collection)):
+            if not isinstance(item, dict):
+                continue
+            values: list[Any] = []
+            valid = True
+            for key_name in keys:
+                raw = item.get(key_name)
+                if raw is None and key_name in nullable_fields:
+                    values.append(None)
+                elif isinstance(raw, int) and not isinstance(raw, bool):
+                    values.append(raw)
+                else:
+                    valid = False
+                    break
+            if not valid:
+                continue
+            relation_key = tuple(values)
+            if relation_key in seen:
+                errors.append(
+                    f"/{collection}/{pos}: duplicate exact relation {relation_key}"
+                )
+            else:
+                seen.add(relation_key)
+
+    exact_relation_duplicates(
+        "innovation_evaluation_refs",
+        ("thread_index", "innovation_index", "work_package_index", "method_index", "evaluation_index"),
+    )
+    exact_relation_duplicates(
+        "foundation_supports",
+        ("thread_index", "foundation_index", "work_package_index", "method_index"),
+        nullable_fields=frozenset({"method_index"}),
+    )
 
     for collection in (
         "work_packages", "methods", "theoretical_properties", "evaluations", "baselines",
@@ -2686,6 +2898,7 @@ _WF3_SEMANTIC_PROMPTS = frozenset({
     "P-SAFE-ONLINE-PACKAGE",
     "P-SAFE-ONLINE-PACKAGE-CRITIC",
     "P-PUBLIC-RESEARCH-PLAN",
+    "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
     "P-PUBLIC-RESEARCH-SYNTHESIS",
     "P-PUBLIC-RESEARCH-CRITIC",
     "P-ONLINE-RESULT-IMPORT-CRITIC",
@@ -2748,17 +2961,12 @@ def build_safe_online_package_model_input(canonical_envelope: dict[str, Any]) ->
 def build_safe_online_package_critic_model_input(canonical_envelope: dict[str, Any]) -> dict[str, Any]:
     payload = _wf3_payload(canonical_envelope)
     policy = payload.get("security_policy") if isinstance(payload.get("security_policy"), Mapping) else {}
-    scan = payload.get("deterministic_scan") if isinstance(payload.get("deterministic_scan"), Mapping) else {}
     package = _wf3_semantic_safe_package(payload.get("package_candidate"))
     return {
         "outbound_candidate": package,
         "approved_boundary": {
-            "allowed_topics": _wf3_strings(policy.get("allowed_public_topics")),
+            "allowed_topics": _wf3_strings(payload.get("allowed_topics")),
             "forbidden_semantic_categories": _wf3_strings(policy.get("prohibited_external_fields")),
-        },
-        "deterministic_scan_receipt": {
-            "passed": bool(scan.get("passed")),
-            "remaining_semantic_review_required": True,
         },
     }
 
@@ -2792,6 +3000,48 @@ def build_public_research_plan_model_input(canonical_envelope: dict[str, Any]) -
         },
         "evidence_requirements": _wf3_strings(payload.get("evidence_requirements")),
         "known_public_source_summaries": known[:40],
+        "scope_revision_notes": [
+            {
+                "description": str(item.get("description") or "").strip(),
+                "repair_instruction": str(item.get("repair_instruction") or "").strip(),
+            }
+            for item in payload.get("revision_findings") or []
+            if isinstance(item, Mapping)
+            and str(item.get("description") or "").strip()
+            and str(item.get("repair_instruction") or "").strip()
+        ][:20],
+    }
+
+
+def build_public_research_plan_scope_critic_model_input(canonical_envelope: dict[str, Any]) -> dict[str, Any]:
+    payload = _wf3_payload(canonical_envelope)
+    boundary = payload.get("approved_boundary") if isinstance(payload.get("approved_boundary"), Mapping) else {}
+    questions = _wf3_strings(payload.get("research_questions"))
+    executable: list[dict[str, Any]] = []
+    for index, item in enumerate(payload.get("executable_queries") or []):
+        if not isinstance(item, Mapping):
+            continue
+        query = str(item.get("query") or "").strip()
+        linked = [
+            int(value) for value in item.get("linked_question_indexes") or []
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        ]
+        if query:
+            executable.append({
+                "query_index": index,
+                "query": query,
+                "linked_question_indexes": list(dict.fromkeys(linked)),
+            })
+    return {
+        "approved_boundary": {
+            "task_description": str(boundary.get("task_description") or "").strip(),
+            "allowed_topics": _wf3_strings(boundary.get("allowed_topics")),
+            "allowed_context": _wf3_strings(boundary.get("allowed_context")),
+            "prohibited_inferences": _wf3_strings(boundary.get("prohibited_inferences")),
+            "prohibited_outputs": _wf3_strings(boundary.get("prohibited_outputs")),
+        },
+        "research_questions": questions,
+        "executable_queries": executable,
     }
 
 
@@ -2809,7 +3059,31 @@ def _wf3_model_queries(plan: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
-def _wf3_model_passages(values: Any, *, limit: int = 80) -> list[dict[str, str]]:
+def _wf3_source_alias_maps(canonical_envelope: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+    payload = _wf3_payload(canonical_envelope)
+    source_ids: set[str] = set()
+    for field in ("retrieved_sources", "public_sources"):
+        for ref in payload.get(field) or []:
+            if isinstance(ref, Mapping) and ref.get("source_id"):
+                source_ids.add(str(ref.get("source_id")))
+    for field in ("extracted_passages", "public_source_passages"):
+        for passage in payload.get(field) or []:
+            if not isinstance(passage, Mapping):
+                continue
+            ref = passage.get("source_ref") if isinstance(passage.get("source_ref"), Mapping) else {}
+            source_id = str(ref.get("source_id") or passage.get("source_id") or "").strip()
+            if source_id:
+                source_ids.add(source_id)
+    real_to_alias = {source_id: f"S{index:03d}" for index, source_id in enumerate(sorted(source_ids), 1)}
+    return real_to_alias, {alias: source_id for source_id, alias in real_to_alias.items()}
+
+
+def _wf3_model_passages(
+    values: Any,
+    *,
+    limit: int = 80,
+    source_aliases: Mapping[str, str] | None = None,
+) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     for passage in values or []:
         if not isinstance(passage, Mapping):
@@ -2819,10 +3093,34 @@ def _wf3_model_passages(values: Any, *, limit: int = 80) -> list[dict[str, str]]
         text = str(passage.get("text") or "").strip()
         relevance = str(passage.get("relevance") or "公开研究证据").strip()
         if source_id and text:
-            result.append({"source_id": source_id, "text": text, "relevance": relevance or "公开研究证据"})
+            visible_id = str((source_aliases or {}).get(source_id) or source_id)
+            result.append({"source_id": visible_id, "text": text, "relevance": relevance or "公开研究证据"})
         if len(result) >= limit:
             break
     return result
+
+
+def _wf3_compact_research_sufficiency(value: Any) -> dict[str, Any]:
+    source = value if isinstance(value, Mapping) else {}
+    status = str(source.get("status") or "SUFFICIENT")
+    if status not in {"SUFFICIENT", "DEGRADED", "BLOCKING_FAILURE"}:
+        status = "SUFFICIENT"
+    gaps: list[dict[str, Any]] = []
+    for item in source.get("research_gaps") or []:
+        if not isinstance(item, Mapping):
+            continue
+        gaps.append({
+            "gap_id": str(item.get("gap_id") or f"gap-{len(gaps)+1}"),
+            "scope": str(item.get("scope") or "GLOBAL") if str(item.get("scope") or "GLOBAL") in {"QUERY", "GLOBAL"} else "GLOBAL",
+            "linked_question_indexes": [int(v) for v in item.get("linked_question_indexes") or [] if isinstance(v, int) and not isinstance(v, bool)],
+            "gap_types": _wf3_strings(item.get("gap_types")) or ["UNSPECIFIED"],
+            "source_count": item.get("source_count") if isinstance(item.get("source_count"), int) and not isinstance(item.get("source_count"), bool) else None,
+            "required_source_count": item.get("required_source_count") if isinstance(item.get("required_source_count"), int) and not isinstance(item.get("required_source_count"), bool) else None,
+            "authoritative_source_count": item.get("authoritative_source_count") if isinstance(item.get("authoritative_source_count"), int) and not isinstance(item.get("authoritative_source_count"), bool) else None,
+            "required_authoritative_source_count": item.get("required_authoritative_source_count") if isinstance(item.get("required_authoritative_source_count"), int) and not isinstance(item.get("required_authoritative_source_count"), bool) else None,
+            "description": str(item.get("description") or "公开研究证据存在已知缺口。"),
+        })
+    return {"status": status, "research_gaps": gaps[:32]}
 
 
 def _wf3_claim_source_ids(claim: Mapping[str, Any]) -> list[str]:
@@ -2836,6 +3134,7 @@ def _wf3_claim_source_ids(claim: Mapping[str, Any]) -> list[str]:
 def build_public_research_synthesis_model_input(canonical_envelope: dict[str, Any]) -> dict[str, Any]:
     payload = _wf3_payload(canonical_envelope)
     plan = payload.get("research_plan") if isinstance(payload.get("research_plan"), Mapping) else {}
+    real_to_alias, _ = _wf3_source_alias_maps(canonical_envelope)
     return {
         "research_plan": {
             "research_questions": _wf3_strings(plan.get("research_questions")),
@@ -2843,7 +3142,8 @@ def build_public_research_synthesis_model_input(canonical_envelope: dict[str, An
             "evidence_requirements": _wf3_strings(plan.get("evidence_requirements")),
             "prohibited_inferences": _wf3_strings(plan.get("prohibited_inferences")),
         },
-        "evidence_passages": _wf3_model_passages(payload.get("extracted_passages")),
+        "research_sufficiency": _wf3_compact_research_sufficiency(payload.get("research_sufficiency")),
+        "evidence_passages": _wf3_model_passages(payload.get("extracted_passages"), source_aliases=real_to_alias),
     }
 
 
@@ -2851,6 +3151,7 @@ def build_public_research_critic_model_input(canonical_envelope: dict[str, Any])
     payload = _wf3_payload(canonical_envelope)
     plan = payload.get("research_plan") if isinstance(payload.get("research_plan"), Mapping) else {}
     synthesis = payload.get("synthesis_candidate") if isinstance(payload.get("synthesis_candidate"), Mapping) else {}
+    real_to_alias, _ = _wf3_source_alias_maps(canonical_envelope)
     claims: list[dict[str, Any]] = []
     for claim in synthesis.get("claims") or []:
         if not isinstance(claim, Mapping):
@@ -2858,13 +3159,17 @@ def build_public_research_critic_model_input(canonical_envelope: dict[str, Any])
         claim_id = str(claim.get("claim_id") or "").strip()
         text = str(claim.get("claim_text") or "").strip()
         if claim_id and text:
-            claims.append({"claim_id": claim_id, "claim_text": text, "source_ids": _wf3_claim_source_ids(claim)})
+            claims.append({
+                "claim_id": claim_id,
+                "claim_text": text,
+                "source_ids": [real_to_alias.get(source_id, source_id) for source_id in _wf3_claim_source_ids(claim)],
+            })
     comparisons: list[dict[str, Any]] = []
     for item in synthesis.get("source_comparisons") or []:
         if not isinstance(item, Mapping):
             continue
         topic = str(item.get("topic") or "").strip()
-        source_ids = _wf3_strings(item.get("source_ids"))
+        source_ids = [real_to_alias.get(source_id, source_id) for source_id in _wf3_strings(item.get("source_ids"))]
         agreement = str(item.get("agreement") or "").strip()
         summary = str(item.get("summary") or "").strip()
         if topic and len(source_ids) >= 2 and agreement in {"AGREE", "PARTIAL", "CONFLICT"} and summary:
@@ -2877,7 +3182,8 @@ def build_public_research_critic_model_input(canonical_envelope: dict[str, Any])
     return {
         "research_questions": _wf3_strings(plan.get("research_questions")),
         "claims": claims,
-        "evidence_passages": _wf3_model_passages(payload.get("extracted_passages")),
+        "research_sufficiency": _wf3_compact_research_sufficiency(payload.get("research_sufficiency")),
+        "evidence_passages": _wf3_model_passages(payload.get("extracted_passages"), source_aliases=real_to_alias),
         "source_comparisons": comparisons,
         "declared_conflicts": _wf3_strings(synthesis.get("conflicts")),
         "declared_limitations": _wf3_strings(synthesis.get("limitations")),
@@ -2938,6 +3244,15 @@ def _wf3_semantic_reference_errors(prompt_id: str, canonical_envelope: dict[str,
             for lindex, linked in enumerate(query.get("linked_question_indexes") or []):
                 if not isinstance(linked, int) or isinstance(linked, bool) or linked < 0 or linked >= count:
                     errors.append(f"/queries/{qindex}/linked_question_indexes/{lindex}: index {linked!r} is outside research_questions")
+    elif prompt_id == "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC":
+        queries = [item for item in model_input.get("executable_queries") or [] if isinstance(item, Mapping)]
+        query_indexes = {int(item.get("query_index")) for item in queries if isinstance(item.get("query_index"), int)}
+        for index, issue in enumerate(semantic_output.get("issues") or []):
+            if not isinstance(issue, Mapping):
+                continue
+            query_index = issue.get("query_index")
+            if not isinstance(query_index, int) or isinstance(query_index, bool) or query_index not in query_indexes:
+                errors.append(f"/issues/{index}/query_index: unknown query_index {query_index!r}")
     elif prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS":
         known = {str(item.get("source_id")) for item in model_input.get("evidence_passages") or [] if isinstance(item, Mapping)}
         for cindex, claim in enumerate(semantic_output.get("claims") or []):
@@ -3054,30 +3369,38 @@ def expand_safe_online_package_critic_model_output(canonical_envelope: dict[str,
         if not isinstance(issue, Mapping):
             continue
         risk_type = str(issue.get("risk_type") or "")
-        action = str(issue.get("required_action") or "")
+        model_action = str(issue.get("required_action") or "")
         field = str(issue.get("outbound_field") or "")
-        block = action == "BLOCK"
         code = {
             "IDENTIFIABLE_PROJECT": "SAFE_PACKAGE_REIDENTIFICATION",
             "COMBINATION_REIDENTIFICATION": "SAFE_PACKAGE_REIDENTIFICATION",
             "SCOPE_EXCESS": "SAFE_PACKAGE_SCOPE_EXCESS",
             "MISSING_PROHIBITION": "SAFE_PACKAGE_MISSING_PROHIBITION",
         }.get(risk_type, "SAFE_PACKAGE_SEMANTIC_RISK")
+        runtime_action = {
+            "IDENTIFIABLE_PROJECT": "REDACT",
+            "COMBINATION_REIDENTIFICATION": "REDACT",
+            "SCOPE_EXCESS": "NARROW_SCOPE",
+            "MISSING_PROHIBITION": "ADD_PROHIBITION",
+        }.get(risk_type, "REDACT")
         redaction = str(issue.get("required_redaction") or "").strip()
         if redaction and redaction not in redactions:
             redactions.append(redaction)
+        description = str(issue.get("description") or "发现外发语义风险。")
+        if model_action == "BLOCK":
+            description += " 模型建议 BLOCK 仅作为语义观察；最终控制策略由运行时决定。"
         findings.append(_wf3_finding(
             code=code,
             category="SECURITY",
             target_type="SAFE_ONLINE_PACKAGE",
             target_path=f"/payload/package_candidate/{field}" if field else "/payload/package_candidate",
-            description=str(issue.get("description") or "发现外发语义风险。"),
-            repair_instruction=(redaction or f"按 {action or 'REDACT'} 要求修订准备外发的文本。"),
-            route="BLOCK" if block else "ORIGINAL_PRODUCER",
+            description=description,
+            repair_instruction=(redaction or f"按 {runtime_action} 策略修订准备外发的文本。"),
+            route="ORIGINAL_PRODUCER",
             blocking=True,
-            severity="P0" if block else "P1",
+            severity="P1",
             evidence_refs=[],
-            repairable=not block,
+            repairable=True,
         ))
     output["findings"] = findings
     output["result"] = {
@@ -3118,15 +3441,62 @@ def expand_public_research_plan_model_output(canonical_envelope: dict[str, Any],
     return output
 
 
+def expand_public_research_plan_scope_critic_model_output(canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:
+    output = _wf3_canonical_base(canonical_envelope, "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC")
+    model_input = build_public_research_plan_scope_critic_model_input(canonical_envelope)
+    query_count = len(model_input.get("executable_queries") or [])
+    rejected: list[int] = []
+    findings: list[dict[str, Any]] = []
+    for issue in semantic_output.get("issues") or []:
+        if not isinstance(issue, Mapping):
+            continue
+        query_index = issue.get("query_index")
+        if not isinstance(query_index, int) or isinstance(query_index, bool) or not 0 <= query_index < query_count:
+            continue
+        if query_index not in rejected:
+            rejected.append(query_index)
+        issue_type = str(issue.get("issue_type") or "OUTSIDE_APPROVED_SCOPE")
+        code = (
+            "PUBLIC_RESEARCH_QUERY_SENSITIVE_INFERENCE"
+            if issue_type == "SENSITIVE_INFERENCE_RISK"
+            else "PUBLIC_RESEARCH_QUERY_SCOPE_EXCESS"
+        )
+        findings.append(_wf3_finding(
+            code=code,
+            category="SECURITY",
+            target_type="PUBLIC_RESEARCH_QUERY",
+            target_path=f"/payload/executable_queries/{query_index}/query",
+            description=str(issue.get("description") or "最终公开检索查询超出批准研究边界。"),
+            repair_instruction="重新生成该查询，使其仅覆盖已经批准的公开研究主题且不要求受禁止的敏感推断。",
+            route="ORIGINAL_PRODUCER",
+            blocking=True,
+            severity="P1",
+            evidence_refs=[],
+            repairable=False,
+        ))
+    approved = [index for index in range(query_count) if index not in set(rejected)]
+    output["findings"] = findings
+    output["result"] = {
+        "verdict": "REVISE" if rejected else "ACCEPT",
+        "approved_query_indexes": approved,
+        "rejected_query_indexes": rejected,
+    }
+    output["status"] = "REVISE" if rejected else "PASS"
+    return output
+
+
 def expand_public_research_synthesis_model_output(canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:
     output = _wf3_canonical_base(canonical_envelope, "P-PUBLIC-RESEARCH-SYNTHESIS")
+    payload = _wf3_payload(canonical_envelope)
     refs = _wf3_known_source_refs(canonical_envelope)
+    _, alias_to_real = _wf3_source_alias_maps(canonical_envelope)
     claims: list[dict[str, Any]] = []
     for item in semantic_output.get("claims") or []:
         if not isinstance(item, Mapping):
             continue
         qualifiers = _wf3_strings([*(item.get("qualifiers") or []), "MODEL_SYNTHESIS"])
-        source_refs = [copy.deepcopy(refs[str(source_id)]) for source_id in item.get("source_ids") or [] if str(source_id) in refs]
+        real_source_ids = [alias_to_real.get(str(source_id), str(source_id)) for source_id in item.get("source_ids") or []]
+        source_refs = [copy.deepcopy(refs[source_id]) for source_id in real_source_ids if source_id in refs]
         claims.append({
             "claim_id": "runtime",
             "claim_text": str(item.get("claim_text") or ""),
@@ -3139,18 +3509,50 @@ def expand_public_research_synthesis_model_output(canonical_envelope: dict[str, 
             "knowledge_status": "DOCUMENT_EXTRACTED",
             "security_level": "PUBLIC",
         })
+    comparisons: list[dict[str, Any]] = []
+    for item in semantic_output.get("source_comparisons") or []:
+        if not isinstance(item, Mapping):
+            continue
+        normalized = copy.deepcopy(dict(item))
+        normalized["source_ids"] = [alias_to_real.get(str(source_id), str(source_id)) for source_id in item.get("source_ids") or []]
+        comparisons.append(normalized)
+
+    limitations = _wf3_strings(semantic_output.get("limitations"))
+    sufficiency = payload.get("research_sufficiency") if isinstance(payload.get("research_sufficiency"), Mapping) else {}
+    if str(sufficiency.get("status") or "") == "DEGRADED":
+        for gap in sufficiency.get("research_gaps") or []:
+            if not isinstance(gap, Mapping):
+                continue
+            description = str(gap.get("description") or "公开研究证据存在已知缺口。").strip()
+            marker = f"RESEARCH_GAP[{gap.get('gap_id') or 'unknown'}]: {description}"
+            if marker not in limitations:
+                limitations.append(marker)
+    coverage_summary = str(semantic_output.get("coverage_summary") or "").strip()
+    if str(sufficiency.get("status") or "") == "DEGRADED" and "DEGRADED" not in coverage_summary.upper():
+        coverage_summary = (coverage_summary + " Research sufficiency is DEGRADED; known evidence gaps are preserved in limitations.").strip()
     output["result"] = {
         "claims": claims,
-        "source_comparisons": copy.deepcopy(semantic_output.get("source_comparisons") or []),
+        "source_comparisons": comparisons,
         "conflicts": copy.deepcopy(semantic_output.get("conflicts") or []),
-        "limitations": copy.deepcopy(semantic_output.get("limitations") or []),
-        "coverage_summary": str(semantic_output.get("coverage_summary") or ""),
+        "limitations": limitations,
+        "coverage_summary": coverage_summary or "Public research synthesis completed with the available evidence.",
     }
     return output
 
 
 def expand_public_research_critic_model_output(canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:
     output = _wf3_canonical_base(canonical_envelope, "P-PUBLIC-RESEARCH-CRITIC")
+    payload = _wf3_payload(canonical_envelope)
+    sufficiency = payload.get("research_sufficiency") if isinstance(payload.get("research_sufficiency"), Mapping) else {}
+    acknowledged_question_indexes: set[int] = set()
+    for gap in sufficiency.get("research_gaps") or []:
+        if not isinstance(gap, Mapping):
+            continue
+        for value in gap.get("linked_question_indexes") or []:
+            if isinstance(value, int) and not isinstance(value, bool):
+                acknowledged_question_indexes.add(value)
+    _, alias_to_real = _wf3_source_alias_maps(canonical_envelope)
+
     findings: list[dict[str, Any]] = []
     unsupported: list[str] = []
     for issue in semantic_output.get("issues") or []:
@@ -3159,6 +3561,24 @@ def expand_public_research_critic_model_output(canonical_envelope: dict[str, Any
         issue_type = str(issue.get("issue_type") or "")
         claim_id = str(issue.get("claim_id") or "").strip()
         question_index = issue.get("question_index")
+        evidence_refs = [alias_to_real.get(str(source_id), str(source_id)) for source_id in issue.get("evidence_source_ids") or []]
+
+        if issue_type == "UNANSWERED_RESEARCH_QUESTION" and isinstance(question_index, int) and question_index in acknowledged_question_indexes:
+            findings.append(_wf3_finding(
+                code="PUBLIC_CRITIC_ACKNOWLEDGED_RESEARCH_GAP",
+                category="EVIDENCE",
+                target_type="PUBLIC_RESEARCH_SYNTHESIS",
+                target_path=f"/payload/research_plan/research_questions/{question_index}",
+                description=str(issue.get("description") or "该研究问题对应确定性 ResearchGap，综合结果已按证据不足处理。"),
+                repair_instruction=None,
+                route="ORIGINAL_PRODUCER",
+                blocking=False,
+                severity="P2",
+                evidence_refs=evidence_refs,
+                repairable=False,
+            ))
+            continue
+
         if issue_type in {"UNSUPPORTED_CLAIM", "OVERGENERALIZED_CLAIM"} and claim_id and claim_id not in unsupported:
             unsupported.append(claim_id)
         if issue_type in {"UNSUPPORTED_CLAIM", "OVERGENERALIZED_CLAIM"}:
@@ -3180,17 +3600,18 @@ def expand_public_research_critic_model_output(canonical_envelope: dict[str, Any
             route="ORIGINAL_PRODUCER",
             blocking=True,
             severity="P1",
-            evidence_refs=_wf3_strings(issue.get("evidence_source_ids")),
+            evidence_refs=evidence_refs,
             repairable=True,
         ))
+    blocking_findings = [item for item in findings if bool(item.get("blocking"))]
     output["findings"] = findings
     output["result"] = {
-        "verdict": "REVISE" if findings else "ACCEPT_FOR_IMPORT_REVIEW",
+        "verdict": "REVISE" if blocking_findings else "ACCEPT_FOR_IMPORT_REVIEW",
         "source_quality_summary": [],
         "unsupported_claim_ids": unsupported,
         "missing_counterevidence_topics": copy.deepcopy(semantic_output.get("missing_counterevidence_topics") or []),
     }
-    output["status"] = "REVISE" if findings else "PASS"
+    output["status"] = "REVISE" if blocking_findings else "PASS"
     return output
 
 
@@ -3250,6 +3671,13 @@ def expand_online_result_import_critic_model_output(canonical_envelope: dict[str
         for item in semantic_output.get("claim_decisions") or []
         if isinstance(item, Mapping)
     }
+    payload = _wf3_payload(canonical_envelope)
+    result_package = payload.get("result_package") if isinstance(payload.get("result_package"), Mapping) else {}
+    claim_source_bindings = {
+        str(claim.get("claim_id")): _wf3_claim_source_ids(claim)
+        for claim in result_package.get("claims") or []
+        if isinstance(claim, Mapping) and claim.get("claim_id")
+    }
     findings: list[dict[str, Any]] = []
     forced_reject: set[str] = set()
     hard_blocked = False
@@ -3295,11 +3723,20 @@ def expand_online_result_import_critic_model_output(canonical_envelope: dict[str
                 route, repairable = "ORIGINAL_PRODUCER", True
                 repair_instruction = "修订公开研究综合以恢复批准范围边界后重新审查。"
         elif issue_type == "UNSOURCED_CLAIM":
-            if claim_id:
+            if claim_id and not claim_source_bindings.get(claim_id):
+                # Source-reference existence is deterministic.  Only an actual
+                # missing binding may force rejection here; semantic support
+                # adequacy has already been reviewed by Research Critic.
                 forced_reject.add(claim_id)
-            code, blocking, severity = "IMPORT_UNSOURCED_CLAIM", False, "P2"
-            route, repairable = "ORIGINAL_PRODUCER", False
-            repair_instruction = "不导入该无充分来源支持的 claim。"
+                code, blocking, severity = "IMPORT_UNSOURCED_CLAIM", False, "P2"
+                route, repairable = "ORIGINAL_PRODUCER", False
+                repair_instruction = "不导入缺少确定性公开来源绑定的 claim。"
+            else:
+                code, blocking, severity = "IMPORT_UNSOURCED_CLAIM_SUSPECTED", False, "P2"
+                route, repairable = "ORIGINAL_PRODUCER", False
+                repair_instruction = (
+                    "保留为语义观察；运行时已确认来源绑定存在，不重复覆盖 Research Critic 的证据支持裁决。"
+                )
         else:
             code, blocking, severity = "IMPORT_SEMANTIC_REVIEW", False, "P2"
             route, repairable = "ORIGINAL_PRODUCER", False
@@ -3370,6 +3807,7 @@ def build_semantic_model_input(prompt_id: str, canonical_envelope: dict[str, Any
     if prompt_id=="P-SAFE-ONLINE-PACKAGE": return build_safe_online_package_model_input(canonical_envelope)
     if prompt_id=="P-SAFE-ONLINE-PACKAGE-CRITIC": return build_safe_online_package_critic_model_input(canonical_envelope)
     if prompt_id=="P-PUBLIC-RESEARCH-PLAN": return build_public_research_plan_model_input(canonical_envelope)
+    if prompt_id=="P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC": return build_public_research_plan_scope_critic_model_input(canonical_envelope)
     if prompt_id=="P-PUBLIC-RESEARCH-SYNTHESIS": return build_public_research_synthesis_model_input(canonical_envelope)
     if prompt_id=="P-PUBLIC-RESEARCH-CRITIC": return build_public_research_critic_model_input(canonical_envelope)
     if prompt_id=="P-ONLINE-RESULT-IMPORT-CRITIC": return build_online_result_import_critic_model_input(canonical_envelope)
@@ -3705,8 +4143,7 @@ def semantic_model_reference_errors(
                 f"/user_questions/{i}/allowed_values: CHOICE requires at least one allowed value"
             )
 
-    dimension_issue_codes = _critic_dimension_issue_codes()
-    required_dimensions = set(dimension_issue_codes)
+    required_dimensions = set(_critic_dimension_issue_codes())
     dimensions = [
         str(x.get("dimension"))
         for x in semantic_output.get("quality_dimensions") or []
@@ -3719,35 +4156,13 @@ def semantic_model_reference_errors(
             "/quality_dimensions: must contain each of the seven argument quality dimensions exactly once"
         )
 
+    # Model scores/evidence are advisory semantic observations.  Runtime derives
+    # pass/fail and required_action from concrete semantic issues plus
+    # deterministic receipts; a model cannot create or erase a workflow failure
+    # by toggling quality_dimensions[].passed.
     issues = [
         x for x in semantic_output.get("issues") or [] if isinstance(x, dict)
     ]
-    failed_names: set[str] = set()
-    for i, dimension in enumerate(
-        semantic_output.get("quality_dimensions") or []
-    ):
-        if not isinstance(dimension, dict) or bool(dimension.get("passed")):
-            continue
-        name = str(dimension.get("dimension") or "")
-        failed_names.add(name)
-        expected_codes = dimension_issue_codes.get(name, set())
-        dimension_issues = [
-            issue
-            for issue in issues
-            if str(issue.get("dimension") or "") == name
-            and str(issue.get("code") or "") in expected_codes
-        ]
-        if not dimension_issues:
-            errors.append(
-                f"/quality_dimensions/{i}: failed dimension {name!r} "
-                "requires at least one issue explicitly tagged with that "
-                "dimension and a corresponding issue code"
-            )
-        if not str(dimension.get("required_action") or "").strip():
-            errors.append(
-                f"/quality_dimensions/{i}/required_action: "
-                "failed dimension requires a concrete action"
-            )
 
     candidate = (canonical_envelope.get("payload") or {}).get(
         "architecture_candidate"
@@ -3777,20 +4192,6 @@ def semantic_model_reference_errors(
 
     for issue_index, issue in enumerate(issues):
         code = str(issue.get("code") or "")
-        issue_dimension = str(issue.get("dimension") or "")
-        if issue_dimension not in failed_names:
-            errors.append(
-                f"/issues/{issue_index}/dimension: issue dimension "
-                f"{issue_dimension!r} must correspond to a failed quality dimension"
-            )
-        elif code not in dimension_issue_codes.get(
-            issue_dimension, set()
-        ):
-            errors.append(
-                f"/issues/{issue_index}/code: issue code {code!r} is not "
-                f"allowed for dimension {issue_dimension!r}"
-            )
-
         target = issue.get("target") or {}
         component = str(target.get("component") or "")
         raw_thread_index = target.get("thread_index")
@@ -3874,15 +4275,15 @@ def semantic_model_reference_errors(
     user_issues = [
         issue
         for issue in issues
-        if str(issue.get("resolution") or "") == "USER_INPUT"
+        if _critic_issue_needs_user_input(issue)
     ]
     if user_issues and not blocking_questions:
         errors.append(
-            "/issues: USER_INPUT resolution requires at least one concrete blocking user_question"
+            "/issues: needs_user_input requires at least one concrete blocking user_question"
         )
     if blocking_questions and not user_issues:
         errors.append(
-            "/user_questions: a blocking user question must correspond to a USER_INPUT issue"
+            "/user_questions: a blocking user question must correspond to a needs_user_input issue"
         )
     return errors
 
@@ -6383,51 +6784,92 @@ def _argument_deterministic_receipts_for_candidate(
 
 
 def _canonical_quality_dimensions(
-    model_dimensions: Iterable[Any], deterministic_receipts: Iterable[dict[str, Any]]
+    model_dimensions: Iterable[Any],
+    deterministic_receipts: Iterable[dict[str, Any]],
+    semantic_issues: Iterable[dict[str, Any]] = (),
 ) -> list[dict[str, Any]]:
+    """Canonicalize Critic quality dimensions from observations and Runtime facts.
+
+    Model scores/evidence remain advisory.  Pass/fail and required action are
+    Runtime-owned and are derived from concrete semantic issues plus deterministic
+    receipts.
+    """
     result = [copy.deepcopy(item) for item in model_dimensions if isinstance(item, dict)]
     by_name = {str(item.get("dimension") or ""): item for item in result}
-    failures: dict[str, list[dict[str, Any]]] = {}
+
+    semantic_failures: dict[str, list[dict[str, Any]]] = {}
+    for issue in semantic_issues:
+        if not isinstance(issue, Mapping):
+            continue
+        target = issue.get("target") if isinstance(issue.get("target"), Mapping) else {}
+        dimension = _critic_dimension_for_issue(
+            str(issue.get("code") or ""),
+            str(target.get("component") or ""),
+        )
+        semantic_failures.setdefault(dimension, []).append(dict(issue))
+
+    deterministic_failures: dict[str, list[dict[str, Any]]] = {}
     for receipt in deterministic_receipts:
         if not isinstance(receipt, dict) or not bool(receipt.get("blocking")):
             continue
         dimension = str(receipt.get("quality_dimension") or "")
         if dimension:
-            failures.setdefault(dimension, []).append(receipt)
-    failure_score = _critic_deterministic_failure_score()
-    for dimension, receipts in failures.items():
-        item = by_name.get(dimension)
-        if item is None:
-            continue
-        model_failed = item.get("passed") is False
+            deterministic_failures.setdefault(dimension, []).append(receipt)
+
+    deterministic_failure_score = _critic_deterministic_failure_score()
+    semantic_failure_max_score = _critic_semantic_failure_max_score()
+
+    for dimension, item in by_name.items():
+        semantic = semantic_failures.get(dimension, [])
+        deterministic = deterministic_failures.get(dimension, [])
+        failed = bool(semantic or deterministic)
+        item["passed"] = not failed
+
         model_evidence = [
             str(value)
             for value in item.get("evidence") or []
             if str(value).strip()
         ]
-        model_action = str(item.get("required_action") or "").strip()
-        item["passed"] = False
-        item["score"] = failure_score
-        deterministic_messages = list(
-            dict.fromkeys(
-                str(r.get("description") or "")
-                for r in receipts
-                if str(r.get("description") or "").strip()
-            )
-        )
-        evidence = (model_evidence if model_failed else []) + deterministic_messages
-        item["evidence"] = list(dict.fromkeys(evidence))[:8] or [
-            "Runtime deterministic contract failure."
+        if deterministic:
+            item["score"] = deterministic_failure_score
+        elif semantic:
+            try:
+                item["score"] = min(float(item.get("score")), semantic_failure_max_score)
+            except (TypeError, ValueError):
+                item["score"] = semantic_failure_max_score
+
+        if not failed:
+            item["evidence"] = model_evidence[:8]
+            item["required_action"] = None
+            continue
+
+        semantic_messages = [
+            str(issue.get("description") or "")
+            for issue in semantic
+            if str(issue.get("description") or "").strip()
         ]
-        deterministic_actions = list(
-            dict.fromkeys(
-                str(r.get("repair_instruction") or "")
-                for r in receipts
-                if str(r.get("repair_instruction") or "").strip()
-            )
-        )
-        actions = ([model_action] if model_failed and model_action else []) + deterministic_actions
-        item["required_action"] = "；".join(list(dict.fromkeys(actions))[:4]) or "修复确定性契约失败。"
+        deterministic_messages = [
+            str(receipt.get("description") or "")
+            for receipt in deterministic
+            if str(receipt.get("description") or "").strip()
+        ]
+        item["evidence"] = list(
+            dict.fromkeys([*model_evidence, *semantic_messages, *deterministic_messages])
+        )[:8] or ["Runtime canonical quality policy detected an unresolved issue."]
+
+        semantic_actions = [
+            str(issue.get("repair_instruction") or "")
+            for issue in semantic
+            if str(issue.get("repair_instruction") or "").strip()
+        ]
+        deterministic_actions = [
+            str(receipt.get("repair_instruction") or "")
+            for receipt in deterministic
+            if str(receipt.get("repair_instruction") or "").strip()
+        ]
+        actions = list(dict.fromkeys([*semantic_actions, *deterministic_actions]))
+        item["required_action"] = "；".join(actions[:4]) or "修复该论证质量问题。"
+
     return result
 
 
@@ -6462,23 +6904,21 @@ def expand_argument_architecture_critic_model_output(
     for i, issue in enumerate(semantic_output.get("issues") or [], 1):
         if not isinstance(issue, dict):
             continue
-        resolution = str(issue.get("resolution") or "LOCAL_EDIT")
-        if resolution == "USER_INPUT":
+        policy = _critic_semantic_issue_policy(str(issue.get("code") or ""))
+        needs_user_input = _critic_issue_needs_user_input(issue)
+        requires_structure_change = _critic_issue_requires_structure_change(issue)
+        if needs_user_input:
             route, repairable = "USER", False
-        elif resolution == "REGENERATE":
+        elif requires_structure_change:
             route, repairable = "ORIGINAL_PRODUCER", False
-        elif resolution == "BLOCK":
-            route, repairable = "BLOCK", False
         else:
-            route, repairable = "ARGUMENT_ARCHITECTURE_AGENT", True
+            route = str(policy["route"])
+            repairable = bool(policy["repairable"])
 
         evidence_ids = [
             str(x) for x in issue.get("evidence_ids") or [] if str(x).strip()
         ]
-        blocking = (
-            resolution in {"USER_INPUT", "REGENERATE", "BLOCK"}
-            or str(issue.get("severity") or "") in {"P0", "P1"}
-        )
+        blocking = bool(policy["blocking"]) or needs_user_input or requires_structure_change
         target = issue.get("target") or {}
         target_path = _critic_target_path(candidate, target)
         semantic_thread = _critic_target_canonical_thread(candidate, target)
@@ -6493,7 +6933,7 @@ def expand_argument_architecture_critic_model_output(
                 # from natural-language description or issue ordering.
                 "defect_key": None,
                 "code": str(issue["code"]),
-                "severity": str(issue["severity"]),
+                "severity": str(policy["severity"]),
                 "category": "ARGUMENT",
                 "target_type": "ARGUMENT_SEMANTIC_COMPONENT",
                 "target_path_or_span": target_path,
@@ -6564,7 +7004,9 @@ def expand_argument_architecture_critic_model_output(
             "evidence_checks": evidence_checks,
             "deterministic_receipts": deterministic_receipts,
             "quality_dimensions": _canonical_quality_dimensions(
-                semantic_output.get("quality_dimensions") or [], deterministic_receipts
+                semantic_output.get("quality_dimensions") or [],
+                deterministic_receipts,
+                semantic_output.get("issues") or [],
             ),
         },
         "findings": findings,
@@ -6597,6 +7039,7 @@ def expand_semantic_model_output(prompt_id: str, canonical_envelope: dict[str, A
     if prompt_id=="P-SAFE-ONLINE-PACKAGE": return expand_safe_online_package_model_output(canonical_envelope,semantic_output)
     if prompt_id=="P-SAFE-ONLINE-PACKAGE-CRITIC": return expand_safe_online_package_critic_model_output(canonical_envelope,semantic_output)
     if prompt_id=="P-PUBLIC-RESEARCH-PLAN": return expand_public_research_plan_model_output(canonical_envelope,semantic_output)
+    if prompt_id=="P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC": return expand_public_research_plan_scope_critic_model_output(canonical_envelope,semantic_output)
     if prompt_id=="P-PUBLIC-RESEARCH-SYNTHESIS": return expand_public_research_synthesis_model_output(canonical_envelope,semantic_output)
     if prompt_id=="P-PUBLIC-RESEARCH-CRITIC": return expand_public_research_critic_model_output(canonical_envelope,semantic_output)
     if prompt_id=="P-ONLINE-RESULT-IMPORT-CRITIC": return expand_online_result_import_critic_model_output(canonical_envelope,semantic_output)

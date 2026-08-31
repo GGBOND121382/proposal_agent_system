@@ -33,6 +33,72 @@ def concept_tokens(value: Any) -> set[str]:
     return {token for token in values if token not in _GENERIC_TERMS}
 
 
+
+
+def assess_source_priorities(
+    candidate: dict[str, Any],
+    priorities: list[str] | tuple[str, ...] | None,
+) -> dict[str, Any]:
+    """Return deterministic alignment with the Plan's source priorities.
+
+    ``source_priorities`` are model-authored search strategy preferences, not a
+    security boundary.  Runtime therefore uses them only for ranking/reporting,
+    never to fabricate publication status or to hard-reject otherwise relevant
+    evidence.  Recognised generic categories are matched from trusted metadata;
+    venue-like priorities use conservative substring matching.
+    """
+
+    values = [str(item).strip() for item in priorities or [] if str(item).strip()]
+    if not values:
+        return {
+            "matched_priorities": [],
+            "match_count": 0,
+            "score_bonus": 0.0,
+        }
+
+    source_type = str(candidate.get("source_type") or "").upper()
+    publication_status = str(candidate.get("publication_status") or "").upper()
+    publication_kind = str(candidate.get("publication_kind") or "").lower()
+    title = str(candidate.get("title") or "").lower()
+    venue = str(candidate.get("venue") or "").lower()
+    publisher = str(candidate.get("publisher") or "").lower()
+    url = str(candidate.get("url") or "").lower()
+    haystack = " ".join((title, venue, publisher, publication_kind, url))
+
+    peer_reviewed = source_type in {"PEER_REVIEWED_PAPER", "CONFERENCE_PAPER"}
+    official = source_type in {"OFFICIAL_STANDARD", "GOVERNMENT", "STANDARD", "OFFICIAL_SOURCE"}
+    preprint = publication_status == "PREPRINT" or source_type == "ACADEMIC_PREPRINT"
+    review = any(term in title for term in ("systematic review", "literature review", "survey", "review"))
+
+    matched: list[str] = []
+    for original in values:
+        priority = original.lower().strip()
+        is_match = False
+        if any(token in priority for token in ("peer reviewed", "peer-reviewed", "同行评议", "正式发表")):
+            is_match = peer_reviewed
+        elif any(token in priority for token in ("official", "government", "standard", "官方", "政府", "标准")):
+            is_match = official
+        elif any(token in priority for token in ("review", "survey", "综述", "系统评价")):
+            is_match = review
+        elif any(token in priority for token in ("preprint", "arxiv", "预印本")):
+            is_match = preprint or "arxiv" in haystack
+        else:
+            # Treat a specific venue/publisher priority as a preference only
+            # when enough literal signal survives normalisation.
+            compact = re.sub(r"[^a-z0-9]+", " ", priority).strip()
+            if len(compact) >= 4:
+                normalized_haystack = re.sub(r"[^a-z0-9]+", " ", haystack)
+                is_match = compact in normalized_haystack
+        if is_match and original not in matched:
+            matched.append(original)
+
+    return {
+        "matched_priorities": matched,
+        "match_count": len(matched),
+        "score_bonus": float(min(12, len(matched) * 4)),
+    }
+
+
 def build_query_relevance_profiles(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Build deterministic semantic anchors from the plan's query/question bindings.
 
@@ -157,35 +223,64 @@ def build_retrieval_health(
     retrieval_provider: str,
     queries: list[str],
 ) -> dict[str, Any]:
-    """Summarize whether the configured discovery channels actually executed.
+    """Summarize execution health independently from evidence sufficiency.
 
-    The object is deliberately separate from source coverage: many sources from one
-    surviving provider must not hide a broken hybrid channel.
+    Enabled providers are taken from the discovery manifest. Disabled providers are
+    never counted as failures. A partially degraded provider set is non-blocking as
+    long as every approved query was executed successfully by at least one enabled
+    provider.
     """
 
     provider = str(retrieval_provider or "").lower()
     if not discovery_manifest or provider not in {"academic", "hybrid"}:
         return {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "status": "UNOBSERVED",
             "retrieval_provider": provider or "unknown",
-            "required_providers": [],
+            "enabled_providers": [],
+            "disabled_providers": [],
             "providers": {},
             "reason_codes": [],
+            "blocking_reason_codes": [],
+            "missing_execution_queries": [],
         }
 
-    academic = ("openalex", "crossref", "semantic_scholar")
-    required = list(academic) + (["searxng"] if provider == "hybrid" else [])
+    known_academic = ("openalex", "crossref", "semantic_scholar")
+    declared = [
+        str(item or "").strip().lower()
+        for item in discovery_manifest.get("providers") or []
+        if str(item or "").strip()
+    ]
+    # Older manifests may omit providers. Infer only from actual provider runs/failures;
+    # if that also yields nothing, fall back to the current default academic pair.
+    if not declared:
+        for row in [*(discovery_manifest.get("provider_runs") or []), *(discovery_manifest.get("failures") or [])]:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("provider") or "").strip().lower()
+            if name and name not in declared:
+                declared.append(name)
+    if not declared:
+        declared = ["openalex", "crossref"]
+        if provider == "hybrid":
+            declared.append("searxng")
+
+    enabled = [name for name in declared if name in {*known_academic, "searxng"}]
+    if provider == "hybrid" and "searxng" not in enabled:
+        enabled.append("searxng")
+    disabled = [name for name in known_academic if name not in enabled]
+
     query_set = {str(query) for query in queries if str(query).strip()}
     stats = {
         name: {
+            "enabled": True,
             "attempted_queries": len(query_set),
             "successful_queries": 0,
             "failed_queries": 0,
             "result_count": 0,
             "success_rate": 0.0,
         }
-        for name in required
+        for name in enabled
     }
 
     successful_pairs: set[tuple[str, str]] = set()
@@ -248,38 +343,168 @@ def build_retrieval_health(
         item["attempted_queries"] = attempted
         item["success_rate"] = round(len(successes) / attempted, 4) if attempted else 0.0
 
-    academic_successful = sum(1 for name in academic if stats.get(name, {}).get("successful_queries", 0) > 0)
-    every_query_has_academic = all(
-        any((name, query) in successful_pairs for name in academic)
+    successful_provider_count = sum(1 for item in stats.values() if item["successful_queries"] > 0)
+    missing_execution_queries = sorted(
+        query
         for query in query_set
-    ) if query_set else False
-    web_ok = provider != "hybrid" or stats.get("searxng", {}).get("successful_queries", 0) > 0
+        if not any((name, query) in successful_pairs and name not in global_failed_providers for name in enabled)
+    )
 
     reason_codes: list[str] = []
     blocking_reason_codes: list[str] = []
-    if academic_successful < 2:
-        blocking_reason_codes.append("ACADEMIC_PROVIDER_DIVERSITY_DEGRADED")
-    if not every_query_has_academic:
-        blocking_reason_codes.append("ACADEMIC_QUERY_EXECUTION_INCOMPLETE")
-    if provider == "hybrid" and not web_ok:
-        blocking_reason_codes.append("HYBRID_WEB_CHANNEL_UNAVAILABLE")
-    reason_codes.extend(blocking_reason_codes)
+    if not enabled or successful_provider_count == 0:
+        blocking_reason_codes.append("NO_ENABLED_PROVIDER_SUCCEEDED")
+    if missing_execution_queries:
+        blocking_reason_codes.append("APPROVED_QUERY_EXECUTION_MISSING")
     for name, item in stats.items():
         if item["successful_queries"] == 0:
             reason_codes.append(f"PROVIDER_UNAVAILABLE:{name}")
         elif item["success_rate"] < 0.5:
             reason_codes.append(f"PROVIDER_LOW_SUCCESS_RATE:{name}")
+    academic_enabled = [name for name in enabled if name in known_academic]
+    academic_successful = sum(1 for name in academic_enabled if stats.get(name, {}).get("successful_queries", 0) > 0)
+    if len(academic_enabled) >= 2 and academic_successful < 2:
+        reason_codes.append("ACADEMIC_PROVIDER_DIVERSITY_DEGRADED")
+    if provider == "hybrid" and stats.get("searxng", {}).get("successful_queries", 0) == 0:
+        reason_codes.append("HYBRID_WEB_CHANNEL_UNAVAILABLE")
+    reason_codes = list(dict.fromkeys([*blocking_reason_codes, *reason_codes]))
 
-    status = "PASS" if not blocking_reason_codes else "DEGRADED"
+    if blocking_reason_codes:
+        status = "BLOCKING_FAILURE"
+    elif reason_codes:
+        status = "DEGRADED"
+    else:
+        status = "PASS"
+    return {
+        "schema_version": "2.0",
+        "status": status,
+        "retrieval_provider": provider,
+        "enabled_providers": enabled,
+        "disabled_providers": disabled,
+        "providers": stats,
+        "successful_provider_count": successful_provider_count,
+        "academic_successful_provider_count": academic_successful,
+        "every_query_has_execution": not missing_execution_queries,
+        "missing_execution_queries": missing_execution_queries,
+        "reason_codes": reason_codes,
+        "blocking_reason_codes": blocking_reason_codes,
+    }
+
+
+def build_research_sufficiency(
+    coverage: dict[str, Any] | None,
+    normalized_plan: dict[str, Any] | None,
+    retrieval_health: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the deterministic ResearchSufficiency/ResearchGap object.
+
+    Evidence quality can be insufficient without being a provider failure. The
+    workflow may continue with explicit gaps when some usable public evidence exists;
+    only execution/integrity-equivalent failures or zero usable evidence are blocking.
+    """
+
+    coverage = coverage if isinstance(coverage, dict) else {}
+    plan = normalized_plan if isinstance(normalized_plan, dict) else {}
+    health = retrieval_health if isinstance(retrieval_health, dict) else {"status": "UNOBSERVED"}
+    by_query = coverage.get("by_query") if isinstance(coverage.get("by_query"), dict) else {}
+    dimensions = coverage.get("dimensions") if isinstance(coverage.get("dimensions"), dict) else {}
+
+    query_meta: dict[str, dict[str, Any]] = {}
+    for item in plan.get("query_items") or []:
+        if not isinstance(item, dict):
+            continue
+        query = str(item.get("query") or "").strip()
+        if not query:
+            continue
+        query_meta[query] = {
+            "query_id": str(item.get("query_id") or "") or None,
+            "linked_question_indexes": [
+                int(v) for v in item.get("linked_question_indexes") or []
+                if isinstance(v, int) and not isinstance(v, bool)
+            ],
+        }
+
+    query_min = int((dimensions.get("query_depth") or {}).get("minimum_sources_per_query") or 1)
+    authority_min = int((dimensions.get("query_authoritative_depth") or {}).get("minimum_authoritative_sources_per_query") or 1)
+    gaps: list[dict[str, Any]] = []
+    total_bound_sources: set[str] = set()
+    for index, query in enumerate(plan.get("queries") or []):
+        query = str(query or "").strip()
+        if not query:
+            continue
+        item = by_query.get(query) if isinstance(by_query.get(query), dict) else {}
+        source_ids = [str(v) for v in item.get("source_ids") or [] if str(v)]
+        authoritative_ids = [str(v) for v in item.get("authoritative_source_ids") or [] if str(v)]
+        total_bound_sources.update(source_ids)
+        gap_types: list[str] = []
+        if int(item.get("source_count") or 0) < query_min:
+            gap_types.append("DEPTH")
+        if int(item.get("authoritative_source_count") or 0) < authority_min:
+            gap_types.append("AUTHORITY")
+        if not gap_types:
+            continue
+        meta = query_meta.get(query) or {}
+        gaps.append({
+            "gap_id": f"research-gap-{index + 1:03d}",
+            "scope": "QUERY",
+            "query_id": meta.get("query_id"),
+            "query": query,
+            "linked_question_indexes": list(meta.get("linked_question_indexes") or []),
+            "gap_types": gap_types,
+            "source_count": int(item.get("source_count") or 0),
+            "required_source_count": query_min,
+            "authoritative_source_count": int(item.get("authoritative_source_count") or 0),
+            "required_authoritative_source_count": authority_min,
+            "source_ids": source_ids,
+            "authoritative_source_ids": authoritative_ids,
+            "description": (
+                f"Approved query has {int(item.get('source_count') or 0)}/{query_min} qualifying sources "
+                f"and {int(item.get('authoritative_source_count') or 0)}/{authority_min} authoritative sources."
+            ),
+        })
+
+    # Preserve non-query quality deficiencies as explicit global limitations. They do
+    # not independently block a run that still has usable evidence.
+    for name, value in dimensions.items():
+        if name in {"query_depth", "query_authoritative_depth", "retrieval_health"}:
+            continue
+        if not isinstance(value, dict) or value.get("status") == "PASS":
+            continue
+        gaps.append({
+            "gap_id": f"research-gap-global-{len(gaps) + 1:03d}",
+            "scope": "GLOBAL",
+            "query_id": None,
+            "query": None,
+            "linked_question_indexes": [],
+            "gap_types": [str(name).upper()],
+            "source_count": None,
+            "required_source_count": None,
+            "authoritative_source_count": None,
+            "required_authoritative_source_count": None,
+            "source_ids": [],
+            "authoritative_source_ids": [],
+            "description": f"Research quality dimension {name} is insufficient.",
+        })
+
+    blocking_reasons = list(health.get("blocking_reason_codes") or [])
+    if health.get("status") == "BLOCKING_FAILURE" and not blocking_reasons:
+        blocking_reasons.append("RETRIEVAL_HEALTH_BLOCKING_FAILURE")
+    if not total_bound_sources and by_query:
+        blocking_reasons.append("NO_QUALIFYING_PUBLIC_EVIDENCE")
+
+    if blocking_reasons:
+        status = "BLOCKING_FAILURE"
+    elif coverage.get("status") == "PASS":
+        status = "SUFFICIENT"
+    else:
+        status = "DEGRADED"
+
     return {
         "schema_version": "1.0",
         "status": status,
-        "retrieval_provider": provider,
-        "required_providers": required,
-        "providers": stats,
-        "academic_successful_provider_count": academic_successful,
-        "every_query_has_academic_execution": every_query_has_academic,
-        "hybrid_web_channel_available": web_ok if provider == "hybrid" else None,
-        "reason_codes": reason_codes,
-        "blocking_reason_codes": blocking_reason_codes,
+        "coverage_status": str(coverage.get("status") or "UNKNOWN"),
+        "research_gaps": gaps,
+        "blocking_reasons": list(dict.fromkeys(str(v) for v in blocking_reasons if str(v))),
+        "retrieval_health_status": str(health.get("status") or "UNOBSERVED"),
+        "may_continue": status in {"SUFFICIENT", "DEGRADED"},
     }

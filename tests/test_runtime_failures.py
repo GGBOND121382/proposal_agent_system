@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.executor import PromptExecutionError
 from app.llm import ProviderError
+from app.wf3_contracts import WF3PreModelGuardError
 from app.runtime_failures import (
     FailureCategory,
     ProviderFailureKind,
@@ -103,3 +104,35 @@ def test_validation_error_remains_output_contract_failure():
     assert result.category is FailureCategory.OUTPUT_CONTRACT
     assert result.retryable is False
     assert result.details == {"validation_errors": ["/result/id: required"]}
+
+
+def test_wf3_pre_model_contract_guard_is_blocked_contract() -> None:
+    inner = WF3PreModelGuardError(
+        "WF3_APPROVED_BOUNDARY_MISSING",
+        "approved topic boundary missing",
+        guard_kind="CONTRACT",
+    )
+    try:
+        raise PromptExecutionError("prompt failed") from inner
+    except PromptExecutionError as exc:
+        result = classify_runtime_failure(exc)
+    assert result.category is FailureCategory.OUTPUT_CONTRACT
+    assert result.workflow_status == "BLOCKED_CONTRACT"
+    assert result.retryable is False
+
+
+def test_wf3_pre_model_content_guard_is_blocked_content_without_semantic_budget() -> None:
+    inner = WF3PreModelGuardError(
+        "WF3_DETERMINISTIC_SCAN_FAILED",
+        "deterministic scan matched a sensitive value",
+        guard_kind="CONTENT",
+        details={"matched_rules": ["PROJECT_NAME:/result/task_description"]},
+    )
+    try:
+        raise PromptExecutionError("prompt failed") from inner
+    except PromptExecutionError as exc:
+        result = classify_runtime_failure(exc)
+    assert result.category is FailureCategory.SEMANTIC_REVISE
+    assert result.workflow_status == "BLOCKED_CONTENT"
+    assert result.retryable is False
+    assert result.consumes_semantic_repair_budget is False

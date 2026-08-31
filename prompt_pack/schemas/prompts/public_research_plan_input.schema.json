@@ -243,6 +243,12 @@
           "items": {
             "$ref": "../common/human_resolution.schema.json"
           }
+        },
+        "revision_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/finding.schema.json"
+          }
         }
       },
       "additionalProperties": false,

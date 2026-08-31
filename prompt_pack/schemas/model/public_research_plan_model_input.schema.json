@@ -103,6 +103,27 @@
         "minLength": 1
       },
       "uniqueItems": true
+    },
+    "scope_revision_notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repair_instruction": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "description",
+          "repair_instruction"
+        ]
+      }
     }
   },
   "required": [

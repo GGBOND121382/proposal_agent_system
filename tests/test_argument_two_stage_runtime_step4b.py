@@ -31,6 +31,7 @@ from app.argument_two_stage_orchestration import (
     merge_argument_stage_repair_candidate,
 )
 from app.model_semantic_contracts import (
+    _argument_design_frozen_skeleton,
     assemble_argument_authored_state,
     expand_argument_architecture_model_output,
 )
@@ -201,7 +202,7 @@ def test_step4b_runtime_argument_uses_only_two_internal_stage_calls(tmp_path, mo
     ] == [ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE]
     assert gateway.calls[0]["envelope"].get("skeleton_seed") is not None
     assert "frozen_skeleton" not in gateway.calls[0]["envelope"]
-    assert gateway.calls[1]["envelope"]["frozen_skeleton"] == skeleton
+    assert gateway.calls[1]["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
     assert all(call["direct_tool_arguments"] is True for call in gateway.calls)
     assert gateway.calls[0]["call_key"] != gateway.calls[1]["call_key"]
 
@@ -321,9 +322,9 @@ def test_step4b_runtime_design_retry_never_regenerates_skeleton(tmp_path, monkey
     assert len(gateway.calls) == 3
     first, design1, design_retry = gateway.calls
     assert first["envelope"].get("skeleton_seed") is not None
-    assert design1["envelope"]["frozen_skeleton"] == skeleton
+    assert design1["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
     assert design_retry["prompt_id"] == "P-ARGUMENT-ARCHITECTURE"
-    assert design_retry["envelope"]["frozen_skeleton"] == skeleton
+    assert design_retry["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
     retry_context = design_retry["envelope"]["retry_context"]
     assert retry_context["recovery_mode"] == "FULL_STAGE_RETRY"
     assert any(
@@ -376,7 +377,7 @@ def test_step4b_runtime_allows_a_third_internal_stage_attempt(tmp_path, monkeypa
     for retry in gateway.calls[1:3]:
         assert retry["envelope"]["retry_context"]["recovery_mode"] == "FULL_STAGE_RETRY"
         assert "previous_candidate" not in retry["envelope"]["retry_context"]
-    assert gateway.calls[3]["envelope"]["frozen_skeleton"] == skeleton
+    assert gateway.calls[3]["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
 
 
 def test_empty_skeleton_response_retries_the_full_stage_without_a_fake_draft(
@@ -408,7 +409,7 @@ def test_empty_skeleton_response_retries_the_full_stage_without_a_fake_draft(
     assert len(retry["envelope"]["retry_context"]["validation_errors"]) == 1
     assert len(json.dumps(retry["envelope"]["retry_context"])) < 300
     assert "FULL_STAGE_RETRY" in retry["system_prompt"]
-    assert gateway.calls[2]["envelope"]["frozen_skeleton"] == skeleton
+    assert gateway.calls[2]["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
 
 
 def test_empty_design_response_retries_only_design_with_skeleton_frozen(
@@ -433,8 +434,8 @@ def test_empty_design_response_retries_only_design_with_skeleton_frozen(
         call["route"].profile["argument_two_stage_internal_stage"]
         for call in gateway.calls
     ] == [ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE, ARGUMENT_DESIGN_STAGE]
-    assert gateway.calls[1]["envelope"]["frozen_skeleton"] == skeleton
-    assert gateway.calls[2]["envelope"]["frozen_skeleton"] == skeleton
+    assert gateway.calls[1]["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
+    assert gateway.calls[2]["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
     assert gateway.calls[2]["envelope"]["retry_context"]["recovery_mode"] == "FULL_STAGE_RETRY"
     assert "previous_candidate" not in gateway.calls[2]["envelope"]["retry_context"]
 
@@ -1499,13 +1500,13 @@ def test_step4b_runtime_exhausted_design_failure_is_nonretryable_contract_failur
     assert classification.category == FailureCategory.OUTPUT_CONTRACT
     assert classification.retryable is False
     assert len(gateway.calls) == 4
-    assert gateway.calls[1]["envelope"]["frozen_skeleton"] == skeleton
+    assert gateway.calls[1]["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
     assert all(
         call["prompt_id"] == "P-ARGUMENT-ARCHITECTURE"
         for call in gateway.calls
     )
     assert all(
-        call["envelope"]["frozen_skeleton"] == skeleton
+        call["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
         for call in gateway.calls[1:]
     )
 
@@ -1516,7 +1517,7 @@ def test_step4b_provider_request_identity_includes_two_stage_contract(tmp_path, 
     spec = executor._model_request_spec("P-ARGUMENT-ARCHITECTURE")
 
     contract = spec["argument_two_stage_contract"]
-    assert contract["version"] == "ARGUMENT_TWO_STAGE_V15"
+    assert contract["version"] == "ARGUMENT_TWO_STAGE_V16"
     assert set(contract["stages"]) == {"SKELETON", "DESIGN"}
     assert contract["stages"]["SKELETON"]["desired_output_tokens"] == 8_192
     assert contract["stages"]["DESIGN"]["desired_output_tokens"] == 65_536
@@ -1757,7 +1758,7 @@ def test_step4c_live_argument_two_stage_is_independent_of_legacy_semantic_regist
 
     spec = executor._model_request_spec("P-ARGUMENT-ARCHITECTURE")
     assert spec["semantic_model_contract"]["enabled"] is False
-    assert spec["argument_two_stage_contract"]["version"] == "ARGUMENT_TWO_STAGE_V15"
+    assert spec["argument_two_stage_contract"]["version"] == "ARGUMENT_TWO_STAGE_V16"
     assert spec["prompt_text"] is None
     assert spec["output_schema"] is None
 
@@ -2035,5 +2036,5 @@ def test_step4d_original_producer_regeneration_returns_to_two_stage_runtime(tmp_
     ))
     assert len(gateway.calls) == 4
     assert gateway.calls[2]["envelope"].get("frozen_skeleton") is None
-    assert gateway.calls[3]["envelope"]["frozen_skeleton"] == skeleton2
+    assert gateway.calls[3]["envelope"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton2)
     assert regenerated["output"]["result"]["authored_state"]["central_proposition"] == skeleton2["central_proposition"]

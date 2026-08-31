@@ -125,6 +125,120 @@
           "summary"
         ]
       }
+    },
+    "research_sufficiency": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "SUFFICIENT",
+            "DEGRADED",
+            "BLOCKING_FAILURE"
+          ]
+        },
+        "research_gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gap_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "QUERY",
+                  "GLOBAL"
+                ]
+              },
+              "linked_question_indexes": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "uniqueItems": true
+              },
+              "gap_types": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "source_count": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "required_source_count": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "authoritative_source_count": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "required_authoritative_source_count": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "gap_id",
+              "scope",
+              "linked_question_indexes",
+              "gap_types",
+              "source_count",
+              "required_source_count",
+              "authoritative_source_count",
+              "required_authoritative_source_count",
+              "description"
+            ]
+          }
+        }
+      },
+      "required": [
+        "status",
+        "research_gaps"
+      ]
     }
   },
   "required": [
@@ -133,6 +247,7 @@
     "evidence_passages",
     "source_comparisons",
     "declared_conflicts",
-    "declared_limitations"
+    "declared_limitations",
+    "research_sufficiency"
   ]
 }

@@ -7,7 +7,7 @@ from typing import Any
 
 from ..util import utc_now
 
-_INNOVATION_TERMS = {"innovation", "innovative", "novelty", "创新", "首创", "首次", "突破", "填补空白"}
+_INNOVATION_TERMS = {"innovation", "innovative", "novelty", "novel", "first", "no existing", "no prior", "has not been", "创新", "首创", "首次", "突破", "填补空白", "尚无", "未有", "空白"}
 
 
 def _compact(text: str) -> str:
@@ -21,7 +21,9 @@ def _searchable(text: str) -> str:
 def _innovation_claim(claim: dict[str, Any]) -> bool:
     subject = str(claim.get("subject_id") or "").lower()
     qualifiers = " ".join(str(item) for item in claim.get("qualifiers") or []).lower()
-    return subject.startswith("innovation") or any(term in qualifiers for term in _INNOVATION_TERMS)
+    claim_text = str(claim.get("claim_text") or "").lower()
+    searchable = f"{qualifiers} {claim_text}"
+    return subject.startswith("innovation") or any(term in searchable for term in _INNOVATION_TERMS)
 
 
 def validate_public_claims(synthesis: dict[str, Any], research_output: dict[str, Any]) -> dict[str, Any]:
@@ -74,6 +76,14 @@ def validate_public_claims(synthesis: dict[str, Any], research_output: dict[str,
                 else:
                     findings.append({"code": "PUBLIC_CLAIM_QUOTE_NOT_FOUND", "severity": "P1", "claim_id": claim_id, "source_id": source_id})
         if _innovation_claim(claim):
+            sufficiency = research_output.get("research_sufficiency") or {}
+            if sufficiency.get("status") == "DEGRADED":
+                findings.append({
+                    "code": "PUBLIC_INNOVATION_RESEARCH_SUFFICIENCY_GAP",
+                    "severity": "P0",
+                    "claim_id": claim_id,
+                    "research_gap_ids": [str(item.get("gap_id")) for item in sufficiency.get("research_gaps") or [] if isinstance(item, dict) and item.get("gap_id")],
+                })
             dimensions = coverage.get("dimensions") or {}
             missing = [name for name in ("recent_work", "comparable_baselines", "limitation_mechanisms") if (dimensions.get(name) or {}).get("status") != "PASS"]
             if missing:

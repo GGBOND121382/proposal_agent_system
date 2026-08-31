@@ -13,6 +13,7 @@ from app.config import Settings
 from app.db import Database
 from app.documents import parse_document
 from app.pack import PromptPack
+from app.model_semantic_contracts import build_semantic_model_input
 from app.research import PublicResearchService
 from app.runtime_context import LiveContextBuilder
 from app.runtime_workflows import RecoverableWorkflowEngine
@@ -337,6 +338,60 @@ def test_unapproved_revise_output_is_not_available_to_next_prompt(live_runtime):
         workflow_id=workflow_id,
     ) is None
 
+
+
+
+def test_wf3_approved_topics_fan_out_identically_to_producer_and_safe_critic(live_runtime):
+    _, pack, db, builder, _, _ = live_runtime
+    project_id = create_project(db)
+    state = wf3_state()
+    approved_topics = [
+        "人机协同决策",
+        "多智能体任务分工",
+        "决策证据追踪",
+        "决策系统评价",
+    ]
+    state["options"]["allowed_public_topics"] = list(approved_topics)
+    workflow_id = add_workflow(
+        db,
+        project_id,
+        "WF-3_HYBRID_ONLINE_ASSIST",
+        "RUNNING",
+        workflow_id="wf-wf3-approved-boundary-fanout",
+        state=state,
+    )
+
+    producer = builder.build(
+        "P-SAFE-ONLINE-PACKAGE",
+        project_id,
+        workflow_id=workflow_id,
+        workflow_state=state,
+    )
+    producer_model = build_semantic_model_input("P-SAFE-ONLINE-PACKAGE", producer)
+    assert producer_model["approved_boundary"]["allowed_topics"] == approved_topics
+
+    safe_output = pack.replay_output("P-SAFE-ONLINE-PACKAGE", "normal")
+    add_artifact(
+        db,
+        project_id,
+        "P-SAFE-ONLINE-PACKAGE",
+        safe_output,
+        workflow_id=workflow_id,
+    )
+    critic = builder.build(
+        "P-SAFE-ONLINE-PACKAGE-CRITIC",
+        project_id,
+        workflow_id=workflow_id,
+        workflow_state=state,
+    )
+    critic_model = build_semantic_model_input(
+        "P-SAFE-ONLINE-PACKAGE-CRITIC", critic
+    )
+    assert critic["payload"]["security_policy"]["allowed_public_topics"] == approved_topics
+    assert critic_model["approved_boundary"]["allowed_topics"] == approved_topics
+    assert critic_model["approved_boundary"]["allowed_topics"] == (
+        producer_model["approved_boundary"]["allowed_topics"]
+    )
 
 def test_wf3_downstream_live_inputs_are_complete_and_schema_valid(live_runtime):
     _, pack, db, builder, _, _ = live_runtime
@@ -767,6 +822,16 @@ def test_strict_live_context_completes_full_workflow_with_simulated_provider(tmp
         ):
             workflow = await finish(workflow_type)
             assert workflow["status"] == "COMPLETED", workflow["state"].get("last_error")
+            if workflow_type == "WF-3_HYBRID_ONLINE_ASSIST":
+                artifact = db.fetchone(
+                    "SELECT content_json,status FROM artifacts WHERE project_id=? AND workflow_id=? AND artifact_type='WF3_RESEARCH_RESULT' ORDER BY version DESC LIMIT 1",
+                    (project_id, workflow["id"]),
+                )
+                assert artifact is not None
+                content = json.loads(artifact["content_json"])
+                assert content["research_sufficiency"]["status"] in {"SUFFICIENT", "DEGRADED"}
+                assert content["research_gaps"] == content["research_sufficiency"]["research_gaps"]
+                assert content["completion_semantics"] in {"COMPLETED", "COMPLETED_WITH_RESEARCH_GAPS"}
 
     asyncio.run(run_all())
 

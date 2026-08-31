@@ -4,8 +4,8 @@
   "prompt_pack": {
     "registry": "prompt_pack/config/prompt_registry.json",
     "replay_manifest": "prompt_pack/replay/manifest.json",
-    "expected_prompt_count": 30,
-    "expected_replay_count": 150,
+    "expected_prompt_count": 31,
+    "expected_replay_count": 155,
     "required_replay_case_types": [
       "normal",
       "missing_input",
@@ -15,7 +15,11 @@
     ]
   },
   "agent_matrix": {
-    "positive": ["normal", "high_risk", "need_user_input"],
+    "positive": [
+      "normal",
+      "high_risk",
+      "need_user_input"
+    ],
     "negative": [
       "schema_error",
       "missing_schema_version",
@@ -23,8 +27,12 @@
       "output_status_invalid",
       "output_prompt_id_mismatch"
     ],
-    "edge": ["missing_input_semantic_boundary"],
-    "restart": ["prompt_pack_reload_and_revalidate"]
+    "edge": [
+      "missing_input_semantic_boundary"
+    ],
+    "restart": [
+      "prompt_pack_reload_and_revalidate"
+    ]
   },
   "workflow_fault_checkpoints": [
     "after_workflow_start",

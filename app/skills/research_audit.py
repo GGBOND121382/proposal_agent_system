@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from ..util import new_id, sha256_bytes, sha256_text, utc_now, write_json
 from .research_plan import canonical_url, normalize_doi, parse_year
 from .public_research import PublicResearchIntegrityError
+from .research_quality import build_research_sufficiency
 
 _BASELINE_TERMS = {"baseline", "benchmark", "comparison", "comparative", "survey", "review", "基线", "对比", "比较", "综述", "评测", "现有方法"}
 _LIMITATION_TERMS = {"limitation", "limitations", "challenge", "challenges", "gap", "open problem", "drawback", "局限", "不足", "挑战", "差距", "瓶颈"}
@@ -428,6 +429,11 @@ def upgrade_archive_result(
         min_sources_per_query=min_sources_per_query,
         retrieval_health=retrieval_health,
     )
+    research_sufficiency = build_research_sufficiency(
+        coverage,
+        normalized_plan,
+        retrieval_health or {"status": "UNOBSERVED"},
+    )
     for query in coverage["uncovered_queries"]:
         issues.append({"type": "EVIDENCE_GAP", "code": "QUERY_UNCOVERED", "query": query})
     for dimension, item in coverage["dimensions"].items():
@@ -450,6 +456,8 @@ def upgrade_archive_result(
         "selection_report": selection_report,
         "execution_report": execution_report,
         "retrieval_health": retrieval_health or {"status": "UNOBSERVED"},
+        "research_sufficiency": research_sufficiency,
+        "research_gaps": research_sufficiency.get("research_gaps", []),
         "connector_response_sha256": connector_hash,
     })
     write_json(manifest_path, manifest)
@@ -491,6 +499,8 @@ def upgrade_archive_result(
         "research_quality_profile": str(quality_profile or "legacy"),
         "selection_report": selection_report, "execution_report": execution_report,
         "retrieval_health": retrieval_health or {"status": "UNOBSERVED"},
+        "research_sufficiency": research_sufficiency,
+        "research_gaps": research_sufficiency.get("research_gaps", []),
         "archive_verification": verification, "warnings": warnings,
     })
     result.warnings = warnings

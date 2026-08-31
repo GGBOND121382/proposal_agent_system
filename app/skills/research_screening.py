@@ -9,7 +9,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .research_plan import deduplicate_candidates, parse_date, parse_time_scope_bounds, parse_year
-from .research_quality import assess_candidate_relevance, build_query_relevance_profiles
+from .research_quality import (
+    assess_candidate_relevance,
+    assess_source_priorities,
+    build_query_relevance_profiles,
+)
 
 _GENERIC_LATIN = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into", "is", "of", "on", "or", "the", "to", "using", "via", "with",
@@ -99,7 +103,15 @@ def _score(candidate: dict[str, Any], query: str, *, end_year: int | None) -> fl
     alignment, _, _ = _query_alignment(query, candidate)
     doi_bonus = 12.0 if candidate.get("doi") else 0.0
     source_type = str(candidate.get("source_type") or "").upper()
-    peer_bonus = 10.0 if "PEER" in source_type or candidate.get("doi") else 0.0
+    publication_status = str(candidate.get("publication_status") or "").upper()
+    if source_type in {"OFFICIAL_STANDARD", "GOVERNMENT", "STANDARD", "OFFICIAL_SOURCE"}:
+        authority_bonus = 12.0
+    elif source_type in {"PEER_REVIEWED_PAPER", "CONFERENCE_PAPER"}:
+        authority_bonus = 10.0
+    elif publication_status == "PUBLISHED" and source_type == "SCHOLARLY_PUBLICATION_UNVERIFIED":
+        authority_bonus = 3.0
+    else:
+        authority_bonus = 0.0
     abstract = str(candidate.get("abstract") or candidate.get("excerpt") or "")
     abstract_bonus = min(10.0, len(abstract) / 160.0)
     try:
@@ -116,7 +128,9 @@ def _score(candidate: dict[str, Any], query: str, *, end_year: int | None) -> fl
     verification = candidate.get("verification") if isinstance(candidate.get("verification"), dict) else {}
     assessment = (verification.get("semantic_relevance_by_query") or {}).get(query) or {}
     relevance_bonus = {"DIRECT": 18.0, "SUPPORTING": 8.0}.get(str(assessment.get("label") or ""), 0.0)
-    return round(45.0 * alignment + doi_bonus + peer_bonus + abstract_bonus + citation_bonus + recency_bonus + review_bonus + relevance_bonus, 4)
+    priority_assessment = verification.get("source_priority_assessment") if isinstance(verification.get("source_priority_assessment"), dict) else {}
+    priority_bonus = float(priority_assessment.get("score_bonus") or 0.0)
+    return round(45.0 * alignment + doi_bonus + authority_bonus + abstract_bonus + citation_bonus + recency_bonus + review_bonus + relevance_bonus + priority_bonus, 4)
 
 
 def screen_and_select_candidates(
@@ -135,6 +149,11 @@ def screen_and_select_candidates(
     start_date, end_date = parse_time_scope_bounds(normalized_plan.get("time_scope"))
     end_year = end_date.year if end_date else None
     relevance_profiles = build_query_relevance_profiles(normalized_plan)
+    source_priorities = [
+        str(item).strip()
+        for item in normalized_plan.get("source_priorities") or []
+        if str(item).strip()
+    ]
     screened: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
 
@@ -208,6 +227,9 @@ def screen_and_select_candidates(
         verification["semantic_relevance_by_query"] = relevance_by_query
         verification["time_scope_status"] = time_status
         verification["published_date_precision"] = date_precision
+        verification["source_priority_assessment"] = assess_source_priorities(
+            candidate, source_priorities
+        )
         candidate["verification"] = verification
         per_query_scores = {
             query: _score(candidate, query, end_year=end_year)
@@ -315,8 +337,19 @@ def screen_and_select_candidates(
             if isinstance(assessment, dict):
                 relevance_counts[str(assessment.get("label") or "UNKNOWN")] += 1
 
+    selected_priority_matches: Counter[str] = Counter()
+    priority_matched_candidates = 0
+    for candidate in selected:
+        verification = candidate.get("verification") if isinstance(candidate.get("verification"), dict) else {}
+        assessment = verification.get("source_priority_assessment") if isinstance(verification.get("source_priority_assessment"), dict) else {}
+        matched = [str(item) for item in assessment.get("matched_priorities") or [] if str(item)]
+        if matched:
+            priority_matched_candidates += 1
+        for priority in matched:
+            selected_priority_matches[priority] += 1
+
     selection_report = {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "status": "PASS" if selected else "INSUFFICIENT",
         "input_candidate_count": len(candidates),
         "screened_candidate_count": len(screened),
@@ -329,6 +362,9 @@ def screen_and_select_candidates(
         "selected_by_query": coverage_counts,
         "semantic_relevance_counts": dict(sorted(relevance_counts.items())),
         "query_relevance_profiles": relevance_profiles,
+        "source_priorities": source_priorities,
+        "priority_matched_candidate_count": priority_matched_candidates,
+        "selected_priority_match_counts": dict(sorted(selected_priority_matches.items())),
         "issues": issues,
     }
     return selected, selection_report

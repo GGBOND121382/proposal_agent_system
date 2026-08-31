@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from app.skills.academic_search import AcademicSearchClient
 from app.skills.research_audit import coverage_report, source_category
 from app.skills.research_plan import normalize_and_validate_plan, parse_time_scope_bounds
-from app.skills.research_quality import build_retrieval_health
+from app.skills.research_quality import build_research_sufficiency, build_retrieval_health
 from app.skills.research_screening import screen_and_select_candidates
 
 
@@ -222,7 +222,8 @@ def test_hybrid_retrieval_health_exposes_missing_web_and_rate_limited_channels()
     assert health["providers"]["crossref"]["success_rate"] == 0.375
     assert health["providers"]["semantic_scholar"]["successful_queries"] == 0
     assert health["providers"]["searxng"]["successful_queries"] == 0
-    assert "HYBRID_WEB_CHANNEL_UNAVAILABLE" in health["blocking_reason_codes"]
+    assert "HYBRID_WEB_CHANNEL_UNAVAILABLE" in health["reason_codes"]
+    assert "HYBRID_WEB_CHANNEL_UNAVAILABLE" not in health["blocking_reason_codes"]
 
 
 def test_strict_coverage_uses_relevance_and_retrieval_health_not_search_binding_alone() -> None:
@@ -343,3 +344,164 @@ def test_strict_coverage_requires_authoritative_depth_per_query() -> None:
     assert report["dimensions"]["query_authoritative_depth"]["status"] == "INSUFFICIENT"
     assert report["by_query"][query]["authoritative_source_count"] == 0
     assert report["status"] == "INSUFFICIENT"
+
+
+def test_source_priorities_are_consumed_by_runtime_ranking_not_left_as_dead_plan_fields() -> None:
+    plan = _realistic_plan()
+    plan["research_questions"] = ["How is decision provenance represented?"]
+    plan["queries"] = [{
+        "query_id": "query-priority",
+        "query": "decision provenance evidence version auditable workflow",
+        "linked_question_indexes": [0],
+    }]
+    plan["source_priorities"] = ["peer reviewed papers", "IEEE TKDE"]
+    normalized, validation = normalize_and_validate_plan(plan, strict=True)
+    assert validation["status"] == "PASS"
+    query = normalized["queries"][0]
+    candidates = [
+        {
+            "title": "Decision provenance evidence versioning for auditable workflows",
+            "url": "https://doi.org/10.1000/preprint",
+            "doi": "10.1000/preprint",
+            "published_at": "2024-01-01",
+            "matched_query": query,
+            "abstract": "Decision provenance evidence versioning supports auditable workflow decisions.",
+            "source_type": "ACADEMIC_PREPRINT",
+            "publication_status": "PREPRINT",
+            "venue": "Research Square",
+            "citation_count": 20,
+        },
+        {
+            "title": "Decision provenance evidence versioning for auditable workflows",
+            "url": "https://doi.org/10.1000/peer",
+            "doi": "10.1000/peer",
+            "published_at": "2024-01-01",
+            "matched_query": query,
+            "abstract": "Decision provenance evidence versioning supports auditable workflow decisions.",
+            "source_type": "PEER_REVIEWED_PAPER",
+            "publication_status": "PUBLISHED",
+            "venue": "IEEE Transactions on Knowledge and Data Engineering",
+            "publisher": "IEEE",
+            "citation_count": 0,
+        },
+    ]
+    selected, report = screen_and_select_candidates(
+        candidates,
+        normalized,
+        max_results=1,
+        strict=True,
+        min_per_query=1,
+        enforce_semantic_relevance=True,
+    )
+    assert len(selected) == 1
+    assert selected[0]["url"] == "https://doi.org/10.1000/peer"
+    assessment = selected[0]["verification"]["source_priority_assessment"]
+    assert "peer reviewed papers" in assessment["matched_priorities"]
+    assert report["source_priorities"] == ["peer reviewed papers", "IEEE TKDE"]
+    assert report["priority_matched_candidate_count"] == 1
+    assert report["selected_priority_match_counts"]["peer reviewed papers"] == 1
+
+
+def test_doi_does_not_restore_peer_review_authority_bonus_for_preprints() -> None:
+    plan = _realistic_plan()
+    plan["research_questions"] = ["How is decision provenance represented?"]
+    plan["queries"] = [{
+        "query_id": "query-doi",
+        "query": "decision provenance evidence version auditable workflow",
+        "linked_question_indexes": [0],
+    }]
+    plan["source_priorities"] = ["peer reviewed papers"]
+    normalized, _ = normalize_and_validate_plan(plan, strict=True)
+    query = normalized["queries"][0]
+    candidates = [
+        {
+            "title": "Decision provenance evidence versioning for auditable workflows",
+            "url": "https://doi.org/10.1000/preprint-doi",
+            "doi": "10.1000/preprint-doi",
+            "published_at": "2024-01-01",
+            "matched_query": query,
+            "abstract": "Decision provenance evidence versioning supports auditable workflow decisions.",
+            "source_type": "ACADEMIC_PREPRINT",
+            "publication_status": "PREPRINT",
+            "citation_count": 0,
+        },
+        {
+            "title": "Decision provenance evidence versioning for auditable workflows",
+            "url": "https://example.org/peer-no-doi",
+            "published_at": "2024-01-01",
+            "matched_query": query,
+            "abstract": "Decision provenance evidence versioning supports auditable workflow decisions.",
+            "source_type": "PEER_REVIEWED_PAPER",
+            "publication_status": "PUBLISHED",
+            "citation_count": 0,
+        },
+    ]
+    selected, _ = screen_and_select_candidates(
+        candidates,
+        normalized,
+        max_results=1,
+        strict=True,
+        min_per_query=1,
+        enforce_semantic_relevance=True,
+    )
+    # DOI contributes traceability only; it cannot impersonate peer-review authority.
+    assert selected[0]["url"] == "https://example.org/peer-no-doi"
+
+
+
+def test_research_sufficiency_marks_shallow_query_degraded_not_blocking() -> None:
+    plan = {
+        "queries": ["q1", "q2"],
+        "query_items": [
+            {"query_id": "query-001", "query": "q1", "linked_question_indexes": [0]},
+            {"query_id": "query-002", "query": "q2", "linked_question_indexes": [1]},
+        ],
+    }
+    coverage = {
+        "status": "INSUFFICIENT",
+        "by_query": {
+            "q1": {"source_count": 3, "source_ids": ["s1", "s2", "s3"], "authoritative_source_count": 1, "authoritative_source_ids": ["s1"]},
+            "q2": {"source_count": 1, "source_ids": ["s4"], "authoritative_source_count": 0, "authoritative_source_ids": []},
+        },
+        "dimensions": {
+            "query_depth": {"status": "INSUFFICIENT", "minimum_sources_per_query": 3},
+            "query_authoritative_depth": {"status": "INSUFFICIENT", "minimum_authoritative_sources_per_query": 1},
+        },
+    }
+    value = build_research_sufficiency(
+        coverage,
+        plan,
+        {"status": "PASS", "blocking_reason_codes": []},
+    )
+    assert value["status"] == "DEGRADED"
+    assert value["may_continue"] is True
+    assert len(value["research_gaps"]) == 1
+    gap = value["research_gaps"][0]
+    assert gap["query_id"] == "query-002"
+    assert set(gap["gap_types"]) == {"DEPTH", "AUTHORITY"}
+    assert gap["linked_question_indexes"] == [1]
+
+
+def test_research_sufficiency_blocks_when_no_query_has_qualifying_evidence() -> None:
+    plan = {
+        "queries": ["q1"],
+        "query_items": [{"query_id": "query-001", "query": "q1", "linked_question_indexes": [0]}],
+    }
+    coverage = {
+        "status": "INSUFFICIENT",
+        "by_query": {
+            "q1": {"source_count": 0, "source_ids": [], "authoritative_source_count": 0, "authoritative_source_ids": []},
+        },
+        "dimensions": {
+            "query_depth": {"status": "INSUFFICIENT", "minimum_sources_per_query": 3},
+            "query_authoritative_depth": {"status": "INSUFFICIENT", "minimum_authoritative_sources_per_query": 1},
+        },
+    }
+    value = build_research_sufficiency(
+        coverage,
+        plan,
+        {"status": "PASS", "blocking_reason_codes": []},
+    )
+    assert value["status"] == "BLOCKING_FAILURE"
+    assert value["may_continue"] is False
+    assert "NO_QUALIFYING_PUBLIC_EVIDENCE" in value["blocking_reasons"]

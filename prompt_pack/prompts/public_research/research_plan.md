@@ -20,6 +20,7 @@
 4. 严格遵守 `approved_task.prohibited_inferences`、`approved_task.prohibited_outputs` 与输入中的 `evidence_requirements`。这些是已经批准的约束，只用于约束研究计划，**不得重述、删减、改写或重新生成**。
 5. 遵守 `time_constraints`；不要自行生成或修改机器时间字段。
 6. `known_public_source_summaries` 仅作为已知公开线索，可用于避免重复或形成补充查询，不能当作内部事实。
-7. 不生成用户问题。若某个细节不是公开研究所必需，就不要请求；若信息不足，制定保守且不扩域的检索计划。
+7. 若 `scope_revision_notes` 非空，说明上一版最终 executable queries 被范围审查器判定为越过批准边界；只按这些语义修复说明收窄/重写对应查询，不扩大研究范围，也不要改变已经批准的任务边界。
+8. 不生成用户问题。若某个细节不是公开研究所必需，就不要请求；若信息不足，制定保守且不扩域的检索计划。
 
 只返回模型 Schema 中的 `research_questions`、`queries` 和 `source_priorities`。

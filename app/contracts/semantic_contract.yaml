@@ -1,5 +1,5 @@
-version: 2.10.0
-rule_registry_version: 1.9.0
+version: 2.12.0
+rule_registry_version: 1.11.0
 rules:
   SC-ARGUMENT-ROLE-COMPATIBILITY:
     responsibility: DETERMINISTIC_GUARD
@@ -214,6 +214,79 @@ rules:
     description: Define every evidence-required Argument Architecture semantic component
       and its support predicate.
     config:
+      bindings:
+      - binding_id: CENTRAL_PROPOSITION_EVIDENCE
+        stage: SKELETON
+        wire_path: central_proposition/evidence_ids
+        canonical_path: central_proposition/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: RESEARCH_GAP_EVIDENCE
+        stage: SKELETON
+        wire_path: research_threads/*/gap_evidence_ids
+        canonical_path: research_threads/*/gap/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: LIMITATION_MECHANISM_EVIDENCE
+        stage: SKELETON
+        wire_path: research_threads/*/limitation_mechanism_evidence_ids
+        canonical_path: research_threads/*/gap/limitation_mechanism/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: OBJECTIVE_EVIDENCE
+        stage: SKELETON
+        wire_path: research_threads/*/objective_evidence_ids
+        canonical_path: research_threads/*/objective/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: WORK_PACKAGE_EVIDENCE
+        stage: DESIGN
+        wire_path: work_packages/*/evidence_ids
+        canonical_path: research_threads/*/work_packages/*/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: METHOD_EVIDENCE
+        stage: DESIGN
+        wire_path: methods/*/evidence_ids
+        canonical_path: research_threads/*/work_packages/*/methods/*/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: THEORETICAL_PROPERTY_EVIDENCE
+        stage: DESIGN
+        wire_path: theoretical_properties/*/evidence_ids
+        canonical_path: research_threads/*/work_packages/*/methods/*/theoretical_properties/*/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: EVALUATION_EVIDENCE
+        stage: DESIGN
+        wire_path: evaluations/*/evidence_ids
+        canonical_path: research_threads/*/work_packages/*/methods/*/evaluations/*/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: BASELINE_EVIDENCE
+        stage: DESIGN
+        wire_path: baselines/*/evidence_ids
+        canonical_path: research_threads/*/work_packages/*/methods/*/evaluations/*/baselines/*/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: INNOVATION_EVIDENCE
+        stage: DESIGN
+        wire_path: innovations/*/evidence_ids
+        canonical_path: research_threads/*/innovations/*/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: CLOSEST_PRIOR_WORK_EVIDENCE
+        stage: DESIGN
+        wire_path: innovation_prior_work/*/evidence_ids
+        canonical_path: research_threads/*/innovations/*/closest_prior_work/*/evidence_ids
+        reference_domain: EVIDENCE_CARDS
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
+      - binding_id: FOUNDATION_EVIDENCE
+        stage: DESIGN
+        wire_path: foundation/*/evidence_ids
+        canonical_path: research_threads/*/foundation/*/evidence_ids
+        reference_domain: FOUNDATION_ELIGIBLE
+        invalid_reference_policy: DROP_EXACT_INVALID_REF
       supported_knowledge_statuses:
       - CONFIRMED
       - USER_ASSERTED
@@ -416,6 +489,53 @@ rules:
         ARGUMENT_METRIC_JUSTIFICATION_MISSING: EVALUATION
         ARGUMENT_METHOD_SUBSTANCE_WEAK: METHOD
       deterministic_failure_score: 1
+      semantic_failure_max_score: 2
+      semantic_issue_policy_by_code:
+        ARGUMENT_PROPOSITION_UNTESTABLE:
+          severity: P1
+          route: ARGUMENT_ARCHITECTURE_AGENT
+          blocking: true
+          repairable: true
+        GAP_QUESTION_CHAIN_BROKEN:
+          severity: P1
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          repairable: false
+        RESEARCH_DESIGN_INCOMPLETE:
+          severity: P1
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          repairable: false
+        INNOVATION_BASELINE_MISSING:
+          severity: P1
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          repairable: false
+        FOUNDATION_EVIDENCE_MISSING:
+          severity: P1
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          repairable: false
+        ARGUMENT_SCOPE_VIOLATION:
+          severity: P1
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          repairable: false
+        ARGUMENT_EVIDENCE_UNSUPPORTED:
+          severity: P1
+          route: ORIGINAL_PRODUCER
+          blocking: true
+          repairable: false
+        ARGUMENT_METRIC_JUSTIFICATION_MISSING:
+          severity: P1
+          route: ARGUMENT_ARCHITECTURE_AGENT
+          blocking: true
+          repairable: true
+        ARGUMENT_METHOD_SUBSTANCE_WEAK:
+          severity: P1
+          route: ARGUMENT_ARCHITECTURE_AGENT
+          blocking: true
+          repairable: true
       component_by_node_type:
         CENTRAL_PROPOSITION: CENTRAL_PROPOSITION
         RESEARCH_QUESTION: QUESTION

@@ -1,16 +1,16 @@
 {
-  "case_id": "public_research_plan-normal",
-  "prompt_id": "P-PUBLIC-RESEARCH-PLAN",
+  "case_id": "public-research-plan-scope-critic-normal",
+  "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
   "case_type": "normal",
-  "description": "正常业务输入应通过",
+  "description": "Final executable public-research queries remain within the workflow-approved public boundary.",
   "input": {
     "schema_version": "2.0",
-    "prompt_id": "P-PUBLIC-RESEARCH-PLAN",
-    "prompt_version": "2.1.0",
+    "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+    "prompt_version": "1.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "HYBRID_ONLINE_ASSIST",
-      "current_step": "PUBLIC_RESEARCH_PLAN",
+      "current_step": "PUBLIC_RESEARCH_PLAN_SCOPE_CRITIC",
       "attempt": 1,
       "writing_mode": "SUBSTANTIVE_REVISION"
     },
@@ -48,59 +48,49 @@
       "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "payload": {
-      "safe_online_package": {
-        "object_id": "obj-001",
-        "object_type": "GENERIC",
-        "version": 1,
-        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "security_level": "INTERNAL",
-        "display_name": "示例对象"
+      "approved_boundary": {
+        "task_description": "研究公开的人机协同决策方法与评价机制。",
+        "allowed_topics": [
+          "人机协同决策",
+          "多智能体协作",
+          "公开评价方法"
+        ],
+        "allowed_context": [
+          "公开学术资料"
+        ],
+        "prohibited_inferences": [
+          "不得推断内部项目身份"
+        ],
+        "prohibited_outputs": [
+          "不得输出内部参数"
+        ]
       },
-      "task_type": "PUBLIC_RESEARCH",
-      "known_public_sources": [],
-      "time_constraints": {
-        "start_date": null,
-        "end_date": null,
-        "freshness_required": true
-      },
-      "evidence_requirements": [
-        "优先官方来源"
-      ],
-      "revision_findings": []
-    },
-    "expected_output_schema": "schemas/prompts/public_research_plan_output.schema.json"
-  },
-  "expected_output": {
-    "schema_version": "2.0",
-    "prompt_id": "P-PUBLIC-RESEARCH-PLAN",
-    "prompt_version": "2.1.0",
-    "status": "PASS",
-    "result": {
-      "plan_id": "rplan-001",
-      "task_type": "PUBLIC_RESEARCH",
       "research_questions": [
-        "公开评价方法有哪些？"
+        "公开的人机协同决策评价方法有哪些？"
       ],
-      "queries": [
+      "executable_queries": [
         {
           "query_id": "query-001",
-          "query": "公开评价方法",
+          "query": "human AI collaborative decision evaluation methods",
           "linked_question_indexes": [
             0
           ]
         }
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/public_research_plan_scope_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "PASS",
+    "result": {
+      "verdict": "ACCEPT",
+      "approved_query_indexes": [
+        0
       ],
-      "source_priorities": [
-        "官方标准"
-      ],
-      "time_scope": null,
-      "evidence_requirements": [
-        "至少两个来源"
-      ],
-      "prohibited_inferences": [
-        "不得推断内部项目"
-      ],
-      "binding_contract_version": "1.0"
+      "rejected_query_indexes": []
     },
     "findings": [],
     "unresolved_items": [],

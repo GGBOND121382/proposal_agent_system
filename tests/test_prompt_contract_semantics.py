@@ -170,8 +170,8 @@ def test_prompt_contract_audit_matrix_has_no_blocking_issue() -> None:
 
     report = build_matrix(PACK_ROOT)
     assert report["status"] == "PASS", report["blocking_issues"]
-    assert report["summary"]["prompt_count"] == 30
-    assert report["summary"]["replay_count"] == 150
+    assert report["summary"]["prompt_count"] == 31
+    assert report["summary"]["replay_count"] == 155
     assert report["summary"]["normalization_boundary"][
         "inlined_required_output_fields"
     ] > 0

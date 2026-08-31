@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "research_sufficiency.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "status": {"type": "string", "enum": ["SUFFICIENT", "DEGRADED", "BLOCKING_FAILURE"]},
+    "coverage_status": {"type": "string", "minLength": 1},
+    "research_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gap_id": {"type": "string", "minLength": 1},
+          "scope": {"type": "string", "enum": ["QUERY", "GLOBAL"]},
+          "query_id": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+          "query": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+          "linked_question_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0}, "uniqueItems": true},
+          "gap_types": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+          "source_count": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+          "required_source_count": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+          "authoritative_source_count": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+          "required_authoritative_source_count": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+          "source_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "authoritative_source_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "description": {"type": "string", "minLength": 1}
+        },
+        "required": ["gap_id", "scope", "query_id", "query", "linked_question_indexes", "gap_types", "source_count", "required_source_count", "authoritative_source_count", "required_authoritative_source_count", "source_ids", "authoritative_source_ids", "description"]
+      }
+    },
+    "blocking_reasons": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "retrieval_health_status": {"type": "string", "minLength": 1},
+    "may_continue": {"type": "boolean"}
+  },
+  "required": ["schema_version", "status", "coverage_status", "research_gaps", "blocking_reasons", "retrieval_health_status", "may_continue"]
+}

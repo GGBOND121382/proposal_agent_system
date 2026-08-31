@@ -69,8 +69,11 @@ def test_v8_baseline_machine_defect_and_evaluation_semantic_observation_coexist(
     matching = [f for f in output["findings"] if f.get("code") == "ARGUMENT_METRIC_JUSTIFICATION_MISSING"]
     assert len(matching) == 2
     assert {f["defect_namespace"] for f in matching} == {"MACHINE_DEFECT", "SEMANTIC_OBSERVATION"}
-    assert {f["suggested_route"] for f in matching} == {"ORIGINAL_PRODUCER", "BLOCK"}
-    assert output["status"] == "BLOCK"
+    assert {f["suggested_route"] for f in matching} == {"ORIGINAL_PRODUCER", "ARGUMENT_ARCHITECTURE_AGENT"}
+    # The model's legacy severity/resolution fields are advisory only. Runtime
+    # keeps the machine defect on ORIGINAL_PRODUCER and routes the semantic
+    # observation by the registered issue policy.
+    assert output["status"] == "REVISE"
 
 
 def test_v8_prior_work_machine_defect_and_innovation_semantic_observation_coexist():
@@ -97,8 +100,9 @@ def test_v8_prior_work_machine_defect_and_innovation_semantic_observation_coexis
     matching = [f for f in output["findings"] if f.get("code") == "INNOVATION_BASELINE_MISSING"]
     assert len(matching) == 2
     assert {f["defect_namespace"] for f in matching} == {"MACHINE_DEFECT", "SEMANTIC_OBSERVATION"}
-    assert {f["suggested_route"] for f in matching} == {"ORIGINAL_PRODUCER", "BLOCK"}
-    assert output["status"] == "BLOCK"
+    assert {f["suggested_route"] for f in matching} == {"ORIGINAL_PRODUCER"}
+    # A model-requested BLOCK cannot override the Runtime policy for this issue.
+    assert output["status"] == "REVISE"
 
 
 def test_v7_issue_code_rejects_incompatible_semantic_target():
@@ -260,9 +264,10 @@ def test_v8_derived_chain_cache_tamper_cannot_suppress_model_semantic_block():
         "repair_instruction": "block", "resolution": "BLOCK",
     }]
     output = expand_argument_architecture_critic_model_output(critic_envelope, critic_semantic)
-    assert output["status"] == "BLOCK"
+    assert output["status"] == "REVISE"
     assert any(
-        f["defect_namespace"] == "SEMANTIC_OBSERVATION" and f["suggested_route"] == "BLOCK"
+        f["defect_namespace"] == "SEMANTIC_OBSERVATION"
+        and f["suggested_route"] == "ORIGINAL_PRODUCER"
         for f in output["findings"] if f.get("semantic_thread") == 0
     )
 
@@ -311,10 +316,10 @@ def test_v7_unrelated_same_thread_model_issue_is_not_swallowed_by_chain_receipt(
     model_findings = [
         finding for finding in output["findings"]
         if finding.get("semantic_component") == "METHOD"
-        and finding.get("suggested_route") == "BLOCK"
+        and finding.get("suggested_route") == "ORIGINAL_PRODUCER"
     ]
     assert len(model_findings) == 1
-    assert output["status"] == "BLOCK"
+    assert output["status"] == "REVISE"
 
 
 def test_v7_precise_target_thread_must_match_canonical_review_unit_owner():
@@ -431,7 +436,9 @@ def test_v7_decision_arbiter_cannot_promote_canonical_semantic_revise_to_pass():
     critic_output = expand_argument_architecture_critic_model_output(critic_envelope, critic_semantic)
     assert critic_output["status"] == "REVISE"
     assert len(critic_output["findings"]) == 1
-    assert critic_output["findings"][0]["blocking"] is False
+    assert critic_output["findings"][0]["blocking"] is True
+    assert critic_output["findings"][0]["suggested_route"] == "ARGUMENT_ARCHITECTURE_AGENT"
+    assert critic_output["findings"][0]["severity"] == "P1"
 
     contract = get_semantic_contract()
     guard = {
@@ -507,7 +514,10 @@ def test_v7_quality_dimension_preserves_model_failure_evidence_alongside_runtime
     assert dimension["passed"] is False
     assert "model independently found weak metric rationale" in dimension["evidence"]
     assert any("基线" in evidence or "证据" in evidence for evidence in dimension["evidence"])
-    assert "strengthen semantic metric rationale" in dimension["required_action"]
+    assert "strengthen semantic metric rationale" not in dimension["required_action"]
+    assert dimension["required_action"]
+    # quality_dimensions.required_action is Runtime-owned; the model's legacy
+    # field may contribute evidence but cannot become the canonical action.
 
 
 def test_v7_scoped_runtime_has_no_local_route_priority_or_regeneration_reconstruction_tables():

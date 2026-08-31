@@ -16,7 +16,6 @@
 2. 查询、任务描述或允许上下文是否超出 `approved_boundary.allowed_topics`；
 3. 多个单独无害的片段组合后，是否产生项目重识别或敏感内部推断。
 
-`deterministic_scan_receipt` 只表示确定性扫描已经执行，不要求你重新检查运行时规则。
 
 ## 明确不属于审查对象
 

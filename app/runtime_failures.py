@@ -328,6 +328,35 @@ def classify_runtime_failure(exc: BaseException) -> FailureClassification:
             cause_chain=labels,
         )
 
+    wf3_guard = next(
+        (item for item in chain if getattr(item, "wf3_guard_code", None)),
+        None,
+    )
+    if wf3_guard is not None:
+        guard_kind = str(getattr(wf3_guard, "wf3_guard_kind", "CONTRACT") or "CONTRACT").upper()
+        code = str(getattr(wf3_guard, "wf3_guard_code", "WF3_PRE_MODEL_GUARD"))
+        details = dict(getattr(wf3_guard, "wf3_guard_details", {}) or {})
+        details["guard_code"] = code
+        if guard_kind == "CONTENT":
+            return FailureClassification(
+                FailureCategory.SEMANTIC_REVISE,
+                WorkflowStatus.BLOCKED_CONTENT.value,
+                False,
+                False,
+                "WF-3 deterministic pre-model content guard blocked provider execution",
+                cause_chain=labels,
+                details=details,
+            )
+        return FailureClassification(
+            FailureCategory.OUTPUT_CONTRACT,
+            WorkflowStatus.BLOCKED_CONTRACT.value,
+            False,
+            False,
+            "WF-3 authoritative runtime contract was incomplete before provider execution",
+            cause_chain=labels,
+            details=details,
+        )
+
     provider = _provider_metadata(chain)
     if provider is not None:
         return _classification_from_provider(provider, cause_chain=labels)

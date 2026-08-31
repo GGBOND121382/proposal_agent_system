@@ -25,6 +25,7 @@ WF3_MODEL_PROMPTS = frozenset(
         "P-SAFE-ONLINE-PACKAGE",
         "P-SAFE-ONLINE-PACKAGE-CRITIC",
         "P-PUBLIC-RESEARCH-PLAN",
+        "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
         "P-PUBLIC-RESEARCH-SYNTHESIS",
         "P-PUBLIC-RESEARCH-CRITIC",
         "P-ONLINE-RESULT-IMPORT-CRITIC",
@@ -71,8 +72,6 @@ WF3_FIELD_OWNERSHIP: dict[str, dict[str, tuple[str, ...]]] = {
             "result.research_questions",
             "result.queries",
             "result.source_priorities",
-            "result.evidence_requirements",
-            "result.prohibited_inferences",
         ),
         "RUNTIME_DERIVED": (
             "result.plan_id",
@@ -82,8 +81,26 @@ WF3_FIELD_OWNERSHIP: dict[str, dict[str, tuple[str, ...]]] = {
             "finding/question IDs",
             "source_refs",
         ),
-        "INPUT_COPIED": ("result.task_type", "result.time_scope", "topic boundary"),
+        "INPUT_COPIED": (
+            "result.task_type",
+            "result.time_scope",
+            "result.evidence_requirements",
+            "result.prohibited_inferences",
+            "topic boundary",
+        ),
         "GUARD_CONTROLLED": ("Gate controls",),
+    },
+    "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC": {
+        "MODEL_SEMANTIC": ("query scope issues",),
+        "RUNTIME_DERIVED": (
+            "result.verdict",
+            "result.approved_query_indexes",
+            "result.rejected_query_indexes",
+            "finding IDs",
+            "severity/blocking/route/status",
+        ),
+        "INPUT_COPIED": ("approved boundary", "research questions", "executable queries"),
+        "GUARD_CONTROLLED": ("workflow routing", "Gate controls"),
     },
     "PUBLIC-RESEARCH-SEARCH": {
         "MODEL_SEMANTIC": (),
@@ -171,6 +188,11 @@ WF3_PROVENANCE_PAYLOAD_FIELDS: dict[str, tuple[str, ...]] = {
         "known_public_sources",
         "evidence_requirements",
     ),
+    "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC": (
+        "approved_boundary",
+        "research_questions",
+        "executable_queries",
+    ),
     "P-PUBLIC-RESEARCH-SYNTHESIS": (
         "research_plan",
         "retrieved_sources",
@@ -200,11 +222,113 @@ WF3_PROVIDER_REQUEST_CHAR_BUDGETS: dict[str, int] = {
     "P-SAFE-ONLINE-PACKAGE": 65_000,
     "P-SAFE-ONLINE-PACKAGE-CRITIC": 75_000,
     "P-PUBLIC-RESEARCH-PLAN": 60_000,
+    "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC": 35_000,
     "P-PUBLIC-RESEARCH-SYNTHESIS": 95_000,
     "P-PUBLIC-RESEARCH-CRITIC": 105_000,
     "P-ONLINE-RESULT-IMPORT-CRITIC": 105_000,
 }
 
+
+
+class WF3PreModelGuardError(ValueError):
+    """Deterministic WF-3 precondition failed before any provider call.
+
+    ``guard_kind`` distinguishes an internal contract/pipeline defect from a
+    content-level deterministic safety finding.  The runtime failure classifier
+    uses these stable attributes without importing this module, which keeps the
+    dependency direction acyclic.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        guard_kind: str = "CONTRACT",
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(f"{code}: {message}")
+        self.wf3_guard_code = str(code)
+        self.wf3_guard_kind = str(guard_kind).upper()
+        self.wf3_guard_details = dict(details or {})
+
+
+def enforce_wf3_pre_model_guards(
+    prompt_id: str,
+    canonical_envelope: Mapping[str, Any],
+) -> None:
+    """Enforce deterministic WF-3 invariants before an LLM/provider call.
+
+    A model may assess semantic risk, but it must never decide whether an
+    authoritative boundary exists or whether a deterministic sensitive-value
+    scan passed.  Those are runtime facts.
+    """
+
+    if prompt_id not in WF3_MODEL_PROMPTS:
+        return
+    payload = (
+        canonical_envelope.get("payload")
+        if isinstance(canonical_envelope.get("payload"), Mapping)
+        else {}
+    )
+
+    if prompt_id == "P-SAFE-ONLINE-PACKAGE":
+        allowed_topics = [
+            str(item).strip()
+            for item in payload.get("allowed_topics") or []
+            if str(item).strip()
+        ]
+        if not allowed_topics:
+            raise WF3PreModelGuardError(
+                "WF3_APPROVED_BOUNDARY_MISSING",
+                "Safe Package Producer has no authoritative allowed_topics boundary",
+                guard_kind="CONTRACT",
+            )
+        return
+
+    if prompt_id == "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC":
+        boundary = payload.get("approved_boundary") if isinstance(payload.get("approved_boundary"), Mapping) else {}
+        allowed_topics = [str(item).strip() for item in boundary.get("allowed_topics") or [] if str(item).strip()]
+        queries = [item for item in payload.get("executable_queries") or [] if isinstance(item, Mapping) and str(item.get("query") or "").strip()]
+        if not allowed_topics:
+            raise WF3PreModelGuardError(
+                "WF3_APPROVED_BOUNDARY_MISSING",
+                "Research Plan scope guard has no authoritative allowed_topics boundary",
+                guard_kind="CONTRACT",
+            )
+        if not queries:
+            raise WF3PreModelGuardError(
+                "WF3_EXECUTABLE_QUERY_SET_MISSING",
+                "Research Plan scope guard received no executable queries",
+                guard_kind="CONTRACT",
+            )
+        return
+
+    if prompt_id == "P-SAFE-ONLINE-PACKAGE-CRITIC":
+        allowed_topics = [
+            str(item).strip()
+            for item in payload.get("allowed_topics") or []
+            if str(item).strip()
+        ]
+        if not allowed_topics:
+            raise WF3PreModelGuardError(
+                "WF3_APPROVED_BOUNDARY_MISSING",
+                "Safe Package Critic lost the workflow-approved topic boundary",
+                guard_kind="CONTRACT",
+            )
+        scan = (
+            payload.get("deterministic_scan")
+            if isinstance(payload.get("deterministic_scan"), Mapping)
+            else {}
+        )
+        if scan.get("passed") is not True:
+            matched = [str(item) for item in scan.get("matched_rules") or [] if str(item)]
+            raise WF3PreModelGuardError(
+                "WF3_DETERMINISTIC_SCAN_FAILED",
+                "deterministic outbound scan failed; semantic Critic must not override it",
+                guard_kind="CONTENT",
+                details={"matched_rules": matched[:32]},
+            )
 
 
 WF3_RUNTIME_ONLY_TARGET_PREFIXES = (
@@ -750,6 +874,7 @@ def canonicalize_wf3_critic_control(
 
     if prompt_id not in {
         "P-SAFE-ONLINE-PACKAGE-CRITIC",
+        "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
         "P-PUBLIC-RESEARCH-CRITIC",
         "P-ONLINE-RESULT-IMPORT-CRITIC",
     }:
@@ -776,11 +901,12 @@ def canonicalize_wf3_critic_control(
     verdict_after = None
     if isinstance(result, dict) and prompt_id != "P-ONLINE-RESULT-IMPORT-CRITIC":
         verdict_before = result.get("verdict")
-        accept = (
-            "ACCEPT_FOR_HUMAN_APPROVAL"
-            if prompt_id == "P-SAFE-ONLINE-PACKAGE-CRITIC"
-            else "ACCEPT_FOR_IMPORT_REVIEW"
-        )
+        if prompt_id == "P-SAFE-ONLINE-PACKAGE-CRITIC":
+            accept = "ACCEPT_FOR_HUMAN_APPROVAL"
+        elif prompt_id == "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC":
+            accept = "ACCEPT"
+        else:
+            accept = "ACCEPT_FOR_IMPORT_REVIEW"
         verdict_after = "BLOCK" if status == "BLOCK" else ("REVISE" if status != "PASS" else accept)
         result["verdict"] = verdict_after
     if isinstance(result, dict) and prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC":

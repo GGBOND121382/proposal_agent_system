@@ -91,6 +91,20 @@
       "model_output_schema": "schemas/model/public_research_plan_model_output.schema.json"
     },
     {
+      "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+      "prompt_version": "1.0.0",
+      "prompt_file": "prompts/public_research/research_plan_scope_critic.md",
+      "input_schema": "schemas/prompts/public_research_plan_scope_critic_input.schema.json",
+      "output_schema": "schemas/prompts/public_research_plan_scope_critic_output.schema.json",
+      "model_profile": "security_review",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": null,
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/public_research_plan_scope_critic_model_input.schema.json",
+      "model_output_schema": "schemas/model/public_research_plan_scope_critic_model_output.schema.json"
+    },
+    {
       "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS",
       "prompt_version": "2.0.0",
       "prompt_file": "prompts/public_research/research_synthesis.md",
@@ -324,7 +338,7 @@
     },
     {
       "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
-      "prompt_version": "9.0.0",
+      "prompt_version": "9.1.0",
       "prompt_file": "prompts/argument/argument_architecture_critic.md",
       "input_schema": "schemas/prompts/argument_architecture_critic_input.schema.json",
       "output_schema": "schemas/prompts/argument_architecture_critic_output.schema.json",

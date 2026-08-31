@@ -263,6 +263,7 @@ def write_validation_bundle(
             "05_selection_report.json",
             "06_source_catalog.json",
             "07_coverage.json",
+            "07b_research_sufficiency.json",
             "08_quality_summary.json",
             "09_synthesis.json (written only after synthesis executes)",
             "10_claim_validation.json (written only after synthesis validation executes)",
@@ -283,17 +284,18 @@ def write_validation_bundle(
     write_json(root / "05_selection_report.json", selection_report or {})
     write_json(root / "06_source_catalog.json", _source_catalog(records))
     write_json(root / "07_coverage.json", coverage or {})
-    write_json(
-        root / "08_quality_summary.json",
-        _quality_summary(
-            normalized_plan=normalized_plan,
-            execution_report=execution_report,
-            discovery_manifest=discovery_manifest,
-            selection_report=selection_report,
-            coverage=coverage,
-            records=records,
-        ),
+    write_json(root / "07b_research_sufficiency.json", result_output.get("research_sufficiency") or {})
+    quality_summary = _quality_summary(
+        normalized_plan=normalized_plan,
+        execution_report=execution_report,
+        discovery_manifest=discovery_manifest,
+        selection_report=selection_report,
+        coverage=coverage,
+        records=records,
     )
+    quality_summary["research_sufficiency"] = result_output.get("research_sufficiency") or {}
+    quality_summary["research_gaps"] = list(result_output.get("research_gaps") or [])
+    write_json(root / "08_quality_summary.json", quality_summary)
     return root
 
 

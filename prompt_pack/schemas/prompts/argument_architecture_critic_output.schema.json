@@ -10,7 +10,7 @@
       "const": "P-ARGUMENT-ARCHITECTURE-CRITIC"
     },
     "prompt_version": {
-      "const": "9.0.0"
+      "const": "9.1.0"
     },
     "status": {
       "type": "string",

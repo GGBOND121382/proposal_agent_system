@@ -50,9 +50,7 @@
         "required": [
           "dimension",
           "score",
-          "passed",
-          "evidence",
-          "required_action"
+          "evidence"
         ]
       }
     },
@@ -175,17 +173,20 @@
               "FEASIBILITY_FOUNDATION",
               "METRIC_JUSTIFICATION"
             ]
+          },
+          "needs_user_input": {
+            "type": "boolean"
+          },
+          "requires_structure_change": {
+            "type": "boolean"
           }
         },
         "required": [
           "code",
-          "severity",
           "target",
           "description",
           "evidence_ids",
-          "repair_instruction",
-          "resolution",
-          "dimension"
+          "repair_instruction"
         ],
         "allOf": [
           {

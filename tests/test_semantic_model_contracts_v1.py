@@ -20,8 +20,10 @@ from app.deterministic_repair import apply_deterministic_contract_repairs
 from app.executor import PromptExecutor
 from app.llm import LLMResult
 from app.model_semantic_contracts import (
+    _argument_design_frozen_skeleton,
     _argument_quantified_support,
     _critic_chain_checks,
+    argument_evidence_binding_specs,
     build_argument_architecture_critic_model_input,
     build_argument_architecture_model_input,
     build_argument_skeleton_model_input,
@@ -477,7 +479,7 @@ def test_deterministic_question_type_repair_does_not_create_multi_select_enum():
     assert repaired.candidate["user_questions"][0]["answer_schema"]["type"] == "STRING"
 
 
-def test_failed_critic_dimension_requires_corresponding_issue():
+def test_legacy_model_pass_bit_cannot_create_canonical_critic_failure_without_issue():
     envelope = PACK.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
     model_input = build_argument_architecture_critic_model_input(envelope)
     semantic = _critic_semantic_all_pass(model_input)
@@ -485,13 +487,21 @@ def test_failed_critic_dimension_requires_corresponding_issue():
         "dimension": "ARGUMENT_CHAIN",
         "score": 1,
         "passed": False,
-        "evidence": ["存在链路缺失"],
-        "required_action": "补齐工作包到方法的论证关系。",
+        "evidence": ["模型自行声称链路未通过"],
+        "required_action": "模型自行要求补齐链路。",
     }
-    errors = semantic_model_reference_errors(
+    assert semantic_model_reference_errors(
         "P-ARGUMENT-ARCHITECTURE-CRITIC", envelope, semantic
+    ) == []
+
+    expanded = expand_argument_architecture_critic_model_output(envelope, semantic)
+    dimension = next(
+        item for item in expanded["result"]["quality_dimensions"]
+        if item["dimension"] == "ARGUMENT_CHAIN"
     )
-    assert any("requires at least one issue explicitly tagged with that dimension" in x for x in errors)
+    assert dimension["passed"] is True
+    assert dimension["required_action"] is None
+    assert expanded["status"] == "PASS"
 
 
 def test_critic_missing_review_unit_is_rejected():
@@ -646,38 +656,84 @@ def test_missing_foundation_evidence_cannot_pass():
     )
 
 
-def test_user_input_resolution_without_blocking_question_is_rejected():
+def test_needs_user_input_without_blocking_question_is_rejected():
     envelope = PACK.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
     model_input = build_argument_architecture_critic_model_input(envelope)
     semantic = _critic_semantic_all_pass(model_input)
-    semantic["quality_dimensions"][5] = {
-        "dimension": "FEASIBILITY_FOUNDATION",
-        "score": 1,
-        "passed": False,
-        "evidence": ["基础材料缺失"],
-        "required_action": "由用户补充基础材料。",
-    }
+    foundation_key = next(
+        unit["unit_key"]
+        for unit in model_input["candidate"]["review_units"]
+        if unit["component"] == "TEAM_EVIDENCE"
+    )
     semantic["issues"] = [
         {
             "code": "FOUNDATION_EVIDENCE_MISSING",
-            "dimension": "FEASIBILITY_FOUNDATION",
-            "severity": "P1",
             "target": {
                 "component": "FOUNDATION",
                 "thread_index": 0,
                 "item_index": 0,
+                "review_unit_key": foundation_key,
             },
             "description": "缺少研究基础材料。",
             "evidence_ids": [],
             "repair_instruction": "补充能够证明已有能力的材料。",
-            "resolution": "USER_INPUT",
+            "needs_user_input": True,
+            "requires_structure_change": False,
         }
     ]
     semantic["user_questions"] = []
     errors = semantic_model_reference_errors(
         "P-ARGUMENT-ARCHITECTURE-CRITIC", envelope, semantic
     )
-    assert any("USER_INPUT resolution requires" in x for x in errors)
+    assert any("needs_user_input requires" in x for x in errors)
+
+
+def test_needs_user_input_with_blocking_question_routes_to_user_under_runtime_policy():
+    envelope = PACK.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
+    model_input = build_argument_architecture_critic_model_input(envelope)
+    semantic = _critic_semantic_all_pass(model_input)
+    foundation_key = next(
+        unit["unit_key"]
+        for unit in model_input["candidate"]["review_units"]
+        if unit["component"] == "TEAM_EVIDENCE"
+    )
+    semantic["issues"] = [{
+        "code": "FOUNDATION_EVIDENCE_MISSING",
+        "target": {
+            "component": "FOUNDATION",
+            "thread_index": 0,
+            "item_index": 0,
+            "review_unit_key": foundation_key,
+        },
+        "description": "缺少可核验的研究基础材料。",
+        "evidence_ids": [],
+        "repair_instruction": "补充能够证明已有能力的材料。",
+        "needs_user_input": True,
+        "requires_structure_change": False,
+    }]
+    semantic["user_questions"] = [{
+        "target_area": "FOUNDATION_EVIDENCE",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充可核验的研究基础证据。",
+        "reason": "当前材料不足以支持研究基础判断。",
+        "answer_shape": "OBJECT",
+        "allowed_values": [],
+        "blocking": True,
+        "priority": "P1",
+    }]
+
+    assert semantic_model_reference_errors(
+        "P-ARGUMENT-ARCHITECTURE-CRITIC", envelope, semantic
+    ) == []
+    expanded = expand_argument_architecture_critic_model_output(envelope, semantic)
+    finding = next(
+        item for item in expanded["findings"]
+        if item["defect_namespace"] == "SEMANTIC_OBSERVATION"
+    )
+    assert finding["suggested_route"] == "USER"
+    assert finding["repairable"] is False
+    assert finding["blocking"] is True
+    assert expanded["status"] == "NEED_USER_INPUT"
 
 
 def test_blocking_evidence_gap_without_question_does_not_create_need_user_input_status():
@@ -1599,12 +1655,18 @@ def test_issue_code_cannot_coexist_with_corresponding_dimension_marked_pass():
             "resolution": "LOCAL_EDIT",
         }
     ]
-    errors = semantic_model_reference_errors(
+    assert semantic_model_reference_errors(
         "P-ARGUMENT-ARCHITECTURE-CRITIC",
         critic_envelope,
         output,
+    ) == []
+    expanded = expand_argument_architecture_critic_model_output(critic_envelope, output)
+    dimension = next(
+        item for item in expanded["result"]["quality_dimensions"]
+        if item["dimension"] == "METHOD_SUBSTANCE"
     )
-    assert any("must correspond to a failed quality dimension" in e for e in errors)
+    assert dimension["passed"] is False
+    assert dimension["required_action"] == "补充方法机制。"
 
 
 def test_evaluation_to_innovation_requires_explicit_semantic_relation():
@@ -1659,9 +1721,9 @@ def test_argument_stage_requirements_exclude_only_presentation_constraints():
     ]
 
 def test_live_equivalent_fake_gateway_routes_local_and_structural_critic_findings():
-    """Exercise LOCAL_EDIT and REGENERATE through the real semantic executor boundary."""
+    """Exercise runtime-owned local vs structural routing through the semantic executor."""
 
-    async def run_case(resolution):
+    async def run_case(requires_structure_change):
         producer_envelope = _argument_envelope_with_evidence()
 
         def critic_builder(model_envelope):
@@ -1702,7 +1764,8 @@ def test_live_equivalent_fake_gateway_routes_local_and_structural_critic_finding
                     "description": "方法机制没有形成可检验的输入—机制—输出闭环。",
                     "evidence_ids": [],
                     "repair_instruction": "补充方法机制和可验证输出。",
-                    "resolution": resolution,
+                    "needs_user_input": False,
+                    "requires_structure_change": requires_structure_change,
                 }
             ]
             return output
@@ -1721,7 +1784,7 @@ def test_live_equivalent_fake_gateway_routes_local_and_structural_critic_finding
         producer_run = await executor.execute(
             "P-ARGUMENT-ARCHITECTURE",
             producer_envelope,
-            project_id=f"project-route-{resolution.lower()}",
+            project_id=f"project-route-{str(requires_structure_change).lower()}",
         )
         assert producer_run["status"] == "PASS"
 
@@ -1737,7 +1800,7 @@ def test_live_equivalent_fake_gateway_routes_local_and_structural_critic_finding
         critic_run = await executor.execute(
             "P-ARGUMENT-ARCHITECTURE-CRITIC",
             critic_envelope,
-            project_id=f"project-route-{resolution.lower()}",
+            project_id=f"project-route-{str(requires_structure_change).lower()}",
         )
         assert critic_run["status"] == "REVISE"
         finding = critic_run["output"]["findings"][0]
@@ -1748,8 +1811,8 @@ def test_live_equivalent_fake_gateway_routes_local_and_structural_critic_finding
     # asyncio.gather must be created inside the local event loop.
     async def combined():
         return await asyncio.gather(
-            run_case("LOCAL_EDIT"),
-            run_case("REGENERATE"),
+            run_case(False),
+            run_case(True),
         )
 
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -1933,7 +1996,13 @@ def test_deterministic_finding_overrides_same_local_model_finding():
     ]
     assert len(matching) == 2
     assert {finding["defect_namespace"] for finding in matching} == {"MACHINE_DEFECT", "SEMANTIC_OBSERVATION"}
-    assert {finding["suggested_route"] for finding in matching} == {"ORIGINAL_PRODUCER", "ARGUMENT_ARCHITECTURE_AGENT"}
+    assert {finding["suggested_route"] for finding in matching} == {"ORIGINAL_PRODUCER"}
+    semantic_finding = next(
+        finding for finding in matching
+        if finding["defect_namespace"] == "SEMANTIC_OBSERVATION"
+    )
+    assert semantic_finding["severity"] == "P1"
+    assert semantic_finding["repairable"] is False
 
 
 def test_argument_repair_local_context_hides_machine_fields():
@@ -2136,9 +2205,15 @@ def test_v5_mutation_deterministic_route_overrides_model_block_before_final_stat
     ]
     assert len(matching) == 2
     assert {finding["defect_namespace"] for finding in matching} == {"MACHINE_DEFECT", "SEMANTIC_OBSERVATION"}
-    assert {finding["suggested_route"] for finding in matching} == {"ORIGINAL_PRODUCER", "BLOCK"}
-    assert output["status"] == "BLOCK"
-    assert output["result"]["verdict"] == "BLOCK"
+    assert {finding["suggested_route"] for finding in matching} == {"ORIGINAL_PRODUCER"}
+    semantic_finding = next(
+        finding for finding in matching
+        if finding["defect_namespace"] == "SEMANTIC_OBSERVATION"
+    )
+    assert semantic_finding["severity"] == "P1"
+    assert semantic_finding["suggested_route"] == "ORIGINAL_PRODUCER"
+    assert output["status"] == "REVISE"
+    assert output["result"]["verdict"] == "REVISE"
 
 
 def test_v5_invariant_machine_managed_fields_never_enter_argument_repair_writable_set():
@@ -2458,7 +2533,7 @@ def test_argument_design_contract_is_flat_frozen_skeleton_input_and_unregistered
         "project_task", "constraints", "evidence_cards", "frozen_skeleton",
         "design_seed", "revision_issues", "human_resolutions",
     }
-    assert model_input["frozen_skeleton"] == skeleton
+    assert model_input["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
     assert model_input["frozen_skeleton"] is not skeleton
     assert set(model_input["design_seed"] or {}) == {"existing_components", "existing_relations"}
     design = _flat_design_output(envelope)
@@ -2971,11 +3046,82 @@ def test_argument_two_stage_step4a_happy_path_projects_existing_canonical_output
     assert [call["desired_output_tokens"] for call in gateway.calls] == [
         8_192, 65_536
     ]
-    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == result["skeleton"]
+    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == _argument_design_frozen_skeleton(result["skeleton"])
     assert result["skeleton"] == skeleton
     assert result["design"] == design
     assert result["authored_state"] == assemble_argument_authored_state(skeleton, design)
     assert PACK.validate("P-ARGUMENT-ARCHITECTURE", "output", result["canonical_output"]) == []
+
+
+def test_argument_two_stage_exact_duplicate_innovation_evaluation_relation_is_runtime_canonicalized_without_retry():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    duplicate = copy.deepcopy(design["innovation_evaluation_refs"][0])
+    design["innovation_evaluation_refs"].append(duplicate)
+    gateway = _FakeArgumentStageGateway([skeleton, design])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+    ))
+
+    assert [call["stage"] for call in gateway.calls] == [
+        ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE
+    ]
+    assert len(result["design"]["innovation_evaluation_refs"]) == 1
+    assert result["design"]["innovation_evaluation_refs"][0] == duplicate
+    assert result["authored_state"]["research_threads"][0]["innovations"][0]["evaluation_refs"] == [
+        {"work_package_index": 0, "method_index": 0, "evaluation_index": 0}
+    ]
+    assert PACK.validate("P-ARGUMENT-ARCHITECTURE", "output", result["canonical_output"]) == []
+
+
+def test_argument_two_stage_exact_duplicate_foundation_support_relation_is_runtime_canonicalized_without_retry():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    design["foundation"] = [{
+        "thread_index": 0,
+        "foundation_index": 0,
+        "statement": "已有优化原型可支撑工作包实施。",
+        "evidence_ids": _available_evidence_ids(envelope),
+    }]
+    support = {
+        "thread_index": 0,
+        "foundation_index": 0,
+        "work_package_index": 0,
+        "method_index": None,
+    }
+    design["foundation_supports"] = [copy.deepcopy(support), copy.deepcopy(support)]
+    gateway = _FakeArgumentStageGateway([skeleton, design])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+    ))
+
+    assert [call["stage"] for call in gateway.calls] == [
+        ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE
+    ]
+    assert result["design"]["foundation_supports"] == [support]
+    assert result["authored_state"]["research_threads"][0]["foundation"][0]["supports"] == [
+        {"work_package_index": 0, "method_index": None}
+    ]
+    assert PACK.validate("P-ARGUMENT-ARCHITECTURE", "output", result["canonical_output"]) == []
+
+
+def test_argument_design_raw_duplicate_relation_is_rejected_if_runtime_normalizer_is_bypassed():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    design["innovation_evaluation_refs"].append(
+        copy.deepcopy(design["innovation_evaluation_refs"][0])
+    )
+
+    schema_errors = argument_design_model_output_errors(design)
+    reference_errors = argument_design_model_reference_errors(design, skeleton)
+
+    assert any("non-unique elements" in error for error in schema_errors)
+    assert any("duplicate exact relation" in error for error in reference_errors)
 
 
 def test_argument_semantic_regeneration_freezes_skeleton_and_accepts_only_improvement():
@@ -3498,6 +3644,319 @@ def test_argument_two_stage_step4a_skeleton_unknown_evidence_is_dropped_determin
     assert len(gateway.calls) == 2
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "gap_evidence_ids",
+        "limitation_mechanism_evidence_ids",
+        "objective_evidence_ids",
+    ],
+)
+def test_argument_two_stage_skeleton_thread_evidence_aliases_are_reference_closed(field):
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    skeleton["research_threads"][0][field] = ["EV-NOT-PRESENT"]
+    gateway = _FakeArgumentStageGateway([skeleton, _flat_design_output(envelope)])
+
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+    ))
+
+    assert result["skeleton"]["research_threads"][0][field] == []
+    assert len(gateway.calls) == 2
+
+
+def test_argument_evidence_binding_registry_covers_every_canonical_evidence_path():
+    specs = argument_evidence_binding_specs()
+    assert len(specs) == 12
+    assert {item["binding_id"] for item in specs} == {
+        "CENTRAL_PROPOSITION_EVIDENCE",
+        "RESEARCH_GAP_EVIDENCE",
+        "LIMITATION_MECHANISM_EVIDENCE",
+        "OBJECTIVE_EVIDENCE",
+        "WORK_PACKAGE_EVIDENCE",
+        "METHOD_EVIDENCE",
+        "THEORETICAL_PROPERTY_EVIDENCE",
+        "EVALUATION_EVIDENCE",
+        "BASELINE_EVIDENCE",
+        "INNOVATION_EVIDENCE",
+        "CLOSEST_PRIOR_WORK_EVIDENCE",
+        "FOUNDATION_EVIDENCE",
+    }
+    assert {item["stage"] for item in specs} == {"SKELETON", "DESIGN"}
+    assert all(item["invalid_reference_policy"] == "DROP_EXACT_INVALID_REF" for item in specs)
+
+    schema = json.loads(
+        (ROOT / "prompt_pack/schemas/model/argument_architecture_model_output.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    canonical_paths = set()
+
+    def collect(node, path=()):
+        if not isinstance(node, dict):
+            return
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            for key, child in properties.items():
+                child_path = (*path, key)
+                if key == "evidence_ids":
+                    canonical_paths.add("/".join(child_path))
+                collect(child, child_path)
+        items = node.get("items")
+        if isinstance(items, dict):
+            collect(items, (*path, "*"))
+
+    collect(schema)
+    assert {item["canonical_path"] for item in specs} == canonical_paths
+
+    def wire_paths(schema_path):
+        stage_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        result = set()
+        def walk(node, path=()):
+            if not isinstance(node, dict):
+                return
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                for key, child in properties.items():
+                    child_path = (*path, key)
+                    if key.endswith("evidence_ids"):
+                        result.add("/".join(child_path))
+                    walk(child, child_path)
+            items = node.get("items")
+            if isinstance(items, dict):
+                walk(items, (*path, "*"))
+        walk(stage_schema)
+        return result
+
+    skeleton_wire = wire_paths(
+        ROOT / "prompt_pack/schemas/model/argument_skeleton_model_output.schema.json"
+    )
+    design_wire = wire_paths(
+        ROOT / "prompt_pack/schemas/model/argument_design_model_output.schema.json"
+    )
+    assert {item["wire_path"] for item in specs if item["stage"] == "SKELETON"} == skeleton_wire
+    assert {item["wire_path"] for item in specs if item["stage"] == "DESIGN"} == design_wire
+    foundation = [item for item in specs if item["binding_id"] == "FOUNDATION_EVIDENCE"]
+    assert foundation[0]["reference_domain"] == "FOUNDATION_ELIGIBLE"
+
+
+def test_real_20260831_skeleton_response_drops_hallucinated_method_evidence_before_design():
+    fixture = json.loads(
+        (ROOT / "tests/fixtures/wf4_skeleton_evidence_reference_failure_20260831.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    skeleton = fixture["skeleton_response"]
+    archived_input = fixture["model_input"]
+    known = {card["evidence_id"] for card in archived_input["evidence_cards"]}
+    assert not (set(fixture["hallucinated_evidence_ids"]) & known)
+
+    # Recreate an equivalent canonical evidence registry with the exact archived
+    # evidence IDs, while replaying the real Stage-A response unchanged.
+    envelope = _argument_envelope_with_evidence()
+    envelope["payload"]["confirmed_facts"] = [
+        _claim(evidence_id, f"Regression evidence {index}: {evidence_id}")
+        for index, evidence_id in enumerate(sorted(known))
+    ]
+    rebuilt_known = {
+        card["evidence_id"] for card in build_argument_skeleton_model_input(envelope)["evidence_cards"]
+    }
+    assert known <= rebuilt_known
+
+    def design_response(stage, current_input, _schema):
+        assert stage == ARGUMENT_DESIGN_STAGE
+        frozen = current_input["frozen_skeleton"]["research_threads"]
+        serialized = json.dumps(frozen, ensure_ascii=False)
+        assert "METHOD-PROJ-001" not in serialized
+        assert "METHOD-PROJ-002" not in serialized
+        return _flat_design_output(envelope)
+
+    gateway = _FakeArgumentStageGateway([skeleton, design_response])
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+    ))
+    serialized = json.dumps(result["skeleton"], ensure_ascii=False)
+    assert "METHOD-PROJ-001" not in serialized
+    assert "METHOD-PROJ-002" not in serialized
+    assert len(gateway.calls) == 2
+
+
+def test_argument_design_foundation_reference_domain_is_subset_and_extra_ref_is_dropped():
+    envelope = _argument_envelope_with_evidence()
+    eligible_id = _available_evidence_ids(envelope)[0]
+    # Add one ordinary evidence record that is known but intentionally not
+    # FOUNDATION-eligible because it lacks quoted foundation material policy.
+    envelope["payload"]["confirmed_facts"].append({
+        "claim_id": "E-NONFOUNDATION",
+        "claim_text": "普通事实，不构成团队基础材料。",
+        "claim_type": "FACT",
+        "subject_id": None,
+        "temporal_status": "TIME_INDEPENDENT",
+        "qualifiers": [],
+        "numeric_values": [],
+        "source_refs": [{
+            "source_id": "src-nonfoundation",
+            "source_type": "PUBLIC_REPORT",
+            "document_version_id": None,
+            "section_id": None,
+            "span_start": None,
+            "span_end": None,
+            "quoted_text": "普通事实",
+            "source_hash": "c" * 64,
+            "authority_rank": 50,
+            "security_level": "PUBLIC",
+        }],
+        "knowledge_status": "DOCUMENT_EXTRACTED",
+        "security_level": "PUBLIC",
+    })
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    design["foundation"] = [{
+        "thread_index": 0,
+        "foundation_index": 0,
+        "statement": "已有合格内部材料支撑该研究基础。",
+        "evidence_ids": [eligible_id, "E-NONFOUNDATION"],
+    }]
+    design["foundation_supports"] = [{
+        "thread_index": 0,
+        "foundation_index": 0,
+        "work_package_index": 0,
+        "method_index": None,
+    }]
+    gateway = _FakeArgumentStageGateway([skeleton, design])
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+    ))
+    assert result["design"]["foundation"][0]["evidence_ids"] == [eligible_id]
+    assert len(gateway.calls) == 2
+
+
+def test_design_only_regeneration_recloses_baseline_skeleton_and_design_evidence():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    design = _flat_design_output(envelope)
+    authored = assemble_argument_authored_state(skeleton, design)
+    authored["research_threads"][0]["gap"]["evidence_ids"] = ["EV-STALE-SKELETON"]
+    authored["research_threads"][0]["work_packages"][0]["methods"][0]["evidence_ids"] = [
+        "EV-STALE-DESIGN"
+    ]
+    envelope["payload"]["revision_findings"] = [{
+        "code": "RESEARCH_DESIGN_INCOMPLETE",
+        "description": "方法需要局部语义修订。",
+        "repair_instruction": "修订方法但保持研究问题骨架。",
+        "severity": "P1",
+        "semantic_component": "METHOD",
+        "semantic_thread": 0,
+    }]
+    fresh_design = _flat_design_output(envelope)
+    gateway = _FakeArgumentStageGateway([fresh_design])
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope,
+        stage_gateway=gateway,
+        pack=PACK,
+        max_stage_attempts=1,
+        regeneration_baseline_authored_state=authored,
+    ))
+    first = gateway.calls[0]
+    assert first["stage"] == ARGUMENT_DESIGN_STAGE
+    inherited = first["model_input"]["frozen_skeleton"]["research_threads"][0]["inherited_evidence"]
+    assert inherited["gap"] == []
+    assert first["retry_context"]["previous_candidate"]["methods"][0]["evidence_ids"] == []
+    assert "EV-STALE-SKELETON" not in json.dumps(result["authored_state"], ensure_ascii=False)
+    assert "EV-STALE-DESIGN" not in json.dumps(result["authored_state"], ensure_ascii=False)
+
+
+def test_nonblocking_skeleton_cannot_accept_zero_research_threads():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    skeleton["research_threads"] = []
+    gateway = _FakeArgumentStageGateway([skeleton])
+    with pytest.raises(ArgumentStageContractError) as raised:
+        asyncio.run(orchestrate_argument_architecture_two_stage(
+            envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+        ))
+    assert raised.value.stage == ARGUMENT_SKELETON_STAGE
+    assert raised.value.phase == "cross_stage_validation"
+    assert any("must contain 1-4 research threads" in item for item in raised.value.errors)
+    assert len(gateway.calls) == 1
+
+
+def test_blocked_skeleton_may_have_zero_threads_when_user_question_owns_blocker():
+    envelope = _argument_envelope_with_evidence()
+    skeleton = _flat_skeleton_output(envelope)
+    skeleton["research_threads"] = []
+    skeleton["user_questions"] = [{
+        "target_area": "PROJECT_SCOPE",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充形成研究线程所必需的研究范围。",
+        "reason": "当前范围信息不足，不能可靠形成研究线程。",
+        "answer_shape": "STRING",
+        "allowed_values": [],
+        "blocking": True,
+        "priority": "P0",
+    }]
+    skeleton["cannot_proceed_reason"] = None
+    design = {key: copy.deepcopy(value) for key, value in _flat_design_output(envelope).items()}
+    for collection in (
+        "work_packages", "methods", "theoretical_properties", "evaluations",
+        "baselines", "ablations", "innovations", "innovation_prior_work",
+        "innovation_evaluation_refs", "foundation", "foundation_supports",
+    ):
+        design[collection] = []
+    gateway = _FakeArgumentStageGateway([skeleton, design])
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        envelope, stage_gateway=gateway, pack=PACK, max_stage_attempts=1
+    ))
+    assert result["skeleton"]["research_threads"] == []
+    assert result["canonical_output"]["status"] == "NEED_USER_INPUT"
+    assert len(gateway.calls) == 2
+
+
+def test_design_only_baseline_drops_foundation_that_lost_current_eligibility():
+    original = _argument_envelope_with_evidence()
+    evidence_id = _available_evidence_ids(original)[0]
+    skeleton = _flat_skeleton_output(original)
+    design = _flat_design_output(original)
+    design["foundation"] = [{
+        "thread_index": 0,
+        "foundation_index": 0,
+        "statement": "旧基线曾有合格团队基础。",
+        "evidence_ids": [evidence_id],
+    }]
+    design["foundation_supports"] = [{
+        "thread_index": 0,
+        "foundation_index": 0,
+        "work_package_index": 0,
+        "method_index": None,
+    }]
+    authored = assemble_argument_authored_state(skeleton, design)
+
+    current = copy.deepcopy(original)
+    current["payload"]["confirmed_facts"][0]["source_refs"][0]["source_type"] = "PUBLIC_SOURCE"
+    current["payload"]["revision_findings"] = [{
+        "code": "RESEARCH_DESIGN_INCOMPLETE",
+        "description": "设计需要局部更新。",
+        "repair_instruction": "更新设计。",
+        "severity": "P1",
+        "semantic_component": "METHOD",
+        "semantic_thread": 0,
+    }]
+    fresh = _flat_design_output(current)
+    gateway = _FakeArgumentStageGateway([fresh])
+    result = asyncio.run(orchestrate_argument_architecture_two_stage(
+        current,
+        stage_gateway=gateway,
+        pack=PACK,
+        max_stage_attempts=1,
+        regeneration_baseline_authored_state=authored,
+    ))
+    previous = gateway.calls[0]["retry_context"]["previous_candidate"]
+    assert previous["foundation"] == []
+    assert previous["foundation_supports"] == []
+    assert result["design"]["foundation"] == []
+
+
 def test_argument_two_stage_step4a_design_reference_failure_keeps_skeleton_frozen():
     envelope = _argument_envelope_with_evidence()
     skeleton = _flat_skeleton_output(envelope)
@@ -3514,7 +3973,7 @@ def test_argument_two_stage_step4a_design_reference_failure_keeps_skeleton_froze
     assert raised.value.stage == ARGUMENT_DESIGN_STAGE
     assert raised.value.phase == "reference_validation"
     assert len(gateway.calls) == 2
-    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == original_skeleton
+    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == _argument_design_frozen_skeleton(original_skeleton)
     assert skeleton == original_skeleton
 
 
@@ -3579,7 +4038,7 @@ def test_argument_two_stage_step4a_skeleton_full_retry_does_not_call_design_earl
     assert retry["validation_errors"]
     assert "previous_candidate" not in retry
     assert "repair_targets" not in gateway.calls[1]["model_input"]
-    assert gateway.calls[2]["model_input"]["frozen_skeleton"] == valid_skeleton
+    assert gateway.calls[2]["model_input"]["frozen_skeleton"] == _argument_design_frozen_skeleton(valid_skeleton)
     assert result["skeleton"] == valid_skeleton
 
 
@@ -3604,12 +4063,12 @@ def test_argument_two_stage_step4a_design_full_retry_freezes_skeleton_and_carrie
         ARGUMENT_DESIGN_STAGE,
         ARGUMENT_DESIGN_STAGE,
     ]
-    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == skeleton
+    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
     retry = gateway.calls[2]["retry_context"]
     assert retry["attempt"] == 2
     assert retry["recovery_mode"] == "FULL_STAGE_RETRY"
     assert "previous_candidate" not in retry
-    assert gateway.calls[2]["model_input"]["frozen_skeleton"] == skeleton
+    assert gateway.calls[2]["model_input"]["frozen_skeleton"] == _argument_design_frozen_skeleton(skeleton)
     assert any(
         "unresolved parent index" in error
         for error in retry["validation_errors"]
@@ -3887,7 +4346,7 @@ def test_argument_two_stage_cross_stage_readiness_conflict_is_normalized_locally
     assert [call["stage"] for call in gateway.calls] == [
         ARGUMENT_SKELETON_STAGE, ARGUMENT_DESIGN_STAGE
     ]
-    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == result["skeleton"]
+    assert gateway.calls[1]["model_input"]["frozen_skeleton"] == _argument_design_frozen_skeleton(result["skeleton"])
     assert result["design"]["cannot_proceed_reason"] is None
     assert result["design"]["user_questions"] == []
     assert PACK.validate_model("P-ARGUMENT-ARCHITECTURE", "output", result["authored_state"]) == []

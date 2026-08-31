@@ -25,6 +25,9 @@
       "$ref": "../prompts/public_research_plan_output.schema.json"
     },
     {
+      "$ref": "../prompts/public_research_plan_scope_critic_output.schema.json"
+    },
+    {
       "$ref": "../prompts/public_research_synthesis_output.schema.json"
     },
     {

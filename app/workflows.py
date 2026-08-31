@@ -31,6 +31,7 @@ from .workflow_gates import WorkflowGateMixin
 from .workflow_repair import WorkflowRepairMixin
 from .wf3_input import WorkflowInputRequired, normalize_wf3_time_constraints
 from .wf3_contracts import (
+    WF3_MODEL_PROMPTS,
     WF3_RESEARCH_CRITIC,
     compare_wf3_plan_candidates,
     compare_wf3_synthesis_candidates,
@@ -145,6 +146,120 @@ def semantic_gap_revision_finding(
 
 
 class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMixin):
+    def _persist_wf3_research_result(self, wf: dict[str, Any], state: dict[str, Any]) -> str | None:
+        """Persist the final WF-3 result without erasing known research gaps.
+
+        Workflow completion means the protocol finished successfully; it does not
+        imply that every research question achieved the strict evidence target.
+        Research sufficiency and gaps therefore remain first-class result fields
+        for downstream consumers and audit.
+        """
+        if wf.get("workflow_type") != "WF-3_HYBRID_ONLINE_ASSIST":
+            return None
+
+        existing = str(state.get("wf3_research_result_artifact_id") or "").strip()
+        if existing:
+            row = self.db.fetchone(
+                "SELECT id FROM artifacts WHERE id=? AND project_id=? AND workflow_id=? AND artifact_type='WF3_RESEARCH_RESULT'",
+                (existing, wf["project_id"], wf["id"]),
+            )
+            if row:
+                return existing
+
+        search = state.get("public_search_results") if isinstance(state.get("public_search_results"), dict) else {}
+        coverage = search.get("coverage") if isinstance(search.get("coverage"), dict) else {}
+        retrieval_health = search.get("retrieval_health") if isinstance(search.get("retrieval_health"), dict) else {}
+        sufficiency = search.get("research_sufficiency") if isinstance(search.get("research_sufficiency"), dict) else {}
+        if not sufficiency:
+            sufficiency = state.get("research_sufficiency") if isinstance(state.get("research_sufficiency"), dict) else {}
+        if not sufficiency:
+            # Backward-compatible default for Replay/SIMULATED archives created
+            # before ResearchSufficiency became a first-class WF-3 object.
+            sufficiency = {
+                "schema_version": "1.0",
+                "status": "SUFFICIENT",
+                "coverage_status": str(coverage.get("status") or "PASS"),
+                "research_gaps": [],
+                "blocking_reasons": [],
+                "retrieval_health_status": str(retrieval_health.get("status") or "UNOBSERVED"),
+                "may_continue": True,
+            }
+        gaps = list(search.get("research_gaps") or sufficiency.get("research_gaps") or state.get("research_gaps") or [])
+
+        synthesis = self._context_result(
+            wf["project_id"],
+            "P-PUBLIC-RESEARCH-SYNTHESIS",
+            workflow_id=wf["id"],
+            exact_workflow=True,
+        ) or {}
+        import_result = self._context_result(
+            wf["project_id"],
+            "P-ONLINE-RESULT-IMPORT-CRITIC",
+            workflow_id=wf["id"],
+            exact_workflow=True,
+        ) or {}
+
+        claims = [copy.deepcopy(item) for item in synthesis.get("claims") or [] if isinstance(item, dict)]
+        result_payload = {
+            "schema_version": "1.0",
+            "project_id": wf["project_id"],
+            "workflow_id": wf["id"],
+            "completion_semantics": (
+                "COMPLETED_WITH_RESEARCH_GAPS"
+                if str(sufficiency.get("status") or "") == "DEGRADED"
+                else "COMPLETED"
+            ),
+            "research_sufficiency": copy.deepcopy(sufficiency),
+            "research_gaps": copy.deepcopy(gaps),
+            "retrieval_health": copy.deepcopy(retrieval_health or {"status": "UNOBSERVED"}),
+            "coverage": copy.deepcopy(coverage),
+            "accepted_claim_ids": [str(v) for v in import_result.get("accepted_claim_ids") or []],
+            "reference_only_claim_ids": [str(v) for v in import_result.get("reference_only_claim_ids") or []],
+            "rejected_claim_ids": [str(v) for v in import_result.get("rejected_claim_ids") or []],
+            "claims": claims,
+            "source_catalog": copy.deepcopy(search.get("source_catalog") or search.get("sources") or []),
+            "validation_bundle_dir": search.get("validation_bundle_dir"),
+            "created_at": utc_now(),
+        }
+        row = self.db.fetchone(
+            "SELECT COALESCE(MAX(version),0) AS v FROM artifacts WHERE project_id=? AND workflow_id=? AND artifact_type='WF3_RESEARCH_RESULT'",
+            (wf["project_id"], wf["id"]),
+        )
+        artifact_id = new_id("artifact")
+        context_hash = sha256_json({key: value for key, value in result_payload.items() if key != "created_at"})
+        self.db.execute(
+            """INSERT INTO artifacts(id,project_id,workflow_id,artifact_type,prompt_id,version,status,security_level,context_hash,content_json,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                artifact_id,
+                wf["project_id"],
+                wf["id"],
+                "WF3_RESEARCH_RESULT",
+                "P-ONLINE-RESULT-IMPORT-CRITIC",
+                int((row or {}).get("v") or 0) + 1,
+                str(sufficiency.get("status") or "SUFFICIENT"),
+                self._project_level(wf["project_id"]),
+                context_hash,
+                json.dumps(result_payload, ensure_ascii=False),
+                result_payload["created_at"],
+            ),
+        )
+        state["wf3_research_result_artifact_id"] = artifact_id
+        state["research_sufficiency"] = copy.deepcopy(sufficiency)
+        state["research_gaps"] = copy.deepcopy(gaps)
+        state["completion_semantics"] = result_payload["completion_semantics"]
+        self.db.audit(
+            "WF3_RESEARCH_RESULT_PERSISTED",
+            project_id=wf["project_id"],
+            object_id=artifact_id,
+            metadata={
+                "workflow_id": wf["id"],
+                "research_sufficiency": str(sufficiency.get("status") or "SUFFICIENT"),
+                "gap_count": len(gaps),
+                "context_hash": context_hash,
+            },
+        )
+        return artifact_id
     def _wf3_accept_complete_candidate(
         self,
         wf: dict[str, Any],
@@ -335,14 +450,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
     ) -> list[str]:
         """Return exact bounded validation feedback for WF-3 regeneration."""
 
-        if prompt_id not in {
-            "P-SAFE-ONLINE-PACKAGE",
-            "P-SAFE-ONLINE-PACKAGE-CRITIC",
-            "P-PUBLIC-RESEARCH-PLAN",
-            "P-PUBLIC-RESEARCH-SYNTHESIS",
-            "P-PUBLIC-RESEARCH-CRITIC",
-            "P-ONLINE-RESULT-IMPORT-CRITIC",
-        }:
+        if prompt_id not in WF3_MODEL_PROMPTS:
             return []
         phase = ""
         current: BaseException | None = exc
@@ -2354,6 +2462,19 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
 
         round_number = completed + 1
         rounds[critic_prompt] = round_number
+        # A downstream independent Critic has rejected the previously accepted
+        # semantic subject.  Non-regression baselines are valid across provider
+        # retries, not across an explicit semantic rejection: retaining the old
+        # WF-3 Plan/Synthesis baseline here would forbid exactly the query/claim
+        # changes the Critic requested.
+        wf3_baselines = state.get("wf3_accepted_model_baselines")
+        if isinstance(wf3_baselines, dict) and producer in {
+            "P-PUBLIC-RESEARCH-PLAN",
+            "P-PUBLIC-RESEARCH-SYNTHESIS",
+        }:
+            wf3_baselines.pop(producer, None)
+            if not wf3_baselines:
+                state.pop("wf3_accepted_model_baselines", None)
         state.setdefault("producer_revision_findings", {})[producer] = findings
         state.setdefault("producer_regeneration_history", []).append({
             "critic_prompt": critic_prompt,
@@ -3380,6 +3501,8 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 state["completion_scope"] = "CONTENT_VALIDATION_ONLY"
         state.pop("last_error", None)
         state.pop("quality_blocker_ids", None)
+        if wf["workflow_type"] == "WF-3_HYBRID_ONLINE_ASSIST":
+            self._persist_wf3_research_result(wf, state)
         self._update(wf, status="COMPLETED", state=state)
         self.db.audit("WORKFLOW_COMPLETED", project_id=wf["project_id"], object_id=workflow_id, metadata={"workflow_type": wf["workflow_type"]})
         return self.get(workflow_id)

@@ -34,7 +34,13 @@ ResearchQuestion + CandidateSemanticRelevance ------> EvidenceQuestionBinding
                                                     +--> CoverageMatrix
 RetrievalHealth ------------------------------------> CoverageMatrix
                                                     |
-                                                    +--> ResearchSufficiencyDecision
+                                                    +--> ResearchGap
+                                                           |
+                                                           +--> ResearchSufficiency
+                                                                  |
+                                                                  +--> Synthesis
+                                                                  +--> ResearchCritic
+                                                                  +--> WF3ResearchResult
 ```
 
 Current Batch-A does not yet create full-text `EvidenceCard` objects; that remains Batch-B work.
@@ -99,6 +105,20 @@ For `hybrid`, an unavailable SearXNG web channel makes retrieval health `DEGRADE
 ### I8. Research sufficiency is a runtime decision
 
 `CoverageMatrix` and `RetrievalHealth` are runtime-owned. An LLM must not override them by declaring the literature review sufficient.
+
+`ResearchSufficiency` has three meanings:
+
+- `SUFFICIENT`: current quality requirements are met.
+- `DEGRADED`: usable evidence exists but deterministic `ResearchGap` objects remain; the protocol may continue only while preserving those limitations.
+- `BLOCKING_FAILURE`: retrieval/execution integrity failed or no qualifying public evidence exists; the protocol must not synthesize.
+
+### I9. A known ResearchGap is not a request to invent evidence
+
+`ResearchGap` is derived deterministically from coverage. Synthesis must preserve it as a limitation. A Research Critic observation that merely restates an already-known uncovered research question is non-blocking when the synthesis has preserved the gap; unsupported or over-generalized claims remain blocking.
+
+### I10. Workflow completion does not erase research sufficiency
+
+A completed WF-3 persists `WF3_RESEARCH_RESULT` containing `ResearchSufficiency`, `ResearchGap`, retrieval health, claim dispositions and the public source catalog. `COMPLETED` means the protocol completed; it does not imply that every research question was sufficiently covered.
 
 ## 5. Current deterministic relevance boundary
 

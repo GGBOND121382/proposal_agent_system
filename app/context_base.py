@@ -2249,7 +2249,17 @@ class ContextBuilder:
                 workflow_id=workflow_id,
             )
             package_candidate = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE") or {}
+            # Approved public topics are a workflow-owned authoritative object.
+            # The Critic must consume the exact same value as the Producer; do
+            # not rebuild this boundary independently from project security
+            # configuration, which may legitimately leave the legacy field empty.
+            critic_security_policy = copy.deepcopy(security_profile)
+            critic_security_policy["allowed_public_topics"] = list(
+                wf3_payload["allowed_topics"]
+            )
             replacements.extend([
+                ("payload.allowed_topics", list(wf3_payload["allowed_topics"])),
+                ("payload.security_policy", critic_security_policy),
                 ("payload.source_summary", self._wf3_source_summary(wf3_payload["source_items"])),
                 ("payload.deterministic_scan", self._wf3_deterministic_scan(package_candidate, config)),
             ])
@@ -2267,6 +2277,37 @@ class ContextBuilder:
                 ("payload.known_public_sources", known_sources),
                 ("payload.time_constraints", self._wf3_time_constraints(options)),
                 ("payload.evidence_requirements", self._wf3_evidence_requirements(options)),
+            ])
+        if prompt_id == "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC":
+            wf3_payload = self._wf3_online_assist_payload(
+                project=project,
+                config=config,
+                docs=docs,
+                state=state,
+                workflow_id=workflow_id,
+            )
+            safe_package = self._result(
+                project["id"],
+                "P-SAFE-ONLINE-PACKAGE",
+                workflow_id=workflow_id,
+                exact_workflow=True,
+            ) or {}
+            plan = self._result(
+                project["id"],
+                "P-PUBLIC-RESEARCH-PLAN",
+                workflow_id=workflow_id,
+                exact_workflow=True,
+            ) or {}
+            replacements.extend([
+                ("payload.approved_boundary", {
+                    "task_description": str(safe_package.get("task_description") or wf3_payload["research_need"].get("question") or "").strip(),
+                    "allowed_topics": list(wf3_payload["allowed_topics"]),
+                    "allowed_context": list(safe_package.get("allowed_context") or []),
+                    "prohibited_inferences": list(safe_package.get("prohibited_inferences") or []),
+                    "prohibited_outputs": list(safe_package.get("prohibited_outputs") or []),
+                }),
+                ("payload.research_questions", list(plan.get("research_questions") or [])),
+                ("payload.executable_queries", list(plan.get("queries") or [])),
             ])
         human_resolutions = self._human_resolutions_for_prompt(state, prompt_id, workflow_id)
         if "human_resolutions" in payload or human_resolutions:
@@ -3011,6 +3052,17 @@ class ContextBuilder:
 
         search_results = state.get("public_search_results")
         if search_results:
+            if prompt_id in {"P-PUBLIC-RESEARCH-SYNTHESIS", "P-PUBLIC-RESEARCH-CRITIC"}:
+                sufficiency = search_results.get("research_sufficiency") or {
+                    "schema_version": "1.0",
+                    "status": "SUFFICIENT",
+                    "coverage_status": str((search_results.get("coverage") or {}).get("status") or "PASS"),
+                    "research_gaps": [],
+                    "blocking_reasons": [],
+                    "retrieval_health_status": str((search_results.get("retrieval_health") or {}).get("status") or "UNOBSERVED"),
+                    "may_continue": True,
+                }
+                replacements.append(("payload.research_sufficiency", sufficiency))
             if "retrieved_sources" in payload:
                 replacements.append(("payload.retrieved_sources", search_results.get("sources", [])))
             if "extracted_passages" in payload or prompt_id == "P-PUBLIC-RESEARCH-CRITIC":

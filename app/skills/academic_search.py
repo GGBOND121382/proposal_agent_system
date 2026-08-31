@@ -16,7 +16,8 @@ from ..util import new_id, utc_now
 from .research_plan import normalize_doi, parse_time_scope_bounds
 
 
-ACADEMIC_PROVIDERS = ("openalex", "crossref", "semantic_scholar")
+ACADEMIC_PROVIDERS = ("openalex", "crossref")
+SUPPORTED_ACADEMIC_PROVIDERS = ("openalex", "crossref", "semantic_scholar")
 
 
 class AcademicDiscoveryError(RuntimeError):

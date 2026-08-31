@@ -409,7 +409,8 @@
           "method_index",
           "evaluation_index"
         ]
-      }
+      },
+      "uniqueItems": true
     },
     "foundation": {
       "type": "array",
@@ -480,7 +481,8 @@
           "work_package_index",
           "method_index"
         ]
-      }
+      },
+      "uniqueItems": true
     },
     "evidence_gaps": {
       "type": "array",

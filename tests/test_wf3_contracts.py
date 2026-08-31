@@ -38,13 +38,18 @@ from tests.test_runtime_recovery import SequencePromptExecutor, make_executor_db
 
 FIXTURE = Path(__file__).parent / "fixtures" / "wf3_historical_regressions_20260826.json"
 PACK = PromptPack(Path(__file__).resolve().parents[1] / "prompt_pack")
-WF3_PROMPT_IDS = (
+WF3_HISTORICAL_PROMPT_IDS = (
     "P-SAFE-ONLINE-PACKAGE",
     "P-SAFE-ONLINE-PACKAGE-CRITIC",
     "P-PUBLIC-RESEARCH-PLAN",
     "P-PUBLIC-RESEARCH-SYNTHESIS",
     "P-PUBLIC-RESEARCH-CRITIC",
     "P-ONLINE-RESULT-IMPORT-CRITIC",
+)
+WF3_PROMPT_IDS = (
+    *WF3_HISTORICAL_PROMPT_IDS[:3],
+    "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+    *WF3_HISTORICAL_PROMPT_IDS[3:],
 )
 
 
@@ -67,14 +72,14 @@ def test_wf3_historical_inventory_names_and_hashes_are_immutable():
     ]
     assert all(len(item["input_sha256"]) == 64 for item in inventory)
     assert all(len(item["output_sha256"]) == 64 for item in inventory)
-    assert set(item["prompt_id"] for item in inventory) == set(WF3_PROMPT_IDS)
+    assert set(item["prompt_id"] for item in inventory) == set(WF3_HISTORICAL_PROMPT_IDS)
 
 
 def test_recorded_wf3_requests_fit_node_budgets_with_regression_headroom():
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
     measurements = fixture["request_size_baseline"]
     measurements.pop("measurement", None)
-    assert set(measurements) == set(WF3_PROMPT_IDS)
+    assert set(measurements) == set(WF3_HISTORICAL_PROMPT_IDS)
     for prompt_id, metrics in measurements.items():
         assert metrics["provider_visible_chars"] == (
             metrics["system_prompt_chars"] + metrics["provider_envelope_chars"]
@@ -368,6 +373,24 @@ def test_each_wf3_model_node_carries_exact_contract_error_into_bounded_retry(pro
     ]
 
 
+def test_plan_scope_critic_is_runtime_controlled_as_a_critic_not_a_producer():
+    candidate = copy.deepcopy(
+        PACK.replay_output("P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC", "high_risk")
+    )
+    candidate["status"] = "PASS"
+    candidate["result"]["verdict"] = "ACCEPT"
+    producer_normalized, producer_report = canonicalize_wf3_producer_status(
+        "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC", candidate
+    )
+    assert producer_report is None
+    critic_normalized, critic_report = canonicalize_wf3_critic_control(
+        "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC", producer_normalized
+    )
+    assert critic_normalized["status"] == "REVISE"
+    assert critic_normalized["result"]["verdict"] == "REVISE"
+    assert critic_report is not None
+
+
 def test_wf3_provider_retry_passes_previous_validation_errors_to_next_attempt(tmp_path):
     db = make_executor_db(tmp_path)
     state = {
@@ -495,11 +518,12 @@ def test_wf3_business_nullable_fields_normalize_exact_null_only(prompt_id, mutat
     assert report["normalized_count"] == 1
 
 
-def test_wf3_field_ownership_covers_six_model_nodes_and_search_without_schema_changes():
+def test_wf3_field_ownership_covers_current_model_nodes_and_search_without_schema_changes():
     assert set(WF3_FIELD_OWNERSHIP) == {
         "P-SAFE-ONLINE-PACKAGE",
         "P-SAFE-ONLINE-PACKAGE-CRITIC",
         "P-PUBLIC-RESEARCH-PLAN",
+        "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
         "PUBLIC-RESEARCH-SEARCH",
         "P-PUBLIC-RESEARCH-SYNTHESIS",
         "P-PUBLIC-RESEARCH-CRITIC",
@@ -1199,3 +1223,99 @@ def test_runtime_prompt_trace_uses_the_same_unambiguous_provider_request_names()
     assert trace["provider_input_envelope"] == provider_envelope
     assert trace["provider_request_envelope"] == provider_envelope
     assert trace["provider_input_sha256"] == trace["provider_request_sha256"]
+
+
+
+def test_wf3_scope_critic_supersedes_plan_baseline_before_regeneration():
+    critic = "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC"
+    producer = "P-PUBLIC-RESEARCH-PLAN"
+
+    class _Pack:
+        def entry(self, prompt_id):
+            return {"model_contract_mode": "SEMANTIC"} if prompt_id == critic else {}
+
+    class _DB:
+        def __init__(self):
+            self.events = []
+
+        def audit(self, event_type, **kwargs):
+            self.events.append((event_type, copy.deepcopy(kwargs)))
+
+    class _Harness(WorkflowEngine):
+        def __init__(self, wf):
+            self._wf = wf
+            self.pack = _Pack()
+            self.db = _DB()
+
+        def get(self, workflow_id):
+            assert workflow_id == self._wf["id"]
+            result = copy.deepcopy(self._wf)
+            result["steps"] = [
+                {"prompt_id": "P-SAFE-ONLINE-PACKAGE"},
+                {"prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC"},
+                {"prompt_id": producer},
+                {"prompt_id": critic},
+                {"type": "PUBLIC_SEARCH"},
+            ]
+            return result
+
+        def _update(self, wf, **kwargs):
+            for key in ("status", "current_step", "state"):
+                if key in kwargs:
+                    wf[key] = kwargs[key]
+            self._wf.update(
+                status=wf.get("status"),
+                current_step=wf.get("current_step"),
+                state=copy.deepcopy(wf.get("state") or {}),
+            )
+
+        def _clear_workflow_repair_rereview(self, state, prompt_id):
+            pending = state.get("pending_repair_rereviews")
+            if isinstance(pending, dict):
+                pending.pop(prompt_id, None)
+
+    state = {
+        "options": {"original_producer_regeneration_limit": 2},
+        "step_results": {"0": {}, "1": {}, "2": {"run_id": "plan-old"}, "3": {}},
+        "wf3_accepted_model_baselines": {
+            producer: {"run_id": "plan-old", "output_hash": "old-hash"},
+            "P-PUBLIC-RESEARCH-SYNTHESIS": {"run_id": "synthesis-old", "output_hash": "synth-hash"},
+        },
+    }
+    wf = {
+        "id": "wf-scope-regeneration",
+        "project_id": "project-1",
+        "workflow_type": "WF-3_HYBRID_ONLINE_ASSIST",
+        "status": "RUNNING",
+        "current_step": 3,
+        "state": state,
+    }
+    finding = {
+        "finding_instance_id": "runtime-query-scope-1",
+        "code": "PUBLIC_RESEARCH_QUERY_SCOPE_EXCESS",
+        "severity": "P1",
+        "category": "SECURITY",
+        "target_type": "PUBLIC_RESEARCH_QUERY",
+        "target_path_or_span": "/payload/executable_queries/0/query",
+        "description": "最终查询超出已批准公开研究边界。",
+        "evidence_refs": [],
+        "repairable": False,
+        "repair_instruction": "重新生成该查询并保持在已批准主题范围内。",
+        "suggested_route": "ORIGINAL_PRODUCER",
+        "blocking": True,
+    }
+    engine = _Harness(wf)
+    result = engine._prepare_original_producer_regeneration(
+        wf,
+        state,
+        critic_prompt=critic,
+        output={"findings": [finding]},
+    )
+    assert result == "SCHEDULED"
+    assert wf["current_step"] == 2
+    # The rejected Plan is no longer a non-regression baseline. A new Plan is
+    # allowed to change the query set exactly as requested by the scope critic.
+    assert producer not in state["wf3_accepted_model_baselines"]
+    assert "P-PUBLIC-RESEARCH-SYNTHESIS" in state["wf3_accepted_model_baselines"]
+    assert state["producer_revision_findings"][producer][0]["code"] == "PUBLIC_RESEARCH_QUERY_SCOPE_EXCESS"
+    assert state["step_results"] == {"0": {}, "1": {}}

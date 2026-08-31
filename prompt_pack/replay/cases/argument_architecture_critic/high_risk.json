@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
-    "prompt_version": "9.0.0",
+    "prompt_version": "9.1.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -1376,7 +1376,7 @@
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
-    "prompt_version": "9.0.0",
+    "prompt_version": "9.1.0",
     "status": "BLOCK",
     "result": {
       "verdict": "BLOCK",

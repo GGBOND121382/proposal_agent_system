@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "safe_online_package_critic_model_input.schema.json",
+  "$id": "public_research_plan_scope_critic_model_input.schema.json",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "outbound_candidate": {
+    "approved_boundary": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -12,77 +12,87 @@
           "type": "string",
           "minLength": 1
         },
-        "queries": {
+        "allowed_topics": {
           "type": "array",
+          "minItems": 1,
           "items": {
             "type": "string",
             "minLength": 1
-          },
-          "minItems": 1,
-          "uniqueItems": true
+          }
         },
         "allowed_context": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1
-          },
-          "uniqueItems": true
+          }
         },
         "prohibited_inferences": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1
-          },
-          "uniqueItems": true
+          }
         },
         "prohibited_outputs": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 1
-          },
-          "uniqueItems": true
+          }
         }
       },
       "required": [
         "task_description",
-        "queries",
+        "allowed_topics",
         "allowed_context",
         "prohibited_inferences",
         "prohibited_outputs"
       ]
     },
-    "approved_boundary": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "allowed_topics": {
-          "type": "array",
-          "items": {
+    "research_questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "executable_queries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "query": {
             "type": "string",
             "minLength": 1
           },
-          "uniqueItems": true
+          "linked_question_indexes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         },
-        "forbidden_semantic_categories": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "uniqueItems": true
-        }
-      },
-      "required": [
-        "allowed_topics",
-        "forbidden_semantic_categories"
-      ]
+        "required": [
+          "query_index",
+          "query",
+          "linked_question_indexes"
+        ]
+      }
     }
   },
   "required": [
-    "outbound_candidate",
-    "approved_boundary"
+    "approved_boundary",
+    "research_questions",
+    "executable_queries"
   ]
 }

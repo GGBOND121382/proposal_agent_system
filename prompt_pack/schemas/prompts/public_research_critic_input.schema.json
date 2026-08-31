@@ -356,6 +356,9 @@
               "relevance"
             ]
           }
+        },
+        "research_sufficiency": {
+          "$ref": "../common/research_sufficiency.schema.json"
         }
       },
       "additionalProperties": false,

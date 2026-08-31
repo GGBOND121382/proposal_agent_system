@@ -169,12 +169,34 @@ class PublicResearchService:
             "queries": self._queries(plan),
             "mode": "SIMULATED_ARCHIVE",
             "coverage": {
+                "status": "PASS",
                 "dimensions": {
                     "recent_work": {"status": "PASS"},
                     "comparable_baselines": {"status": "PASS"},
                     "limitation_mechanisms": {"status": "PASS"},
-                }
+                },
             },
+            "retrieval_health": {
+                "schema_version": "2.0",
+                "status": "UNOBSERVED",
+                "retrieval_provider": "simulated",
+                "enabled_providers": [],
+                "disabled_providers": [],
+                "providers": {},
+                "reason_codes": [],
+                "blocking_reason_codes": [],
+                "missing_execution_queries": [],
+            },
+            "research_sufficiency": {
+                "schema_version": "1.0",
+                "status": "SUFFICIENT",
+                "coverage_status": "PASS",
+                "research_gaps": [],
+                "blocking_reasons": [],
+                "retrieval_health_status": "UNOBSERVED",
+                "may_continue": True,
+            },
+            "research_gaps": [],
             "issues": [],
         }
 

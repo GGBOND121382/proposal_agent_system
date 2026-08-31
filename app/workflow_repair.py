@@ -761,6 +761,11 @@ class WorkflowRepairMixin:
                 return
         state["public_search_results"] = candidate
         state["public_search_accepted_baseline"] = summarize_public_search(candidate)
+        if isinstance(candidate.get("research_sufficiency"), dict):
+            state["research_sufficiency"] = copy.deepcopy(candidate["research_sufficiency"])
+            state["research_gaps"] = copy.deepcopy(candidate.get("research_gaps") or candidate["research_sufficiency"].get("research_gaps") or [])
+        if isinstance(candidate.get("retrieval_health"), dict):
+            state["retrieval_health"] = copy.deepcopy(candidate["retrieval_health"])
 
     @staticmethod
     def _repair_state_key(prompt_id: str, state: dict[str, Any]) -> str:

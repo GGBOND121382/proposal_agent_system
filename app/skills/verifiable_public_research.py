@@ -304,17 +304,21 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             result.output["validation_bundle_dir"] = str(validation_root)
             result.artifacts = list(result.artifacts or []) + [str(validation_root / "00_run_manifest.json"), str(validation_root / "08_quality_summary.json")]
 
-            if strict and quality_profile == "proposal_related_work" and result.output.get("coverage", {}).get("status") != "PASS":
-                raise PublicResearchRetrievalError(
-                    "Proposal related-work research coverage is insufficient; synthesis is blocked until retrieval depth/diversity gaps are repaired.",
-                    details={
-                        "coverage": result.output.get("coverage"),
-                        "selection_report": result.output.get("selection_report"),
-                        "archive_manifest": result.output.get("archive_manifest"),
-                        "validation_bundle_dir": result.output.get("validation_bundle_dir"),
-                        "source_count": len(result.output.get("source_catalog") or []),
-                    },
-                )
+            if strict and quality_profile == "proposal_related_work":
+                sufficiency = result.output.get("research_sufficiency") or {}
+                if sufficiency.get("status") == "BLOCKING_FAILURE":
+                    raise PublicResearchRetrievalError(
+                        "Public research cannot continue because retrieval produced no usable evidence or an approved query was not executed by any enabled provider.",
+                        details={
+                            "research_sufficiency": sufficiency,
+                            "coverage": result.output.get("coverage"),
+                            "retrieval_health": result.output.get("retrieval_health"),
+                            "selection_report": result.output.get("selection_report"),
+                            "archive_manifest": result.output.get("archive_manifest"),
+                            "validation_bundle_dir": result.output.get("validation_bundle_dir"),
+                            "source_count": len(result.output.get("source_catalog") or []),
+                        },
+                    )
             return result
         finally:
             _DUPLICATE_ISSUES.reset(token_duplicate)

@@ -44,7 +44,7 @@ from .runtime_failures import classify_runtime_failure, persistence_safe_failure
 from .security import RoutingDenied
 from .secret_redaction import redact_secrets, redact_secret_text
 from .util import new_id, sha256_json, utc_now
-from .wf3_contracts import wf3_provider_request_budget_report
+from .wf3_contracts import enforce_wf3_pre_model_guards, wf3_provider_request_budget_report
 
 
 class RecoverablePromptExecutionError(PromptExecutionError):
@@ -1190,6 +1190,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     },
                 }
             elif semantic_model_contract:
+                enforce_wf3_pre_model_guards(prompt_id, model_envelope)
                 provider_call_envelope = build_semantic_model_input(prompt_id, model_envelope)
                 provider_call_envelope = self._merge_semantic_retry_issues(
                     prompt_id,

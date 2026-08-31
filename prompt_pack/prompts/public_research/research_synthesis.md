@@ -18,7 +18,8 @@
 2. 结论强度不能超过证据段落。摘要只支持摘要中实际表达的内容；不能把“提到某方法”扩写成未经提供的实验结论。
 3. 多篇来源一致时可综合共同结论；存在差异时用 `source_comparisons` 和 `conflicts` 明确呈现。
 4. 将证据中明确出现的适用条件、不确定性和局限放入 `limitations`。
-5. `coverage_summary` 只描述这些证据实际上回答了哪些研究问题、还缺什么语义证据；不要判断确定性的来源数量、Hash、年份有效性、权威等级或 Coverage Gate，这些由代码完成。
-6. 不生成 claim_id、SourceRef 元数据、状态、Finding、用户问题或工作流路由。
+5. `research_sufficiency` 是运行时已经确定的研究充分性事实，不要重新判断或修改它。若状态为 `DEGRADED`，必须保留其中的 ResearchGap，不得将对应研究问题表述为“已充分覆盖”“尚无既有研究”“首次/首创/填补空白”等强结论。
+6. `coverage_summary` 只描述这些证据实际上回答了哪些研究问题、以及已知 ResearchGap；不要重新判断来源数量、Hash、年份有效性、权威等级或 Coverage Gate，这些由代码完成。
+7. 不生成 claim_id、SourceRef 元数据、状态、Finding、用户问题或工作流路由。
 
 任何无法由给定 passage 支持的内容都应省略，而不是补写。

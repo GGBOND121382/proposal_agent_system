@@ -11,6 +11,7 @@ from jsonschema import Draft202012Validator
 from .model_semantic_contracts import (
     argument_design_model_output_errors,
     argument_design_model_reference_errors,
+    argument_evidence_binding_specs,
     argument_foundation_eligible_evidence_ids,
     argument_skeleton_model_output_errors,
     assemble_argument_authored_state,
@@ -26,7 +27,7 @@ from .model_semantic_contracts import (
 ARGUMENT_SKELETON_STAGE = "SKELETON"
 ARGUMENT_DESIGN_STAGE = "DESIGN"
 ARGUMENT_STAGE_REPAIR_SUFFIX = "_REPAIR"
-ARGUMENT_TWO_STAGE_CONTRACT_VERSION = "ARGUMENT_TWO_STAGE_V15"
+ARGUMENT_TWO_STAGE_CONTRACT_VERSION = "ARGUMENT_TWO_STAGE_V16"
 
 # Stage-local ceilings replace the legacy one-size-fits-all 131072-token demand
 # for the internal two-stage Argument producer.  They are intentionally kept
@@ -101,7 +102,10 @@ def argument_stage_prompt_text(stage: str) -> str:
         return (
             "# 论证架构：研究设计阶段\n\n"
             "只确定“怎么做、怎么验证、创新在哪里、已有基础支撑什么”。"
-            "`frozen_skeleton` 是只读事实：不得重写中心命题、研究范围或研究线程。"
+            "`frozen_skeleton` 是运行时从已通过 Stage-A 骨架投影出的只读语义视图：不得重写中心命题、研究范围或研究线程。"
+            "其中 `research_threads[].thread_index` 仅用于引用冻结线程，`inherited_evidence` 按 gap、limitation_mechanism、objective 保留该线程已有证据绑定。"
+            "`design_seed.existing_components[].seed_key` 是请求内语义句柄；关系提示若提供 `source_key/target_key`，"
+            "应通过对应 seed component 理解其语义，不要把 seed_key 当作输出机器 ID。"
             "围绕冻结线程生成工作包、方法、必要理论性质、验证方案、代表性基线、必要消融、"
             "创新点及其最近工作/验证关联；只有存在合格证据时才声明团队基础。\n\n"
             "使用输出契约规定的局部整数索引建立这些语义记录之间的关联；"
@@ -185,39 +189,77 @@ def _known_evidence_ids(model_input: dict[str, Any]) -> set[str]:
     }
 
 
+def _binding_pattern_tokens(spec: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        token for token in str(spec.get("wire_path") or "").strip("/").split("/")
+        if token
+    )
+
+
+def _iter_binding_lists(
+    node: Any,
+    pattern: tuple[str, ...],
+    path: tuple[str, ...] = (),
+):
+    if not pattern:
+        if isinstance(node, list):
+            yield path, node
+        return
+    token, *rest = pattern
+    tail = tuple(rest)
+    if token == "*":
+        if not isinstance(node, list):
+            return
+        for index, item in enumerate(node):
+            yield from _iter_binding_lists(item, tail, (*path, str(index)))
+        return
+    if isinstance(node, dict) and token in node:
+        yield from _iter_binding_lists(node[token], tail, (*path, token))
+
+
+def _registered_evidence_parent_paths(stage: str, candidate: dict[str, Any]) -> set[tuple[str, ...]]:
+    paths: set[tuple[str, ...]] = set()
+    for spec in argument_evidence_binding_specs(stage):
+        pattern = _binding_pattern_tokens(spec)
+        paths.update(path for path, _values in _iter_binding_lists(candidate, pattern))
+    return paths
+
+
 def _stage_evidence_reference_errors(
-    model_input: dict[str, Any], candidate: dict[str, Any]
+    stage: str, model_input: dict[str, Any], candidate: dict[str, Any]
 ) -> list[str]:
     known = _known_evidence_ids(model_input)
+    foundation_eligible = {
+        str(value)
+        for value in model_input.get("foundation_eligible_evidence_ids") or []
+        if str(value).strip()
+    }
     errors: list[str] = []
-
-    def visit(node: Any, path: tuple[str, ...] = ()) -> None:
-        if isinstance(node, list):
-            for index, item in enumerate(node):
-                visit(item, (*path, str(index)))
-            return
-        if not isinstance(node, dict):
-            return
-        for key, value in node.items():
-            child = (*path, str(key))
-            if key == "evidence_ids" and isinstance(value, list):
-                for index, evidence_id in enumerate(value):
-                    if str(evidence_id) not in known:
-                        errors.append(
-                            "/" + "/".join((*child, str(index)))
-                            + f": evidence_id {evidence_id!r} is not present in evidence_cards"
-                        )
-            else:
-                visit(value, child)
-
-    visit(candidate)
+    for spec in argument_evidence_binding_specs(stage):
+        pattern = _binding_pattern_tokens(spec)
+        domain = str(spec.get("reference_domain") or "EVIDENCE_CARDS")
+        for parent_path, values in _iter_binding_lists(candidate, pattern):
+            for index, evidence_id in enumerate(values):
+                evidence_text = str(evidence_id)
+                pointer = "/" + "/".join((*parent_path, str(index)))
+                if evidence_text not in known:
+                    errors.append(
+                        pointer
+                        + f": evidence_id {evidence_id!r} is not present in evidence_cards"
+                    )
+                    continue
+                if domain == "FOUNDATION_ELIGIBLE" and evidence_text not in foundation_eligible:
+                    errors.append(
+                        pointer
+                        + f": evidence_id {evidence_id!r} is not present in foundation_eligible_evidence_ids"
+                    )
     return errors
 
 
 def _skeleton_reference_errors(
     model_input: dict[str, Any], candidate: dict[str, Any]
 ) -> list[str]:
-    errors = _stage_evidence_reference_errors(model_input, candidate)
+    errors = _stage_evidence_reference_errors(ARGUMENT_SKELETON_STAGE, model_input, candidate)
     threads = candidate.get("research_threads")
     thread_count = len(threads) if isinstance(threads, list) else None
     gaps = candidate.get("evidence_gaps")
@@ -242,7 +284,7 @@ def _design_reference_errors(
 ) -> list[str]:
     errors = [
         *argument_design_model_reference_errors(candidate, frozen_skeleton),
-        *_stage_evidence_reference_errors(model_input, candidate),
+        *_stage_evidence_reference_errors(ARGUMENT_DESIGN_STAGE, model_input, candidate),
     ]
     eligible = {
         str(value)
@@ -342,6 +384,7 @@ def argument_stage_repair_scope_paths(errors: list[str]) -> tuple[tuple[str, ...
 
 _UNKNOWN_EVIDENCE_ERROR_PREFIX = "evidence_id "
 _UNKNOWN_EVIDENCE_ERROR_SUFFIX = " is not present in evidence_cards"
+_FOUNDATION_EVIDENCE_DOMAIN_ERROR_SUFFIX = " is not present in foundation_eligible_evidence_ids"
 
 
 def _value_at_pointer(root: Any, path: tuple[str, ...]) -> Any:
@@ -365,6 +408,8 @@ def _value_at_pointer(root: Any, path: tuple[str, ...]) -> Any:
 def _drop_reported_unknown_evidence_ids(
     candidate: Any,
     errors: list[str],
+    *,
+    stage: str | None = None,
 ) -> tuple[Any, list[str]]:
     """Delete only exact evidence values named by reference validation.
 
@@ -378,6 +423,11 @@ def _drop_reported_unknown_evidence_ids(
     if not isinstance(repaired, dict):
         return repaired, []
 
+    allowed_parent_paths = (
+        _registered_evidence_parent_paths(stage, repaired)
+        if stage is not None
+        else None
+    )
     planned: dict[tuple[str, ...], set[int]] = {}
     resolved_indexes: set[int] = set()
     for error_index, raw_error in enumerate(errors):
@@ -388,9 +438,11 @@ def _drop_reported_unknown_evidence_ids(
         if (
             path is None
             or len(path) < 2
-            or not path[-2].endswith("evidence_ids")
             or not message.startswith(_UNKNOWN_EVIDENCE_ERROR_PREFIX)
-            or not message.endswith(_UNKNOWN_EVIDENCE_ERROR_SUFFIX)
+            or not message.endswith((
+                _UNKNOWN_EVIDENCE_ERROR_SUFFIX,
+                _FOUNDATION_EVIDENCE_DOMAIN_ERROR_SUFFIX,
+            ))
         ):
             continue
         try:
@@ -398,11 +450,20 @@ def _drop_reported_unknown_evidence_ids(
         except ValueError:
             continue
         parent_path = path[:-1]
+        if stage is None and not path[-2].endswith("evidence_ids"):
+            continue
         values = _value_at_pointer(repaired, parent_path)
         if not isinstance(values, list) or not (0 <= item_index < len(values)):
             continue
+        if allowed_parent_paths is not None and parent_path not in allowed_parent_paths:
+            continue
+        suffix = (
+            _FOUNDATION_EVIDENCE_DOMAIN_ERROR_SUFFIX
+            if message.endswith(_FOUNDATION_EVIDENCE_DOMAIN_ERROR_SUFFIX)
+            else _UNKNOWN_EVIDENCE_ERROR_SUFFIX
+        )
         expected_repr = message[
-            len(_UNKNOWN_EVIDENCE_ERROR_PREFIX) : -len(_UNKNOWN_EVIDENCE_ERROR_SUFFIX)
+            len(_UNKNOWN_EVIDENCE_ERROR_PREFIX) : -len(suffix)
         ]
         if repr(values[item_index]) != expected_repr:
             continue
@@ -1323,6 +1384,27 @@ def _local_index_tuple(item: Any, fields: tuple[str, ...]) -> tuple[int, ...] | 
     return tuple(values)
 
 
+def _local_relation_tuple(
+    item: Any,
+    fields: tuple[str, ...],
+    *,
+    nullable_fields: frozenset[str] = frozenset(),
+) -> tuple[Any, ...] | None:
+    """Return an exact local relation identity without guessing malformed values."""
+    if not isinstance(item, dict):
+        return None
+    values: list[Any] = []
+    for field in fields:
+        value = item.get(field)
+        if value is None and field in nullable_fields:
+            values.append(None)
+            continue
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        values.append(value)
+    return tuple(values)
+
+
 def _normalize_design_mechanical_artifacts(
     candidate: Any,
     frozen_skeleton: dict[str, Any],
@@ -1363,6 +1445,53 @@ def _normalize_design_mechanical_artifacts(
 
     dedupe_owned_rows("user_questions", _question_key)
     dedupe_owned_rows("evidence_gaps", _gap_key)
+
+    def dedupe_relation_rows(
+        collection: str,
+        fields: tuple[str, ...],
+        *,
+        nullable_fields: frozenset[str] = frozenset(),
+    ) -> None:
+        """Canonicalize exact relation-set duplicates, preserving first occurrence."""
+        rows = normalized.get(collection)
+        if not isinstance(rows, list):
+            return
+        seen: set[tuple[Any, ...]] = set()
+        kept: list[Any] = []
+        for item in rows:
+            key = _local_relation_tuple(
+                item, fields, nullable_fields=nullable_fields
+            )
+            if key is not None and key in seen:
+                continue
+            kept.append(item)
+            if key is not None:
+                seen.add(key)
+        normalized[collection] = kept
+
+    # Relationship rows are set-valued canonical facts.  Repeating the exact
+    # same endpoints cannot add semantics, so Runtime removes duplicates before
+    # Stage-B schema/reference validation rather than spending a provider retry.
+    dedupe_relation_rows(
+        "innovation_evaluation_refs",
+        (
+            "thread_index",
+            "innovation_index",
+            "work_package_index",
+            "method_index",
+            "evaluation_index",
+        ),
+    )
+    dedupe_relation_rows(
+        "foundation_supports",
+        (
+            "thread_index",
+            "foundation_index",
+            "work_package_index",
+            "method_index",
+        ),
+        nullable_fields=frozenset({"method_index"}),
+    )
 
     def keyset(collection: str, fields: tuple[str, ...]) -> set[tuple[int, ...]]:
         rows = normalized.get(collection)
@@ -1544,6 +1673,14 @@ def _readiness_conflict_errors(
     )
 
     errors: list[str] = []
+    if frozen_skeleton is None:
+        threads = candidate.get("research_threads")
+        thread_count = len(threads) if isinstance(threads, list) else 0
+        if thread_count == 0 and not blocking_exists and not effective_reason:
+            errors.append(
+                "/research_threads: must contain 1-4 research threads when the Skeleton "
+                "has no blocking user question and no cannot_proceed_reason"
+            )
     if effective_reason and blocking_exists:
         errors.append(
             "/cannot_proceed_reason: must be JSON null (without quotes), never the string \"null\", "
@@ -2170,7 +2307,7 @@ async def _invoke_validated_stage(
         if reference_errors:
             repaired_structural_candidate, resolved_reference_errors = (
                 _drop_reported_unknown_evidence_ids(
-                    structural_candidate, reference_errors
+                    structural_candidate, reference_errors, stage=stage
                 )
             )
             if resolved_reference_errors:
@@ -2502,6 +2639,89 @@ def _argument_whole_design_revision_errors(
     return errors
 
 
+def _sanitize_baseline_design_foundation(
+    candidate: dict[str, Any],
+    model_input: dict[str, Any],
+) -> dict[str, Any]:
+    """Drop only baseline foundation facts no longer qualified by current evidence policy."""
+    normalized = copy.deepcopy(candidate)
+    eligible = {
+        str(value)
+        for value in model_input.get("foundation_eligible_evidence_ids") or []
+        if str(value).strip()
+    }
+    rows = normalized.get("foundation")
+    if not isinstance(rows, list):
+        return normalized
+    removed: set[tuple[int, int]] = set()
+    kept: list[Any] = []
+    for item in rows:
+        key = _local_index_tuple(item, ("thread_index", "foundation_index"))
+        evidence_ids = {str(value) for value in (item.get("evidence_ids") or [])} if isinstance(item, dict) else set()
+        if key is not None and not (evidence_ids & eligible):
+            removed.add(key)
+            continue
+        kept.append(item)
+    normalized["foundation"] = kept
+    supports = normalized.get("foundation_supports")
+    if isinstance(supports, list) and removed:
+        normalized["foundation_supports"] = [
+            item for item in supports
+            if _local_index_tuple(item, ("thread_index", "foundation_index")) not in removed
+        ]
+    return normalized
+
+
+def _reference_close_baseline_stage(
+    *,
+    stage: str,
+    model_input: dict[str, Any],
+    baseline_candidate: dict[str, Any],
+    frozen_skeleton: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Re-close accepted historical Stage state against the current reference registries."""
+    structural_candidate = _normalize_stage_structural_artifacts(
+        stage, baseline_candidate, frozen_skeleton=frozen_skeleton
+    )
+    if stage == ARGUMENT_DESIGN_STAGE:
+        structural_candidate = _sanitize_baseline_design_foundation(
+            structural_candidate, model_input
+        )
+    candidate, _defaults = _normalize_stage_mechanical_defaults_with_provenance(
+        structural_candidate
+    )
+    shape_errors, reference_errors, cross_stage_errors, errors, phase = (
+        _argument_stage_validation_errors(
+            stage=stage,
+            model_input=model_input,
+            candidate=candidate,
+            frozen_skeleton=frozen_skeleton,
+        )
+    )
+    if reference_errors:
+        repaired_structural, resolved = _drop_reported_unknown_evidence_ids(
+            structural_candidate, reference_errors, stage=stage
+        )
+        if resolved:
+            structural_candidate = repaired_structural
+            candidate, _defaults = _normalize_stage_mechanical_defaults_with_provenance(
+                structural_candidate
+            )
+            shape_errors, reference_errors, cross_stage_errors, errors, phase = (
+                _argument_stage_validation_errors(
+                    stage=stage,
+                    model_input=model_input,
+                    candidate=candidate,
+                    frozen_skeleton=frozen_skeleton,
+                )
+            )
+    if errors:
+        raise ArgumentStageContractError(
+            stage, f"baseline_{phase}", errors, candidate=candidate
+        )
+    return candidate
+
+
 async def orchestrate_argument_architecture_two_stage(
     canonical_envelope: dict[str, Any],
     *,
@@ -2521,6 +2741,7 @@ async def orchestrate_argument_architecture_two_stage(
     provider_source = stage_input_envelope if stage_input_envelope is not None else canonical_envelope
     baseline_skeleton: dict[str, Any] | None = None
     baseline_design: dict[str, Any] | None = None
+    reference_closed_baseline_authored_state: dict[str, Any] | None = None
     revision_issues = build_argument_architecture_model_input(provider_source).get(
         "revision_issues"
     ) or []
@@ -2539,10 +2760,14 @@ async def orchestrate_argument_architecture_two_stage(
             if isinstance(item, dict)
         )
     )
+    skeleton_input = build_argument_skeleton_model_input(provider_source)
     if design_only_regeneration:
-        frozen_skeleton = copy.deepcopy(baseline_skeleton)
+        frozen_skeleton = _reference_close_baseline_stage(
+            stage=ARGUMENT_SKELETON_STAGE,
+            model_input=skeleton_input,
+            baseline_candidate=copy.deepcopy(baseline_skeleton),
+        )
     else:
-        skeleton_input = build_argument_skeleton_model_input(provider_source)
         frozen_skeleton = await _invoke_validated_stage(
             stage=ARGUMENT_SKELETON_STAGE,
             model_input=skeleton_input,
@@ -2554,6 +2779,16 @@ async def orchestrate_argument_architecture_two_stage(
     design_input["foundation_eligible_evidence_ids"] = (
         argument_foundation_eligible_evidence_ids(canonical_envelope)
     )
+    if design_only_regeneration and baseline_design is not None:
+        baseline_design = _reference_close_baseline_stage(
+            stage=ARGUMENT_DESIGN_STAGE,
+            model_input=design_input,
+            baseline_candidate=baseline_design,
+            frozen_skeleton=frozen_skeleton,
+        )
+        reference_closed_baseline_authored_state = assemble_argument_authored_state(
+            frozen_skeleton, baseline_design
+        )
     initial_design_retry_context = None
     if design_only_regeneration and baseline_design is not None:
         exact_revision_targets = _argument_design_revision_targets(
@@ -2632,8 +2867,13 @@ async def orchestrate_argument_architecture_two_stage(
         and baseline_skeleton is not None
         and baseline_design is not None
     ):
+        effective_baseline_authored_state = (
+            reference_closed_baseline_authored_state
+            if reference_closed_baseline_authored_state is not None
+            else regeneration_baseline_authored_state
+        )
         baseline_output = expand_argument_architecture_model_output(
-            canonical_envelope, regeneration_baseline_authored_state
+            canonical_envelope, effective_baseline_authored_state
         )
         baseline_blocking = _argument_blocking_gaps(baseline_output)
         candidate_blocking = _argument_blocking_gaps(canonical_output)
@@ -2664,7 +2904,7 @@ async def orchestrate_argument_architecture_two_stage(
         ):
             frozen_skeleton = copy.deepcopy(baseline_skeleton)
             design_candidate = copy.deepcopy(baseline_design)
-            authored_state = copy.deepcopy(regeneration_baseline_authored_state)
+            authored_state = copy.deepcopy(effective_baseline_authored_state)
             canonical_output = baseline_output
             regeneration_merge = {
                 "accepted": False,

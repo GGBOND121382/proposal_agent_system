@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "public_research_plan_scope_critic_output.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC"
+    },
+    "prompt_version": {
+      "const": "1.0.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "REVISE",
+        "NEED_USER_INPUT",
+        "BLOCK"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "ACCEPT",
+            "REVISE"
+          ]
+        },
+        "approved_query_indexes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "rejected_query_indexes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "required": [
+        "verdict",
+        "approved_query_indexes",
+        "rejected_query_indexes"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/finding.schema.json"
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/unresolved_item.schema.json"
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/user_question.schema.json"
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/source_ref.schema.json"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "status",
+    "result",
+    "findings",
+    "unresolved_items",
+    "user_questions",
+    "source_refs",
+    "warnings"
+  ]
+}

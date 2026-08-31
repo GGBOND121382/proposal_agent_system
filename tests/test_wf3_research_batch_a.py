@@ -341,14 +341,13 @@ def test_academic_discovery_aggregates_multiple_providers_without_network(monkey
         time_scope="2021-2025",
         per_query_limit=5,
     )
-    assert output["providers"] == ["openalex", "crossref", "semantic_scholar"]
+    assert output["providers"] == ["openalex", "crossref"]
     assert [item["title"] for item in output["responses"][0]["results"]] == [
         "openalex result",
         "crossref result",
-        "semantic_scholar result",
     ]
     assert [item["provider"] for item in output["provider_runs"]] == [
-        "openalex", "crossref", "semantic_scholar"
+        "openalex", "crossref"
     ]
 
 
@@ -419,21 +418,22 @@ def test_strict_related_work_profile_blocks_shallow_connector_before_synthesis(t
         ),
         encoding="utf-8",
     )
-    with pytest.raises(PublicResearchRetrievalError) as caught:
-        VerifiablePublicResearchArchiveSkill(_settings(tmp_path, connector)).run(
-            {
-                "provider": "connector",
-                "connector_file": str(connector),
-                "require_structured_plan": True,
-                "research_quality_profile": "proposal_related_work",
-                "plan": plan,
-                "max_results": 14,
-            },
-            SkillContext(project_id="p", workflow_id="wf", security_level="PUBLIC", data_dir=str(tmp_path)),
-        )
-    assert caught.value.details["coverage"]["status"] == "INSUFFICIENT"
-    assert caught.value.details["coverage"]["dimensions"]["query_depth"]["status"] == "INSUFFICIENT"
-    assert Path(caught.value.details["archive_manifest"]).exists()
+    result = VerifiablePublicResearchArchiveSkill(_settings(tmp_path, connector)).run(
+        {
+            "provider": "connector",
+            "connector_file": str(connector),
+            "require_structured_plan": True,
+            "research_quality_profile": "proposal_related_work",
+            "plan": plan,
+            "max_results": 14,
+        },
+        SkillContext(project_id="p", workflow_id="wf", security_level="PUBLIC", data_dir=str(tmp_path)),
+    )
+    assert result.output["coverage"]["status"] == "INSUFFICIENT"
+    assert result.output["coverage"]["dimensions"]["query_depth"]["status"] == "INSUFFICIENT"
+    assert result.output["research_sufficiency"]["status"] == "DEGRADED"
+    assert result.output["research_sufficiency"]["may_continue"] is True
+    assert Path(result.output["archive_manifest"]).exists()
 
 
 def test_validation_bundle_is_persisted_before_insufficient_gate(tmp_path: Path) -> None:
@@ -471,20 +471,19 @@ def test_validation_bundle_is_persisted_before_insufficient_gate(tmp_path: Path)
         encoding="utf-8",
     )
 
-    with pytest.raises(PublicResearchRetrievalError) as caught:
-        VerifiablePublicResearchArchiveSkill(_settings(tmp_path, connector)).run(
-            {
-                "provider": "connector",
-                "connector_file": str(connector),
-                "require_structured_plan": True,
-                "research_quality_profile": "proposal_related_work",
-                "plan": plan,
-                "max_results": 14,
-            },
-            SkillContext(project_id="p", workflow_id="wf-validation", security_level="PUBLIC", data_dir=str(tmp_path)),
-        )
+    result = VerifiablePublicResearchArchiveSkill(_settings(tmp_path, connector)).run(
+        {
+            "provider": "connector",
+            "connector_file": str(connector),
+            "require_structured_plan": True,
+            "research_quality_profile": "proposal_related_work",
+            "plan": plan,
+            "max_results": 14,
+        },
+        SkillContext(project_id="p", workflow_id="wf-validation", security_level="PUBLIC", data_dir=str(tmp_path)),
+    )
 
-    root = Path(caught.value.details["validation_bundle_dir"])
+    root = Path(result.output["validation_bundle_dir"])
     assert root.parent.parent == tmp_path / "wf3_validation"
     expected = [
         "00_run_manifest.json",
@@ -495,6 +494,7 @@ def test_validation_bundle_is_persisted_before_insufficient_gate(tmp_path: Path)
         "05_selection_report.json",
         "06_source_catalog.json",
         "07_coverage.json",
+        "07b_research_sufficiency.json",
         "08_quality_summary.json",
     ]
     assert all((root / name).exists() for name in expected)
@@ -503,6 +503,7 @@ def test_validation_bundle_is_persisted_before_insufficient_gate(tmp_path: Path)
     assert summary["candidate_funnel"]["selected_candidates"] == 2
     assert summary["candidate_funnel"]["archived_sources"] == 1
     assert summary["coverage"]["status"] == "INSUFFICIENT"
+    assert summary["research_sufficiency"]["status"] == "DEGRADED"
     assert "query_depth" in summary["coverage"]["failing_dimensions"]
 
 
