@@ -448,9 +448,12 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         *,
         limit: int = 12,
     ) -> list[str]:
-        """Return exact bounded validation feedback for WF-3 regeneration."""
+        """Return exact bounded feedback for model-contract regeneration."""
 
-        if prompt_id not in WF3_MODEL_PROMPTS:
+        if prompt_id not in {
+            *WF3_MODEL_PROMPTS,
+            "P-ARGUMENT-ARCHITECTURE-CRITIC",
+        }:
             return []
         phase = ""
         current: BaseException | None = exc

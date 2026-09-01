@@ -634,6 +634,23 @@ rules:
         - METHOD
         - ASSUMPTION
         - THEORETICAL_PROPERTY
+      review_slot_policy:
+        global_components:
+        - CENTRAL_PROPOSITION
+        - SCOPE
+        per_thread_components:
+        - THREAD
+        - GAP
+        - QUESTION
+        - LIMITATION
+        - OBJECTIVE
+        - WORK_PACKAGE
+        - METHOD
+        - EVALUATION
+        - SUCCESS_CRITERION
+        - INNOVATION
+        - PRIOR_WORK
+        - FOUNDATION
       producer_gap_kind_policy:
         FOUNDATION:
           finding_code: FOUNDATION_EVIDENCE_MISSING

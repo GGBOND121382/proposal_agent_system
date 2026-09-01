@@ -413,9 +413,9 @@ def test_v6_critic_issue_taxonomy_is_closed_against_model_schema() -> None:
     issue_schema = schema["properties"]["issues"]["items"]
     quality_schema = schema["properties"]["quality_dimensions"]["items"]
     dimensions = {str(value) for value in taxonomy["dimensions"]}
-    schema_issue_dimensions = set(issue_schema["properties"]["dimension"]["enum"])
     schema_quality_dimensions = set(quality_schema["properties"]["dimension"]["enum"])
-    assert dimensions == schema_issue_dimensions == schema_quality_dimensions
+    assert dimensions == schema_quality_dimensions
+    assert "dimension" not in issue_schema["properties"]
 
     taxonomy_codes = {
         str(code)

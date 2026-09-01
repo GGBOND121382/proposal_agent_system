@@ -111,18 +111,21 @@ def _critic_semantic_all_pass(model_input: dict) -> dict:
             {
                 "dimension": d,
                 "score": 4,
-                "passed": True,
                 "evidence": [f"{d}满足要求"],
-                "required_action": None,
             }
             for d in dims
-        ],
-        "reviewed_unit_keys": [
-            u["unit_key"] for u in model_input["candidate"]["review_units"]
         ],
         "issues": [],
         "user_questions": [],
     }
+
+
+def _critic_review_unit(model_input: dict, component: str) -> dict:
+    return next(
+        unit
+        for unit in model_input["candidate"]["review_graph"]["units"]
+        if unit["semantic_component"] == component
+    )
 def _semantic_argument_output(envelope: dict) -> dict:
     evidence_ids = _available_evidence_ids(envelope)
     return {
@@ -403,13 +406,7 @@ def test_critic_model_only_judges_semantic_quality_runtime_builds_receipts():
     envelope=PACK.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
     model_input=build_argument_architecture_critic_model_input(envelope)
     assert PACK.validate_model("P-ARGUMENT-ARCHITECTURE-CRITIC","input",model_input)==[]
-    dims=["CENTRAL_THESIS","ARGUMENT_CHAIN","EVIDENCE_SUPPORT","METHOD_SUBSTANCE","INNOVATION_BASELINE","FEASIBILITY_FOUNDATION","METRIC_JUSTIFICATION"]
-    semantic={
-        "quality_dimensions":[{"dimension":d,"score":4,"passed":True,"evidence":[f"{d}满足要求"],"required_action":None} for d in dims],
-        "reviewed_unit_keys":[u["unit_key"] for u in model_input["candidate"]["review_units"]],
-        "issues":[],
-        "user_questions":[],
-    }
+    semantic = _critic_semantic_all_pass(model_input)
     canonical=expand_argument_architecture_critic_model_output(envelope,semantic)
     assert PACK.validate("P-ARGUMENT-ARCHITECTURE-CRITIC","output",canonical)==[]
     assert len(canonical["result"]["chain_checks"])==8
@@ -504,15 +501,23 @@ def test_legacy_model_pass_bit_cannot_create_canonical_critic_failure_without_is
     assert expanded["status"] == "PASS"
 
 
-def test_critic_missing_review_unit_is_rejected():
+def test_critic_unknown_review_ref_is_rejected():
     envelope = PACK.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
     model_input = build_argument_architecture_critic_model_input(envelope)
     semantic = _critic_semantic_all_pass(model_input)
-    semantic["reviewed_unit_keys"] = semantic["reviewed_unit_keys"][:-1]
+    semantic["issues"] = [{
+        "code": "ARGUMENT_METHOD_SUBSTANCE_WEAK",
+        "review_ref": "RU-999",
+        "description": "未知定位。",
+        "evidence_refs": [],
+        "repair_instruction": "使用现有 ReviewRef。",
+        "needs_user_input": False,
+        "requires_structure_change": False,
+    }]
     errors = semantic_model_reference_errors(
         "P-ARGUMENT-ARCHITECTURE-CRITIC", envelope, semantic
     )
-    assert any("did not explicitly cover review unit" in x for x in errors)
+    assert any("unknown ReviewRef" in x for x in errors)
 
 
 def test_exact_evidence_binding_survives_shared_source_id_roundtrip():
@@ -542,11 +547,15 @@ def test_exact_evidence_binding_survives_shared_source_id_roundtrip():
         producer_envelope["payload"]["confirmed_facts"]
     )
     critic_input = build_argument_architecture_critic_model_input(critic_envelope)
-    rendered = json.dumps(critic_input["candidate"], ensure_ascii=False)
-    assert '"E2"' in rendered
-    assert '"E1"' not in rendered
-    assert critic_input["candidate"]["central_proposition"]["evidence_ids"] == ["E2"]
-    assert critic_input["candidate"]["research_threads"][0]["gap"]["evidence_ids"] == ["E2"]
+    assert [card["evidence_ref"] for card in critic_input["evidence_cards"]] == [
+        "EV-001", "EV-002"
+    ]
+    evidence_refs = {
+        evidence_ref
+        for unit in critic_input["candidate"]["review_graph"]["units"]
+        for evidence_ref in unit["evidence_refs"]
+    }
+    assert evidence_refs == {"EV-002"}
 
 
 
@@ -660,22 +669,13 @@ def test_needs_user_input_without_blocking_question_is_rejected():
     envelope = PACK.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
     model_input = build_argument_architecture_critic_model_input(envelope)
     semantic = _critic_semantic_all_pass(model_input)
-    foundation_key = next(
-        unit["unit_key"]
-        for unit in model_input["candidate"]["review_units"]
-        if unit["component"] == "TEAM_EVIDENCE"
-    )
+    foundation_ref = _critic_review_unit(model_input, "FOUNDATION")["review_ref"]
     semantic["issues"] = [
         {
             "code": "FOUNDATION_EVIDENCE_MISSING",
-            "target": {
-                "component": "FOUNDATION",
-                "thread_index": 0,
-                "item_index": 0,
-                "review_unit_key": foundation_key,
-            },
+            "review_ref": foundation_ref,
             "description": "缺少研究基础材料。",
-            "evidence_ids": [],
+            "evidence_refs": [],
             "repair_instruction": "补充能够证明已有能力的材料。",
             "needs_user_input": True,
             "requires_structure_change": False,
@@ -692,21 +692,12 @@ def test_needs_user_input_with_blocking_question_routes_to_user_under_runtime_po
     envelope = PACK.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
     model_input = build_argument_architecture_critic_model_input(envelope)
     semantic = _critic_semantic_all_pass(model_input)
-    foundation_key = next(
-        unit["unit_key"]
-        for unit in model_input["candidate"]["review_units"]
-        if unit["component"] == "TEAM_EVIDENCE"
-    )
+    foundation_ref = _critic_review_unit(model_input, "FOUNDATION")["review_ref"]
     semantic["issues"] = [{
         "code": "FOUNDATION_EVIDENCE_MISSING",
-        "target": {
-            "component": "FOUNDATION",
-            "thread_index": 0,
-            "item_index": 0,
-            "review_unit_key": foundation_key,
-        },
+        "review_ref": foundation_ref,
         "description": "缺少可核验的研究基础材料。",
-        "evidence_ids": [],
+        "evidence_refs": [],
         "repair_instruction": "补充能够证明已有能力的材料。",
         "needs_user_input": True,
         "requires_structure_change": False,
@@ -774,28 +765,25 @@ def test_producer_schema_rejects_terminal_reason_with_blocking_question():
     assert PACK.validate_model("P-ARGUMENT-ARCHITECTURE", "output", semantic)
 
 
-def test_critic_schema_exposes_dimension_code_mapping():
+def test_critic_schema_rejects_runtime_owned_addressing_fields():
     envelope = PACK.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
     model_input = build_argument_architecture_critic_model_input(envelope)
     semantic = _critic_semantic_all_pass(model_input)
-    method_key = next(
-        unit["unit_key"]
-        for unit in model_input["candidate"]["review_units"]
-        if unit["component"] in {"FORMAL_MODEL", "ALGORITHM", "ANALYTICAL_METHOD", "ENGINEERING_METHOD"}
-    )
+    method_ref = _critic_review_unit(model_input, "METHOD")["review_ref"]
     semantic["issues"] = [
         {
             "code": "FOUNDATION_EVIDENCE_MISSING",
             "dimension": "METHOD_SUBSTANCE",
             "severity": "P1",
+            "review_ref": method_ref,
             "target": {
                 "component": "METHOD",
                 "thread_index": 0,
                 "item_index": 0,
-                "review_unit_key": method_key,
+                "review_unit_key": "ANALYTICAL_METHOD:1",
             },
             "description": "错误的静态组合。",
-            "evidence_ids": [],
+            "evidence_refs": [],
             "repair_instruction": "修复。",
             "resolution": "LOCAL_EDIT",
         }
@@ -803,25 +791,18 @@ def test_critic_schema_exposes_dimension_code_mapping():
     assert PACK.validate_model("P-ARGUMENT-ARCHITECTURE-CRITIC", "output", semantic)
 
 
-def test_critic_schema_requires_review_key_for_precise_target():
+def test_critic_schema_requires_single_review_ref():
     envelope = PACK.replay_input("P-ARGUMENT-ARCHITECTURE-CRITIC")
     model_input = build_argument_architecture_critic_model_input(envelope)
     semantic = _critic_semantic_all_pass(model_input)
     semantic["issues"] = [
         {
             "code": "ARGUMENT_METHOD_SUBSTANCE_WEAK",
-            "dimension": "METHOD_SUBSTANCE",
-            "severity": "P1",
-            "target": {
-                "component": "METHOD",
-                "thread_index": 0,
-                "item_index": 0,
-                "review_unit_key": None,
-            },
             "description": "方法机制不足。",
-            "evidence_ids": [],
+            "evidence_refs": [],
             "repair_instruction": "补充机制。",
-            "resolution": "LOCAL_EDIT",
+            "needs_user_input": False,
+            "requires_structure_change": False,
         }
     ]
     assert PACK.validate_model("P-ARGUMENT-ARCHITECTURE-CRITIC", "output", semantic)
@@ -870,8 +851,14 @@ def test_runtime_preserves_thread_assumptions_without_inferred_objective_edge():
         producer_envelope["payload"]["confirmed_facts"]
     )
     critic_input = build_argument_architecture_critic_model_input(critic_envelope)
-    assert critic_input["candidate"]["research_threads"][0]["thread_assumptions"] == (
-        semantic["research_threads"][0]["thread_assumptions"]
+    projected_assumptions = [
+        unit["statement"]
+        for unit in critic_input["candidate"]["review_graph"]["units"]
+        if unit["semantic_component"] == "ASSUMPTION"
+        and unit["thread_index"] == 0
+    ]
+    assert set(semantic["research_threads"][0]["thread_assumptions"]) <= set(
+        projected_assumptions
     )
 
 
@@ -1280,15 +1267,29 @@ def test_critic_projection_preserves_nested_method_evaluation_and_prior_work_rel
         producer_envelope["payload"]["confirmed_facts"]
     )
     model_input = build_argument_architecture_critic_model_input(critic_envelope)
-    thread = model_input["candidate"]["research_threads"][0]
-    assert thread["work_packages"][0]["methods"][0]["evaluations"][0]["statement"]
-    assert thread["innovations"][0]["closest_prior_work"][0]["statement"]
-    assert thread["innovations"][0]["evaluation_refs"] == [
-        {"work_package_index": 0, "method_index": 0, "evaluation_index": 0}
-    ]
-    assert "methods" not in thread
-    assert "evaluations" not in thread
-    assert "closest_prior_work" not in thread
+    review_graph = model_input["candidate"]["review_graph"]
+    units = review_graph["units"]
+    refs = {
+        component: next(
+            unit["review_ref"]
+            for unit in units
+            if unit["semantic_component"] == component
+            and unit["thread_index"] == 0
+        )
+        for component in ("METHOD", "EVALUATION", "INNOVATION", "PRIOR_WORK")
+    }
+    assert all(
+        next(unit for unit in units if unit["review_ref"] == review_ref)["statement"]
+        for review_ref in refs.values()
+    )
+    assert {
+        (relation["source_ref"], relation["relation"], relation["target_ref"])
+        for relation in review_graph["relations"]
+    } >= {
+        (refs["METHOD"], "VALIDATED_BY", refs["EVALUATION"]),
+        (refs["EVALUATION"], "EVIDENCES", refs["INNOVATION"]),
+        (refs["PRIOR_WORK"], "CONTRASTS_WITH", refs["INNOVATION"]),
+    }
 
 
 def test_argument_semantic_schema_contains_p1_research_objects():
@@ -1419,9 +1420,14 @@ def test_live_equivalent_fake_gateway_producer_to_critic_end_to_end():
         critic_envelope["payload"]["confirmed_facts"] = copy.deepcopy(
             producer_envelope["payload"]["confirmed_facts"]
         )
-        expected_review_units = build_argument_architecture_critic_model_input(
-            critic_envelope
-        )["candidate"]["review_units"]
+        expected_review_units = [
+            unit
+            for unit in build_argument_architecture_critic_model_input(
+                critic_envelope
+            )["candidate"]["review_graph"]["units"]
+            if unit["presence"] == "PRESENT"
+            and unit["semantic_component"] not in {"SCOPE", "THREAD"}
+        ]
 
         critic_run = await executor.execute(
             "P-ARGUMENT-ARCHITECTURE-CRITIC",
@@ -1527,10 +1533,8 @@ def test_limitation_mechanism_preserves_its_own_authored_evidence_binding():
     critic_input = build_argument_architecture_critic_model_input(
         critic_envelope
     )
-    projected = critic_input["candidate"]["research_threads"][0][
-        "gap"
-    ]["limitation_mechanism"]
-    assert projected["evidence_ids"] == ["E2"]
+    projected = _critic_review_unit(critic_input, "LIMITATION")
+    assert projected["evidence_refs"] == ["EV-002"]
 
 
 def test_critic_issue_requires_precise_review_unit_and_matching_component():
@@ -1549,33 +1553,15 @@ def test_critic_issue_requires_precise_review_unit_and_matching_component():
         critic_envelope
     )
     output = _critic_semantic_all_pass(model_input)
-    method_dimension = next(
-        item
-        for item in output["quality_dimensions"]
-        if item["dimension"] == "METHOD_SUBSTANCE"
-    )
-    method_dimension.update(
-        {
-            "score": 2,
-            "passed": False,
-            "required_action": "补充方法机制和可验证输出。",
-        }
-    )
     output["issues"] = [
         {
             "code": "ARGUMENT_METHOD_SUBSTANCE_WEAK",
-            "dimension": "METHOD_SUBSTANCE",
-            "severity": "P1",
-            "target": {
-                "component": "METHOD",
-                "thread_index": 0,
-                "item_index": 0,
-                "review_unit_key": None,
-            },
+            "review_ref": "RU-999",
             "description": "方法机制不足。",
-            "evidence_ids": [],
+            "evidence_refs": [],
             "repair_instruction": "补充方法机制。",
-            "resolution": "LOCAL_EDIT",
+            "needs_user_input": False,
+            "requires_structure_change": False,
         }
     ]
     errors = semantic_model_reference_errors(
@@ -1583,38 +1569,25 @@ def test_critic_issue_requires_precise_review_unit_and_matching_component():
         critic_envelope,
         output,
     )
-    assert any("requires a precise semantic review-unit target" in e for e in errors)
+    assert any("unknown ReviewRef" in e for e in errors)
 
-    gap_key = next(
-        u["unit_key"]
-        for u in model_input["candidate"]["review_units"]
-        if u["component"] == "RESEARCH_GAP"
-    )
-    output["issues"][0]["target"]["review_unit_key"] = gap_key
+    gap_ref = _critic_review_unit(model_input, "GAP")["review_ref"]
+    output["issues"][0]["review_ref"] = gap_ref
     errors = semantic_model_reference_errors(
         "P-ARGUMENT-ARCHITECTURE-CRITIC",
         critic_envelope,
         output,
     )
-    assert any("does not match review unit" in e for e in errors)
+    assert any("cannot target" in e for e in errors)
 
-    method_key = next(
-        u["unit_key"]
-        for u in model_input["candidate"]["review_units"]
-        if u["component"] in {
-            "FORMAL_MODEL",
-            "ALGORITHM",
-            "ANALYTICAL_METHOD",
-            "ENGINEERING_METHOD",
-        }
-    )
-    output["issues"][0]["target"]["review_unit_key"] = method_key
+    method_ref = _critic_review_unit(model_input, "METHOD")["review_ref"]
+    output["issues"][0]["review_ref"] = method_ref
     errors = semantic_model_reference_errors(
         "P-ARGUMENT-ARCHITECTURE-CRITIC",
         critic_envelope,
         output,
     )
-    assert not any("/issues/0/target" in e for e in errors)
+    assert not any("/issues/0/review_ref" in e for e in errors)
 
 
 def test_issue_code_cannot_coexist_with_corresponding_dimension_marked_pass():
@@ -1633,26 +1606,16 @@ def test_issue_code_cannot_coexist_with_corresponding_dimension_marked_pass():
         critic_envelope
     )
     output = _critic_semantic_all_pass(model_input)
-    method_key = next(
-        u["unit_key"]
-        for u in model_input["candidate"]["review_units"]
-        if u["component"] == "FORMAL_MODEL"
-    )
+    method_ref = _critic_review_unit(model_input, "METHOD")["review_ref"]
     output["issues"] = [
         {
             "code": "ARGUMENT_METHOD_SUBSTANCE_WEAK",
-            "dimension": "METHOD_SUBSTANCE",
-            "severity": "P1",
-            "target": {
-                "component": "METHOD",
-                "thread_index": 0,
-                "item_index": 0,
-                "review_unit_key": method_key,
-            },
+            "review_ref": method_ref,
             "description": "方法机制不足。",
-            "evidence_ids": [],
+            "evidence_refs": [],
             "repair_instruction": "补充方法机制。",
-            "resolution": "LOCAL_EDIT",
+            "needs_user_input": False,
+            "requires_structure_change": False,
         }
     ]
     assert semantic_model_reference_errors(
@@ -1728,16 +1691,7 @@ def test_live_equivalent_fake_gateway_routes_local_and_structural_critic_finding
 
         def critic_builder(model_envelope):
             output = _critic_semantic_all_pass(model_envelope)
-            method_key = next(
-                unit["unit_key"]
-                for unit in model_envelope["candidate"]["review_units"]
-                if unit["component"] in {
-                    "FORMAL_MODEL",
-                    "ALGORITHM",
-                    "ANALYTICAL_METHOD",
-                    "ENGINEERING_METHOD",
-                }
-            )
+            method_ref = _critic_review_unit(model_envelope, "METHOD")["review_ref"]
             method_dimension = next(
                 item
                 for item in output["quality_dimensions"]
@@ -1746,23 +1700,14 @@ def test_live_equivalent_fake_gateway_routes_local_and_structural_critic_finding
             method_dimension.update(
                 {
                     "score": 2,
-                    "passed": False,
-                    "required_action": "补充方法的输入、核心机制和可验证输出。",
                 }
             )
             output["issues"] = [
                 {
                     "code": "ARGUMENT_METHOD_SUBSTANCE_WEAK",
-            "dimension": "METHOD_SUBSTANCE",
-                    "severity": "P1",
-                    "target": {
-                        "component": "METHOD",
-                        "thread_index": 0,
-                        "item_index": 0,
-                        "review_unit_key": method_key,
-                    },
+                    "review_ref": method_ref,
                     "description": "方法机制没有形成可检验的输入—机制—输出闭环。",
-                    "evidence_ids": [],
+                    "evidence_refs": [],
                     "repair_instruction": "补充方法机制和可验证输出。",
                     "needs_user_input": False,
                     "requires_structure_change": requires_structure_change,
@@ -1899,9 +1844,13 @@ def test_thread_assumption_binding_reads_current_node_statement():
     )
     critic_input = build_argument_architecture_critic_model_input(critic_envelope)
 
-    assert critic_input["candidate"]["research_threads"][0]["thread_assumptions"] == [
-        repaired_statement
+    projected_assumptions = [
+        unit["statement"]
+        for unit in critic_input["candidate"]["review_graph"]["units"]
+        if unit["semantic_component"] == "ASSUMPTION"
+        and unit["thread_index"] == 0
     ]
+    assert repaired_statement in projected_assumptions
 
 
 def test_critic_evidence_check_uses_current_record_status():
@@ -1951,11 +1900,7 @@ def test_deterministic_finding_overrides_same_local_model_finding():
         producer_envelope["payload"]["confirmed_facts"]
     )
     model_input = build_argument_architecture_critic_model_input(critic_envelope)
-    foundation_key = next(
-        unit["unit_key"]
-        for unit in model_input["candidate"]["review_units"]
-        if unit["component"] == "TEAM_EVIDENCE"
-    )
+    foundation_ref = _critic_review_unit(model_input, "FOUNDATION")["review_ref"]
     critic_semantic = _critic_semantic_all_pass(model_input)
     for dimension in critic_semantic["quality_dimensions"]:
         if dimension["dimension"] == "ARGUMENT_CHAIN":
@@ -1970,18 +1915,12 @@ def test_deterministic_finding_overrides_same_local_model_finding():
     critic_semantic["issues"] = [
         {
             "code": "RESEARCH_DESIGN_INCOMPLETE",
-            "dimension": "ARGUMENT_CHAIN",
-            "severity": "P1",
-            "target": {
-                "component": "FOUNDATION",
-                "thread_index": 0,
-                "item_index": 0,
-                "review_unit_key": foundation_key,
-            },
+            "review_ref": foundation_ref,
             "description": "研究基础没有明确支撑任何现有工作包或方法。",
-            "evidence_ids": [],
+            "evidence_refs": [],
             "repair_instruction": "局部补写研究基础支撑关系。",
-            "resolution": "LOCAL_EDIT",
+            "needs_user_input": False,
+            "requires_structure_change": False,
         }
     ]
 
@@ -1992,7 +1931,7 @@ def test_deterministic_finding_overrides_same_local_model_finding():
         finding
         for finding in critic_output["findings"]
         if finding.get("code") == "RESEARCH_DESIGN_INCOMPLETE"
-        and finding.get("semantic_review_unit_key") == foundation_key
+        and finding.get("semantic_component") == "FOUNDATION"
     ]
     assert len(matching) == 2
     assert {finding["defect_namespace"] for finding in matching} == {"MACHINE_DEFECT", "SEMANTIC_OBSERVATION"}
@@ -2160,11 +2099,7 @@ def test_v5_mutation_deterministic_route_overrides_model_block_before_final_stat
         producer_envelope["payload"]["confirmed_facts"]
     )
     model_input = build_argument_architecture_critic_model_input(critic_envelope)
-    foundation_key = next(
-        unit["unit_key"]
-        for unit in model_input["candidate"]["review_units"]
-        if unit["component"] == "TEAM_EVIDENCE"
-    )
+    foundation_ref = _critic_review_unit(model_input, "FOUNDATION")["review_ref"]
     critic_semantic = _critic_semantic_all_pass(model_input)
     for dimension in critic_semantic["quality_dimensions"]:
         if dimension["dimension"] == "ARGUMENT_CHAIN":
@@ -2179,18 +2114,12 @@ def test_v5_mutation_deterministic_route_overrides_model_block_before_final_stat
     critic_semantic["issues"] = [
         {
             "code": "RESEARCH_DESIGN_INCOMPLETE",
-            "dimension": "ARGUMENT_CHAIN",
-            "severity": "P0",
-            "target": {
-                "component": "FOUNDATION",
-                "thread_index": 0,
-                "item_index": 0,
-                "review_unit_key": foundation_key,
-            },
+            "review_ref": foundation_ref,
             "description": "模型认为该缺陷必须阻断。",
-            "evidence_ids": [],
+            "evidence_refs": [],
             "repair_instruction": "阻断工作流。",
-            "resolution": "BLOCK",
+            "needs_user_input": False,
+            "requires_structure_change": False,
         }
     ]
 
@@ -2200,7 +2129,7 @@ def test_v5_mutation_deterministic_route_overrides_model_block_before_final_stat
     matching = [
         finding
         for finding in output["findings"]
-        if finding.get("semantic_review_unit_key") == foundation_key
+        if finding.get("semantic_component") == "FOUNDATION"
         and finding.get("code") == "RESEARCH_DESIGN_INCOMPLETE"
     ]
     assert len(matching) == 2

@@ -338,7 +338,7 @@
     },
     {
       "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC",
-      "prompt_version": "9.1.0",
+      "prompt_version": "10.0.0",
       "prompt_file": "prompts/argument/argument_architecture_critic.md",
       "input_schema": "schemas/prompts/argument_architecture_critic_input.schema.json",
       "output_schema": "schemas/prompts/argument_architecture_critic_output.schema.json",

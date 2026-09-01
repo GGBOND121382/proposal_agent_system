@@ -21,7 +21,7 @@ from .json_pointer import (
 )
 
 
-SEMANTIC_MODEL_CONTRACT_VERSION = "2026-08-31.v14-wf4-reference-graph"
+SEMANTIC_MODEL_CONTRACT_VERSION = "2026-09-01.v15-wf4-review-graph-closure"
 SEMANTIC_PROMPTS = frozenset({
     "P-ARGUMENT-ARCHITECTURE",
     "P-ARGUMENT-ARCHITECTURE-CRITIC",
@@ -192,6 +192,25 @@ def _critic_allowed_target_components() -> dict[str, set[str]]:
         for code, values in dict(
             _argument_critic_taxonomy().get("allowed_target_components_by_code") or {}
         ).items()
+    }
+
+
+def _critic_review_slot_policy() -> dict[str, tuple[str, ...]]:
+    """Return the configured addressable Critic review-slot policy.
+
+    A slot is an addressable semantic expectation, not fabricated business
+    content.  Runtime materializes a MISSING slot only when no authored object
+    of that component exists in the configured scope.
+    """
+
+    raw = dict(_argument_critic_taxonomy().get("review_slot_policy") or {})
+    return {
+        scope: tuple(
+            str(component)
+            for component in raw.get(scope) or ()
+            if str(component).strip()
+        )
+        for scope in ("global_components", "per_thread_components")
     }
 
 
@@ -1979,6 +1998,300 @@ def _critic_review_units(
     return units, mapping
 
 
+def _critic_evidence_registry(
+    canonical_envelope: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, str]]:
+    """Project canonical evidence ids into a disjoint model-facing namespace."""
+
+    producer = build_argument_architecture_model_input(canonical_envelope)
+    cards: list[dict[str, Any]] = []
+    evidence_id_by_ref: dict[str, str] = {}
+    evidence_ref_by_id: dict[str, str] = {}
+    for index, raw in enumerate(producer.get("evidence_cards") or [], 1):
+        if not isinstance(raw, Mapping):
+            continue
+        evidence_id = str(raw.get("evidence_id") or "").strip()
+        if not evidence_id:
+            continue
+        evidence_ref = f"EV-{index:03d}"
+        evidence_id_by_ref[evidence_ref] = evidence_id
+        evidence_ref_by_id[evidence_id] = evidence_ref
+        cards.append(
+            {
+                "evidence_ref": evidence_ref,
+                "evidence_type": str(raw.get("evidence_type") or "UNKNOWN"),
+                "knowledge_status": str(raw.get("knowledge_status") or "UNKNOWN"),
+                "statement": str(raw.get("statement") or ""),
+                "qualifiers": [str(value) for value in raw.get("qualifiers") or []],
+            }
+        )
+    return cards, evidence_id_by_ref, evidence_ref_by_id
+
+
+def _critic_review_graph(
+    canonical_envelope: dict[str, Any],
+    candidate: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, str]]:
+    """Build the single model-visible Review/Addressing Graph.
+
+    The model receives typed ReviewRefs and EvidenceRefs.  Canonical object ids,
+    paths, components and thread membership remain Runtime-owned locators.  The
+    graph also materializes configured MISSING slots, so absence is addressable
+    without inventing a semantic object.
+    """
+
+    graph = candidate.get("argument_architecture") or {}
+    legacy_units, legacy_mapping = _critic_review_units(candidate)
+    legacy_by_node_id = {
+        str(node_id): str(unit_key)
+        for unit_key, node_id in legacy_mapping.items()
+        if str(node_id).strip()
+    }
+    _, records = _evidence_records(canonical_envelope)
+    authored_bindings = _authored_evidence_binding_map(candidate)
+    _, _, evidence_ref_by_id = _critic_evidence_registry(canonical_envelope)
+    memberships = _graph_thread_memberships(candidate)
+
+    proposition = graph.get("central_proposition") or {}
+    questions = [
+        item
+        for item in graph.get("research_questions") or []
+        if isinstance(item, dict)
+    ]
+    nodes = [item for item in graph.get("nodes") or [] if isinstance(item, dict)]
+    node_by_id = {
+        str(item.get("node_id")): item
+        for item in nodes
+        if str(item.get("node_id") or "").strip()
+    }
+    if str(proposition.get("node_id") or "").strip():
+        node_by_id[str(proposition["node_id"])] = proposition
+    for question in questions:
+        if str(question.get("node_id") or "").strip():
+            node_by_id[str(question["node_id"])] = question
+
+    def target_path(object_id: str) -> str:
+        if object_id and object_id == str(proposition.get("node_id") or ""):
+            return "/result/argument_architecture/central_proposition"
+        for index, question in enumerate(questions):
+            if object_id == str(question.get("node_id") or ""):
+                return f"/result/argument_architecture/research_questions/{index}"
+        for index, node in enumerate(nodes):
+            if object_id == str(node.get("node_id") or ""):
+                return f"/result/argument_architecture/nodes/{index}"
+        return "/result/argument_architecture"
+
+    def evidence_refs_for(object_id: str) -> list[str]:
+        node = node_by_id.get(object_id) or {}
+        if object_id in authored_bindings:
+            evidence_ids = authored_bindings[object_id]
+        else:
+            evidence_ids = _evidence_ids_for_source_refs(
+                node.get("source_refs") or [], records
+            )
+        return list(
+            dict.fromkeys(
+                evidence_ref_by_id[evidence_id]
+                for evidence_id in evidence_ids
+                if evidence_id in evidence_ref_by_id
+            )
+        )
+
+    units: list[dict[str, Any]] = []
+    locators: dict[str, dict[str, Any]] = {}
+    ref_by_object_id: dict[str, str] = {}
+
+    def add_unit(
+        *,
+        component: str,
+        statement: str,
+        presence: str,
+        thread_index: int | None,
+        semantic_object_id: str | None = None,
+        semantic_review_unit_key: str | None = None,
+        canonical_path: str | None = None,
+        evidence_refs: Iterable[str] = (),
+    ) -> str:
+        review_ref = f"RU-{len(units) + 1:03d}"
+        model_unit = {
+            "review_ref": review_ref,
+            "semantic_component": str(component),
+            "thread_index": thread_index,
+            "presence": str(presence),
+            "statement": str(statement),
+            "evidence_refs": list(dict.fromkeys(str(value) for value in evidence_refs)),
+        }
+        units.append(model_unit)
+        locators[review_ref] = {
+            **model_unit,
+            "semantic_object_id": semantic_object_id,
+            "semantic_review_unit_key": semantic_review_unit_key,
+            "target_path": canonical_path or "/result/argument_architecture",
+        }
+        if semantic_object_id:
+            ref_by_object_id[str(semantic_object_id)] = review_ref
+        return review_ref
+
+    scope = graph.get("scope_boundaries") or {}
+    scope_text = "；".join(
+        [
+            *(f"范围内：{value}" for value in scope.get("in_scope") or []),
+            *(f"范围外：{value}" for value in scope.get("out_of_scope") or []),
+        ]
+    ) or "候选未提供明确范围边界。"
+    add_unit(
+        component="SCOPE",
+        statement=scope_text,
+        presence="PRESENT" if scope.get("in_scope") or scope.get("out_of_scope") else "MISSING",
+        thread_index=None,
+        semantic_review_unit_key="SLOT:SCOPE:GLOBAL",
+        canonical_path="/result/argument_architecture/scope_boundaries",
+    )
+
+    for index, question in enumerate(questions):
+        add_unit(
+            component="THREAD",
+            statement=f"研究线程 {index + 1}：{str(question.get('statement') or '')}",
+            presence="PRESENT",
+            thread_index=index,
+            semantic_review_unit_key=f"SLOT:THREAD:{index}",
+            canonical_path=f"/result/research_design_matrix/{index}",
+        )
+
+    for legacy in legacy_units:
+        legacy_key = str(legacy.get("unit_key") or "")
+        object_id = str(legacy_mapping.get(legacy_key) or "")
+        raw_component = str(legacy.get("component") or "")
+        component = _critic_review_component_group(raw_component)
+        object_memberships = set(memberships.get(object_id, set()))
+        if raw_component == "RESEARCH_QUESTION":
+            question_position = next(
+                (
+                    index
+                    for index, question in enumerate(questions)
+                    if str(question.get("node_id") or "") == object_id
+                ),
+                None,
+            )
+            if question_position is not None:
+                object_memberships = {question_position}
+        thread_index = (
+            next(iter(object_memberships)) if len(object_memberships) == 1 else None
+        )
+        add_unit(
+            component=component,
+            statement=str(legacy.get("statement") or ""),
+            presence="PRESENT",
+            thread_index=thread_index,
+            semantic_object_id=object_id,
+            semantic_review_unit_key=legacy_key,
+            canonical_path=target_path(object_id),
+            evidence_refs=evidence_refs_for(object_id),
+        )
+
+    policy = _critic_review_slot_policy()
+    present_components = {
+        (str(unit["semantic_component"]), unit.get("thread_index"))
+        for unit in units
+        if unit.get("presence") == "PRESENT"
+    }
+    for component in policy.get("global_components", ()):
+        if (component, None) not in present_components:
+            add_unit(
+                component=component,
+                statement=f"缺失的全局 {component} 语义槽位。",
+                presence="MISSING",
+                thread_index=None,
+                semantic_review_unit_key=f"SLOT:{component}:GLOBAL",
+            )
+    for thread_index in range(len(questions)):
+        for component in policy.get("per_thread_components", ()):
+            if (component, thread_index) in present_components:
+                continue
+            add_unit(
+                component=component,
+                statement=f"研究线程 {thread_index + 1} 缺失 {component} 语义对象。",
+                presence="MISSING",
+                thread_index=thread_index,
+                semantic_review_unit_key=f"SLOT:{component}:THREAD:{thread_index}",
+                canonical_path=f"/result/research_design_matrix/{thread_index}",
+            )
+
+    relations: list[dict[str, str]] = []
+    relation_seen: set[tuple[str, str, str]] = set()
+
+    def add_relation(source_ref: str, relation: str, target_ref: str) -> None:
+        key = (source_ref, relation, target_ref)
+        if not source_ref or not target_ref or key in relation_seen:
+            return
+        relation_seen.add(key)
+        relations.append(
+            {"source_ref": source_ref, "relation": relation, "target_ref": target_ref}
+        )
+
+    thread_refs = {
+        int(unit["thread_index"]): str(unit["review_ref"])
+        for unit in units
+        if unit.get("semantic_component") == "THREAD"
+        and isinstance(unit.get("thread_index"), int)
+    }
+    for unit in units:
+        thread_index = unit.get("thread_index")
+        if isinstance(thread_index, int) and unit.get("semantic_component") != "THREAD":
+            add_relation(thread_refs.get(thread_index, ""), "CONTAINS", str(unit["review_ref"]))
+    for edge in graph.get("edges") or []:
+        if not isinstance(edge, Mapping):
+            continue
+        add_relation(
+            ref_by_object_id.get(str(edge.get("source_id") or ""), ""),
+            str(edge.get("relation") or "RELATED_TO"),
+            ref_by_object_id.get(str(edge.get("target_id") or ""), ""),
+        )
+
+    return (
+        {
+            "units": units,
+            "relations": relations,
+            "coverage_policy": "ALL_ASSIGNED_UNITS_RUNTIME_RECEIPT",
+        },
+        locators,
+        evidence_ref_by_id,
+    )
+
+
+def _critic_issue_locator(
+    issue: Mapping[str, Any],
+    locators: Mapping[str, dict[str, Any]],
+) -> tuple[str, dict[str, Any] | None]:
+    """Resolve the v15 ReviewRef, with direct-call replay compatibility.
+
+    Provider output is validated against the v15 schema before this function is
+    reached, so LIVE calls can only use ``review_ref``.  The fallback keeps old
+    persisted unit-test/replay objects inspectable without reactivating the old
+    provider contract.
+    """
+
+    review_ref = str(issue.get("review_ref") or "").strip()
+    if review_ref:
+        return review_ref, locators.get(review_ref)
+    target = issue.get("target") if isinstance(issue.get("target"), Mapping) else {}
+    legacy_key = str(target.get("review_unit_key") or "").strip()
+    if legacy_key:
+        if legacy_key in locators:
+            return legacy_key, locators.get(legacy_key)
+        for ref, locator in locators.items():
+            if str(locator.get("semantic_review_unit_key") or "") == legacy_key:
+                return str(ref), locator
+    component = str(target.get("component") or "").strip()
+    thread_index = target.get("thread_index")
+    for ref, locator in locators.items():
+        if str(locator.get("semantic_component") or "") != component:
+            continue
+        if locator.get("thread_index") == thread_index:
+            return str(ref), locator
+    return review_ref or legacy_key, None
+
+
 def _critic_candidate_semantics(
     canonical_envelope: dict[str, Any],
     *,
@@ -2343,8 +2656,24 @@ def _critic_candidate_semantics(
 
 
 def build_argument_architecture_critic_model_input(canonical_envelope: dict[str, Any]) -> dict[str, Any]:
-    producer=build_argument_architecture_model_input(canonical_envelope)
-    return {"project_task":producer["project_task"],"constraints":producer["constraints"],"evidence_cards":producer["evidence_cards"],"candidate":_critic_candidate_semantics(canonical_envelope),"human_resolutions":producer["human_resolutions"]}
+    producer = build_argument_architecture_model_input(canonical_envelope)
+    payload = canonical_envelope.get("payload") or {}
+    candidate = _canonical_argument_candidate(
+        canonical_envelope, payload.get("architecture_candidate") or {}
+    )
+    review_graph, _, _ = _critic_review_graph(canonical_envelope, candidate)
+    evidence_cards, _, _ = _critic_evidence_registry(canonical_envelope)
+    return {
+        "project_task": producer["project_task"],
+        "constraints": producer["constraints"],
+        "evidence_cards": evidence_cards,
+        "candidate": {
+            "review_graph": review_graph,
+            "evidence_gaps": copy.deepcopy(candidate.get("evidence_gap_report") or []),
+            "readiness_summary": str((candidate.get("readiness") or {}).get("summary") or ""),
+        },
+        "human_resolutions": producer["human_resolutions"],
+    }
 
 
 def _repair_model_path(canonical_path: str) -> str:
@@ -4181,90 +4510,51 @@ def semantic_model_reference_errors(
         errors.extend(candidate_state_errors)
         return errors
     candidate = _canonical_argument_candidate(canonical_envelope, candidate)
-    review_units, review_mapping = _critic_review_units(candidate)
-    unit_components = {
-        str(item["unit_key"]): _critic_review_component_group(
-            str(item.get("component") or "")
-        )
-        for item in review_units
-    }
-    expected_keys = [str(x["unit_key"]) for x in review_units]
+    _, review_locators, _ = _critic_review_graph(canonical_envelope, candidate)
+    _, evidence_id_by_ref, _ = _critic_evidence_registry(canonical_envelope)
 
     for issue_index, issue in enumerate(issues):
         code = str(issue.get("code") or "")
-        target = issue.get("target") or {}
-        component = str(target.get("component") or "")
-        raw_thread_index = target.get("thread_index")
-        graph = candidate.get("argument_architecture") or {}
-        thread_count = len(
-            [q for q in graph.get("research_questions") or [] if isinstance(q, dict)]
-        )
-        if raw_thread_index is not None and not (
-            isinstance(raw_thread_index, int)
-            and 0 <= raw_thread_index < thread_count
-        ):
+        review_ref, locator = _critic_issue_locator(issue, review_locators)
+        if locator is None:
             errors.append(
-                f"/issues/{issue_index}/target/thread_index: target thread must identify an existing research thread"
+                f"/issues/{issue_index}/review_ref: unknown ReviewRef {review_ref!r}"
             )
-        if component in {"CENTRAL_PROPOSITION", "SCOPE"} and raw_thread_index is not None:
+            continue
+        component = str(locator.get("semantic_component") or "")
+        legacy_target = issue.get("target") if isinstance(issue.get("target"), Mapping) else {}
+        declared_component = str(legacy_target.get("component") or "").strip()
+        if declared_component and declared_component != component:
             errors.append(
-                f"/issues/{issue_index}/target/thread_index: global component {component!r} must not claim a research thread"
+                f"/issues/{issue_index}/review_ref: declared component "
+                f"{declared_component!r} does not match ReviewRef {review_ref!r} "
+                f"({component!r})"
             )
-        if component == "THREAD" and not isinstance(raw_thread_index, int):
+        declared_thread = legacy_target.get("thread_index")
+        if declared_thread is not None and declared_thread != locator.get("thread_index"):
             errors.append(
-                f"/issues/{issue_index}/target/thread_index: THREAD target requires an existing research thread index"
+                f"/issues/{issue_index}/review_ref: ReviewRef {review_ref!r} belongs "
+                f"to thread {locator.get('thread_index')!r}, not {declared_thread!r}"
             )
         allowed_components = _critic_allowed_target_components().get(code, set())
         if component not in allowed_components:
             errors.append(
-                f"/issues/{issue_index}/target/component: issue code {code!r} cannot target semantic component {component!r}"
+                f"/issues/{issue_index}/review_ref: issue code {code!r} cannot "
+                f"target {review_ref!r} ({component!r})"
             )
-        review_key = str(target.get("review_unit_key") or "").strip()
-        if component in _critic_precise_target_components():
-            if not review_key:
+        for evidence_index, evidence_ref in enumerate(issue.get("evidence_refs") or []):
+            value = str(evidence_ref)
+            if value not in evidence_id_by_ref:
                 errors.append(
-                    f"/issues/{issue_index}/target/review_unit_key: "
-                    f"component {component!r} requires a precise semantic "
-                    "review-unit target"
+                    f"/issues/{issue_index}/evidence_refs/{evidence_index}: "
+                    f"unknown EvidenceRef {value!r}"
                 )
-            elif review_key not in review_mapping:
+        for evidence_index, evidence_id in enumerate(issue.get("evidence_ids") or []):
+            if str(evidence_id) not in known:
                 errors.append(
-                    f"/issues/{issue_index}/target/review_unit_key: "
-                    f"unknown review unit {review_key!r}"
+                    f"/issues/{issue_index}/evidence_ids/{evidence_index}: "
+                    f"unknown canonical evidence id {str(evidence_id)!r}"
                 )
-            else:
-                actual_component = unit_components.get(review_key, "")
-                if actual_component != component:
-                    errors.append(
-                        f"/issues/{issue_index}/target: component "
-                        f"{component!r} does not match review unit "
-                        f"{review_key!r} ({actual_component!r})"
-                    )
-                canonical_thread = _critic_target_canonical_thread(candidate, target)
-                if (
-                    canonical_thread is not None
-                    and raw_thread_index != canonical_thread
-                ):
-                    errors.append(
-                        f"/issues/{issue_index}/target/thread_index: review unit {review_key!r} belongs to thread {canonical_thread}, not {raw_thread_index!r}"
-                    )
-    reviewed_keys = [
-        str(x)
-        for x in semantic_output.get("reviewed_unit_keys") or []
-        if str(x).strip()
-    ]
-    missing = [x for x in expected_keys if x not in reviewed_keys]
-    unknown = [x for x in reviewed_keys if x not in set(expected_keys)]
-    if missing:
-        errors.append(
-            "/reviewed_unit_keys: critic did not explicitly cover review unit(s): "
-            + ", ".join(missing[:12])
-        )
-    if unknown:
-        errors.append(
-            "/reviewed_unit_keys: contains unknown review unit(s): "
-            + ", ".join(unknown[:12])
-        )
 
     user_questions = [
         q
@@ -6886,21 +7176,22 @@ def expand_argument_architecture_critic_model_output(
     candidate = _canonical_argument_candidate(canonical_envelope, raw_candidate)
     canonical_envelope = copy.deepcopy(canonical_envelope)
     canonical_envelope.setdefault("payload", {})["architecture_candidate"] = candidate
-    _, review_mapping = _critic_review_units(candidate)
-    reviewed_keys = [
-        str(x)
-        for x in semantic_output.get("reviewed_unit_keys") or []
-        if str(x).strip()
-    ]
+    _, review_locators, _ = _critic_review_graph(canonical_envelope, candidate)
+    _, evidence_id_by_ref, _ = _critic_evidence_registry(canonical_envelope)
+    # A successful Critic call is the Runtime coverage receipt for the complete
+    # assigned Review Graph.  Copying every key back cannot prove review and is
+    # no longer part of the model contract.
     checked = list(
         dict.fromkeys(
-            review_mapping[key]
-            for key in reviewed_keys
-            if key in review_mapping
+            str(locator.get("semantic_object_id") or "")
+            for locator in review_locators.values()
+            if locator.get("presence") == "PRESENT"
+            and str(locator.get("semantic_object_id") or "").strip()
         )
     )
 
     model_findings: list[dict[str, Any]] = []
+    canonical_semantic_issues: list[dict[str, Any]] = []
     for i, issue in enumerate(semantic_output.get("issues") or [], 1):
         if not isinstance(issue, dict):
             continue
@@ -6915,14 +7206,27 @@ def expand_argument_architecture_critic_model_output(
             route = str(policy["route"])
             repairable = bool(policy["repairable"])
 
-        evidence_ids = [
-            str(x) for x in issue.get("evidence_ids") or [] if str(x).strip()
-        ]
+        evidence_ids = list(
+            dict.fromkeys(
+                evidence_id_by_ref[str(value)]
+                for value in issue.get("evidence_refs") or []
+                if str(value) in evidence_id_by_ref
+            )
+        )
         blocking = bool(policy["blocking"]) or needs_user_input or requires_structure_change
-        target = issue.get("target") or {}
-        target_path = _critic_target_path(candidate, target)
-        semantic_thread = _critic_target_canonical_thread(candidate, target)
-        review_key = str(target.get("review_unit_key") or "").strip() or None
+        review_ref = str(issue.get("review_ref") or "").strip()
+        locator = review_locators.get(review_ref) or {}
+        target_path = str(locator.get("target_path") or "/result/argument_architecture")
+        semantic_thread = locator.get("thread_index")
+        review_key = str(locator.get("semantic_review_unit_key") or "").strip() or None
+        semantic_component = str(locator.get("semantic_component") or "") or None
+        canonical_issue = copy.deepcopy(issue)
+        canonical_issue["target"] = {
+            "component": semantic_component,
+            "thread_index": semantic_thread,
+            "review_unit_key": review_key,
+        }
+        canonical_semantic_issues.append(canonical_issue)
         finding_instance_id = f"F-ARG-CRITIC-{i:03d}"
         model_findings.append(
             {
@@ -6937,7 +7241,7 @@ def expand_argument_architecture_critic_model_output(
                 "category": "ARGUMENT",
                 "target_type": "ARGUMENT_SEMANTIC_COMPONENT",
                 "target_path_or_span": target_path,
-                "semantic_component": str(target.get("component") or "") or None,
+                "semantic_component": semantic_component,
                 "semantic_thread": semantic_thread,
                 "semantic_review_unit_key": review_key,
                 "description": str(issue["description"]),
@@ -7006,7 +7310,7 @@ def expand_argument_architecture_critic_model_output(
             "quality_dimensions": _canonical_quality_dimensions(
                 semantic_output.get("quality_dimensions") or [],
                 deterministic_receipts,
-                semantic_output.get("issues") or [],
+                canonical_semantic_issues,
             ),
         },
         "findings": findings,
