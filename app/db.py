@@ -94,6 +94,38 @@ CREATE TABLE IF NOT EXISTS workflows (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS workflow_rebuild_operations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  branch_id TEXT NOT NULL,
+  root_source_workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE RESTRICT,
+  scope TEXT NOT NULL,
+  status TEXT NOT NULL,
+  current_index INTEGER NOT NULL,
+  plan_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workflow_lineage (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  branch_id TEXT NOT NULL,
+  operation_id TEXT NOT NULL REFERENCES workflow_rebuild_operations(id) ON DELETE CASCADE,
+  parent_workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE RESTRICT,
+  child_workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE RESTRICT,
+  relation_type TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(child_workflow_id)
+);
+CREATE TABLE IF NOT EXISTS workflow_branch_members (
+  branch_id TEXT NOT NULL,
+  operation_id TEXT NOT NULL REFERENCES workflow_rebuild_operations(id) ON DELETE CASCADE,
+  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  source_workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE RESTRICT,
+  position INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(branch_id, workflow_id)
+);
 CREATE TABLE IF NOT EXISTS gates (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -125,6 +157,10 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id, prompt
 CREATE INDEX IF NOT EXISTS idx_runs_project ON prompt_runs(project_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_skill_runs_project ON skill_runs(project_id, skill_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_gates_workflow ON gates(workflow_id, status);
+CREATE INDEX IF NOT EXISTS idx_workflow_rebuild_project ON workflow_rebuild_operations(project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_lineage_parent ON workflow_lineage(parent_workflow_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_lineage_child ON workflow_lineage(child_workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_branch_members ON workflow_branch_members(branch_id, position);
 """
 
 

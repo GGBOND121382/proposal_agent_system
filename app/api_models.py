@@ -31,6 +31,11 @@ class WorkflowStartRequest(BaseModel):
     auto_advance: bool = True
 
 
+class WorkflowRebuildRequest(BaseModel):
+    scope: Literal["SELF", "ALL_DOWNSTREAM"] = "ALL_DOWNSTREAM"
+    auto_advance: bool = True
+
+
 class GateDecisionRequest(BaseModel):
     action: str
     decided_by: str = "local-user"

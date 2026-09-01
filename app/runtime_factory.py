@@ -14,6 +14,7 @@ from .runtime_gateway import AuditedModelGateway
 from .runtime_workflows import RecoverableWorkflowEngine
 from .security import SecurityRouter
 from .unified_workflows import UnifiedWorkflowEngine
+from .workflow_lifecycle import WorkflowLifecycleService
 from .skill_setup import build_skill_executor
 from .track_b import TrackBAgentPromptValidator
 
@@ -31,6 +32,7 @@ class RuntimeStack:
     exporter: RecoverableDocxExporter
     post_export_acceptance: PostExportAcceptanceManager
     dependency_preflight: RuntimeDependencyPreflight
+    lifecycle: WorkflowLifecycleService | None = None
 
     def close(self) -> None:
         """Release long-lived runtime resources in dependency-safe order."""
@@ -91,6 +93,7 @@ def build_runtime_stack(settings, pack, db) -> RuntimeStack:
         settings,
         dependency_preflight=dependency_preflight,
     )
+    lifecycle = WorkflowLifecycleService(db, workflows)
     exporter = RecoverableDocxExporter(db, settings)
     post_export_acceptance = PostExportAcceptanceManager(db, settings, exporter)
     return RuntimeStack(
@@ -102,6 +105,7 @@ def build_runtime_stack(settings, pack, db) -> RuntimeStack:
         research=research,
         diagram_enrichment=diagram_enrichment,
         workflows=workflows,
+        lifecycle=lifecycle,
         exporter=exporter,
         post_export_acceptance=post_export_acceptance,
         dependency_preflight=dependency_preflight,

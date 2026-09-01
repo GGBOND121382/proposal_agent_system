@@ -1957,6 +1957,61 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             required = ["WF-4_PROPOSAL_AUTHORING"]
         return required
 
+    def _validate_explicit_prerequisite_workflows(
+        self,
+        project_id: str,
+        workflow_type: str,
+        options: dict[str, Any],
+        explicit: dict[str, str],
+    ) -> tuple[dict[str, str], list[str]]:
+        """Validate caller-frozen workflow bindings without resolving "latest".
+
+        Rebuild/lineage operations use this path so a newly created workflow
+        consumes exactly the prerequisite versions selected by its rebuild plan.
+        """
+
+        required = set(self._required_workflow_types(project_id, workflow_type, options))
+        allowed = set(required)
+        if workflow_type == "WF-4_PROPOSAL_AUTHORING":
+            allowed.add("WF-3_HYBRID_ONLINE_ASSIST")
+        unknown_types = sorted(set(explicit) - allowed)
+        if unknown_types:
+            raise ValueError(
+                "显式前置工作流包含当前工作流不允许的类型："
+                + "、".join(unknown_types)
+            )
+
+        bindings: dict[str, str] = {}
+        seen_ids: set[str] = set()
+        for required_type, workflow_id in explicit.items():
+            workflow_id = str(workflow_id or "").strip()
+            if not workflow_id:
+                raise ValueError(f"显式前置工作流 {required_type} 缺少 workflow_id")
+            if workflow_id in seen_ids:
+                raise ValueError(f"同一个 workflow_id 不能绑定到多个前置类型：{workflow_id}")
+            row = self.db.fetchone(
+                "SELECT id,project_id,workflow_type,status FROM workflows WHERE id=?",
+                (workflow_id,),
+            )
+            if row is None:
+                raise ValueError(f"显式前置工作流不存在：{workflow_id}")
+            if str(row["project_id"]) != project_id:
+                raise ValueError(f"显式前置工作流跨项目：{workflow_id}")
+            if str(row["workflow_type"]) != required_type:
+                raise ValueError(
+                    f"显式前置工作流类型不匹配：{required_type} -> "
+                    f"{workflow_id}({row['workflow_type']})"
+                )
+            if str(row["status"]) != WorkflowStatus.COMPLETED.value:
+                raise ValueError(
+                    f"显式前置工作流必须已完成：{workflow_id}({row['status']})"
+                )
+            bindings[required_type] = workflow_id
+            seen_ids.add(workflow_id)
+
+        missing = sorted(required - set(bindings))
+        return bindings, missing
+
     def _resolve_prerequisite_workflows(
         self,
         project_id: str,
@@ -2138,7 +2193,15 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             scope=scope,
         )
 
-    def start(self, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    def start(
+        self,
+        project_id: str,
+        workflow_type: str,
+        options: dict[str, Any] | None = None,
+        *,
+        prerequisite_workflow_ids: dict[str, str] | None = None,
+        lifecycle_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if workflow_type not in WORKFLOWS:
             raise KeyError(f"Unknown workflow: {workflow_type}")
         if not self.db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
@@ -2173,11 +2236,21 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 reference_date=now,
             )
         workflow_id = new_id("wf")
-        prerequisite_bindings, missing_prerequisites = self._resolve_prerequisite_workflows(
-            project_id,
-            workflow_type,
-            resolved_options,
-        )
+        if prerequisite_workflow_ids is None:
+            prerequisite_bindings, missing_prerequisites = self._resolve_prerequisite_workflows(
+                project_id,
+                workflow_type,
+                resolved_options,
+            )
+            prerequisite_binding_mode = "RESOLVED"
+        else:
+            prerequisite_bindings, missing_prerequisites = self._validate_explicit_prerequisite_workflows(
+                project_id,
+                workflow_type,
+                resolved_options,
+                dict(prerequisite_workflow_ids),
+            )
+            prerequisite_binding_mode = "EXPLICIT_FROZEN"
         state = {
             "workflow_type": workflow_type,
             "options": resolved_options,
@@ -2185,7 +2258,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             "repair_attempts": {},
             "public_search_results": None,
             "prerequisite_workflow_ids": prerequisite_bindings,
+            "prerequisite_binding_mode": prerequisite_binding_mode,
         }
+        if lifecycle_context:
+            state["workflow_lifecycle"] = copy.deepcopy(lifecycle_context)
         prerequisite_error = self._prerequisite_error(missing_prerequisites)
         status = (
             WorkflowStatus.WAITING_PREREQUISITE.value
@@ -2213,7 +2289,17 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
             (workflow_id, project_id, workflow_type, status, 0, json.dumps(state, ensure_ascii=False), now, now),
         )
-        self.db.audit("WORKFLOW_STARTED", project_id=project_id, object_id=workflow_id, metadata={"workflow_type": workflow_type})
+        self.db.audit(
+            "WORKFLOW_STARTED",
+            project_id=project_id,
+            object_id=workflow_id,
+            metadata={
+                "workflow_type": workflow_type,
+                "prerequisite_binding_mode": prerequisite_binding_mode,
+                "prerequisite_workflow_ids": prerequisite_bindings,
+                "workflow_lifecycle": copy.deepcopy(lifecycle_context or {}),
+            },
+        )
         if status == WorkflowStatus.WAITING_CONFIGURATION.value:
             self.db.audit(
                 "WORKFLOW_WAITING_CONFIGURATION",

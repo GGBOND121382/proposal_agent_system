@@ -22,7 +22,15 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
         super().__init__(*args, **kwargs)
         self._active_workflow_ids: set[str] = set()
 
-    def start(self, project_id: str, workflow_type: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    def start(
+        self,
+        project_id: str,
+        workflow_type: str,
+        options: dict[str, Any] | None = None,
+        *,
+        prerequisite_workflow_ids: dict[str, str] | None = None,
+        lifecycle_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         options = options or {}
         idempotency_key = str(options.get("idempotency_key") or "").strip()
         if idempotency_key:
@@ -33,8 +41,22 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
             for row in existing:
                 state = json.loads(row["state_json"])
                 if state.get("start_idempotency_key") == idempotency_key:
+                    existing_bindings = state.get("prerequisite_workflow_ids") or {}
+                    if (
+                        prerequisite_workflow_ids is not None
+                        and dict(existing_bindings) != dict(prerequisite_workflow_ids)
+                    ):
+                        raise ValueError(
+                            "幂等启动键对应的既有工作流前置绑定与本次显式绑定不一致"
+                        )
                     return self.get(row["id"])
-        result = super().start(project_id, workflow_type, options)
+        result = super().start(
+            project_id,
+            workflow_type,
+            options,
+            prerequisite_workflow_ids=prerequisite_workflow_ids,
+            lifecycle_context=lifecycle_context,
+        )
         if idempotency_key:
             state = result["state"]
             state["start_idempotency_key"] = idempotency_key

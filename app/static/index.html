@@ -71,7 +71,10 @@
           </select>
           <button id="startWorkflow">启动并运行至下一个门禁</button>
           <button id="advanceWorkflow">继续选中的工作流</button>
+          <button id="rebuildWorkflow" class="warning" disabled>一键重建所选工作流</button>
+          <button id="resumeRebuild" class="success" hidden>继续重建</button>
           <button id="exportDocx">导出 DOCX</button><button id="exportPackage">导出审计包</button>
+          <div id="rebuildHint" class="rebuild-hint">选择一个工作流后即可一键重建；系统会自动关联并重建其下游。</div>
           <div id="wf3Options" class="workflow-options" hidden>
             <h4>WF-3 公开研究需求（可留空，由系统从 WF-1 结果推导；无法推导时转人工门禁）</h4>
             <label>公开研究问题<textarea id="wf3Question" placeholder="例如：检索与核心研究问题最接近的公开工作、代表性基线和评价指标。"></textarea></label>
