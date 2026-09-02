@@ -63,6 +63,34 @@ class ContentExtractor:
             failure_reason=failure_reason,
         )
 
+    def browser_fallback_reason(
+        self,
+        fetched: FetchedDocument,
+        extracted: ExtractedDocument | None = None,
+    ) -> str | None:
+        """Return a deterministic reason when static HTML is not usable evidence."""
+        if "html" not in str(fetched.content_type or "").lower():
+            return None
+        extracted = extracted or self.extract(fetched)
+        if extracted.quality == "EMPTY":
+            return "STATIC_TEXT_EMPTY"
+        if extracted.quality == "SHORT":
+            return "STATIC_TEXT_SHORT"
+        raw = fetched.raw_bytes[:500_000].decode("utf-8", errors="ignore").lower()
+        compact = self.compact_text(extracted.text).lower()
+        shell_markers = (
+            "you need to enable javascript",
+            "please enable javascript",
+            "javascript is required",
+            "__next_data__",
+            "id=\"__next\"",
+            "id=\"root\"></div>",
+            "id=\"app\"></div>",
+        )
+        if any(marker in raw for marker in shell_markers) and len(compact) < 1200:
+            return "STATIC_JS_SHELL"
+        return None
+
     @staticmethod
     def extract_text(raw: bytes, content_type: str, url: str) -> tuple[str, str]:
         if content_type == "application/pdf" or url.lower().endswith(".pdf"):

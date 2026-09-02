@@ -80,6 +80,8 @@ def main() -> None:
             "data_dir": str(settings.data_dir),
             "prompt_pack_dir": str(settings.prompt_pack_dir),
             "public_search_provider": settings.public_search_provider,
+            "browser_search_enabled": settings.browser_search_enabled,
+            "browser_fetch_fallback_enabled": settings.browser_fetch_fallback_enabled,
         }
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -19,6 +19,8 @@ data/research_archive/
 data/research_discovery_inputs/
 data/wf3_validation/
 data/model_calls/
+data/capability_tests/
+data/browser_cache/
 recovery_evidence/*.log
 recovery_evidence/g0/
 recovery_evidence/d/
@@ -33,3 +35,4 @@ recovery_evidence/full_proposal/
 recovery_evidence/full_integration/
 
 recovery_evidence/post_export/
+docs/video_demo_20260902

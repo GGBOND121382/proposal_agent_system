@@ -25,6 +25,7 @@ from .research_validation import write_validation_bundle
 from .search_gateway import SearchGateway, normalize_search_queries
 from .search_providers import (
     AcademicSearchProvider,
+    BrowserSearchProvider,
     SearchProviderError,
     SearxngSearchProvider,
 )
@@ -77,6 +78,13 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             normalized_plan.get("query_items") or queries
         )
         per_query = self._candidate_budget_per_query()
+        root = (
+            Path(context.data_dir)
+            / "research_discovery_inputs"
+            / safe_filename(context.project_id)
+            / safe_filename(context.workflow_id or "workflow")
+        )
+        root.mkdir(parents=True, exist_ok=True)
         discovery: dict[str, Any] | None = None
         academic_error: Exception | None = None
         try:
@@ -151,6 +159,37 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                         "message": f"{type(exc).__name__}: {exc}",
                     }
                 ]
+            if not web_candidates and bool(
+                getattr(self.settings, "browser_search_enabled", False)
+            ):
+                try:
+                    browser_batch = SearchGateway(
+                        [
+                            BrowserSearchProvider(
+                                self.settings,
+                                worker=self.browser_worker,
+                                evidence_dir=root / "browser_search",
+                            )
+                        ]
+                    ).search(
+                        search_queries,
+                        per_query_limit=per_query,
+                        continue_on_error=True,
+                    )
+                    web_candidates = browser_batch.candidates()
+                    web_failures.extend(browser_batch.failures)
+                    web_runs.extend(run.to_dict() for run in browser_batch.runs)
+                except SearchProviderError as exc:
+                    web_failures.append(exc.to_failure())
+                except Exception as exc:
+                    web_failures.append(
+                        {
+                            "provider": "browser_search",
+                            "category": "RETRIEVAL",
+                            "error_code": "HYBRID_BROWSER_DISCOVERY_ERROR",
+                            "message": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
             by_query = {
                 str(row.get("query") or ""): row
                 for row in discovery.get("responses") or []
@@ -163,18 +202,27 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                 candidate = dict(candidate)
                 candidate["matched_queries"] = [query]
                 verification = dict(candidate.get("verification") or {})
+                discovery_provider = str(
+                    candidate.get("discovery_provider") or "searxng"
+                )
                 verification.update(
                     {
-                        "status": "SEARXNG_DISCOVERY_RETURNED",
-                        "discovery_provider": "searxng",
+                        "status": f"{discovery_provider.upper()}_DISCOVERY_RETURNED",
+                        "discovery_provider": discovery_provider,
                         "query": query,
                         "matched_queries": [query],
                     }
                 )
                 candidate["verification"] = verification
-                candidate["academic_provider"] = "searxng"
+                candidate["academic_provider"] = discovery_provider
                 by_query[query].setdefault("results", []).append(candidate)
-            discovery.setdefault("providers", []).append("searxng")
+            discovered_web_providers = [
+                str(run.get("provider") or "")
+                for run in web_runs
+                if str(run.get("provider") or "")
+            ]
+            discovery.setdefault("providers", []).extend(discovered_web_providers)
+            discovery["providers"] = list(dict.fromkeys(discovery["providers"]))
             discovery.setdefault("failures", []).extend(web_failures)
             discovery.setdefault("provider_runs", []).extend(web_runs)
 
@@ -193,13 +241,6 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         discovery["plan_hash"] = build_plan_lock(normalized_plan)["plan_hash"]
         discovery["retrieval_provider"] = provider
 
-        root = (
-            Path(context.data_dir)
-            / "research_discovery_inputs"
-            / safe_filename(context.project_id)
-            / safe_filename(context.workflow_id or "workflow")
-        )
-        root.mkdir(parents=True, exist_ok=True)
         path = root / f"{safe_filename(str(discovery.get('run_id') or 'academic-discovery'))}.json"
         write_json(path, discovery)
         return path, discovery

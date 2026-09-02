@@ -25,6 +25,14 @@ class Settings:
     public_search_max_results: int
     research_fetch_timeout_seconds: int
     research_max_source_bytes: int
+    browser_search_enabled: bool
+    browser_search_url_template: str
+    browser_executable: str
+    browser_headless: bool
+    browser_navigation_timeout_seconds: int
+    browser_rate_limit_seconds: float
+    browser_cache_ttl_seconds: int
+    browser_fetch_fallback_enabled: bool
     mermaid_js_path: Path
     mermaid_browser_executable: str
     skill_timeout_seconds: int
@@ -61,6 +69,20 @@ class Settings:
             public_search_max_results=int(os.getenv("PUBLIC_SEARCH_MAX_RESULTS", "40")),
             research_fetch_timeout_seconds=int(os.getenv("RESEARCH_FETCH_TIMEOUT_SECONDS", "45")),
             research_max_source_bytes=int(os.getenv("RESEARCH_MAX_SOURCE_BYTES", str(10 * 1024 * 1024))),
+            browser_search_enabled=os.getenv("BROWSER_SEARCH_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"},
+            browser_search_url_template=os.getenv(
+                "BROWSER_SEARCH_URL_TEMPLATE",
+                "https://search.brave.com/search?q={query}&source=web",
+            ).strip(),
+            browser_executable=os.getenv(
+                "BROWSER_EXECUTABLE",
+                os.getenv("MERMAID_BROWSER_EXECUTABLE", ""),
+            ).strip(),
+            browser_headless=os.getenv("BROWSER_HEADLESS", "true").strip().lower() not in {"0", "false", "no", "off"},
+            browser_navigation_timeout_seconds=int(os.getenv("BROWSER_NAVIGATION_TIMEOUT_SECONDS", "45")),
+            browser_rate_limit_seconds=float(os.getenv("BROWSER_RATE_LIMIT_SECONDS", "1.5")),
+            browser_cache_ttl_seconds=int(os.getenv("BROWSER_CACHE_TTL_SECONDS", "86400")),
+            browser_fetch_fallback_enabled=os.getenv("BROWSER_FETCH_FALLBACK_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"},
             mermaid_js_path=Path(os.getenv("MERMAID_JS_PATH", str(root / "third_party" / "mermaid" / "mermaid.min.js"))).resolve(),
             mermaid_browser_executable=os.getenv("MERMAID_BROWSER_EXECUTABLE", ""),
             skill_timeout_seconds=int(os.getenv("SKILL_TIMEOUT_SECONDS", "60")),

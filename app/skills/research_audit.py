@@ -422,8 +422,27 @@ def upgrade_archive_result(
         unique_records.append(record)
 
     unique_records.sort(key=lambda item: (-int(item.get("authority_rank") or 0), -(item.get("published_year") or 0), item.get("canonical_url") or ""))
+    evidence_records = [
+        record
+        for record in unique_records
+        if str(record.get("fetch_mode") or "").upper() != "SNIPPET_ONLY"
+    ]
+    snippet_only_records = [
+        record
+        for record in unique_records
+        if str(record.get("fetch_mode") or "").upper() == "SNIPPET_ONLY"
+    ]
+    for record in snippet_only_records:
+        issues.append(
+            {
+                "type": "SOURCE_FETCH_FAILURE",
+                "code": "SNIPPET_ONLY_NOT_EVIDENCE",
+                "url": record.get("url"),
+                "blockage_type": record.get("browser_blockage_type"),
+            }
+        )
     coverage = coverage_report(
-        unique_records,
+        evidence_records,
         normalized_plan,
         quality_profile=quality_profile,
         min_sources_per_query=min_sources_per_query,
@@ -467,14 +486,16 @@ def upgrade_archive_result(
     passages: list[dict[str, Any]] = []
     catalog: list[dict[str, Any]] = []
     for record in unique_records:
+        is_snippet_only = str(record.get("fetch_mode") or "").upper() == "SNIPPET_ONLY"
         source_ref = {
             "source_id": record["source_id"], "source_type": "PUBLIC_SOURCE",
             "document_version_id": None, "section_id": None, "span_start": None, "span_end": None,
             "quoted_text": str(record.get("excerpt") or "")[:500],
             "source_hash": record["snapshot_sha256"], "authority_rank": record["authority_rank"], "security_level": "PUBLIC",
         }
-        sources.append(source_ref)
-        passages.append({"passage_id": new_id("passage"), "source_ref": source_ref, "text": str(record.get("excerpt") or "")[:6000], "relevance": record.get("matched_query") or "公开资料检索"})
+        if not is_snippet_only:
+            sources.append(source_ref)
+            passages.append({"passage_id": new_id("passage"), "source_ref": source_ref, "text": str(record.get("excerpt") or "")[:6000], "relevance": record.get("matched_query") or "公开资料检索"})
         catalog.append({
             "source_id": record["source_id"], "title": record.get("title"), "url": record.get("url"),
             "canonical_url": record.get("canonical_url"), "doi": record.get("doi"), "source_type": record.get("source_category"),
@@ -484,7 +505,10 @@ def upgrade_archive_result(
             "discovery_providers": _record_providers(record), "snapshot_sha256": record.get("snapshot_sha256"),
             "text_sha256": record.get("text_sha256"), "excerpt": record.get("excerpt"),
             "text_length": record.get("text_length"),
-            "full_text_available": bool(int(record.get("text_length") or 0) >= 1000),
+            "full_text_available": bool(
+                not is_snippet_only and int(record.get("text_length") or 0) >= 1000
+            ),
+            "fetch_mode": record.get("fetch_mode"),
         })
     verification = verify_research_archive(manifest_path)
     if verification["status"] != "PASS":

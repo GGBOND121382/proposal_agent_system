@@ -70,6 +70,8 @@ def config_status() -> dict[str, Any]:
     return {
         "runtime_mode": settings.runtime_mode,
         "public_search_provider": settings.public_search_provider,
+        "browser_search_enabled": settings.browser_search_enabled,
+        "browser_fetch_fallback_enabled": settings.browser_fetch_fallback_enabled,
         "endpoints": endpoints,
         "preflight": report.as_dict(),
     }

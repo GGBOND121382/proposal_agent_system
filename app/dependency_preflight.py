@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import shutil
 import tempfile
@@ -633,7 +634,7 @@ class RuntimeDependencyPreflight:
         if mode in {"REPLAY", "MOCK"} or (mode == "SIMULATED" and provider == "disabled"):
             report.checks.append({"name": "PUBLIC_SEARCH", "status": "SKIP", "reason": f"runtime mode {mode}"})
             return report
-        allowed = {"searxng", "connector", "recorded", "academic", "hybrid"}
+        allowed = {"searxng", "connector", "recorded", "academic", "hybrid", "browser", "browser_search"}
         if provider == "disabled":
             report.issues.append(
                 DependencyIssue(
@@ -662,6 +663,57 @@ class RuntimeDependencyPreflight:
                         dependency="PUBLIC_SEARCH",
                         message="SearXNG 模式未配置 PUBLIC_SEARCH_BASE_URL。",
                         required_settings=("PUBLIC_SEARCH_BASE_URL",),
+                    )
+                )
+        if provider in {"browser", "browser_search"} or (
+            provider == "hybrid"
+            and bool(getattr(self.settings, "browser_search_enabled", False))
+        ) or (
+            provider == "searxng"
+            and bool(getattr(self.settings, "browser_fetch_fallback_enabled", False))
+        ):
+            browser_required = provider in {"browser", "browser_search"}
+            template = str(
+                getattr(self.settings, "browser_search_url_template", "") or ""
+            ).strip()
+            if provider in {"browser", "browser_search", "hybrid"} and "{query}" not in template:
+                report.issues.append(
+                    DependencyIssue(
+                        code="BROWSER_SEARCH_URL_TEMPLATE_INVALID",
+                        dependency="BROWSER_SEARCH",
+                        message="BROWSER_SEARCH_URL_TEMPLATE 必须包含 {query} 占位符。",
+                        required_settings=("BROWSER_SEARCH_URL_TEMPLATE",),
+                        severity="ERROR" if browser_required else "WARNING",
+                    )
+                )
+            if importlib.util.find_spec("playwright") is None:
+                report.issues.append(
+                    DependencyIssue(
+                        code="PLAYWRIGHT_PYTHON_PACKAGE_MISSING",
+                        dependency="BROWSER_SEARCH",
+                        message="当前 Python 环境未安装 Playwright。",
+                        required_settings=("requirements.txt:playwright",),
+                        severity="ERROR" if browser_required else "WARNING",
+                    )
+                )
+            browser = self._find_browser(
+                str(getattr(self.settings, "browser_executable", "") or "")
+            )
+            report.checks.append(
+                {
+                    "name": "PUBLIC_SEARCH_BROWSER",
+                    "status": "PASS" if browser else "FAIL",
+                    "path": browser,
+                }
+            )
+            if not browser:
+                report.issues.append(
+                    DependencyIssue(
+                        code="PUBLIC_SEARCH_BROWSER_NOT_FOUND",
+                        dependency="BROWSER_SEARCH",
+                        message="未找到可用于 Browser Search 的 Chromium、Chrome 或 Edge。",
+                        required_settings=("BROWSER_EXECUTABLE",),
+                        severity="ERROR" if browser_required else "WARNING",
                     )
                 )
         elif provider == "connector":
@@ -695,6 +747,33 @@ class RuntimeDependencyPreflight:
                     dependency="PUBLIC_SEARCH",
                     message="RESEARCH_MAX_SOURCE_BYTES 必须大于 0。",
                     required_settings=("RESEARCH_MAX_SOURCE_BYTES",),
+                )
+            )
+        if int(getattr(self.settings, "browser_navigation_timeout_seconds", 45)) <= 0:
+            report.issues.append(
+                DependencyIssue(
+                    code="BROWSER_NAVIGATION_TIMEOUT_INVALID",
+                    dependency="BROWSER_SEARCH",
+                    message="BROWSER_NAVIGATION_TIMEOUT_SECONDS 必须大于 0。",
+                    required_settings=("BROWSER_NAVIGATION_TIMEOUT_SECONDS",),
+                )
+            )
+        if float(getattr(self.settings, "browser_rate_limit_seconds", 1.5)) < 0:
+            report.issues.append(
+                DependencyIssue(
+                    code="BROWSER_RATE_LIMIT_INVALID",
+                    dependency="BROWSER_SEARCH",
+                    message="BROWSER_RATE_LIMIT_SECONDS 不能小于 0。",
+                    required_settings=("BROWSER_RATE_LIMIT_SECONDS",),
+                )
+            )
+        if int(getattr(self.settings, "browser_cache_ttl_seconds", 86400)) < 0:
+            report.issues.append(
+                DependencyIssue(
+                    code="BROWSER_CACHE_TTL_INVALID",
+                    dependency="BROWSER_SEARCH",
+                    message="BROWSER_CACHE_TTL_SECONDS 不能小于 0。",
+                    required_settings=("BROWSER_CACHE_TTL_SECONDS",),
                 )
             )
         return report
@@ -1049,4 +1128,44 @@ class RuntimeDependencyPreflight:
                         required_settings=("PUBLIC_SEARCH_BASE_URL",),
                     )
                 )
+        if self.settings.public_search_provider in {"browser", "browser_search"} and not search.blocking_issues:
+            from .skills.browser_worker import BrowserWorker
+            from .skills.search_gateway import SearchGateway, normalize_search_queries
+            from .skills.search_providers import BrowserSearchProvider
+
+            worker = BrowserWorker(self.settings)
+            try:
+                batch = SearchGateway(
+                    [BrowserSearchProvider(self.settings, worker=worker)]
+                ).search(
+                    normalize_search_queries(["proposal agent preflight"]),
+                    per_query_limit=3,
+                )
+                run = batch.runs[0] if batch.runs else None
+                if run is None or run.status != "PASS" or not batch.hits:
+                    raise RuntimeError(
+                        f"browser search status={getattr(run, 'status', None)}, hits={len(batch.hits)}"
+                    )
+                report.checks.append(
+                    {
+                        "name": "BROWSER_SEARCH_REAL_WEB",
+                        "status": "PASS",
+                        "result_count": len(batch.hits),
+                        "provider_run": run.to_dict(),
+                    }
+                )
+            except Exception as exc:
+                report.issues.append(
+                    DependencyIssue(
+                        code="BROWSER_SEARCH_PROBE_FAILED",
+                        dependency="BROWSER_SEARCH",
+                        message=f"Browser Search 探测失败：{type(exc).__name__}: {exc}",
+                        required_settings=(
+                            "BROWSER_SEARCH_URL_TEMPLATE",
+                            "BROWSER_EXECUTABLE",
+                        ),
+                    )
+                )
+            finally:
+                worker.close()
         return report

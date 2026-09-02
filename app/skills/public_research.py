@@ -10,6 +10,7 @@ import httpx
 
 from .base import SkillContext, SkillResult
 from .content_extraction import ContentExtractor
+from .browser_worker import BrowserWorker
 from .fetch_gateway import (
     FetchGatewayRetrievalError,
     FetchGatewaySecurityError,
@@ -19,6 +20,7 @@ from .fetch_gateway import (
 from .search_gateway import SearchGateway, normalize_search_queries
 from .search_providers import (
     ConnectorSearchProvider,
+    BrowserSearchProvider,
     RecordedSearchProvider,
     SearchProviderConfigurationError,
     SearxngSearchProvider,
@@ -75,9 +77,21 @@ class PublicResearchArchiveSkill:
 
     def __init__(self, settings):
         self.settings = settings
-        self.fetch_gateway = HttpFetchGateway(settings, client_factory=httpx.Client)
         self.content_extractor = ContentExtractor()
+        self.browser_worker = BrowserWorker(settings)
+        self.fetch_gateway = HttpFetchGateway(
+            settings,
+            client_factory=httpx.Client,
+            browser_worker=(
+                self.browser_worker
+                if bool(getattr(settings, "browser_fetch_fallback_enabled", False))
+                else None
+            ),
+        )
         self._last_search_execution: dict[str, Any] | None = None
+
+    def close(self) -> None:
+        self.browser_worker.close()
 
     def run(self, payload: dict[str, Any], context: SkillContext) -> SkillResult:
         self._last_search_execution = None
@@ -91,7 +105,8 @@ class PublicResearchArchiveSkill:
         text_dir = root / "text"
         meta_dir = root / "metadata"
         connector_dir = root / "connector"
-        for directory in [raw_dir, text_dir, meta_dir, connector_dir]:
+        search_page_dir = root / "search_pages"
+        for directory in [raw_dir, text_dir, meta_dir, connector_dir, search_page_dir]:
             directory.mkdir(parents=True, exist_ok=True)
 
         connector_manifest: dict[str, Any] | None = None
@@ -111,6 +126,17 @@ class PublicResearchArchiveSkill:
                 for item in retrieval_failures
             ]
             retrieval_mode = "LIVE_SEARXNG"
+        elif provider in {"browser", "browser_search"}:
+            candidates, retrieval_failures = self._search_browser(
+                queries,
+                max_results,
+                evidence_dir=search_page_dir,
+            )
+            retrieval_warnings = [
+                f"query={item['query']}: {item['message']}"
+                for item in retrieval_failures
+            ]
+            retrieval_mode = "LIVE_BROWSER_SEARCH"
         else:
             raise PublicResearchConfigurationError(f"Unsupported PUBLIC_SEARCH_PROVIDER: {provider}")
 
@@ -152,6 +178,11 @@ class PublicResearchArchiveSkill:
                 })
                 continue
             records.append(record)
+            if record.get("fetch_mode") == "SNIPPET_ONLY":
+                warnings.append(
+                    f"{record['url']}: browser fallback was blocked; search snippet was archived but not admitted as full-text evidence"
+                )
+                continue
             source_ref = {
                 "source_id": record["source_id"],
                 "source_type": "PUBLIC_SOURCE",
@@ -319,6 +350,40 @@ class PublicResearchArchiveSkill:
             )
         return candidates, batch.failures
 
+    def _search_browser(
+        self,
+        queries: list[str],
+        max_results: int,
+        *,
+        evidence_dir: Path,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if not queries:
+            return [], []
+        provider = BrowserSearchProvider(
+            self.settings,
+            worker=self.browser_worker,
+            evidence_dir=evidence_dir,
+        )
+        try:
+            batch = SearchGateway([provider]).search(
+                normalize_search_queries(queries),
+                per_query_limit=max_results,
+            )
+        except SearchProviderConfigurationError as exc:
+            raise PublicResearchConfigurationError(str(exc), details=exc.details) from exc
+        self._last_search_execution = {
+            "providers": list(batch.providers),
+            "provider_runs": [run.to_dict() for run in batch.runs],
+            "failures": list(batch.failures),
+        }
+        candidates = batch.candidates()
+        if not candidates and batch.failures:
+            raise PublicResearchRetrievalError(
+                "All Browser Search queries failed or were blocked",
+                details={"query_failures": batch.failures},
+            )
+        return candidates, batch.failures
+
     @staticmethod
     def _round_robin(groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
         """Interleave query results so max_results cannot starve later queries."""
@@ -340,7 +405,7 @@ class PublicResearchArchiveSkill:
         provider: str,
     ) -> dict[str, Any]:
         url = str(candidate.get("url") or "").strip()
-        self._validate_public_url(url, resolve_dns=provider == "searxng")
+        self._validate_public_url(url, resolve_dns=provider not in {"recorded", "connector"})
         source_id = str(candidate.get("source_id") or new_id("public-src"))
         title = str(candidate.get("title") or url).strip()
         retrieved_at = str(candidate.get("retrieved_at") or utc_now())
@@ -391,6 +456,11 @@ class PublicResearchArchiveSkill:
             extraction_quality = extracted.quality
             extraction_failure_reason = extracted.failure_reason
             body_text = extracted.text
+            if fetch_mode == "SNIPPET_ONLY":
+                body_text = str(candidate.get("excerpt") or title)
+                extractor = "SEARCH_SNIPPET"
+                extraction_quality = "SNIPPET_ONLY"
+                extraction_failure_reason = fetched.blockage_type or fetched.browser_status
             if not body_text:
                 body_text = str(candidate.get("excerpt") or title)
             suffix = self.content_extractor.suffix(content_type, final_url)
@@ -429,6 +499,18 @@ class PublicResearchArchiveSkill:
             "http_status": http_status,
             "content_type": content_type,
             "fetch_mode": fetch_mode,
+            "fetch_fallback_reason": (
+                fetched.fallback_reason if provider not in {"recorded", "connector"} else None
+            ),
+            "browser_status": (
+                fetched.browser_status if provider not in {"recorded", "connector"} else None
+            ),
+            "browser_blockage_type": (
+                fetched.blockage_type if provider not in {"recorded", "connector"} else None
+            ),
+            "fetch_cache_hit": (
+                fetched.cache_hit if provider not in {"recorded", "connector"} else False
+            ),
             "extractor": extractor,
             "extraction_quality": extraction_quality,
             "extraction_failure_reason": extraction_failure_reason,
