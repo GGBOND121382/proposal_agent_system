@@ -1,23 +1,28 @@
 from __future__ import annotations
 
 import csv
-import hashlib
-import ipaddress
 import json
-import mimetypes
-import re
-import socket
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from bs4 import BeautifulSoup
-from pypdf import PdfReader
 
 from .base import SkillContext, SkillResult
+from .content_extraction import ContentExtractor
+from .fetch_gateway import (
+    FetchGatewayRetrievalError,
+    FetchGatewaySecurityError,
+    HttpFetchGateway,
+    validate_public_url,
+)
+from .search_gateway import SearchGateway, normalize_search_queries
+from .search_providers import (
+    ConnectorSearchProvider,
+    RecordedSearchProvider,
+    SearchProviderConfigurationError,
+    SearxngSearchProvider,
+)
 from ..util import new_id, safe_filename, sha256_bytes, sha256_text, utc_now, write_json
 
 
@@ -70,8 +75,12 @@ class PublicResearchArchiveSkill:
 
     def __init__(self, settings):
         self.settings = settings
+        self.fetch_gateway = HttpFetchGateway(settings, client_factory=httpx.Client)
+        self.content_extractor = ContentExtractor()
+        self._last_search_execution: dict[str, Any] | None = None
 
     def run(self, payload: dict[str, Any], context: SkillContext) -> SkillResult:
+        self._last_search_execution = None
         provider = str(payload.get("provider") or self.settings.public_search_provider).lower()
         plan = payload.get("plan") or {}
         queries = self._queries(plan)
@@ -207,6 +216,7 @@ class PublicResearchArchiveSkill:
             "warning_count": len(warnings),
             "warnings": warnings,
             "query_failures": retrieval_failures,
+            "provider_runs": list((self._last_search_execution or {}).get("provider_runs") or []),
             "records": records,
             "connector_response": str(connector_dir / "connector_response.json") if connector_manifest is not None else None,
         }
@@ -245,253 +255,69 @@ class PublicResearchArchiveSkill:
         return result[:12]
 
     def _load_recorded(self, record_file: str | Path) -> list[dict[str, Any]]:
-        path = Path(record_file)
-        if not path.exists():
-            raise PublicResearchConfigurationError(f"Recorded research file not found: {path}")
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise PublicResearchConfigurationError(
-                f"Recorded research file is not readable JSON: {path}: {exc}"
-            ) from exc
-        sources = payload.get("sources") if isinstance(payload, dict) else payload
-        if not isinstance(sources, list):
-            raise PublicResearchConfigurationError("Recorded research file must contain a sources array")
-        return [item for item in sources if isinstance(item, dict)]
+            return RecordedSearchProvider(record_file).load_candidates()
+        except SearchProviderConfigurationError as exc:
+            raise PublicResearchConfigurationError(str(exc), details=exc.details) from exc
 
 
     def _load_connector(self, connector_file: str | Path, planned_queries: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        path = Path(connector_file)
-        if not path.exists():
-            raise PublicResearchConfigurationError(f"Connector research file not found: {path}")
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise PublicResearchConfigurationError(
-                f"Connector research file is not readable JSON: {path}: {exc}"
-            ) from exc
-        if not isinstance(payload, dict):
-            raise PublicResearchConfigurationError("Connector research file must be a JSON object")
-        responses = payload.get("responses")
-        if not isinstance(responses, list):
-            raise PublicResearchConfigurationError("Connector research file must contain a responses array")
-        connector_queries = []
-        candidates: list[dict[str, Any]] = []
-        for response in responses:
-            if not isinstance(response, dict):
-                continue
-            query = str(response.get("query") or "").strip()
-            if query:
-                connector_queries.append(query)
-            results = response.get("results") or []
-            if not isinstance(results, list):
-                continue
-            for item in results:
-                if not isinstance(item, dict):
-                    continue
-                candidate = dict(item)
-                candidate.setdefault("matched_query", query)
-                candidate.setdefault("retrieved_at", response.get("retrieved_at") or payload.get("created_at") or utc_now())
-                candidate.setdefault("connector", payload.get("connector") or "approved-search-connector")
-                candidate.setdefault("verification", {})
-                candidate["verification"] = {
-                    **candidate["verification"],
-                    "connector_run_id": payload.get("run_id"),
-                    "connector": payload.get("connector"),
-                    "query": query,
-                    "status": candidate["verification"].get("status") or "CONNECTOR_RETURNED",
-                }
-                candidates.append(candidate)
-        missing = [q for q in planned_queries if q not in connector_queries]
-        if missing:
-            raise PublicResearchConfigurationError(f"Connector responses do not cover planned queries: {missing}", details={"missing_queries": missing})
-        if not candidates:
-            raise PublicResearchConfigurationError("Connector research file contains no result records")
-        manifest = {
-            **payload,
-            "ingested_at": utc_now(),
-            "planned_queries": planned_queries,
-            "connector_queries": connector_queries,
-            "result_count": len(candidates),
-            "source_file": str(path),
-            "source_file_sha256": sha256_bytes(path.read_bytes()),
-        }
-        return candidates, manifest
+            return ConnectorSearchProvider(connector_file).load_candidates(planned_queries)
+        except SearchProviderConfigurationError as exc:
+            raise PublicResearchConfigurationError(str(exc), details=exc.details) from exc
 
     def _search_searxng_sequential(
         self,
         queries: list[str],
         max_results: int,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        if not self.settings.public_search_base_url:
-            raise PublicResearchConfigurationError("PUBLIC_SEARCH_BASE_URL is empty")
-        endpoint = f"{self.settings.public_search_base_url.rstrip('/')}/search"
-        engines = str(getattr(self.settings, "public_search_engines", "") or "").strip()
-        results_by_query: list[list[dict[str, Any]]] = []
-        query_failures: list[dict[str, Any]] = []
-        with httpx.Client(
-            timeout=self.settings.research_fetch_timeout_seconds,
-            follow_redirects=True,
-            # The SearXNG endpoint is commonly loopback/LAN.  Windows system
-            # proxy discovery can otherwise route 127.0.0.1 through a proxy.
-            trust_env=False,
-        ) as client:
-            for query in queries:
-                params = {
-                    "q": query,
-                    "format": "json",
-                    "language": "all",
-                    "safesearch": 1,
-                }
-                if engines:
-                    params["engines"] = engines
-                query_candidates: list[dict[str, Any]] = []
-                try:
-                    response = client.get(
-                        endpoint,
-                        params=params,
-                    )
-                    response.raise_for_status()
-                    try:
-                        payload = response.json()
-                    except ValueError as exc:
-                        raise PublicResearchConfigurationError(
-                            f"SearXNG JSON API returned invalid JSON: {endpoint}",
-                            details={"endpoint": endpoint, "query": query},
-                        ) from exc
-                    results = payload.get("results") if isinstance(payload, dict) else None
-                    if not isinstance(results, list):
-                        raise PublicResearchConfigurationError(
-                            f"SearXNG JSON API response has no results array: {endpoint}",
-                            details={"endpoint": endpoint, "query": query},
-                        )
-                    for item in results[: min(10, max_results)]:
-                        if not isinstance(item, dict):
-                            continue
-                        raw_authors = item.get("authors") or item.get("author") or []
-                        if isinstance(raw_authors, str):
-                            authors = [
-                                value.strip()
-                                for value in re.split(r"[,;|]", raw_authors)
-                                if value.strip()
-                            ]
-                        elif isinstance(raw_authors, list):
-                            authors = [
-                                str(value.get("name") if isinstance(value, dict) else value).strip()
-                                for value in raw_authors
-                                if str(value.get("name") if isinstance(value, dict) else value).strip()
-                            ]
-                        else:
-                            authors = []
-                        query_candidates.append(
-                            {
-                                "title": str(item.get("title") or "").strip(),
-                                "url": str(item.get("url") or "").strip(),
-                                "excerpt": str(item.get("content") or item.get("snippet") or "").strip(),
-                                "matched_query": query,
-                                "engine": item.get("engine"),
-                                "published_at": (
-                                    item.get("publishedDate")
-                                    or item.get("published_date")
-                                    or item.get("pubdate")
-                                    or item.get("date")
-                                ),
-                                "authors": authors,
-                                "publisher": (
-                                    item.get("publisher")
-                                    or item.get("journal")
-                                    or item.get("source")
-                                ),
-                                "doi": item.get("doi"),
-                                "citation_count": item.get("citation_count"),
-                                "is_retracted": bool(item.get("is_retracted", False)),
-                            }
-                        )
-                except PublicResearchConfigurationError:
-                    raise
-                except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError) as exc:
-                    query_failures.append(
-                        {
-                            "query": query,
-                            "category": "RETRIEVAL",
-                            "error_code": "PUBLIC_RESEARCH_QUERY_RETRIEVAL_ERROR",
-                            "message": f"SearXNG query failed: {exc}",
-                            "details": {
-                                "endpoint": endpoint,
-                                "exception_type": type(exc).__name__,
-                            },
-                        }
-                    )
-                    query_candidates = []
-                results_by_query.append(query_candidates)
-
-        candidates = self._round_robin(results_by_query)
-        if not candidates and query_failures:
-            raise PublicResearchRetrievalError(
-                "All SearXNG queries failed",
-                details={
-                    "endpoint": endpoint,
-                    "query_failures": query_failures,
-                },
-            )
-        return candidates, query_failures
+        return self._search_searxng_with_provider(queries, max_results, max_workers=1)
 
     def _search_searxng(
         self,
         queries: list[str],
         max_results: int,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Run independent SearXNG queries concurrently and preserve query order."""
+        """Run SearXNG through the provider-neutral search contract."""
+        return self._search_searxng_with_provider(queries, max_results, max_workers=4)
+
+    def _search_searxng_with_provider(
+        self,
+        queries: list[str],
+        max_results: int,
+        *,
+        max_workers: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         if not queries:
             return [], []
-        results_by_query: list[list[dict[str, Any]]] = [[] for _ in queries]
-        query_failures: list[dict[str, Any]] = []
-
-        def search_one(index: int, query: str):
-            try:
-                candidates, failures = self._search_searxng_sequential([query], max_results)
-                return index, candidates, failures
-            except PublicResearchRetrievalError as exc:
-                failures = list(exc.details.get("query_failures") or [])
-                if not failures:
-                    failures = [
-                        {
-                            "query": query,
-                            "category": "RETRIEVAL",
-                            "error_code": exc.error_code,
-                            "message": str(exc),
-                            "details": dict(exc.details),
-                        }
-                    ]
-                return index, [], failures
-
-        with ThreadPoolExecutor(
-            max_workers=min(4, len(queries)),
-            thread_name_prefix="searxng-query",
-        ) as pool:
-            futures = [
-                pool.submit(search_one, index, query)
-                for index, query in enumerate(queries)
-            ]
-            for future in as_completed(futures):
-                index, candidates, failures = future.result()
-                results_by_query[index] = candidates
-                query_failures.extend(failures)
-
-        query_order = {query: index for index, query in enumerate(queries)}
-        query_failures.sort(
-            key=lambda item: query_order.get(str(item.get("query") or ""), len(queries))
+        provider = SearxngSearchProvider(
+            self.settings,
+            # Resolve the module attribute at call time so existing test and
+            # deployment injection points remain compatible.
+            client_factory=httpx.Client,
+            max_workers=max_workers,
         )
-        candidates = self._round_robin(results_by_query)
-        if not candidates and query_failures:
+        try:
+            batch = SearchGateway([provider]).search(
+                normalize_search_queries(queries),
+                per_query_limit=max_results,
+            )
+        except SearchProviderConfigurationError as exc:
+            raise PublicResearchConfigurationError(str(exc), details=exc.details) from exc
+        self._last_search_execution = {
+            "providers": list(batch.providers),
+            "provider_runs": [run.to_dict() for run in batch.runs],
+            "failures": list(batch.failures),
+        }
+        candidates = batch.candidates()
+        if not candidates and batch.failures:
+            endpoint = f"{str(self.settings.public_search_base_url or '').rstrip('/')}/search"
             raise PublicResearchRetrievalError(
                 "All SearXNG queries failed",
-                details={
-                    "endpoint": f"{self.settings.public_search_base_url.rstrip('/')}/search",
-                    "query_failures": query_failures,
-                },
+                details={"endpoint": endpoint, "query_failures": batch.failures},
             )
-        return candidates, query_failures
+        return candidates, batch.failures
 
     @staticmethod
     def _round_robin(groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -544,12 +370,30 @@ class PublicResearchArchiveSkill:
             content_type = "application/json"
             final_url = url
             http_status = None
+            fetch_mode = "PROVIDER_PAYLOAD"
+            extractor = "PROVIDER_TEXT"
+            extraction_quality = "USABLE" if len(body_text) >= 200 else ("SHORT" if body_text else "EMPTY")
+            extraction_failure_reason = "NO_EXTRACTABLE_TEXT" if not body_text else None
         else:
-            raw_bytes, content_type, final_url, http_status = self._fetch_url(url)
-            body_text = self._extract_text(raw_bytes, content_type, final_url)
+            try:
+                fetched = self.fetch_gateway.fetch(url)
+            except FetchGatewaySecurityError as exc:
+                raise PublicResearchSecurityError(str(exc), details=exc.details) from exc
+            except FetchGatewayRetrievalError as exc:
+                raise PublicResearchRetrievalError(str(exc), details=exc.details) from exc
+            extracted = self.content_extractor.extract(fetched)
+            raw_bytes = fetched.raw_bytes
+            content_type = fetched.content_type
+            final_url = fetched.final_url
+            http_status = fetched.http_status
+            fetch_mode = fetched.fetch_mode
+            extractor = extracted.extractor
+            extraction_quality = extracted.quality
+            extraction_failure_reason = extracted.failure_reason
+            body_text = extracted.text
             if not body_text:
                 body_text = str(candidate.get("excerpt") or title)
-            suffix = self._suffix(content_type, final_url)
+            suffix = self.content_extractor.suffix(content_type, final_url)
 
         excerpt = self._compact_text(body_text)[:12000]
         if len(excerpt) < 20:
@@ -584,6 +428,10 @@ class PublicResearchArchiveSkill:
             "retrieval_provider": provider,
             "http_status": http_status,
             "content_type": content_type,
+            "fetch_mode": fetch_mode,
+            "extractor": extractor,
+            "extraction_quality": extraction_quality,
+            "extraction_failure_reason": extraction_failure_reason,
             "raw_path": str(raw_path),
             "text_path": str(text_path),
             "metadata_path": str(meta_path),
@@ -599,75 +447,37 @@ class PublicResearchArchiveSkill:
         return record
 
     def _fetch_url(self, url: str) -> tuple[bytes, str, str, int]:
-        headers = {
-            "User-Agent": "ProposalAgentResearchArchiver/1.0 (+public-source-verification)",
-            "Accept": "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.1",
-        }
-        limit = int(self.settings.research_max_source_bytes)
-        with httpx.Client(timeout=self.settings.research_fetch_timeout_seconds, follow_redirects=True, headers=headers) as client:
-            with client.stream("GET", url) as response:
-                response.raise_for_status()
-                final_url = str(response.url)
-                self._validate_public_url(final_url, resolve_dns=True)
-                chunks: list[bytes] = []
-                total = 0
-                for chunk in response.iter_bytes():
-                    total += len(chunk)
-                    if total > limit:
-                        raise PublicResearchRetrievalError(f"Source exceeds {limit} bytes")
-                    chunks.append(chunk)
-                content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0].lower()
-                return b"".join(chunks), content_type, final_url, response.status_code
+        try:
+            fetched = HttpFetchGateway(
+                self.settings,
+                client_factory=httpx.Client,
+            ).fetch(url)
+        except FetchGatewaySecurityError as exc:
+            raise PublicResearchSecurityError(str(exc), details=exc.details) from exc
+        except FetchGatewayRetrievalError as exc:
+            raise PublicResearchRetrievalError(str(exc), details=exc.details) from exc
+        return fetched.raw_bytes, fetched.content_type, fetched.final_url, fetched.http_status
 
     @staticmethod
     def _extract_text(raw: bytes, content_type: str, url: str) -> str:
-        if content_type == "application/pdf" or url.lower().endswith(".pdf"):
-            reader = PdfReader(BytesIO(raw))
-            return "\n\n".join((page.extract_text() or "") for page in reader.pages[:200])
-        if content_type.startswith("text/plain"):
-            return raw.decode("utf-8", errors="replace")
-        text = raw.decode("utf-8", errors="replace")
-        soup = BeautifulSoup(text, "html.parser")
-        for node in soup(["script", "style", "noscript", "svg", "nav", "footer", "header"]):
-            node.decompose()
-        main = soup.find("main") or soup.find("article") or soup.body or soup
-        return main.get_text("\n", strip=True)
+        return ContentExtractor.extract_text(raw, content_type, url)[0]
 
     @staticmethod
     def _compact_text(text: str) -> str:
-        return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+        return ContentExtractor.compact_text(text)
 
     @staticmethod
     def _suffix(content_type: str, url: str) -> str:
-        if content_type == "application/pdf" or url.lower().endswith(".pdf"):
-            return ".pdf"
-        if content_type.startswith("text/plain"):
-            return ".txt"
-        if "html" in content_type:
-            return ".html"
-        return mimetypes.guess_extension(content_type) or ".bin"
+        return ContentExtractor.suffix(content_type, url)
 
     @staticmethod
     def _validate_public_url(url: str, *, resolve_dns: bool) -> None:
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise PublicResearchSecurityError("Only public HTTP(S) URLs are allowed")
-        host = parsed.hostname.lower()
-        if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
-            raise PublicResearchSecurityError("Local addresses are prohibited")
         try:
-            ip = ipaddress.ip_address(host)
-            addresses = [ip]
-        except ValueError:
-            addresses = []
-            if resolve_dns:
-                try:
-                    addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)]
-                except socket.gaierror as exc:
-                    raise PublicResearchRetrievalError(f"DNS resolution failed for {host}") from exc
-        for ip in addresses:
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                raise PublicResearchSecurityError(f"Private/reserved address is prohibited: {ip}")
+            validate_public_url(url, resolve_dns=resolve_dns)
+        except FetchGatewaySecurityError as exc:
+            raise PublicResearchSecurityError(str(exc), details=exc.details) from exc
+        except FetchGatewayRetrievalError as exc:
+            raise PublicResearchRetrievalError(str(exc), details=exc.details) from exc
 
     @staticmethod
     def _authority_rank(domain: str, candidate: dict[str, Any]) -> int:
@@ -687,6 +497,7 @@ class PublicResearchArchiveSkill:
         fields = [
             "source_id", "title", "url", "final_url", "domain", "published_at", "publisher",
             "doi", "retrieved_at", "retrieval_provider", "http_status", "content_type",
+            "fetch_mode", "extractor", "extraction_quality", "extraction_failure_reason",
             "snapshot_sha256", "text_sha256", "byte_size", "text_length", "authority_rank",
             "raw_path", "text_path", "metadata_path",
         ]

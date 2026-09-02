@@ -6,7 +6,6 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
-from .academic_search import AcademicDiscoveryError, AcademicSearchClient
 from .base import SkillContext, SkillResult
 from .public_research import (
     PublicResearchArchiveSkill,
@@ -23,6 +22,12 @@ from .research_plan import deduplicate_candidates, normalize_and_validate_plan
 from .research_screening import screen_and_select_candidates
 from .research_quality import build_retrieval_health
 from .research_validation import write_validation_bundle
+from .search_gateway import SearchGateway, normalize_search_queries
+from .search_providers import (
+    AcademicSearchProvider,
+    SearchProviderError,
+    SearxngSearchProvider,
+)
 from ..util import safe_filename, utc_now, write_json
 
 _DUPLICATE_ISSUES: ContextVar[tuple[dict[str, Any], ...]] = ContextVar("research_duplicate_issues", default=())
@@ -68,15 +73,29 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         context: SkillContext,
     ) -> tuple[Path, dict[str, Any]]:
         queries = list(normalized_plan.get("queries") or [])
+        search_queries = normalize_search_queries(
+            normalized_plan.get("query_items") or queries
+        )
         per_query = self._candidate_budget_per_query()
         discovery: dict[str, Any] | None = None
         academic_error: Exception | None = None
         try:
-            discovery = AcademicSearchClient(self.settings).discover(
-                queries,
-                time_scope=normalized_plan.get("time_scope"),
+            academic_batch = SearchGateway(
+                [
+                    AcademicSearchProvider(
+                        self.settings,
+                        time_scope=normalized_plan.get("time_scope"),
+                    )
+                ]
+            ).search(
+                search_queries,
                 per_query_limit=per_query,
             )
+            discovery = dict(
+                academic_batch.provider_manifests.get("academic-multi-source") or {}
+            )
+            if not discovery:
+                raise RuntimeError("Academic search provider returned no discovery manifest")
         except Exception as exc:
             academic_error = exc
             if provider == "academic":
@@ -111,15 +130,20 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
 
         if provider == "hybrid":
             try:
-                # Bypass this wrapper's screening override so the web channel contributes
-                # its full per-query candidate pool before unified screening/deduplication.
-                web_candidates, web_failures = PublicResearchArchiveSkill._search_searxng(
-                    self,
-                    queries,
-                    per_query,
+                web_batch = SearchGateway(
+                    [SearxngSearchProvider(self.settings, max_workers=4)]
+                ).search(
+                    search_queries,
+                    per_query_limit=per_query,
+                    continue_on_error=True,
                 )
+                web_candidates = web_batch.candidates()
+                web_failures = list(web_batch.failures)
+                web_runs = [run.to_dict() for run in web_batch.runs]
+            except SearchProviderError as exc:
+                web_candidates, web_failures, web_runs = [], [exc.to_failure()], []
             except Exception as exc:
-                web_candidates, web_failures = [], [
+                web_candidates, web_failures, web_runs = [], [
                     {
                         "provider": "searxng",
                         "category": "RETRIEVAL",
@@ -152,17 +176,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                 by_query[query].setdefault("results", []).append(candidate)
             discovery.setdefault("providers", []).append("searxng")
             discovery.setdefault("failures", []).extend(web_failures)
-            discovery.setdefault("provider_runs", []).append(
-                {
-                    "provider": "searxng",
-                    "result_count": len(web_candidates),
-                    "query_failures": web_failures,
-                    "raw_response": {
-                        "note": "SearXNG candidate projection; source snapshots are archived separately.",
-                        "candidates": web_candidates,
-                    },
-                }
-            )
+            discovery.setdefault("provider_runs", []).extend(web_runs)
 
         query_id_by_text = {
             str(item.get("query") or ""): str(item.get("query_id") or "")

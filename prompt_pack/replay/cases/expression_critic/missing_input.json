@@ -1036,7 +1036,9 @@
         ],
         "answer_schema": {
           "type": "OBJECT",
-          "allowed_values": []
+          "allowed_values": [],
+          "properties": {},
+          "properties": {}
         },
         "blocking": true,
         "priority": "P1"

@@ -614,7 +614,7 @@ def minimal_result(pid, case_type):
     }[pid]
     status='PASS'; findings=[]; unresolved=[]; questions=[]; warnings=[]
     if case_type=='missing_input':
-        status='NEED_USER_INPUT'; unresolved=[{'item_id':'unres-001','type':'MISSING','description':'缺少必需输入','target_paths':['/payload'],'required_action':'补充输入','blocking':True}]; questions=[{'question_id':'q-001','question_type':'MISSING_INFORMATION','question':'请补充必需输入。','reason':'当前输入不足','target_paths':['/payload'],'answer_schema':{'type':'OBJECT','allowed_values':[]},'blocking':True,'priority':'P1'}]
+        status='NEED_USER_INPUT'; unresolved=[{'item_id':'unres-001','type':'MISSING','description':'缺少必需输入','target_paths':['/payload'],'required_action':'补充输入','blocking':True}]; questions=[{'question_id':'q-001','question_type':'MISSING_INFORMATION','question':'请补充必需输入。','reason':'当前输入不足','target_paths':['/payload'],'answer_schema':{'type':'OBJECT','allowed_values':[],'properties':{}},'blocking':True,'priority':'P1'}]
     elif case_type=='high_risk':
         status='BLOCK'; findings=[{'code':D[pid][3][0],'severity':'P0','category':'SECURITY' if pid.startswith('P-SEC') or 'CONFIDENTIALITY' in pid or 'ONLINE' in pid else 'SYSTEM','target_type':'INPUT','target_path_or_span':'payload','description':'高风险场景触发阻断规则','evidence_refs':['src-001'],'repairable':False,'repair_instruction':None,'suggested_route':'BLOCK','blocking':True}]
     elif case_type=='need_user_input':

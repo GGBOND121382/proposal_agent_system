@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import ipaddress
+import socket
+from dataclasses import dataclass
+from typing import Any, Callable
+from urllib.parse import urlparse
+
+import httpx
+
+from ..util import sha256_bytes
+
+
+class FetchGatewayError(RuntimeError):
+    category = "RETRIEVAL"
+    error_code = "FETCH_GATEWAY_ERROR"
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = dict(details or {})
+
+
+class FetchGatewaySecurityError(FetchGatewayError):
+    category = "SECURITY"
+    error_code = "FETCH_GATEWAY_SECURITY_ERROR"
+
+
+class FetchGatewayRetrievalError(FetchGatewayError):
+    category = "RETRIEVAL"
+    error_code = "FETCH_GATEWAY_RETRIEVAL_ERROR"
+
+
+@dataclass(frozen=True)
+class FetchedDocument:
+    requested_url: str
+    final_url: str
+    content_type: str
+    http_status: int
+    raw_bytes: bytes
+    fetch_mode: str = "HTTP"
+    raw_path: str | None = None
+
+    @property
+    def byte_size(self) -> int:
+        return len(self.raw_bytes)
+
+    @property
+    def raw_sha256(self) -> str:
+        return sha256_bytes(self.raw_bytes)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "requested_url": self.requested_url,
+            "final_url": self.final_url,
+            "content_type": self.content_type,
+            "http_status": self.http_status,
+            "fetch_mode": self.fetch_mode,
+            "raw_path": self.raw_path,
+            "byte_size": self.byte_size,
+            "raw_sha256": self.raw_sha256,
+        }
+
+
+def validate_public_url(url: str, *, resolve_dns: bool) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise FetchGatewaySecurityError("Only public HTTP(S) URLs are allowed")
+    host = parsed.hostname.lower()
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+        raise FetchGatewaySecurityError("Local addresses are prohibited")
+    try:
+        ip = ipaddress.ip_address(host)
+        addresses = [ip]
+    except ValueError:
+        addresses = []
+        if resolve_dns:
+            try:
+                addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)]
+            except socket.gaierror as exc:
+                raise FetchGatewayRetrievalError(f"DNS resolution failed for {host}") from exc
+    for address in addresses:
+        if (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+            or address.is_multicast
+        ):
+            raise FetchGatewaySecurityError(f"Private/reserved address is prohibited: {address}")
+
+
+class HttpFetchGateway:
+    """Fast-path public HTTP/PDF fetcher used before the Phase-2 browser fallback."""
+
+    def __init__(
+        self,
+        settings,
+        *,
+        client_factory: Callable[..., Any] = httpx.Client,
+        url_validator: Callable[..., None] = validate_public_url,
+    ):
+        self.settings = settings
+        self.client_factory = client_factory
+        self.url_validator = url_validator
+
+    def fetch(self, url: str) -> FetchedDocument:
+        self.url_validator(url, resolve_dns=True)
+        headers = {
+            "User-Agent": "ProposalAgentResearchArchiver/1.0 (+public-source-verification)",
+            "Accept": "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.1",
+        }
+        limit = int(self.settings.research_max_source_bytes)
+        try:
+            with self.client_factory(
+                timeout=self.settings.research_fetch_timeout_seconds,
+                follow_redirects=True,
+                headers=headers,
+            ) as client:
+                with client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    final_url = str(response.url)
+                    self.url_validator(final_url, resolve_dns=True)
+                    chunks: list[bytes] = []
+                    total = 0
+                    for chunk in response.iter_bytes():
+                        total += len(chunk)
+                        if total > limit:
+                            raise FetchGatewayRetrievalError(
+                                f"Source exceeds {limit} bytes",
+                                details={"url": url, "limit": limit},
+                            )
+                        chunks.append(chunk)
+                    content_type = response.headers.get(
+                        "content-type", "application/octet-stream"
+                    ).split(";", 1)[0].lower()
+                    return FetchedDocument(
+                        requested_url=url,
+                        final_url=final_url,
+                        content_type=content_type,
+                        http_status=int(response.status_code),
+                        raw_bytes=b"".join(chunks),
+                    )
+        except FetchGatewayError:
+            raise
+        except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError) as exc:
+            raise FetchGatewayRetrievalError(
+                f"Public source fetch failed: {exc}",
+                details={"url": url, "exception_type": type(exc).__name__},
+            ) from exc

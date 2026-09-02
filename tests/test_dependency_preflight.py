@@ -456,13 +456,14 @@ def test_legacy_plan_contract_wait_resumes_public_search_without_replanning(
             "0": {"prompt_id": "P-SAFE-ONLINE-PACKAGE", "status": "PASS"},
             "1": {"prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC", "status": "PASS"},
             "2": {"prompt_id": "P-PUBLIC-RESEARCH-PLAN", "status": "PASS"},
+            "3": {"prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC", "status": "PASS"},
         },
         "repair_attempts": {},
         "repair_overrides": {},
         "prerequisite_workflow_ids": {"WF-1_PROJECT_INTAKE": prerequisite},
         "configuration_wait": {
             "source": "PUBLIC_SEARCH_RUNTIME",
-            "resume_step": 3,
+            "resume_step": 4,
             "issues": [{
                 "code": "PUBLIC_SEARCH_RUNTIME_UNAVAILABLE",
                 "dependency": "PUBLIC_SEARCH",
@@ -478,7 +479,7 @@ def test_legacy_plan_contract_wait_resumes_public_search_without_replanning(
             project_id,
             "WF-3_HYBRID_ONLINE_ASSIST",
             "WAITING_CONFIGURATION",
-            3,
+            4,
             json.dumps(state),
             now,
             now,
@@ -498,13 +499,13 @@ def test_legacy_plan_contract_wait_resumes_public_search_without_replanning(
     monkeypatch.setitem(
         WORKFLOWS,
         "WF-3_HYBRID_ONLINE_ASSIST",
-        WORKFLOWS["WF-3_HYBRID_ONLINE_ASSIST"][:4],
+        WORKFLOWS["WF-3_HYBRID_ONLINE_ASSIST"][:5],
     )
 
     resumed = asyncio.run(engine.advance(workflow_id))
 
     assert resumed["status"] == "COMPLETED"
-    assert resumed["current_step"] == 4
+    assert resumed["current_step"] == 5
     assert calls == [workflow_id]
     assert executor.calls == 0
     assert "configuration_wait" not in resumed["state"]
