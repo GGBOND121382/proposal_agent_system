@@ -10,7 +10,7 @@
       "const": "P-PUBLIC-RESEARCH-PLAN"
     },
     "prompt_version": {
-      "const": "2.1.0"
+      "const": "2.2.0"
     },
     "task": {
       "type": "object",
@@ -173,6 +173,41 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "retrieval_contract": {
+          "type": "object",
+          "properties": {
+            "required_channels": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "ACADEMIC",
+                  "WEB_SEARCH"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "required_providers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "minimum_fulltext_sources_per_query": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "allow_snippet_only": {
+              "type": "boolean"
+            },
+            "require_web_discovery": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
         },
         "safe_online_package_content": {
           "type": "object",

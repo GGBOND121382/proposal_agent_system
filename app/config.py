@@ -23,6 +23,11 @@ class Settings:
     public_research_record_file: str
     public_research_connector_file: str
     public_search_max_results: int
+    public_search_required_channels: str
+    public_search_required_providers: str
+    public_search_require_web_discovery: bool
+    public_research_min_fulltext_sources_per_query: int
+    public_search_allow_snippet_only: bool
     research_fetch_timeout_seconds: int
     research_max_source_bytes: int
     browser_search_enabled: bool
@@ -67,6 +72,11 @@ class Settings:
             public_research_record_file=os.getenv("PUBLIC_RESEARCH_RECORD_FILE", ""),
             public_research_connector_file=os.getenv("PUBLIC_RESEARCH_CONNECTOR_FILE", ""),
             public_search_max_results=int(os.getenv("PUBLIC_SEARCH_MAX_RESULTS", "40")),
+            public_search_required_channels=os.getenv("PUBLIC_SEARCH_REQUIRED_CHANNELS", "").strip(),
+            public_search_required_providers=os.getenv("PUBLIC_SEARCH_REQUIRED_PROVIDERS", "").strip(),
+            public_search_require_web_discovery=os.getenv("PUBLIC_SEARCH_REQUIRE_WEB_DISCOVERY", "false").strip().lower() not in {"0", "false", "no", "off"},
+            public_research_min_fulltext_sources_per_query=int(os.getenv("PUBLIC_RESEARCH_MIN_FULLTEXT_SOURCES_PER_QUERY", "1")),
+            public_search_allow_snippet_only=os.getenv("PUBLIC_SEARCH_ALLOW_SNIPPET_ONLY", "true").strip().lower() not in {"0", "false", "no", "off"},
             research_fetch_timeout_seconds=int(os.getenv("RESEARCH_FETCH_TIMEOUT_SECONDS", "45")),
             research_max_source_bytes=int(os.getenv("RESEARCH_MAX_SOURCE_BYTES", str(10 * 1024 * 1024))),
             browser_search_enabled=os.getenv("BROWSER_SEARCH_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"},

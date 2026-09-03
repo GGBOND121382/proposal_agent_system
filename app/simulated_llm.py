@@ -913,6 +913,27 @@ class SimulatedLLM:
         result["source_priorities"] = ["国际标准与官方规范", "政府/标准机构页面", "协议设计文档", "同行评议论文", "官方开源项目文档"]
         result["evidence_requirements"] = ["覆盖不少于30个可核验公开来源", "保存来源URL、获取时间、摘录与SHA-256", "正文引用与参考文献编号一一对应", "只使用归档来源形成PUBLIC_CLAIM"]
         result["prohibited_inferences"] = ["不得从公开资料反推内部组织、人员或部署信息", "不得将外部性能数字直接作为本项目实测结果"]
+        # Mirror the LIVE semantic expansion: the runtime-owned retrieval execution
+        # contract comes from the approved task payload, never from model output.
+        contract = envelope.get("payload", {}).get("retrieval_contract")
+        if isinstance(contract, dict) and contract:
+            if contract.get("required_channels") is not None:
+                result["required_channels"] = [
+                    str(item).strip().upper() for item in contract.get("required_channels") or [] if str(item).strip()
+                ]
+            if contract.get("required_providers") is not None:
+                result["provider_execution_requirements"] = {
+                    "required_providers": [
+                        str(item).strip().lower() for item in contract.get("required_providers") or [] if str(item).strip()
+                    ],
+                    "execute_all_approved_queries": True,
+                }
+            if contract.get("minimum_fulltext_sources_per_query") is not None:
+                result["minimum_fulltext_sources_per_query"] = max(0, int(contract.get("minimum_fulltext_sources_per_query")))
+            if contract.get("allow_snippet_only") is not None:
+                result["allow_snippet_only"] = bool(contract.get("allow_snippet_only"))
+            if contract.get("require_web_discovery") is not None:
+                result["require_web_discovery"] = bool(contract.get("require_web_discovery"))
         return base
 
     def _handle_public_research_synthesis(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:

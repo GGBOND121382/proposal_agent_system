@@ -5,11 +5,12 @@ from pathlib import Path
 from typing import Any
 
 from ..search_gateway import SearchHit, SearchProviderResult, SearchQuery
-from .base import SearchProvider, SearchProviderConfigurationError
+from .base import CHANNEL_REPLAY, SearchProvider, SearchProviderConfigurationError
 
 
 class RecordedSearchProvider(SearchProvider):
     provider_id = "recorded"
+    channel = CHANNEL_REPLAY
 
     def __init__(self, record_file: str | Path):
         self.record_file = Path(record_file)

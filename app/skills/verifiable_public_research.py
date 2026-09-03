@@ -67,6 +67,55 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             value = 3
         return max(1, min(value, 8))
 
+    def _with_execution_contract_defaults(
+        self,
+        plan: dict[str, Any],
+        provider: str,
+    ) -> dict[str, Any]:
+        """Fill the Phase 3 retrieval execution contract from settings/provider.
+
+        The contract is runtime-owned: values already present in the approved plan are
+        authoritative and never overwritten here; only absent fields are derived.
+        """
+
+        plan = dict(plan)
+        settings = self.settings
+        if "required_channels" not in plan:
+            configured = [
+                item.strip().upper()
+                for item in str(getattr(settings, "public_search_required_channels", "") or "").split(",")
+                if item.strip()
+            ]
+            if configured:
+                plan["required_channels"] = list(dict.fromkeys(configured))
+            else:
+                plan["required_channels"] = {
+                    "academic": ["ACADEMIC"],
+                    "hybrid": ["ACADEMIC", "WEB_SEARCH"],
+                    "searxng": ["WEB_SEARCH"],
+                    "browser": ["WEB_SEARCH"],
+                    "browser_search": ["WEB_SEARCH"],
+                }.get(provider, [])
+        if "provider_execution_requirements" not in plan:
+            required_providers = [
+                item.strip().lower()
+                for item in str(getattr(settings, "public_search_required_providers", "") or "").split(",")
+                if item.strip()
+            ]
+            plan["provider_execution_requirements"] = {
+                "required_providers": list(dict.fromkeys(required_providers)),
+                "execute_all_approved_queries": True,
+            }
+        if "minimum_fulltext_sources_per_query" not in plan:
+            plan["minimum_fulltext_sources_per_query"] = int(
+                getattr(settings, "public_research_min_fulltext_sources_per_query", 1) or 0
+            )
+        if "allow_snippet_only" not in plan:
+            plan["allow_snippet_only"] = bool(getattr(settings, "public_search_allow_snippet_only", True))
+        if "require_web_discovery" not in plan:
+            plan["require_web_discovery"] = bool(getattr(settings, "public_search_require_web_discovery", False))
+        return plan
+
     def _academic_connector_file(
         self,
         provider: str,
@@ -137,6 +186,14 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             )
 
         if provider == "hybrid":
+            requirements = normalized_plan.get("provider_execution_requirements") or {}
+            required_providers = {
+                str(item or "").strip().lower()
+                for item in requirements.get("required_providers") or []
+                if str(item or "").strip()
+            }
+            browser_required = bool(required_providers & {"browser", "browser_search"})
+            browser_enabled = bool(getattr(self.settings, "browser_search_enabled", False))
             try:
                 web_batch = SearchGateway(
                     [SearxngSearchProvider(self.settings, max_workers=4)]
@@ -159,9 +216,19 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                         "message": f"{type(exc).__name__}: {exc}",
                     }
                 ]
-            if not web_candidates and bool(
-                getattr(self.settings, "browser_search_enabled", False)
-            ):
+            # Browser search runs as the SearXNG fallback and additionally whenever the
+            # approved execution contract names it as a required provider, even if
+            # SearXNG already returned candidates.
+            if browser_required and not browser_enabled:
+                web_failures.append(
+                    {
+                        "provider": "browser_search",
+                        "category": "CONFIGURATION",
+                        "error_code": "REQUIRED_PROVIDER_DISABLED",
+                        "message": "The approved execution contract requires browser_search but BROWSER_SEARCH_ENABLED is off.",
+                    }
+                )
+            if browser_enabled and (not web_candidates or browser_required):
                 try:
                     browser_batch = SearchGateway(
                         [
@@ -176,7 +243,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                         per_query_limit=per_query,
                         continue_on_error=True,
                     )
-                    web_candidates = browser_batch.candidates()
+                    web_candidates = [*web_candidates, *browser_batch.candidates()]
                     web_failures.extend(browser_batch.failures)
                     web_runs.extend(run.to_dict() for run in browser_batch.runs)
                 except SearchProviderError as exc:
@@ -249,8 +316,12 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         strict = bool(payload.get("require_structured_plan", False))
         quality_profile = str(payload.get("research_quality_profile") or "legacy").strip().lower()
         original_provider = str(payload.get("provider") or self.settings.public_search_provider).lower()
+        contracted_plan = self._with_execution_contract_defaults(
+            dict(payload.get("plan") or {}),
+            original_provider,
+        )
         try:
-            normalized_plan, validation = normalize_and_validate_plan(payload.get("plan") or {}, strict=strict)
+            normalized_plan, validation = normalize_and_validate_plan(contracted_plan, strict=strict)
         except ValueError as exc:
             raise PublicResearchPlanContractError(str(exc)) from exc
         if validation["status"] == "BLOCK":
@@ -288,7 +359,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         discovery_manifest: dict[str, Any] | None = None
         try:
             effective = dict(payload)
-            effective["plan"] = {**(payload.get("plan") or {}), "queries": normalized_plan["queries"]}
+            effective["plan"] = {**contracted_plan, "queries": normalized_plan["queries"]}
             effective["max_results"] = effective_max
             if original_provider in {"academic", "hybrid"}:
                 discovery_file, discovery_manifest = self._academic_connector_file(
@@ -310,6 +381,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                 discovery_manifest,
                 retrieval_provider=original_provider,
                 queries=list(normalized_plan.get("queries") or []),
+                execution_contract=normalized_plan,
             )
             result = upgrade_archive_result(
                 result,
@@ -320,6 +392,9 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                 selection_report=_SELECTION_REPORT.get(),
                 execution_report=_EXECUTION_REPORT.get(),
                 min_sources_per_query=self._minimum_results_per_query(),
+                min_fulltext_sources_per_query=int(
+                    normalized_plan.get("minimum_fulltext_sources_per_query") or 0
+                ),
                 retrieval_health=retrieval_health,
             )
             if original_provider in {"academic", "hybrid"}:
@@ -372,6 +447,28 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                             "archive_manifest": result.output.get("archive_manifest"),
                             "validation_bundle_dir": result.output.get("validation_bundle_dir"),
                             "source_count": len(result.output.get("source_catalog") or []),
+                        },
+                    )
+            if strict and normalized_plan.get("require_web_discovery"):
+                # A mandated web-discovery channel failure is fatal regardless of the
+                # quality profile: Academic success must never mask it.
+                blocking_codes = {
+                    str(code)
+                    for code in (retrieval_health.get("blocking_reason_codes") or [])
+                }
+                if any(
+                    code.startswith("REQUIRED_CHANNEL_FAILED:WEB_SEARCH")
+                    or code.startswith("REQUIRED_CHANNEL_NOT_EXECUTED:WEB_SEARCH")
+                    for code in blocking_codes
+                ):
+                    raise PublicResearchRetrievalError(
+                        "Public research cannot continue because the required web-discovery channel failed; academic results cannot substitute for it.",
+                        details={
+                            "code": "REQUIRED_WEB_DISCOVERY_FAILED",
+                            "retrieval_health": retrieval_health,
+                            "coverage": result.output.get("coverage"),
+                            "archive_manifest": result.output.get("archive_manifest"),
+                            "validation_bundle_dir": result.output.get("validation_bundle_dir"),
                         },
                     )
             return result

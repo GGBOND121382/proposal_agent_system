@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-PUBLIC-RESEARCH-PLAN",
-    "prompt_version": "2.1.0",
+    "prompt_version": "2.2.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "HYBRID_ONLINE_ASSIST",
@@ -74,7 +74,7 @@
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-PUBLIC-RESEARCH-PLAN",
-    "prompt_version": "2.1.0",
+    "prompt_version": "2.2.0",
     "status": "BLOCK",
     "result": {
       "plan_id": "rplan-001",
@@ -101,7 +101,17 @@
       "prohibited_inferences": [
         "不得推断内部项目"
       ],
-      "binding_contract_version": "1.0"
+      "binding_contract_version": "1.0",
+      "required_channels": [
+        "ACADEMIC"
+      ],
+      "provider_execution_requirements": {
+        "required_providers": [],
+        "execute_all_approved_queries": true
+      },
+      "minimum_fulltext_sources_per_query": 1,
+      "allow_snippet_only": true,
+      "require_web_discovery": false
     },
     "findings": [
       {

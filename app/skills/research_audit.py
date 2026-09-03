@@ -112,6 +112,7 @@ def coverage_report(
     *,
     quality_profile: str = "legacy",
     min_sources_per_query: int = 3,
+    min_fulltext_sources_per_query: int = 1,
     retrieval_health: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     queries = list(plan.get("queries") or [])
@@ -154,6 +155,7 @@ def coverage_report(
     # existential checks (>=1 recent/baseline/limitation source) remain available in
     # legacy mode for replay/backward compatibility but are not sufficient here.
     query_min = max(1, min(int(min_sources_per_query), 8))
+    fulltext_min = max(0, int(min_fulltext_sources_per_query or 0))
     query_count = len(queries)
     source_min = max(10, query_count * query_min) if query_count else 10
     peer_or_official = [
@@ -166,6 +168,7 @@ def coverage_report(
     author_teams = sorted({key for record in records if (key := _author_team_key(record))})
     shallow = [query for query, item in by_query.items() if item["source_count"] < query_min]
     authority_shallow = [query for query, item in by_query.items() if item["authoritative_source_count"] < 1]
+    fulltext_shallow = [query for query, item in by_query.items() if item["source_count"] < fulltext_min]
     authoritative_total = sum(1 for record in records if int(record.get("authority_rank") or 0) >= 80)
 
     provider_counts: dict[str, float] = {}
@@ -188,6 +191,15 @@ def coverage_report(
             "status": "PASS" if not authority_shallow and bool(queries) else "INSUFFICIENT",
             "minimum_authoritative_sources_per_query": 1,
             "shallow_queries": authority_shallow,
+        },
+        "query_fulltext_depth": {
+            # ``records`` here already excludes SNIPPET_ONLY entries, so source_count
+            # is the readable/full-text count per approved query. The default minimum
+            # of 1 coincides with the legacy uncovered-query condition; stricter
+            # values only apply when the approved execution contract declares them.
+            "status": "PASS" if not fulltext_shallow and bool(queries) else "INSUFFICIENT",
+            "minimum_fulltext_sources_per_query": fulltext_min,
+            "shallow_queries": fulltext_shallow,
         },
         "source_volume": {
             "status": "PASS" if len(records) >= source_min else "INSUFFICIENT",
@@ -346,6 +358,7 @@ def upgrade_archive_result(
     selection_report: dict[str, Any] | None = None,
     execution_report: dict[str, Any] | None = None,
     min_sources_per_query: int = 3,
+    min_fulltext_sources_per_query: int = 1,
     retrieval_health: dict[str, Any] | None = None,
 ):
     manifest_path = Path(result.output["archive_manifest"])
@@ -446,6 +459,7 @@ def upgrade_archive_result(
         normalized_plan,
         quality_profile=quality_profile,
         min_sources_per_query=min_sources_per_query,
+        min_fulltext_sources_per_query=min_fulltext_sources_per_query,
         retrieval_health=retrieval_health,
     )
     research_sufficiency = build_research_sufficiency(
@@ -453,6 +467,40 @@ def upgrade_archive_result(
         normalized_plan,
         retrieval_health or {"status": "UNOBSERVED"},
     )
+    # Three-level sufficiency accounting: search hits only prove execution, readable
+    # documents prove a page opened and extracted, and usable evidence is what the
+    # coverage report actually binds to approved queries. SNIPPET_ONLY records stay
+    # visible as discovery leads but never count as readable or usable.
+    provider_stats = (retrieval_health or {}).get("providers") or {}
+    if provider_stats:
+        search_hits: int | None = sum(
+            int(item.get("result_count") or 0)
+            for item in provider_stats.values()
+            if isinstance(item, dict)
+        )
+    else:
+        archive_runs = [item for item in manifest.get("provider_runs") or [] if isinstance(item, dict)]
+        search_hits = (
+            sum(int(item.get("result_count") or 0) for item in archive_runs)
+            if archive_runs
+            else None
+        )
+    usable_source_ids = {
+        str(source_id)
+        for item in (coverage.get("by_query") or {}).values()
+        if isinstance(item, dict)
+        for source_id in item.get("source_ids") or []
+        if str(source_id)
+    }
+    evidence_funnel = {
+        "search_hits": search_hits,
+        "readable_documents": len(evidence_records),
+        "full_text_documents": sum(
+            1 for record in evidence_records if int(record.get("text_length") or 0) >= 1000
+        ),
+        "snippet_only_records": len(snippet_only_records),
+        "usable_evidence": len(usable_source_ids),
+    }
     for query in coverage["uncovered_queries"]:
         issues.append({"type": "EVIDENCE_GAP", "code": "QUERY_UNCOVERED", "query": query})
     for dimension, item in coverage["dimensions"].items():
@@ -471,6 +519,7 @@ def upgrade_archive_result(
         "issues": issues,
         "issue_count": len(issues),
         "coverage": coverage,
+        "evidence_funnel": evidence_funnel,
         "research_quality_profile": str(quality_profile or "legacy"),
         "selection_report": selection_report,
         "execution_report": execution_report,
@@ -520,6 +569,7 @@ def upgrade_archive_result(
         "sources": sources, "passages": passages, "queries": normalized_plan["queries"],
         "normalized_plan": normalized_plan, "plan_validation": plan_validation,
         "source_catalog": catalog, "coverage": coverage, "issues": issues,
+        "evidence_funnel": evidence_funnel,
         "research_quality_profile": str(quality_profile or "legacy"),
         "selection_report": selection_report, "execution_report": execution_report,
         "retrieval_health": retrieval_health or {"status": "UNOBSERVED"},

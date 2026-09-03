@@ -1792,6 +1792,40 @@ class ContextBuilder:
             "比较代表性方法时同时记录适用边界、局限和时间范围",
         ]
 
+    @staticmethod
+    def _wf3_retrieval_contract(options: dict[str, Any]) -> dict[str, Any]:
+        """Task-approved retrieval execution contract overrides (Phase 3).
+
+        Only keys explicitly declared in the workflow options are emitted; all other
+        contract fields derive from settings/provider defaults inside the search skill.
+        The model never sees or generates these values.
+        """
+
+        contract: dict[str, Any] = {}
+        channels = [
+            str(item).strip().upper()
+            for item in options.get("required_channels") or []
+            if str(item).strip()
+        ]
+        if channels:
+            contract["required_channels"] = list(dict.fromkeys(channels))
+        providers = [
+            str(item).strip().lower()
+            for item in options.get("required_providers") or []
+            if str(item).strip()
+        ]
+        if providers:
+            contract["required_providers"] = list(dict.fromkeys(providers))
+        if options.get("minimum_fulltext_sources_per_query") is not None:
+            contract["minimum_fulltext_sources_per_query"] = max(
+                0, int(options.get("minimum_fulltext_sources_per_query"))
+            )
+        if options.get("allow_snippet_only") is not None:
+            contract["allow_snippet_only"] = bool(options.get("allow_snippet_only"))
+        if options.get("require_web_discovery") is not None:
+            contract["require_web_discovery"] = bool(options.get("require_web_discovery"))
+        return contract
+
     def _approved_public_claims(
         self,
         project_id: str,
@@ -2277,6 +2311,7 @@ class ContextBuilder:
                 ("payload.known_public_sources", known_sources),
                 ("payload.time_constraints", self._wf3_time_constraints(options)),
                 ("payload.evidence_requirements", self._wf3_evidence_requirements(options)),
+                ("payload.retrieval_contract", self._wf3_retrieval_contract(options)),
             ])
         if prompt_id == "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC":
             wf3_payload = self._wf3_online_assist_payload(

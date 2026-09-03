@@ -6,11 +6,12 @@ from typing import Any
 
 from ...util import sha256_bytes, utc_now
 from ..search_gateway import SearchHit, SearchProviderResult, SearchQuery
-from .base import SearchProvider, SearchProviderConfigurationError
+from .base import CHANNEL_REPLAY, SearchProvider, SearchProviderConfigurationError
 
 
 class ConnectorSearchProvider(SearchProvider):
     provider_id = "connector"
+    channel = CHANNEL_REPLAY
 
     def __init__(self, connector_file: str | Path):
         self.connector_file = Path(connector_file)

@@ -3747,6 +3747,20 @@ def expand_public_research_plan_model_output(canonical_envelope: dict[str, Any],
     package = payload.get("safe_online_package_content") if isinstance(payload.get("safe_online_package_content"), Mapping) else {}
     authoritative_evidence_requirements = _wf3_strings(payload.get("evidence_requirements"))
     authoritative_prohibited_inferences = _wf3_strings(package.get("prohibited_inferences"))
+    # The retrieval execution contract is an approved task-level constraint owned by
+    # the runtime. The model never sees or generates it; it is injected verbatim.
+    contract = payload.get("retrieval_contract") if isinstance(payload.get("retrieval_contract"), Mapping) else {}
+    required_channels = list(dict.fromkeys(
+        str(item).strip().upper() for item in contract.get("required_channels") or [] if str(item).strip()
+    ))
+    required_providers = list(dict.fromkeys(
+        str(item).strip().lower() for item in contract.get("required_providers") or [] if str(item).strip()
+    ))
+    min_fulltext_raw = contract.get("minimum_fulltext_sources_per_query")
+    try:
+        min_fulltext = max(0, int(min_fulltext_raw)) if min_fulltext_raw is not None else 1
+    except (TypeError, ValueError):
+        min_fulltext = 1
     output = _wf3_canonical_base(canonical_envelope, "P-PUBLIC-RESEARCH-PLAN")
     queries = []
     for item in semantic_output.get("queries") or []:
@@ -3766,6 +3780,14 @@ def expand_public_research_plan_model_output(canonical_envelope: dict[str, Any],
         "time_scope": None,
         "evidence_requirements": authoritative_evidence_requirements,
         "prohibited_inferences": authoritative_prohibited_inferences,
+        "required_channels": required_channels,
+        "provider_execution_requirements": {
+            "required_providers": required_providers,
+            "execute_all_approved_queries": True,
+        },
+        "minimum_fulltext_sources_per_query": min_fulltext,
+        "allow_snippet_only": bool(contract.get("allow_snippet_only", True)),
+        "require_web_discovery": bool(contract.get("require_web_discovery", False)),
     }
     return output
 

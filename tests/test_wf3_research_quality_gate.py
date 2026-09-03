@@ -505,3 +505,159 @@ def test_research_sufficiency_blocks_when_no_query_has_qualifying_evidence() -> 
     assert value["status"] == "BLOCKING_FAILURE"
     assert value["may_continue"] is False
     assert "NO_QUALIFYING_PUBLIC_EVIDENCE" in value["blocking_reasons"]
+
+
+def _hybrid_manifest_with_failed_web(queries: list[str]) -> dict:
+    provider_runs = [
+        {"provider": "openalex", "query": query, "result_count": 8}
+        for query in queries
+    ]
+    provider_runs.append(
+        {"provider": "crossref", "query": queries[0], "result_count": 8}
+    )
+    failures = [
+        {"provider": "searxng", "error_code": "HYBRID_SEARXNG_DISCOVERY_ERROR"},
+        {"provider": "browser_search", "query": queries[0], "error_code": "BROWSER_SEARCH_PROVIDER_BLOCKED"},
+    ]
+    return {
+        "providers": ["openalex", "crossref", "searxng", "browser_search"],
+        "provider_runs": provider_runs,
+        "failures": failures,
+    }
+
+
+def test_required_web_channel_failure_blocks_when_web_discovery_mandated() -> None:
+    queries = ["query one", "query two"]
+    health = build_retrieval_health(
+        _hybrid_manifest_with_failed_web(queries),
+        retrieval_provider="hybrid",
+        queries=queries,
+        execution_contract={
+            "required_channels": ["ACADEMIC", "WEB_SEARCH"],
+            "require_web_discovery": True,
+        },
+    )
+    assert health["status"] == "BLOCKING_FAILURE"
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" in health["blocking_reason_codes"]
+    # Academic success is still fully visible; it simply cannot mask the web failure.
+    assert health["providers"]["openalex"]["success_rate"] == 1.0
+
+    sufficiency = build_research_sufficiency(
+        {"status": "PASS", "by_query": {}, "dimensions": {}},
+        {"queries": queries, "query_items": []},
+        health,
+    )
+    assert sufficiency["status"] == "BLOCKING_FAILURE"
+    assert sufficiency["may_continue"] is False
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" in sufficiency["blocking_reasons"]
+
+
+def test_required_web_channel_failure_degrades_without_mandate() -> None:
+    queries = ["query one", "query two"]
+    health = build_retrieval_health(
+        _hybrid_manifest_with_failed_web(queries),
+        retrieval_provider="hybrid",
+        queries=queries,
+        execution_contract={
+            "required_channels": ["ACADEMIC", "WEB_SEARCH"],
+            "require_web_discovery": False,
+        },
+    )
+    assert health["status"] == "DEGRADED"
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" in health["reason_codes"]
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" not in health["blocking_reason_codes"]
+    assert "HYBRID_WEB_CHANNEL_UNAVAILABLE" in health["reason_codes"]
+
+
+def test_browser_search_success_satisfies_required_web_channel() -> None:
+    queries = ["query one", "query two"]
+    provider_runs = [
+        {"provider": "openalex", "query": query, "result_count": 8}
+        for query in queries
+    ]
+    provider_runs.append(
+        {"provider": "searxng", "result_count": 0, "query_failures": [{"error_code": "ALL_FAILED"}]}
+    )
+    provider_runs.extend(
+        {"provider": "browser_search", "query": query, "result_count": 5}
+        for query in queries
+    )
+    health = build_retrieval_health(
+        {
+            "providers": ["openalex", "searxng", "browser_search"],
+            "provider_runs": provider_runs,
+            "failures": [{"provider": "searxng", "error_code": "HYBRID_SEARXNG_DISCOVERY_ERROR"}],
+        },
+        retrieval_provider="hybrid",
+        queries=queries,
+        execution_contract={
+            "required_channels": ["ACADEMIC", "WEB_SEARCH"],
+            "require_web_discovery": True,
+        },
+    )
+    assert "HYBRID_WEB_CHANNEL_UNAVAILABLE" not in health["reason_codes"]
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" not in health["reason_codes"]
+    # SearXNG itself is still reported as an unavailable provider; only the mandated
+    # web channel as a whole is satisfied by the browser fallback.
+    assert "PROVIDER_UNAVAILABLE:searxng" in health["reason_codes"]
+    assert health["status"] == "DEGRADED"
+
+
+def test_required_provider_not_executed_is_blocking() -> None:
+    queries = ["query one"]
+    health = build_retrieval_health(
+        {
+            "providers": ["openalex", "crossref", "searxng"],
+            "provider_runs": [
+                {"provider": "openalex", "query": "query one", "result_count": 8},
+                {"provider": "crossref", "query": "query one", "result_count": 8},
+                {"provider": "searxng", "query": "query one", "result_count": 5},
+            ],
+            "failures": [],
+        },
+        retrieval_provider="hybrid",
+        queries=queries,
+        execution_contract={
+            "required_channels": ["ACADEMIC", "WEB_SEARCH"],
+            "provider_execution_requirements": {
+                "required_providers": ["browser_search"],
+                "execute_all_approved_queries": True,
+            },
+            "require_web_discovery": True,
+        },
+    )
+    assert health["status"] == "BLOCKING_FAILURE"
+    assert "REQUIRED_PROVIDER_NOT_EXECUTED:browser_search" in health["blocking_reason_codes"]
+
+
+def test_execution_contract_strict_validation() -> None:
+    plan = _realistic_plan()
+    plan["required_channels"] = ["ACADEMIC", "WEB_SEARCH", "INTRANET"]
+    plan["require_web_discovery"] = True
+    _, validation = normalize_and_validate_plan(plan, strict=True)
+    codes = {item["code"] for item in validation["findings"]}
+    assert "RESEARCH_PLAN_UNKNOWN_CHANNEL" in codes
+
+    plan = _realistic_plan()
+    plan["required_channels"] = ["ACADEMIC"]
+    plan["require_web_discovery"] = True
+    _, validation = normalize_and_validate_plan(plan, strict=True)
+    codes = {item["code"] for item in validation["findings"]}
+    assert "RESEARCH_PLAN_WEB_DISCOVERY_WITHOUT_CHANNEL" in codes
+
+    plan = _realistic_plan()
+    plan["required_channels"] = ["ACADEMIC", "WEB_SEARCH"]
+    plan["provider_execution_requirements"] = {
+        "required_providers": ["searxng"],
+        "execute_all_approved_queries": True,
+    }
+    plan["minimum_fulltext_sources_per_query"] = 2
+    plan["allow_snippet_only"] = False
+    plan["require_web_discovery"] = True
+    normalized, validation = normalize_and_validate_plan(plan, strict=True)
+    assert validation["status"] == "PASS"
+    assert normalized["required_channels"] == ["ACADEMIC", "WEB_SEARCH"]
+    assert normalized["provider_execution_requirements"]["required_providers"] == ["searxng"]
+    assert normalized["minimum_fulltext_sources_per_query"] == 2
+    assert normalized["allow_snippet_only"] is False
+    assert normalized["require_web_discovery"] is True

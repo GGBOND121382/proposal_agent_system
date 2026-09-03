@@ -295,6 +295,7 @@ def write_validation_bundle(
     )
     quality_summary["research_sufficiency"] = result_output.get("research_sufficiency") or {}
     quality_summary["research_gaps"] = list(result_output.get("research_gaps") or [])
+    quality_summary["evidence_funnel"] = result_output.get("evidence_funnel") or {}
     write_json(root / "08_quality_summary.json", quality_summary)
     return root
 

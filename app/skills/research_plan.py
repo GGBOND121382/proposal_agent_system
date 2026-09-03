@@ -300,6 +300,76 @@ def _query_text(item: Any) -> str:
 
 MAX_RESEARCH_QUERIES = 12
 
+KNOWN_RETRIEVAL_CHANNELS = ("ACADEMIC", "WEB_SEARCH")
+
+
+def _normalize_contract_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(value)
+
+
+def normalize_execution_contract(plan: dict[str, Any]) -> dict[str, Any]:
+    """Read the runtime-owned retrieval execution contract from a plan.
+
+    These fields are injected by the runtime from approved task constraints; the model
+    never generates them. Absent fields keep the legacy defaults so pre-Phase-3 plans
+    remain readable.
+    """
+
+    plan = plan if isinstance(plan, dict) else {}
+    required_channels: list[str] = []
+    for channel in plan.get("required_channels") or []:
+        name = str(channel or "").strip().upper()
+        if name and name not in required_channels:
+            required_channels.append(name)
+    requirements = plan.get("provider_execution_requirements")
+    requirements = requirements if isinstance(requirements, dict) else {}
+    required_providers: list[str] = []
+    for provider in requirements.get("required_providers") or []:
+        name = str(provider or "").strip().lower()
+        if name and name not in required_providers:
+            required_providers.append(name)
+    try:
+        min_fulltext = int(plan.get("minimum_fulltext_sources_per_query"))
+    except (TypeError, ValueError):
+        min_fulltext = 1
+    return {
+        "required_channels": required_channels,
+        "provider_execution_requirements": {
+            "required_providers": required_providers,
+            "execute_all_approved_queries": _normalize_contract_bool(
+                requirements.get("execute_all_approved_queries"), True
+            ),
+        },
+        "minimum_fulltext_sources_per_query": max(0, min_fulltext),
+        "allow_snippet_only": _normalize_contract_bool(plan.get("allow_snippet_only"), True),
+        "require_web_discovery": _normalize_contract_bool(plan.get("require_web_discovery"), False),
+    }
+
+
+def validate_execution_contract(contract: dict[str, Any]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    unknown = [name for name in contract.get("required_channels") or [] if name not in KNOWN_RETRIEVAL_CHANNELS]
+    if unknown:
+        findings.append({
+            "code": "RESEARCH_PLAN_UNKNOWN_CHANNEL",
+            "severity": "P1",
+            "channels": unknown,
+            "message": "required_channels contains unsupported retrieval channels: " + ", ".join(unknown),
+        })
+    if contract.get("require_web_discovery") and "WEB_SEARCH" not in (contract.get("required_channels") or []):
+        findings.append({
+            "code": "RESEARCH_PLAN_WEB_DISCOVERY_WITHOUT_CHANNEL",
+            "severity": "P1",
+            "message": "require_web_discovery=true requires WEB_SEARCH in required_channels.",
+        })
+    return findings
+
 
 def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(plan, dict):
@@ -463,7 +533,16 @@ def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[
         "time_scope": time_scope,
         "evidence_requirements": evidence_requirements,
         "prohibited_inferences": prohibited_inferences,
+        **normalize_execution_contract(plan),
     }
+    contract_findings = validate_execution_contract(normalized)
+    if contract_findings:
+        if strict:
+            findings.extend(contract_findings)
+        else:
+            warnings.extend(
+                f"{item['code']}: {item['message']}" for item in contract_findings
+            )
     return normalized, {
         "status": "BLOCK" if findings else ("WARN" if warnings else "PASS"),
         "strict": strict,

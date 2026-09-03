@@ -10,7 +10,7 @@
       "const": "P-PUBLIC-RESEARCH-PLAN"
     },
     "prompt_version": {
-      "const": "2.1.0"
+      "const": "2.2.0"
     },
     "status": {
       "type": "string",
@@ -115,6 +115,48 @@
         },
         "binding_contract_version": {
           "const": "1.0"
+        },
+        "required_channels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "ACADEMIC",
+              "WEB_SEARCH"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "provider_execution_requirements": {
+          "type": "object",
+          "properties": {
+            "required_providers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "execute_all_approved_queries": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "required_providers",
+            "execute_all_approved_queries"
+          ]
+        },
+        "minimum_fulltext_sources_per_query": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "allow_snippet_only": {
+          "type": "boolean"
+        },
+        "require_web_discovery": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -127,7 +169,12 @@
         "source_priorities",
         "time_scope",
         "evidence_requirements",
-        "prohibited_inferences"
+        "prohibited_inferences",
+        "required_channels",
+        "provider_execution_requirements",
+        "minimum_fulltext_sources_per_query",
+        "allow_snippet_only",
+        "require_web_discovery"
       ]
     },
     "findings": {

@@ -8,11 +8,12 @@ import httpx
 
 from ...util import utc_now
 from ..search_gateway import ProviderRun, SearchHit, SearchProviderResult, SearchQuery
-from .base import SearchProvider, SearchProviderConfigurationError
+from .base import CHANNEL_WEB_SEARCH, SearchProvider, SearchProviderConfigurationError
 
 
 class SearxngSearchProvider(SearchProvider):
     provider_id = "searxng"
+    channel = CHANNEL_WEB_SEARCH
 
     def __init__(
         self,

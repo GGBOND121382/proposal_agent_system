@@ -10,11 +10,12 @@ from ...util import new_id, safe_filename, sha256_text, utc_now, write_json
 from ..browser_worker import BrowserPageResult, BrowserWorker
 from ..fetch_gateway import FetchGatewaySecurityError, validate_public_url
 from ..search_gateway import ProviderRun, SearchHit, SearchProviderResult, SearchQuery
-from .base import SearchProvider, SearchProviderConfigurationError
+from .base import CHANNEL_WEB_SEARCH, SearchProvider, SearchProviderConfigurationError
 
 
 class BrowserSearchProvider(SearchProvider):
     provider_id = "browser_search"
+    channel = CHANNEL_WEB_SEARCH
 
     def __init__(
         self,

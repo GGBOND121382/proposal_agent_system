@@ -219,3 +219,33 @@ def test_http_fetch_and_static_extraction_are_separate_auditable_stages() -> Non
     assert extracted.quality == "USABLE"
     assert "menu" not in extracted.text
     assert "usable content" in extracted.text
+
+
+def test_provider_channels_are_declared_and_mapped() -> None:
+    from app.skills.search_providers import (
+        PROVIDER_CHANNELS,
+        BrowserSearchProvider,
+        provider_channel,
+    )
+
+    assert AcademicSearchProvider.channel == "ACADEMIC"
+    assert SearxngSearchProvider.channel == "WEB_SEARCH"
+    assert BrowserSearchProvider.channel == "WEB_SEARCH"
+    assert ConnectorSearchProvider.channel == "REPLAY"
+    assert RecordedSearchProvider.channel == "REPLAY"
+    for name in ("openalex", "crossref", "semantic_scholar", "academic-multi-source"):
+        assert provider_channel(name) == "ACADEMIC"
+    for name in ("searxng", "browser", "browser_search"):
+        assert provider_channel(name) == "WEB_SEARCH"
+    for name in ("connector", "recorded"):
+        assert provider_channel(name) == "REPLAY"
+    assert provider_channel("unknown-provider") is None
+    # Every provider class id must be present in the audit-time name mapping.
+    for cls in (
+        AcademicSearchProvider,
+        SearxngSearchProvider,
+        BrowserSearchProvider,
+        ConnectorSearchProvider,
+        RecordedSearchProvider,
+    ):
+        assert PROVIDER_CHANNELS[cls.provider_id] == cls.channel

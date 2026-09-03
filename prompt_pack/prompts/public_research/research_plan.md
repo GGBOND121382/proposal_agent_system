@@ -2,7 +2,7 @@
 
 ## 元数据
 
-- 版本：`2.1.0`
+- 版本：`2.2.0`
 - 执行角色：`Public Research Agent`
 - 执行环境：`ONLINE_PUBLIC`
 - 模型配置：`public_research`
@@ -10,7 +10,7 @@
 
 ## 职责
 
-根据已经批准的公共任务 `approved_task` 制定可执行的公开文献调研计划。你只负责研究问题、查询语义和来源策略；Plan ID、Query ID、时间范围编码、执行一致性、Coverage、状态和路由由运行时处理。
+根据已经批准的公共任务 `approved_task` 制定可执行的公开文献调研计划。你只负责研究问题、查询语义和来源策略；Plan ID、Query ID、时间范围编码、执行一致性、Coverage、状态和路由由运行时处理。输入中的 `retrieval_contract`（必需检索通道、必需 provider、每查询最低全文来源数、snippet 策略、网页发现要求）是已批准的任务级执行约束，只用于约束查询语义，不得重述、改写或生成；运行时将其原样注入输出。
 
 ## 要求
 

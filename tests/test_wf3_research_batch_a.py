@@ -566,3 +566,233 @@ def test_synthesis_and_claim_validation_are_appended_to_validation_bundle(tmp_pa
     claim_report = json.loads((root / "10_claim_validation.json").read_text(encoding="utf-8"))
     assert claim_report["status"] == "PASS"
     assert claim_report["bindings"][0]["claim_id"] == "claim-1"
+
+
+def test_plan_lock_covers_execution_contract_and_legacy_locks() -> None:
+    plan = _plan(1)
+    plan["required_channels"] = ["ACADEMIC", "WEB_SEARCH"]
+    plan["require_web_discovery"] = True
+    lock = build_plan_lock(plan)
+    assert lock["projection"]["required_channels"] == ["ACADEMIC", "WEB_SEARCH"]
+    assert lock["projection"]["require_web_discovery"] is True
+    assert lock["projection"]["minimum_fulltext_sources_per_query"] == 1
+
+    mutated = json.loads(json.dumps(plan, ensure_ascii=False))
+    mutated["require_web_discovery"] = False
+    with pytest.raises(ResearchExecutionContractError) as caught:
+        validate_plan_transition(lock, mutated, allow_additive=True)
+    assert caught.value.code == "RESEARCH_PLAN_LOCK_MISMATCH"
+    assert "require_web_discovery" in caught.value.details["changed_fields"]
+
+    # Locks written before Phase 3 lack the contract keys; their additive retries
+    # must not be rejected merely because normalization now supplies defaults.
+    legacy_lock = build_plan_lock(_plan(1))
+    legacy_lock["projection"].pop("required_channels", None)
+    legacy_lock["projection"].pop("provider_execution_requirements", None)
+    legacy_lock["projection"].pop("minimum_fulltext_sources_per_query", None)
+    legacy_lock["projection"].pop("allow_snippet_only", None)
+    legacy_lock["projection"].pop("require_web_discovery", None)
+    expanded = _plan(1)
+    expanded["research_questions"].append("研究问题2：补充近邻工作的适用边界是什么？")
+    expanded["queries"].append(
+        {
+            "query_id": "query-002",
+            "query": "closest prior work applicability boundary transport scheduling",
+            "linked_question_indexes": [1],
+        }
+    )
+    next_lock = validate_plan_transition(legacy_lock, expanded, allow_additive=True)
+    assert len(next_lock["projection"]["query_items"]) == 2
+
+
+def _fake_academic_manifest(query_texts) -> dict:
+    responses = []
+    runs = []
+    for index, text in enumerate(query_texts, 1):
+        responses.append(
+            {
+                "query": text,
+                "retrieved_at": "2026-09-03T00:00:00+00:00",
+                "results": [{
+                    "title": f"Academic evidence for {text}",
+                    "url": f"https://doi.org/10.1000/fake.{index}",
+                    "doi": f"10.1000/fake.{index}",
+                    "published_at": "2024",
+                    "authors": ["A. Author"],
+                    "publisher": "Journal A",
+                    "content_text": (
+                        "Recent benchmark review limitations evidence for adaptive "
+                        "transport scheduling and baseline comparison. " * 10
+                    ),
+                    "academic_provider": "openalex",
+                }],
+            }
+        )
+        runs.append({"provider": "openalex", "query": text, "result_count": 1})
+    return {
+        "schema_version": "1.0",
+        "run_id": "fake-academic-discovery",
+        "connector": "wf3-hybrid-discovery",
+        "created_at": "2026-09-03T00:00:00+00:00",
+        "agent_generated_queries": list(query_texts),
+        "providers": ["openalex", "crossref"],
+        "responses": responses,
+        "provider_runs": runs,
+        "failures": [],
+    }
+
+
+def _patch_hybrid_providers(monkeypatch) -> None:
+    from app.skills.search_providers import AcademicSearchProvider
+    from app.skills.search_providers.base import (
+        SearchProvider,
+        SearchProviderRetrievalError,
+    )
+
+    fake_client = SimpleNamespace(
+        discover=lambda queries, time_scope=None, per_query_limit=5: _fake_academic_manifest(queries)
+    )
+    monkeypatch.setattr(
+        "app.skills.verifiable_public_research.AcademicSearchProvider",
+        lambda settings, time_scope=None: AcademicSearchProvider(
+            settings,
+            client_factory=lambda _settings: fake_client,
+            time_scope=time_scope,
+        ),
+    )
+
+    class _FailingSearxng(SearchProvider):
+        provider_id = "searxng"
+
+        def search(self, queries, *, per_query_limit):
+            raise SearchProviderRetrievalError("searxng unavailable", provider=self.provider_id)
+
+    monkeypatch.setattr(
+        "app.skills.verifiable_public_research.SearxngSearchProvider",
+        lambda settings, max_workers=4: _FailingSearxng(),
+    )
+
+
+def test_required_web_discovery_failure_blocks_despite_academic_success(tmp_path: Path, monkeypatch) -> None:
+    from app.skills.public_research import PublicResearchRetrievalError
+
+    _patch_hybrid_providers(monkeypatch)
+    plan = _plan(2)
+    plan["required_channels"] = ["ACADEMIC", "WEB_SEARCH"]
+    plan["require_web_discovery"] = True
+    settings = _settings(tmp_path, tmp_path / "unused-connector.json")
+    with pytest.raises(PublicResearchRetrievalError) as caught:
+        VerifiablePublicResearchArchiveSkill(settings).run(
+            {
+                "provider": "hybrid",
+                "require_structured_plan": True,
+                "research_quality_profile": "legacy",
+                "plan": plan,
+            },
+            SkillContext(project_id="p", workflow_id="wf-web-required", security_level="PUBLIC", data_dir=str(tmp_path)),
+        )
+    assert caught.value.details["code"] == "REQUIRED_WEB_DISCOVERY_FAILED"
+    blocking = caught.value.details["retrieval_health"]["blocking_reason_codes"]
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" in blocking
+
+
+def test_hybrid_web_failure_degrades_when_web_discovery_not_mandated(tmp_path: Path, monkeypatch) -> None:
+    _patch_hybrid_providers(monkeypatch)
+    plan = _plan(2)
+    settings = _settings(tmp_path, tmp_path / "unused-connector.json")
+    result = VerifiablePublicResearchArchiveSkill(settings).run(
+        {
+            "provider": "hybrid",
+            "require_structured_plan": True,
+            "research_quality_profile": "legacy",
+            "plan": plan,
+        },
+        SkillContext(project_id="p", workflow_id="wf-web-degraded", security_level="PUBLIC", data_dir=str(tmp_path)),
+    )
+    health = result.output["retrieval_health"]
+    assert health["status"] == "DEGRADED"
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" in health["reason_codes"]
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" not in health["blocking_reason_codes"]
+    assert result.output["research_sufficiency"]["may_continue"] is True
+
+
+def test_evidence_funnel_counts_only_readable_evidence(tmp_path: Path, monkeypatch) -> None:
+    from app.skills.fetch_gateway import FetchedDocument, HttpFetchGateway
+    from app.skills.public_research import PublicResearchArchiveSkill
+
+    plan = _plan(1)
+    query = plan["queries"][0]["query"]
+    candidates = [
+        {
+            "title": f"Adaptive scheduling evidence source {index}",
+            "url": f"https://evidence.example/doc-{index}",
+            "excerpt": f"adaptive transport scheduling benchmark review limitations snippet variant {index}",
+            "matched_query": query,
+            "published_at": "2024",
+            "authors": ["A. Author"],
+            "publisher": "Journal A",
+        }
+        for index in range(10)
+    ]
+
+    def fake_search(self, queries, max_results):
+        self._last_search_execution = {
+            "provider_runs": [
+                {"provider": "searxng", "query": item, "result_count": 10}
+                for item in queries
+            ]
+        }
+        return candidates, []
+
+    monkeypatch.setattr(PublicResearchArchiveSkill, "_search_searxng", fake_search)
+    monkeypatch.setattr(
+        PublicResearchArchiveSkill,
+        "_validate_public_url",
+        staticmethod(lambda url, resolve_dns=True: None),
+    )
+
+    def fake_fetch(self, url):
+        index = int(str(url).rsplit("-", 1)[1])
+        if index < 8:
+            return FetchedDocument(
+                requested_url=url,
+                final_url=url,
+                content_type="text/html",
+                http_status=200,
+                raw_bytes=b"",
+                fetch_mode="SNIPPET_ONLY",
+                blockage_type="CAPTCHA",
+            )
+        readable_html = (
+            "<html><body><p>"
+            + f"adaptive transport scheduling benchmark review limitations evidence variant {index} " * 80
+            + "</p></body></html>"
+        ).encode()
+        return FetchedDocument(
+            requested_url=url,
+            final_url=url,
+            content_type="text/html",
+            http_status=200,
+            raw_bytes=readable_html,
+            fetch_mode="HTTP",
+        )
+
+    monkeypatch.setattr(HttpFetchGateway, "fetch", fake_fetch)
+
+    settings = _settings(tmp_path, tmp_path / "unused-connector.json")
+    result = VerifiablePublicResearchArchiveSkill(settings).run(
+        {
+            "provider": "searxng",
+            "require_structured_plan": False,
+            "plan": plan,
+            "max_results": 40,
+        },
+        SkillContext(project_id="p", workflow_id="wf-funnel", security_level="PUBLIC", data_dir=str(tmp_path)),
+    )
+    funnel = result.output["evidence_funnel"]
+    assert funnel["search_hits"] == 10
+    assert funnel["snippet_only_records"] == 8
+    assert funnel["readable_documents"] == 2
+    assert funnel["full_text_documents"] == 2
+    assert funnel["usable_evidence"] == 2
+    assert result.output["coverage"]["by_query"][query]["source_count"] == 2

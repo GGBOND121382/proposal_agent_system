@@ -4,6 +4,12 @@ import re
 from collections import Counter, defaultdict
 from typing import Any
 
+from .search_providers.base import CHANNEL_ACADEMIC, CHANNEL_WEB_SEARCH, PROVIDER_CHANNELS, provider_channel
+
+_KNOWN_ACADEMIC_PROVIDERS = tuple(
+    name for name, channel in PROVIDER_CHANNELS.items() if channel == CHANNEL_ACADEMIC
+)
+
 _GENERIC_TERMS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into", "is", "of", "on", "or", "the", "to", "using", "via", "with",
     "analysis", "approach", "approaches", "framework", "frameworks", "latest", "method", "methods", "model", "models", "paper", "papers", "recent", "research", "review", "reviews", "study", "studies", "survey", "surveys", "system", "systems",
@@ -222,6 +228,7 @@ def build_retrieval_health(
     *,
     retrieval_provider: str,
     queries: list[str],
+    execution_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Summarize execution health independently from evidence sufficiency.
 
@@ -229,6 +236,13 @@ def build_retrieval_health(
     never counted as failures. A partially degraded provider set is non-blocking as
     long as every approved query was executed successfully by at least one enabled
     provider.
+
+    When the Phase 3 execution contract declares ``required_channels`` /
+    ``provider_execution_requirements``, a required channel whose providers all failed
+    is surfaced as ``REQUIRED_CHANNEL_FAILED:<CHANNEL>``; it becomes blocking only for
+    the WEB_SEARCH channel when ``require_web_discovery`` is true, so an Academic-only
+    success can never mask a mandated web-discovery failure. Required providers that
+    were never executed are always blocking contract violations.
     """
 
     provider = str(retrieval_provider or "").lower()
@@ -245,7 +259,21 @@ def build_retrieval_health(
             "missing_execution_queries": [],
         }
 
-    known_academic = ("openalex", "crossref", "semantic_scholar")
+    contract = execution_contract if isinstance(execution_contract, dict) else {}
+    required_channels = [
+        str(item or "").strip().upper()
+        for item in contract.get("required_channels") or []
+        if str(item or "").strip()
+    ]
+    requirements = contract.get("provider_execution_requirements")
+    requirements = requirements if isinstance(requirements, dict) else {}
+    required_providers = [
+        str(item or "").strip().lower()
+        for item in requirements.get("required_providers") or []
+        if str(item or "").strip()
+    ]
+    require_web_discovery = bool(contract.get("require_web_discovery"))
+
     declared = [
         str(item or "").strip().lower()
         for item in discovery_manifest.get("providers") or []
@@ -265,7 +293,8 @@ def build_retrieval_health(
         if provider == "hybrid":
             declared.append("searxng")
 
-    enabled = [name for name in declared if name in {*known_academic, "searxng"}]
+    known_academic = _KNOWN_ACADEMIC_PROVIDERS
+    enabled = [name for name in declared if provider_channel(name) is not None]
     if provider == "hybrid" and "searxng" not in enabled:
         enabled.append("searxng")
     disabled = [name for name in known_academic if name not in enabled]
@@ -365,8 +394,28 @@ def build_retrieval_health(
     academic_successful = sum(1 for name in academic_enabled if stats.get(name, {}).get("successful_queries", 0) > 0)
     if len(academic_enabled) >= 2 and academic_successful < 2:
         reason_codes.append("ACADEMIC_PROVIDER_DIVERSITY_DEGRADED")
-    if provider == "hybrid" and stats.get("searxng", {}).get("successful_queries", 0) == 0:
+    web_enabled = [name for name in enabled if provider_channel(name) == CHANNEL_WEB_SEARCH]
+    web_successful = [name for name in web_enabled if stats.get(name, {}).get("successful_queries", 0) > 0]
+    if provider == "hybrid" and not web_successful:
         reason_codes.append("HYBRID_WEB_CHANNEL_UNAVAILABLE")
+    for channel in required_channels:
+        members = [name for name in enabled if provider_channel(name) == channel]
+        if not members:
+            code = f"REQUIRED_CHANNEL_NOT_EXECUTED:{channel}"
+        else:
+            successful = [name for name in members if stats.get(name, {}).get("successful_queries", 0) > 0]
+            code = "" if successful else f"REQUIRED_CHANNEL_FAILED:{channel}"
+        if code:
+            # A mandated web-discovery failure must never be masked by Academic
+            # success; other required-channel degradations remain observable but
+            # non-blocking so technical research can still finish DEGRADED.
+            if channel == CHANNEL_WEB_SEARCH and require_web_discovery:
+                blocking_reason_codes.append(code)
+            else:
+                reason_codes.append(code)
+    for name in required_providers:
+        if name not in enabled:
+            blocking_reason_codes.append(f"REQUIRED_PROVIDER_NOT_EXECUTED:{name}")
     reason_codes = list(dict.fromkeys([*blocking_reason_codes, *reason_codes]))
 
     if blocking_reason_codes:
@@ -466,7 +515,7 @@ def build_research_sufficiency(
     # Preserve non-query quality deficiencies as explicit global limitations. They do
     # not independently block a run that still has usable evidence.
     for name, value in dimensions.items():
-        if name in {"query_depth", "query_authoritative_depth", "retrieval_health"}:
+        if name in {"query_depth", "query_authoritative_depth", "query_fulltext_depth", "retrieval_health"}:
             continue
         if not isinstance(value, dict) or value.get("status") == "PASS":
             continue

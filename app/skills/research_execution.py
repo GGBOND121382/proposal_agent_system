@@ -46,6 +46,18 @@ def _plan_projection(normalized_plan: dict[str, Any]) -> dict[str, Any]:
         "time_scope": normalized_plan.get("time_scope"),
         "evidence_requirements": list(normalized_plan.get("evidence_requirements") or []),
         "prohibited_inferences": list(normalized_plan.get("prohibited_inferences") or []),
+        "required_channels": list(normalized_plan.get("required_channels") or []),
+        "provider_execution_requirements": {
+            "required_providers": list(
+                (normalized_plan.get("provider_execution_requirements") or {}).get("required_providers") or []
+            ),
+            "execute_all_approved_queries": bool(
+                (normalized_plan.get("provider_execution_requirements") or {}).get("execute_all_approved_queries", True)
+            ),
+        },
+        "minimum_fulltext_sources_per_query": int(normalized_plan.get("minimum_fulltext_sources_per_query") or 0),
+        "allow_snippet_only": bool(normalized_plan.get("allow_snippet_only", True)),
+        "require_web_discovery": bool(normalized_plan.get("require_web_discovery", False)),
     }
 
 
@@ -99,6 +111,18 @@ def validate_plan_transition(
     new = dict(candidate_lock.get("projection") or {})
     immutable_fields = ("task_type", "binding_contract_version", "time_scope")
     changed = [field for field in immutable_fields if old.get(field) != new.get(field)]
+    # Phase 3 execution-contract fields are immutable once a lock records them.
+    # Locks written before Phase 3 simply lack these keys; absence must not be
+    # treated as a mismatch with the new normalization defaults.
+    for field in (
+        "required_channels",
+        "provider_execution_requirements",
+        "minimum_fulltext_sources_per_query",
+        "allow_snippet_only",
+        "require_web_discovery",
+    ):
+        if field in old and old.get(field) != new.get(field):
+            changed.append(field)
     old_plan_id = str(old.get("plan_id") or "")
     new_plan_id = str(new.get("plan_id") or "")
     if old_plan_id and new_plan_id and old_plan_id != new_plan_id:

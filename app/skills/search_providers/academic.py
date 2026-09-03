@@ -4,11 +4,12 @@ from typing import Any, Callable
 
 from ..academic_search import AcademicSearchClient
 from ..search_gateway import ProviderRun, SearchHit, SearchProviderResult, SearchQuery
-from .base import SearchProvider, SearchProviderRetrievalError
+from .base import CHANNEL_ACADEMIC, SearchProvider, SearchProviderRetrievalError
 
 
 class AcademicSearchProvider(SearchProvider):
     provider_id = "academic-multi-source"
+    channel = CHANNEL_ACADEMIC
 
     def __init__(
         self,

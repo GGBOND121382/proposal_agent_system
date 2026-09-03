@@ -78,7 +78,7 @@
     },
     {
       "prompt_id": "P-PUBLIC-RESEARCH-PLAN",
-      "prompt_version": "2.1.0",
+      "prompt_version": "2.2.0",
       "prompt_file": "prompts/public_research/research_plan.md",
       "input_schema": "schemas/prompts/public_research_plan_input.schema.json",
       "output_schema": "schemas/prompts/public_research_plan_output.schema.json",
