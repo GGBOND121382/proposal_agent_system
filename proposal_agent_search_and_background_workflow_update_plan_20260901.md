@@ -1,7 +1,85 @@
 # Proposal Agent：搜索能力与 Topic 背景调研工作流更新计划
 
-日期：2026-09-01  
+创建日期：2026-09-01
+状态同步：2026-09-03
 审计基线：`7589a674-1f87-47e8-a096-8c5da0a81f56.zip` + `workflow_oneclick_frontend_combined_gitapply_no_ps1_20260831.patch` + `wf4_critic_review_graph_closure_checkpoint_20260901.patch`
+
+## 0. AI 接手摘要（以本节为当前状态准绳）
+
+### 0.1 当前 Git 与工作区状态
+
+- Phase 0/1 技术基线提交：`28bb520 feat(search): extract search fetch and content contracts`。
+- Phase 0/1 说明提交：`03e15ec docs(search): record phase zero and phase one baseline`。
+- Phase 2 已完成实现、范围验收并提交：`7a4e8fd update phase 2 (playwright and search fallback)`。
+- Phase 2 详细实施证据 `docs/SEARCH_BACKGROUND_PHASE2_REPORT_20260902.md` 已包含在 `7a4e8fd` 中。
+- Phase 3 已完成实现、范围验收并提交：`f53e98b update phase 3 (wf3 retrieval execution contract and channel sufficiency)`；详细实施证据 `docs/SEARCH_BACKGROUND_PHASE3_REPORT_20260903.md` 已包含在 `f53e98b` 中。
+- `docs/video_demo_20260902/` 是用户本地视频材料，已被 `.gitignore` 排除且未进入任何技术提交，**不得强制暂存、提交、删除或混入技术补丁**。
+- `data/capability_tests/` 和 `data/browser_cache/` 已加入 `.gitignore`；真实能力 receipt 保留在本地，但不会误入 Git。
+- Phase 3 提交前已执行 `git status --short` 与 `git diff --cached --name-only` 核对；接手者提交前仍须执行同样检查。
+
+### 0.2 用户明确要求与不可突破的边界
+
+1. 不要把“数据库 Schema”和“Prompt JSON Schema”混为一谈。允许修改 Prompt、Prompt JSON Schema、Model Schema、Prompt Registry、`workflow_defs`、`workflows`、context、dependency preflight、UI、Replay 和测试。
+2. 原则上复用现有数据库表；如果后续确实必须修改数据库结构，必须先说明具体原因，不能自行扩表。
+3. 独立 WF-3B 必须使用正式的新工作流类型、新 Prompt 和新 Schema；禁止伪装复用 `PUBLIC_RESEARCH` 类型或以 sidecar 形式绕过类型边界。
+4. Browser Search 不能成为唯一搜索来源。必须保留 Academic API、SearXNG、Connector/Recorded 和可配置 provider；Playwright 仅承担真实搜索引擎补充及动态网页读取兜底。
+5. 真实验收必须证明至少一个 Web Search 通道实际生效；禁止用纯 Academic 结果掩盖网页通道失败。
+6. 必须保留当前工作区全部既有修改；禁止覆盖、回退或清理不属于本任务的用户文件。
+7. 未经用户再次明确授权，不运行 LIVE MiniMax 或其他 LLM。允许并应优先运行不调用 LLM 的真实 Search/Fetch capability test。
+8. 修复应保持确定性边界：provider 选择、运行时 ID、Hash、Coverage、状态、路由和安全判断由代码负责，不要求模型生成。
+9. 后续实施严格按 Phase 3 → Phase 4 → Phase 5 → Phase 6 推进；每一阶段单独验收，不把 WF-3、WF-3B 和 WF-4 一次性混改。
+
+### 0.3 已完成状态
+
+| Phase | 状态 | 结果 |
+|---|---|---|
+| Phase 0 | 已完成 | 基线冻结、Hash/checkpoint 和既有全量失败分类已记录 |
+| Phase 1 | 已完成并提交 | Search/Fetch/Extract 契约抽离，旧 provider 与 WF-3 行为兼容 |
+| Phase 2 | 已完成并提交 | Browser Search、Playwright Worker、动态读取兜底、安全、缓存、限速、preflight 和真实 Web Search 验收；提交 `7a4e8fd` |
+| Phase 3 | 已完成并提交 | WF-3 检索执行合同（Plan 2.2.0 五字段）、provider channel/profile、required web channel 阻断语义、三级充分性 evidence_funnel；提交 `f53e98b` |
+| Phase 4 | 未开始 | 正式独立 WF-3B 背景调研工作流 |
+| Phase 5 | 未开始 | WF-3B → WF-4 的背景证据确定性路由与 lineage |
+| Phase 6 | 未开始 | 完整回归、恢复测试和经授权的小规模 LIVE LLM 验收 |
+
+### 0.4 Phase 2 已实现的代码能力
+
+- 新增 `app/skills/browser_worker.py`：Playwright 延迟加载、单批次 Browser Context 复用、按 origin 限速、TTL 磁盘缓存、关闭释放。
+- 新增 `app/skills/search_providers/browser_search.py`：正式 provider ID 为 `browser_search`，兼容配置别名 `browser`，保存原始搜索结果页和每次查询 receipt。
+- `HttpFetchGateway` 改为手动、受控地跟随 HTTP 重定向；原始 URL、重定向每一跳和最终 URL 都先做公网地址检查。
+- 浏览器导航前、最终 URL 及所有子请求均执行 HTTP(S)/公网地址检查；拒绝回环、私网、链路本地、保留/组播地址和 URL credentials。
+- 静态 HTML 为 `EMPTY`、`SHORT` 或 JS shell 时进入 Playwright；成功标为 `PLAYWRIGHT_RENDERED`。
+- CAPTCHA、登录墙、403、429、超时、导航错误和动态提取失败均分类记录，不绕过验证。
+- 浏览器仍失败时只归档搜索摘要并标为 `SNIPPET_ONLY`；此类记录不进入可引用 `sources/passages`，不计入 Coverage。
+- hybrid 现有路径在 SearXNG 无命中/失败且浏览器开关启用时可进入 Browser Search fallback；这只是 Phase 2 能力接入，不等同于 Phase 3 required channel 合同已经完成。
+- 新增配置、dependency preflight、配置状态输出和无 LLM capability 脚本。
+
+### 0.5 Phase 2 验收证据
+
+- Search/Fetch、dependency preflight、WF-3 相关范围回归：`214 passed in 8.91s`（此前同范围复验为 `214 passed in 9.55s`）。
+- 本批 Python 文件 Ruff：`All checks passed`。
+- Python `compileall`：通过。
+- `git diff --check`：通过，仅有仓库既有 CRLF/LF 提示。
+- 当前 Python 环境已安装仓库锁定版本 `playwright==1.57.0`；系统浏览器使用 `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`。
+- 无 LLM 真实 Web Search 最终结果：`PASS`、`llm_invoked=false`、Brave Search HTTP 200、5 条真实网页命中。
+- 最终 receipt：`data/capability_tests/web_search/20260902T112128.018504_0000/capability_receipt.json`。
+- 原始结果页：`data/capability_tests/web_search/20260902T112128.018504_0000/raw_search_pages/CAPABILITY-WEB-001-browser-search-8a666bf067f340d9.html`。
+- 原始 HTML SHA-256：`8c4a027242a0fc877af29884695d72e1107b68f1362d284678702f862690e371`。
+- 测试过程中的 Bing CAPTCHA、DuckDuckGo 超时和一次异常 DNS 保留地址均被明确判为失败，未伪装为搜索成功。
+
+### 0.6 已知但不属于 Phase 2/3 的基线问题
+
+- 全量测试仍存在 Phase 0/1 已记录的 Argument `candidate.review_units` 历史契约失败、G0 冻结身份漂移、旧 provenance/semantic closure/quality guard 断言，以及 Full Integration 超时级联。
+- 最新全量尝试首个失败仍是 `tests/test_argument_lifecycle_composition_v9.py::test_v9_argument_repair_paths_are_relative_to_producer_result` 的 `KeyError: review_units`；Phase 2/3 未修改 Argument、WF-4 或其 Model Schema。
+- `tests/test_runtime.py::test_runtime_recovers_safe_package_scalar_source_ref_drift_without_model_call` 在干净 HEAD（`7a4e8fd`）上同样失败，属既有基线问题，与 Phase 3 无关（已用 stash 复验）。
+- 不得为了让范围测试看起来全绿而顺手修改上述非搜索问题。应以 227 项范围回归和既有基线报告进行差异判断。
+
+### 0.7 下一位接手者的第一组操作
+
+1. 先阅读本节、`docs/SEARCH_BACKGROUND_PHASE2_REPORT_20260902.md` 和 `docs/SEARCH_BACKGROUND_PHASE3_REPORT_20260903.md`。
+2. 执行 `git show --stat f53e98b` 核对 Phase 3 提交，并执行 `git status --short` 确认没有新的非计划修改。
+3. 重跑 227 项范围测试和 `scripts/check_web_search_capability.py`；真实公网偶发 CAPTCHA/DNS/超时必须保留为真实失败，不能放松私网安全规则或伪造 PASS。
+4. 不重写或拆散 `7a4e8fd`/`f53e98b`；提交后续计划/代码时继续显式排除 `docs/video_demo_20260902/` 和 `data/` 运行证据。
+5. Phase 3 提交稳定后再开始 Phase 4；WF-3B 必须使用正式的新工作流类型、新 Prompt 和新 Schema。
 
 ## 1. 结论
 
@@ -33,19 +111,25 @@ flowchart TD
 - `WF-3_HYBRID_ONLINE_ASSIST` 已包含：安全外发包、调研计划、范围 Critic、`PUBLIC_SEARCH`、综合、Research Critic、导入 Critic 和人工审批。
 - `VerifiablePublicResearchArchiveSkill` 已支持 `academic` 与 `hybrid`：OpenAlex、Crossref，并保留 Semantic Scholar 适配器。
 - 搜索结果、原始页面/PDF、提取文本、元数据、Hash、Coverage、ResearchSufficiency 和 Claim 绑定已有审计基础。
-- `playwright==1.57.0` 已在依赖中，离线包也已安装 Chromium；但当前仅用于 Mermaid 渲染。
+- Search/Fetch/Extract 已拆为稳定接口，Recorded、Connector、SearXNG、Academic 和 Browser Search 均通过 provider 边界接入。
+- `playwright==1.57.0` 已用于正式 Browser Search 和动态网页读取兜底，不再仅用于 Mermaid；浏览器批次复用、缓存、限速、阻断分类和公网 URL 安全检查已经实现。
+- 搜索命中、HTTP 静态读取、Playwright rendered DOM、`SNIPPET_ONLY` 和可引用证据在归档元数据中已有明确区分；`SNIPPET_ONLY` 不计入 Coverage。
 - WF-3 完成时会持久化 `WF3_RESEARCH_RESULT`，WF-4 通过冻结的 prerequisite lineage 消费经审批的公开 Claim。
 
-### 2.2 当前网页知识链的实际缺口
+### 2.2 Phase 2 已关闭的网页知识链缺口
 
-1. 网页发现只依赖 SearXNG JSON API。SearXNG 的上游搜索引擎被 CAPTCHA、403、限流或超时后，没有第二个真实网页搜索入口。
-2. `hybrid` 即使网页通道完全失效，仍可能依靠学术 API 返回结果并以 `DEGRADED` 继续；这不能证明智能体已获得搜索引擎网页知识。
-3. SearXNG 命中 URL 后只用 `httpx` 拉取，HTML 通过 BeautifulSoup `get_text()` 粗提取；JS 渲染页、正文异步加载、反爬中间页和复杂页面没有浏览器兜底。
-4. 搜索、抓取、提取和归档耦合在 `PublicResearchArchiveSkill` 中，难以单独替换搜索源、复用缓存或对不同失败阶段准确分类。
-5. 当前 Research Plan 主要面向综述、方法、baseline、评价协议和局限，不能稳定生成应用背景查询。
-6. 当前公开综合只生成通用 `PUBLIC_CLAIM`，没有“应用场景/痛点/政策/规模/案例/约束/意义”等用途标签。
-7. `_scoped_facts()` 对证据型章节只按现有列表顺序取前 6 条公开 Claim，没有按章节、背景维度或相关性做确定性路由。即使新增背景 Claim，也不能保证进入引言。
-8. WF-4 的章节蓝图要求证据 ID 已进入 Section Contract。若只在 `P-WRITE-CONTENT` 阶段注入背景材料，模型无法合法引用新证据；因此必须从 `P-ARGUMENT-ARCHITECTURE` 和 `P-REVISION-PLAN` 开始接入。
+1. 已新增第二个真实网页搜索入口 `browser_search`；SearXNG 失败后具备浏览器 fallback 能力。
+2. 已增加 HTTP→Playwright 读取兜底，可处理静态正文过短、空页面和 JS shell。
+3. 搜索、抓取、提取和归档已解耦，provider receipt、原始页面、Hash、fetch mode 和失败分类均可单独审计。
+4. CAPTCHA、登录墙或浏览器读取失败不会被解释为零结果或全文成功；snippet 只作为线索归档。
+
+### 2.3 当前仍未关闭的缺口
+
+1. `hybrid` 尚未形成正式 provider profile 和 `required_channels` 合同；即使网页通道完全失效，现有充分性逻辑仍可能被 Academic 结果满足。该问题属于 Phase 3。
+2. 当前 Research Plan 主要面向综述、方法、baseline、评价协议和局限，不能稳定生成应用背景查询。该问题属于 Phase 4 的独立 WF-3B，而不是继续膨胀现有 WF-3 Prompt。
+3. 当前公开综合只生成通用 `PUBLIC_CLAIM`，没有“应用场景/痛点/政策/规模/案例/约束/意义”等用途标签。该问题属于 Phase 4。
+4. `_scoped_facts()` 对证据型章节仍按现有列表顺序取前 6 条公开 Claim，没有按章节、背景维度或相关性做确定性路由。该问题属于 Phase 5。
+5. WF-4 的章节蓝图要求证据 ID 已进入 Section Contract。背景证据必须从 `P-ARGUMENT-ARCHITECTURE` 和 `P-REVISION-PLAN` 开始接入，不能只在 `P-WRITE-CONTENT` 追加背景文本。该问题属于 Phase 5。
 
 ## 3. 目标架构
 
@@ -250,7 +334,9 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 ## 7. 代码修改范围
 
-### 7.1 新增文件建议
+### 7.1 文件实施状态
+
+已在 Phase 1/2 建立：
 
 - `app/skills/search_gateway.py`
 - `app/skills/search_providers/base.py`
@@ -260,6 +346,9 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 - `app/skills/fetch_gateway.py`
 - `app/skills/browser_worker.py`
 - `app/skills/content_extraction.py`
+
+Phase 4 才允许新增：
+
 - `app/background_research.py`
 - `app/background_context.py`
 - `prompt_pack/prompts/background_research/*.md`
@@ -291,7 +380,7 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 ## 8. 实施顺序与检查点
 
-### Phase 0：冻结并验证当前基线
+### Phase 0：冻结并验证当前基线（已完成）
 
 - 完成当前 WF-4 Review Graph checkpoint 尚未完成的旧 fixture 迁移、异步依赖、全量测试、Prompt Pack manifest/hash 检查；
 - 记录搜索相关测试基线；
@@ -299,7 +388,7 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 交付：基线报告 + 可应用补丁检查结果。
 
-### Phase 1：Search/Fetch 契约抽离
+### Phase 1：Search/Fetch 契约抽离（已完成并提交）
 
 - 建立统一对象和 provider 接口；
 - 将现有 SearXNG/Academic 逻辑迁入适配器；
@@ -307,7 +396,7 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 验收：Recorded/Connector/SearXNG/Academic 旧测试不回退；旧 `WF3_RESEARCH_RESULT` 可读取。
 
-### Phase 2：Playwright 网页能力
+### Phase 2：Playwright 网页能力（已完成并提交：`7a4e8fd`）
 
 - Browser Search provider；
 - HTTP→Playwright 页面读取兜底；
@@ -317,7 +406,9 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 验收：无需 LLM 的本机真实搜索能力测试通过，并保存搜索结果页原始证据。
 
-### Phase 3：升级现有 WF-3
+实际验收：已通过；详见第 0.5 节和 `docs/SEARCH_BACKGROUND_PHASE2_REPORT_20260902.md`。
+
+### Phase 3：升级现有 WF-3（下一批，尚未开始）
 
 - provider profile、required channel、执行层级和充分性规则；
 - 明确区分“搜索命中”“正文抓取”“证据可用”；
@@ -325,7 +416,7 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 验收：对技术调研测试集，查询覆盖、来源筛选、正文抓取、归档和 Claim 绑定形成闭环。
 
-### Phase 4：新增 WF-3B
+### Phase 4：新增 WF-3B（尚未开始）
 
 - 背景 Plan/Synthesis/Critic/Schema；
 - 背景维度覆盖和证据卡；
@@ -334,7 +425,7 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 验收：输入一个新 topic 后，能够产生有来源的应用背景卡，而不是复述模型常识。
 
-### Phase 5：接入 WF-4
+### Phase 5：接入 WF-4（尚未开始）
 
 - 前置 workflow lineage；
 - Argument Architecture、Revision Plan、Section Contract 和写作上下文接入；
@@ -343,7 +434,7 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 验收：每个引言实质句可回溯到背景 card → PUBLIC_CLAIM → source passage → archived raw source。
 
-### Phase 6：回归与真实能力验收
+### Phase 6：回归与真实能力验收（尚未开始）
 
 - Unit、Schema、Mutation、Replay、Lifecycle、恢复测试；
 - 搜索源限流、单查询失败、网页抓取失败、JS 页面、PDF、重定向、重复 URL、过期数据和冲突数据测试；
@@ -354,13 +445,13 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 ### 搜索能力
 
-1. SearXNG 所有 engine 失败，但 Browser Search 成功：工作流继续并记录 fallback。
-2. Browser Search 遇到 CAPTCHA：不得伪装成功，切换 provider 或阻断。
-3. 学术 API 成功、网页 channel 全失败且 `require_web_discovery=true`：必须阻断。
-4. 搜索命中 10 条但只有 2 条正文可读：Coverage 按 2 条可用证据计算，不能按 10 条命中计算。
-5. JS 动态页静态抓取为空、Playwright 成功：保存 rendered DOM/正文与 fetch mode。
-6. 页面重定向到私网地址：拒绝并记录安全 Finding。
-7. 重复查询/URL：命中缓存但保留本次 provider execution receipt。
+1. `[Phase 2 已通过]` SearXNG 失败后 Browser Search 可成功并保留 fallback/provider receipt。
+2. `[Phase 2 已通过]` Browser Search 遇到 CAPTCHA：不得伪装成功，切换 provider 或阻断。
+3. `[Phase 3 待实现]` 学术 API 成功、网页 channel 全失败且 `require_web_discovery=true`：必须阻断。
+4. `[Phase 2 已建立数据边界；Phase 3 完成正式合同]` 搜索命中 10 条但只有 2 条正文可读：Coverage 按 2 条可用证据计算，不能按 10 条命中计算。
+5. `[Phase 2 已通过]` JS 动态页静态抓取为空、Playwright 成功：保存 rendered DOM/正文与 fetch mode。
+6. `[Phase 2 已通过]` 页面重定向到私网地址：拒绝并记录安全 Finding。
+7. `[Phase 2 已通过]` 重复查询/URL：命中缓存但保留本次 provider execution receipt。
 
 ### 背景工作流
 
@@ -380,9 +471,11 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 ## 10. 工作量与优先级
 
+以下工时是 2026-09-01 的原始估算，Phase 0–2 已完成后不可再把它当作剩余工时承诺。接手者应在 Phase 3 契约评审后重新估算 Phase 3–6。
+
 ### 最小可用闭包
 
-范围：Search Gateway、一个 Browser Search provider、Playwright 页面兜底、现有 WF-3 required web channel、新 WF-3B、WF-4 背景路由和核心测试。
+原始范围：Search Gateway、一个 Browser Search provider、Playwright 页面兜底、现有 WF-3 required web channel、新 WF-3B、WF-4 背景路由和核心测试。其中 Search Gateway、Browser Search 和页面兜底现已完成。
 
 预计约 24–36 工时。
 
@@ -396,14 +489,48 @@ ID、Hash、SourceRef、权威等级和 target profile 合法性由运行时生�
 
 `确定性检索内核 → 真实 Search/Fetch 验收 → 背景工作流契约 → WF-4 消费闭环 → 小规模 LIVE 模型验收`。
 
-## 11. 建议的第一批修改
+## 11. 后续准确执行计划
 
-第一批只做 Phase 0–1，不立即新增背景 Prompt：
+### 11.1 接手后先验证 Phase 2 基线
 
-1. 完成当前基线全量测试与 Prompt Pack Hash；
-2. 定义 `SearchQuery/SearchHit/ProviderRun/FetchedDocument/ExtractedDocument`；
-3. 把现有 SearXNG 与 Academic 逻辑迁入 Search Gateway；
-4. 保证 WF-3 行为不变并通过回归；
-5. 交付独立补丁和验证报告。
+1. 对照第 0 节和 `git show 7a4e8fd` 审查 Phase 2，不重新设计已经通过验收的 Search/Fetch/Browser 边界。
+2. 重跑 214 项范围测试、Ruff、compileall、`git diff --check` 和一次无 LLM Browser Search capability test。
+3. 确认 `docs/video_demo_20260902/`、`data/capability_tests/`、`data/browser_cache/` 及其他运行日志没有进入暂存区。
+4. Phase 2 已提交，无需重复提交；当前计划状态同步应作为独立文档修改处理，不得夹带 WF-3B、WF-4 或数据库结构修改。
 
-这个检查点通过后，再增加 Playwright 和 WF-3B。这样每一步都能证明增加了真实能力，不会把搜索、背景语义和 WF-4 合同同时改动后只看到新的 `BLOCKED_CONTRACT`。
+### 11.2 Phase 3 的准确修改范围
+
+Phase 3 只升级现有 WF-3，不创建 WF-3B，不修改 WF-4：
+
+1. 修改 `prompt_pack/prompts/public_research/research_plan.md` 及其 Prompt/Model JSON Schema，增加：
+   - `required_channels`；
+   - `provider_execution_requirements`；
+   - `minimum_fulltext_sources_per_query`；
+   - `allow_snippet_only`；
+   - `require_web_discovery`。
+2. 修改 `app/skills/research_plan.py` 和 `app/skills/research_execution.py`，规范化并锁定执行合同。模型只表达语义检索需要；provider 路由、运行时 ID、Hash、状态和执行事实由代码生成。
+3. 修改 `app/skills/verifiable_public_research.py`，实现有序 provider profile、逐 query/channel receipt 和 required web channel 失败语义。
+4. 修改 `app/skills/research_quality.py`、`app/skills/research_audit.py`、`app/skills/research_validation.py`，分别统计：
+   - `search_hits`；
+   - `readable_documents`；
+   - `usable_evidence`。
+5. 明确规则：Academic 成功不能掩盖 `require_web_discovery=true` 时的 Web Search 全失败；`SNIPPET_ONLY` 可保留为发现线索，但不得计入全文来源或 Claim Coverage。
+6. 更新 `prompt_pack/replay/cases/public_research_plan/`、WF-3 契约/质量门禁测试及历史失败回放，不新增数据库表。
+
+Phase 3 验收后再进入 Phase 4。禁止在 Phase 3 顺手新增背景维度 Prompt、`TOPIC_BACKGROUND_RESULT`、UI 入口或 WF-4 lineage。
+
+### 11.3 Phase 4–6 顺序
+
+- Phase 4：正式创建独立 `WF-3B_TOPIC_BACKGROUND_RESEARCH`、专用 Prompt/Schema/Replay/UI 和背景证据卡。
+- Phase 5：接入 WF-4 lineage、Argument Architecture、Revision Plan、Section Contract、Writing context，并修复 `_scoped_facts()` 的确定性路由。
+- Phase 6：完整 mutation/replay/lifecycle/recovery，先做无 LLM 真实能力验收；只有用户再次授权后才运行小规模 LIVE LLM。
+
+### 11.4 每批必须交付
+
+- 修改文件清单；
+- 可独立审查/应用的补丁或明确提交；
+- 基线测试与本批回归结果；
+- 真实 capability receipt（适用时）；
+- 尚未实施阶段；
+- 下一批准确修改范围；
+- 明确说明是否涉及数据库 Schema、Prompt JSON Schema 和 LIVE LLM。
