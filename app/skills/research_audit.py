@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from ..util import new_id, sha256_bytes, sha256_text, utc_now, write_json
 from .research_plan import canonical_url, normalize_doi, parse_year
 from .public_research import PublicResearchIntegrityError
-from .research_quality import build_research_sufficiency
+from .research_quality import build_background_coverage_dimensions, build_research_sufficiency
 
 _BASELINE_TERMS = {"baseline", "benchmark", "comparison", "comparative", "survey", "review", "基线", "对比", "比较", "综述", "评测", "现有方法"}
 _LIMITATION_TERMS = {"limitation", "limitations", "challenge", "challenges", "gap", "open problem", "drawback", "局限", "不足", "挑战", "差距", "瓶颈"}
@@ -141,6 +141,28 @@ def coverage_report(
     }
 
     profile = str(quality_profile or "legacy").strip().lower()
+    if profile == "application_background":
+        # Topic background research has its own dimension set: per-query depth
+        # plus mandatory web-discovered evidence.  The proposal related-work
+        # dimensions (recent work / baselines / limitations) do not apply.
+        background_dimensions = build_background_coverage_dimensions(
+            records,
+            by_query,
+            min_sources_per_query=min_sources_per_query,
+            min_fulltext_sources_per_query=min_fulltext_sources_per_query,
+            retrieval_health=retrieval_health,
+        )
+        background_shallow = list(
+            (background_dimensions.get("query_depth") or {}).get("shallow_queries") or []
+        )
+        return {
+            "status": "PASS" if not uncovered and all(item["status"] == "PASS" for item in background_dimensions.values()) else "INSUFFICIENT",
+            "quality_profile": "application_background",
+            "by_query": by_query,
+            "uncovered_queries": uncovered,
+            "shallow_queries": background_shallow,
+            "dimensions": background_dimensions,
+        }
     if profile != "proposal_related_work":
         return {
             "status": "PASS" if not uncovered and all(item["status"] == "PASS" for item in dimensions.values()) else "INSUFFICIENT",

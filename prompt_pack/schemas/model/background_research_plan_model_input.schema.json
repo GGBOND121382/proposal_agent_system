@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background_research_plan_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "approved_task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task_type": {
+          "const": "PUBLIC_BACKGROUND_RESEARCH"
+        },
+        "task_description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "topic_description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seed_queries": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "allowed_context": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "prohibited_inferences": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "prohibited_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "task_type",
+        "task_description",
+        "topic_description",
+        "seed_queries",
+        "allowed_context",
+        "prohibited_inferences",
+        "prohibited_outputs"
+      ]
+    },
+    "required_dimensions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "APPLICATION_SCENARIO",
+          "STAKEHOLDER_AND_PAIN",
+          "INDUSTRY_SCALE_AND_TREND",
+          "POLICY_STANDARD_AND_PROGRAM",
+          "REPRESENTATIVE_CASE",
+          "CURRENT_ADOPTION",
+          "OPERATIONAL_CONSTRAINT",
+          "RESEARCH_SIGNIFICANCE"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "optional_dimensions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "APPLICATION_SCENARIO",
+          "STAKEHOLDER_AND_PAIN",
+          "INDUSTRY_SCALE_AND_TREND",
+          "POLICY_STANDARD_AND_PROGRAM",
+          "REPRESENTATIVE_CASE",
+          "CURRENT_ADOPTION",
+          "OPERATIONAL_CONSTRAINT",
+          "RESEARCH_SIGNIFICANCE"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "time_constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "end_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "freshness_required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "start_date",
+        "end_date",
+        "freshness_required"
+      ]
+    },
+    "evidence_requirements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "known_public_source_summaries": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "scope_revision_notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repair_instruction": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "description",
+          "repair_instruction"
+        ]
+      }
+    }
+  },
+  "required": [
+    "approved_task",
+    "required_dimensions",
+    "optional_dimensions",
+    "time_constraints",
+    "evidence_requirements",
+    "known_public_source_summaries"
+  ]
+}

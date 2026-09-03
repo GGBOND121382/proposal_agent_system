@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .background_research import BackgroundResearchService
 from .diagram_enrichment import DiagramEnrichmentService
 from .dependency_preflight import RuntimeDependencyPreflight
 from .post_export_acceptance import PostExportAcceptanceManager
@@ -76,6 +77,7 @@ def build_runtime_stack(settings, pack, db) -> RuntimeStack:
     )
     skill_executor = build_skill_executor(db, settings)
     research = PublicResearchService(settings, skill_executor)
+    background_research = BackgroundResearchService(settings, skill_executor)
     diagram_enrichment = DiagramEnrichmentService(db, pack, skill_executor)
     dependency_preflight = RuntimeDependencyPreflight(settings, pack, db)
     runtime_workflows = RecoverableWorkflowEngine(
@@ -86,6 +88,7 @@ def build_runtime_stack(settings, pack, db) -> RuntimeStack:
         research,
         diagram_enrichment,
         dependency_preflight=dependency_preflight,
+        background_research_service=background_research,
     )
     workflows = UnifiedWorkflowEngine(
         runtime_workflows,

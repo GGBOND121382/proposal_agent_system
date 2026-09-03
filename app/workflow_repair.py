@@ -26,6 +26,11 @@ from .json_pointer import (
 )
 from .output_integrity import attach_trusted_source_catalog
 from .workflow_defs import CRITIC_PRODUCER
+from .background_research import (
+    BACKGROUND_DIMENSIONS,
+    WF3B_PLAN_PROMPT,
+    normalize_background_plan,
+)
 from .contracts.semantic_contract import get_semantic_contract
 from .wf3_contracts import compare_public_search_candidates, summarize_public_search
 from .research import PublicResearchPlanError
@@ -766,6 +771,112 @@ class WorkflowRepairMixin:
             state["research_gaps"] = copy.deepcopy(candidate.get("research_gaps") or candidate["research_sufficiency"].get("research_gaps") or [])
         if isinstance(candidate.get("retrieval_health"), dict):
             state["retrieval_health"] = copy.deepcopy(candidate["retrieval_health"])
+
+    async def _run_background_search(self, wf: dict[str, Any], state: dict[str, Any]) -> None:
+        """PUBLIC_SEARCH step for WF-3B, mirrored on distinct state keys.
+
+        Same plan-lock, candidate non-regression and failure semantics as
+        ``_run_public_search``, but the plan is frozen against the WF-3B
+        background dimensions and execution goes through
+        ``BackgroundResearchService`` (``application_background`` profile,
+        forced ``require_web_discovery``).
+        """
+        mode = self.executor.gateway.settings.runtime_mode
+        if mode in {"REPLAY", "MOCK"}:
+            candidate = {
+                "sources": [],
+                "passages": [],
+                "queries": [],
+                "mode": mode,
+            }
+        else:
+            plan = self._context_result(
+                wf["project_id"],
+                WF3B_PLAN_PROMPT,
+                workflow_id=wf["id"],
+                exact_workflow=True,
+            ) or {}
+            options = state.get("options") if isinstance(state.get("options"), dict) else {}
+            required_dimensions = [
+                str(item).strip().upper()
+                for item in options.get("required_dimensions") or []
+                if str(item).strip()
+            ] or list(BACKGROUND_DIMENSIONS)
+            plan, dimension_findings = normalize_background_plan(
+                plan,
+                required_dimensions=required_dimensions,
+            )
+            if dimension_findings:
+                state.setdefault("background_plan_dimension_findings", []).append(
+                    {
+                        "recorded_at": utc_now(),
+                        "findings": dimension_findings,
+                    }
+                )
+                del state["background_plan_dimension_findings"][:-20]
+            candidate_lock = build_plan_lock(plan)
+            approved_lock = state.get("background_research_plan_lock")
+            if isinstance(approved_lock, dict) and approved_lock:
+                try:
+                    next_lock = validate_plan_transition(
+                        approved_lock,
+                        plan,
+                        allow_additive=True,
+                    )
+                except ResearchExecutionContractError as exc:
+                    raise PublicResearchPlanError(
+                        str(exc),
+                        details={
+                            "code": exc.code,
+                            **exc.details,
+                            "approved_plan_hash": approved_lock.get("plan_hash"),
+                            "candidate_plan_hash": candidate_lock.get("plan_hash"),
+                        },
+                    ) from exc
+                if next_lock.get("plan_hash") != approved_lock.get("plan_hash"):
+                    state.setdefault("background_research_plan_lock_history", []).append(
+                        {
+                            "recorded_at": utc_now(),
+                            "from_plan_hash": approved_lock.get("plan_hash"),
+                            "to_plan_hash": next_lock.get("plan_hash"),
+                            "transition": "ADDITIVE_PLAN_DELTA",
+                        }
+                    )
+                    del state["background_research_plan_lock_history"][:-20]
+                state["background_research_plan_lock"] = next_lock
+            else:
+                state["background_research_plan_lock"] = candidate_lock
+            provider = self.executor.gateway.settings.public_search_provider
+            if mode == "SIMULATED" and provider == "disabled":
+                candidate = self._background_research().simulated_search(plan)
+            else:
+                candidate = await self._background_research().search(
+                    plan,
+                    project_id=wf["project_id"],
+                    workflow_id=wf["id"],
+                    security_level="PUBLIC",
+                )
+
+        accepted = state.get("background_search_results")
+        if isinstance(accepted, dict) and accepted:
+            comparison = compare_public_search_candidates(accepted, candidate)
+            state.setdefault("background_search_candidate_history", []).append(
+                {
+                    "recorded_at": utc_now(),
+                    "decision": "ACCEPT" if comparison["accepted"] else "REJECT",
+                    **comparison,
+                }
+            )
+            del state["background_search_candidate_history"][:-20]
+            if not comparison["accepted"]:
+                return
+        state["background_search_results"] = candidate
+        state["background_search_accepted_baseline"] = summarize_public_search(candidate)
+        if isinstance(candidate.get("research_sufficiency"), dict):
+            state["background_research_sufficiency"] = copy.deepcopy(candidate["research_sufficiency"])
+            state["background_research_gaps"] = copy.deepcopy(candidate.get("research_gaps") or candidate["research_sufficiency"].get("research_gaps") or [])
+        if isinstance(candidate.get("retrieval_health"), dict):
+            state["background_retrieval_health"] = copy.deepcopy(candidate["retrieval_health"])
 
     @staticmethod
     def _repair_state_key(prompt_id: str, state: dict[str, Any]) -> str:

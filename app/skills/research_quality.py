@@ -557,3 +557,95 @@ def build_research_sufficiency(
         "retrieval_health_status": str(health.get("status") or "UNOBSERVED"),
         "may_continue": status in {"SUFFICIENT", "DEGRADED"},
     }
+
+
+APPLICATION_BACKGROUND_PROFILE = "application_background"
+KNOWN_RESEARCH_QUALITY_PROFILES = frozenset(
+    {"legacy", "proposal_related_work", APPLICATION_BACKGROUND_PROFILE}
+)
+
+
+def normalize_research_quality_profile(value: Any) -> str:
+    profile = str(value or "legacy").strip().lower()
+    return profile if profile in KNOWN_RESEARCH_QUALITY_PROFILES else "legacy"
+
+
+def _record_discovery_providers(record: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    verification = record.get("verification") if isinstance(record.get("verification"), dict) else {}
+    for raw in verification.get("discovery_providers") or []:
+        value = str(raw or "").strip().lower()
+        if value and value not in values:
+            values.append(value)
+    single = str(verification.get("discovery_provider") or "").strip().lower()
+    if single and single not in values:
+        values.append(single)
+    return values
+
+
+def build_background_coverage_dimensions(
+    records: list[dict[str, Any]],
+    by_query: dict[str, dict[str, Any]],
+    *,
+    min_sources_per_query: int = 3,
+    min_fulltext_sources_per_query: int = 1,
+    retrieval_health: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Coverage dimensions for the ``application_background`` quality profile.
+
+    Proposal related-work dimensions (recent work / baselines / limitations)
+    do not apply to topic background research.  What matters here is per-query
+    evidence depth and — because the WF-3B execution contract always forces
+    ``require_web_discovery=true`` — at least one usable evidence record that
+    was actually discovered through the WEB_SEARCH channel.  A pure Academic
+    source set therefore can never report a PASS for this profile: the web
+    evidence dimension stays INSUFFICIENT and surfaces as an explicit research
+    gap instead of a silently "sufficient" background run.
+    """
+
+    query_min = max(1, min(int(min_sources_per_query), 8))
+    fulltext_min = max(0, int(min_fulltext_sources_per_query or 0))
+    shallow = [
+        query
+        for query, item in by_query.items()
+        if int(item.get("source_count") or 0) < query_min
+    ]
+    fulltext_shallow = [
+        query
+        for query, item in by_query.items()
+        if int(item.get("source_count") or 0) < fulltext_min
+    ]
+    web_sourced = [
+        record
+        for record in records
+        if any(
+            provider_channel(name) == CHANNEL_WEB_SEARCH
+            for name in _record_discovery_providers(record)
+        )
+    ]
+    return {
+        "query_depth": {
+            "status": "PASS" if not shallow and bool(by_query) else "INSUFFICIENT",
+            "minimum_sources_per_query": query_min,
+            "shallow_queries": shallow,
+        },
+        "query_fulltext_depth": {
+            "status": "PASS" if not fulltext_shallow and bool(by_query) else "INSUFFICIENT",
+            "minimum_fulltext_sources_per_query": fulltext_min,
+            "shallow_queries": fulltext_shallow,
+        },
+        "web_evidence": {
+            "status": "PASS" if web_sourced else "INSUFFICIENT",
+            "require_web_discovery": True,
+            "source_ids": [str(record.get("source_id")) for record in web_sourced],
+            "minimum_source_count": 1,
+        },
+        "retrieval_health": {
+            "status": (
+                "PASS"
+                if not retrieval_health or retrieval_health.get("status") in {"PASS", "UNOBSERVED"}
+                else "INSUFFICIENT"
+            ),
+            "health": retrieval_health or {"status": "UNOBSERVED"},
+        },
+    }

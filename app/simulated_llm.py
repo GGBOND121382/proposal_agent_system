@@ -987,6 +987,137 @@ class SimulatedLLM:
     def _handle_public_research_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         return base
 
+    def _handle_background_research_plan(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        topic = str(payload.get("topic") or "").strip() or "当前课题"
+        dimensions = [
+            str(item).strip().upper()
+            for item in payload.get("required_dimensions") or []
+            if str(item).strip()
+        ]
+        if dimensions:
+            result["required_dimensions"] = dimensions
+        else:
+            dimensions = [str(item) for item in result.get("required_dimensions") or []]
+        topic_id = str(payload.get("topic_id") or "").strip()
+        if topic_id:
+            result["topic_id"] = topic_id
+        purpose_by_dimension = {
+            "APPLICATION_SCENARIO": "识别 topic 在真实业务中的应用场景",
+            "STAKEHOLDER_AND_PAIN": "识别利益相关方面临的具体问题",
+            "INDUSTRY_SCALE_AND_TREND": "获取行业规模、增长与成本趋势的公开统计",
+            "POLICY_STANDARD_AND_PROGRAM": "检索相关政策、标准、规划与正式项目",
+            "REPRESENTATIVE_CASE": "检索公开案例、试点或部署",
+            "CURRENT_ADOPTION": "评估现有应用成熟度与主要路线",
+            "OPERATIONAL_CONSTRAINT": "识别数据、实时性、资源、组织或合规约束",
+            "RESEARCH_SIGNIFICANCE": "由上述事实导出研究价值",
+        }
+        result["queries"] = [
+            {
+                "query_id": f"query-{index:03d}",
+                "query": f"{topic} {dimension.lower().replace('_', ' ')} 公开统计 政策 案例",
+                "dimension": dimension,
+                "purpose": purpose_by_dimension.get(dimension, "覆盖该背景维度的公开证据"),
+            }
+            for index, dimension in enumerate(dimensions, 1)
+        ]
+        contract = payload.get("retrieval_contract")
+        if isinstance(contract, dict) and contract:
+            if contract.get("required_channels") is not None:
+                result["required_channels"] = [
+                    str(item).strip().upper() for item in contract.get("required_channels") or [] if str(item).strip()
+                ]
+            if contract.get("required_providers") is not None:
+                result["provider_execution_requirements"] = {
+                    "required_providers": [
+                        str(item).strip().lower() for item in contract.get("required_providers") or [] if str(item).strip()
+                    ],
+                    "execute_all_approved_queries": True,
+                }
+            if contract.get("minimum_fulltext_sources_per_query") is not None:
+                result["minimum_fulltext_sources_per_query"] = max(0, int(contract.get("minimum_fulltext_sources_per_query")))
+            if contract.get("allow_snippet_only") is not None:
+                result["allow_snippet_only"] = bool(contract.get("allow_snippet_only"))
+            if contract.get("require_web_discovery") is not None:
+                result["require_web_discovery"] = bool(contract.get("require_web_discovery"))
+        return base
+
+    def _handle_background_research_plan_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        return base
+
+    def _handle_background_research_synthesis(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        retrieved = [item for item in payload.get("retrieved_sources", []) if isinstance(item, dict)]
+        passages = [item for item in payload.get("extracted_passages", []) if isinstance(item, dict)]
+        passage_by_source = {str(p.get("source_ref", {}).get("source_id")): p for p in passages}
+        catalog = self._catalog(envelope)
+        catalog_by_source = {str(item.get("source_id") or f"public-src-{self._item_number(item, i):03d}"): item for i, item in enumerate(catalog, 1)}
+        if not retrieved:
+            retrieved = [self._source_ref(self._item_number(item, i), item) for i, item in enumerate(catalog, 1)]
+        elif len(retrieved) < 2:
+            existing = {str(item.get("source_id")) for item in retrieved}
+            for i, item in enumerate(catalog, 1):
+                candidate = self._source_ref(self._item_number(item, i), item)
+                if str(candidate.get("source_id")) not in existing:
+                    retrieved.append(candidate)
+                    break
+        plan = payload.get("research_plan") if isinstance(payload.get("research_plan"), dict) else {}
+        dimensions = [
+            str(item).strip().upper()
+            for item in plan.get("required_dimensions") or []
+            if str(item).strip()
+        ]
+        # The model semantics layer emits standard PUBLIC_CLAIM objects; the
+        # deterministic runtime turns validated claims into background evidence
+        # cards (build_background_cards), so no card_id is ever simulated here.
+        claims = []
+        covered: set[str] = set()
+        for idx, source_ref in enumerate(retrieved, 1):
+            source_id = str(source_ref.get("source_id") or "").strip()
+            if not source_id:
+                continue
+            item = catalog_by_source.get(source_id, {})
+            passage = passage_by_source.get(source_id, {})
+            claim_text = str(passage.get("text") or self._item_summary(item) or source_ref.get("quoted_text") or "").strip()[:6000]
+            if not claim_text:
+                continue
+            dimension = dimensions[(idx - 1) % len(dimensions)] if dimensions else "APPLICATION_SCENARIO"
+            covered.add(dimension)
+            claims.append({
+                "claim_id": f"bg-claim-{idx:03d}",
+                "claim_text": claim_text,
+                "claim_type": "PUBLIC_CLAIM",
+                "subject_id": None,
+                "temporal_status": "TIME_INDEPENDENT",
+                "qualifiers": [str(item.get("publisher") or item.get("category") or "PUBLIC_SOURCE")],
+                "numeric_values": [],
+                "source_refs": [source_ref],
+                "knowledge_status": "DOCUMENT_EXTRACTED",
+                "security_level": "PUBLIC",
+                "dimension": dimension,
+                "target_section_profiles": ["BACKGROUND_AND_SIGNIFICANCE"],
+                "conflicts": [],
+                "limitations": ["模拟回放输出仅绑定输入信封中的已归档来源，真实性由归档记录与人工复核保证。"],
+            })
+        gaps = [
+            {"dimension": dimension, "reason": "检索结果未覆盖该背景维度，禁止使用模型记忆补齐。"}
+            for dimension in dimensions
+            if dimension not in covered
+        ]
+        result["claims"] = claims
+        result["background_gaps"] = gaps
+        result["coverage_summary"] = (
+            f"综合{len(claims)}条背景 PUBLIC_CLAIM，覆盖{len(covered)}个必需维度，声明缺口{len(gaps)}个；"
+            "证据卡由运行时按通过来源绑定校验的 claim 确定性构建，证据来自 public_research.archive 技能的归档来源而非模型记忆。"
+        )
+        base["source_refs"] = retrieved
+        return base
+
+    def _handle_background_research_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        return base
+
     def _handle_online_result_import_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         claims = envelope.get("payload", {}).get("result_package", {}).get("claims", [])
         base["result"]["import_recommendation"] = "IMPORT_REFERENCE_ONLY"

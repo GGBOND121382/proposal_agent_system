@@ -1,0 +1,187 @@
+{
+  "case_id": "background_research_critic-normal",
+  "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+  "case_type": "normal",
+  "description": "背景证据卡与证据一致，应通过",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "BACKGROUND_RESEARCH_CRITIC",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "research_plan": {
+        "plan_id": "bplan-001",
+        "task_type": "PUBLIC_BACKGROUND_RESEARCH",
+        "topic_id": "topic-001",
+        "required_dimensions": [
+          "INDUSTRY_SCALE_AND_TREND",
+          "POLICY_STANDARD_AND_PROGRAM"
+        ],
+        "queries": [
+          {
+            "query_id": "query-001",
+            "query": "水质监测 市场规模 官方统计 2024",
+            "dimension": "INDUSTRY_SCALE_AND_TREND",
+            "purpose": "获取可核验规模数据"
+          }
+        ],
+        "time_scope": "2021-01-01/2026-12-31",
+        "evidence_requirements": [
+          "数字与趋势必须绑定官方统计或可核验一手来源"
+        ],
+        "prohibited_inferences": [
+          "不得推断内部项目身份"
+        ],
+        "binding_contract_version": "1.0"
+      },
+      "synthesis_candidate": {
+        "background_cards": [
+          {
+            "card_id": "card-001",
+            "claim_id": "claim-001",
+            "dimension": "INDUSTRY_SCALE_AND_TREND",
+            "claim_text": "2023年公开统计显示水质监测设备与服务市场保持增长。",
+            "source_ids": [
+              "src-001"
+            ],
+            "evidence_mode": "DIRECT_SOURCE_SUPPORTED",
+            "scope_qualifiers": [
+              "地区=中国",
+              "时间=2023",
+              "行业=环境监测"
+            ],
+            "target_section_profiles": [
+              "BACKGROUND_AND_SIGNIFICANCE"
+            ],
+            "conflicts": [],
+            "limitations": [
+              "统计口径以来源发布为准"
+            ]
+          }
+        ],
+        "background_gaps": [
+          {
+            "gap_id": "gap-001",
+            "scope": "DIMENSION",
+            "dimension": "POLICY_STANDARD_AND_PROGRAM",
+            "description": "检索未命中政策原文，保留缺口"
+          }
+        ],
+        "coverage_summary": "规模趋势维度已覆盖，政策维度声明缺口。"
+      },
+      "retrieved_sources": [
+        {
+          "source_id": "src-001",
+          "source_type": "PUBLIC_SOURCE",
+          "document_version_id": null,
+          "section_id": null,
+          "span_start": null,
+          "span_end": null,
+          "quoted_text": "2023年环境监测行业公开统计节选",
+          "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "authority_rank": 80,
+          "security_level": "PUBLIC"
+        }
+      ],
+      "extracted_passages": [
+        {
+          "passage_id": "pass-001",
+          "source_ref": {
+            "source_id": "src-001",
+            "source_type": "PUBLIC_SOURCE",
+            "document_version_id": null,
+            "section_id": null,
+            "span_start": null,
+            "span_end": null,
+            "quoted_text": "2023年环境监测行业公开统计节选",
+            "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "authority_rank": 80,
+            "security_level": "PUBLIC"
+          },
+          "channel": "WEB_SEARCH",
+          "text": "2023年公开统计显示水质监测设备与服务市场保持增长。",
+          "relevance": "支持行业规模与趋势维度"
+        }
+      ],
+      "retrieval_summary": {
+        "status": "DEGRADED",
+        "web_hit_count": 1,
+        "academic_hit_count": 1,
+        "uncovered_dimensions": [
+          "POLICY_STANDARD_AND_PROGRAM"
+        ],
+        "blocking_reasons": []
+      },
+      "safe_online_package": {
+        "object_id": "obj-001",
+        "object_type": "GENERIC",
+        "version": 1,
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "security_level": "INTERNAL",
+        "display_name": "示例对象"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/background_research_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "PASS",
+    "result": {
+      "verdict": "ACCEPT_FOR_IMPORT_REVIEW",
+      "unsupported_card_ids": [],
+      "missing_counterevidence_topics": [],
+      "uncovered_dimensions": []
+    },
+    "findings": [],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "PASS"
+  }
+}

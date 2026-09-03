@@ -150,6 +150,27 @@
                                  "owner":  "Security Runtime Maintainers",
                                  "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
                                  "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+                                 "blob_sha":  "157c759a644ce8b0d8e640ee9b3dcffe2d64049f",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+                                 "blob_sha":  "06fa28dabaf62d6cb7f529d0201034e2bdf7ee69",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+                                 "blob_sha":  "99cd5316c55bd3d257895933122b6d613e808c81",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
                              }
                          ]
 }

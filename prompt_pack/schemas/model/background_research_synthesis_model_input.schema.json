@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background_research_synthesis_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "research_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required_dimensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "APPLICATION_SCENARIO",
+              "STAKEHOLDER_AND_PAIN",
+              "INDUSTRY_SCALE_AND_TREND",
+              "POLICY_STANDARD_AND_PROGRAM",
+              "REPRESENTATIVE_CASE",
+              "CURRENT_ADOPTION",
+              "OPERATIONAL_CONSTRAINT",
+              "RESEARCH_SIGNIFICANCE"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dimension": {
+                "type": "string",
+                "enum": [
+                  "APPLICATION_SCENARIO",
+                  "STAKEHOLDER_AND_PAIN",
+                  "INDUSTRY_SCALE_AND_TREND",
+                  "POLICY_STANDARD_AND_PROGRAM",
+                  "REPRESENTATIVE_CASE",
+                  "CURRENT_ADOPTION",
+                  "OPERATIONAL_CONSTRAINT",
+                  "RESEARCH_SIGNIFICANCE"
+                ]
+              },
+              "purpose": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "query",
+              "dimension",
+              "purpose"
+            ]
+          }
+        },
+        "evidence_requirements": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "prohibited_inferences": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "required_dimensions",
+        "queries",
+        "evidence_requirements",
+        "prohibited_inferences"
+      ]
+    },
+    "evidence_passages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "ACADEMIC",
+              "WEB_SEARCH"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "relevance": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "source_id",
+          "channel",
+          "text",
+          "relevance"
+        ]
+      }
+    },
+    "retrieval_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "SUFFICIENT",
+            "DEGRADED",
+            "BLOCKING_FAILURE"
+          ]
+        },
+        "web_hit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "academic_hit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncovered_dimensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "APPLICATION_SCENARIO",
+              "STAKEHOLDER_AND_PAIN",
+              "INDUSTRY_SCALE_AND_TREND",
+              "POLICY_STANDARD_AND_PROGRAM",
+              "REPRESENTATIVE_CASE",
+              "CURRENT_ADOPTION",
+              "OPERATIONAL_CONSTRAINT",
+              "RESEARCH_SIGNIFICANCE"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "blocking_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "status",
+        "web_hit_count",
+        "academic_hit_count",
+        "uncovered_dimensions",
+        "blocking_reasons"
+      ]
+    }
+  },
+  "required": [
+    "research_plan",
+    "evidence_passages",
+    "retrieval_summary"
+  ]
+}

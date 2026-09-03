@@ -105,7 +105,7 @@ async def finish_workflow(engine: WorkflowEngine, project_id: str, workflow_type
 
 def test_prompt_pack_and_all_normal_replays(runtime):
     _, pack, *_ = runtime
-    assert len(pack.prompt_ids()) == 31
+    assert len(pack.prompt_ids()) == 35
     for prompt_id in pack.prompt_ids():
         case = pack.replay_case(prompt_id, "normal")
         assert pack.validate(prompt_id, "input", case["input"]) == []

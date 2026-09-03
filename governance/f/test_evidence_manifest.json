@@ -4,8 +4,8 @@
   "prompt_pack": {
     "registry": "prompt_pack/config/prompt_registry.json",
     "replay_manifest": "prompt_pack/replay/manifest.json",
-    "expected_prompt_count": 31,
-    "expected_replay_count": 155,
+    "expected_prompt_count": 35,
+    "expected_replay_count": 175,
     "required_replay_case_types": [
       "normal",
       "missing_input",

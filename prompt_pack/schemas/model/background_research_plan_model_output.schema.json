@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background_research_plan_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "dimension_queries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "APPLICATION_SCENARIO",
+              "STAKEHOLDER_AND_PAIN",
+              "INDUSTRY_SCALE_AND_TREND",
+              "POLICY_STANDARD_AND_PROGRAM",
+              "REPRESENTATIVE_CASE",
+              "CURRENT_ADOPTION",
+              "OPERATIONAL_CONSTRAINT",
+              "RESEARCH_SIGNIFICANCE"
+            ]
+          },
+          "queries": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "purpose": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "query",
+                "purpose"
+              ]
+            }
+          }
+        },
+        "required": [
+          "dimension",
+          "queries"
+        ]
+      }
+    }
+  },
+  "required": [
+    "dimension_queries"
+  ]
+}

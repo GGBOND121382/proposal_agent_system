@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background_evidence_card.schema.json",
+  "title": "背景证据卡完整契约；card_id、claim_id 绑定、source_ids 与 evidence_mode 由运行时确定性构建，语义内容来自模型 claim",
+  "type": "object",
+  "properties": {
+    "card_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "claim_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "dimension": {
+      "type": "string",
+      "enum": [
+        "APPLICATION_SCENARIO",
+        "STAKEHOLDER_AND_PAIN",
+        "INDUSTRY_SCALE_AND_TREND",
+        "POLICY_STANDARD_AND_PROGRAM",
+        "REPRESENTATIVE_CASE",
+        "CURRENT_ADOPTION",
+        "OPERATIONAL_CONSTRAINT",
+        "RESEARCH_SIGNIFICANCE",
+        "UNSCOPED"
+      ]
+    },
+    "claim_text": {
+      "type": "string"
+    },
+    "source_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "evidence_mode": {
+      "type": "string"
+    },
+    "scope_qualifiers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "target_section_profiles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "SECTION_GENERAL",
+          "ABSTRACT",
+          "PROJECT_OVERVIEW",
+          "BACKGROUND_AND_SIGNIFICANCE",
+          "LITERATURE_REVIEW",
+          "NEED_ANALYSIS",
+          "KEY_ISSUE",
+          "RESEARCH_OBJECTIVE",
+          "RESEARCH_CONTENT",
+          "METHOD_AND_ALGORITHM",
+          "TECHNICAL_ROUTE",
+          "EVALUATION",
+          "INNOVATION",
+          "OUTPUTS_AND_METRICS",
+          "RESEARCH_FOUNDATION",
+          "CONCLUSION",
+          "PROGRESS_BUDGET_RISK",
+          "REFERENCES",
+          "APPENDIX"
+        ]
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {}
+    },
+    "limitations": {
+      "type": "array",
+      "items": {}
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "card_id",
+    "claim_id",
+    "dimension",
+    "claim_text",
+    "source_ids",
+    "evidence_mode",
+    "scope_qualifiers",
+    "target_section_profiles",
+    "conflicts",
+    "limitations"
+  ]
+}

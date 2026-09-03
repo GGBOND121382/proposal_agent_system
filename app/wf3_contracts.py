@@ -987,7 +987,11 @@ def wf3_finding_route(finding: Mapping[str, Any]) -> str:
     return "BLOCK"
 
 
-def wf3_critic_routing_report(output: Mapping[str, Any]) -> dict[str, Any]:
+def wf3_critic_routing_report(
+    output: Mapping[str, Any],
+    *,
+    prompt_id: str = WF3_RESEARCH_CRITIC,
+) -> dict[str, Any]:
     routed: list[dict[str, Any]] = []
     for finding in output.get("findings") or []:
         if not isinstance(finding, Mapping) or finding.get("blocking") is not True:
@@ -1006,7 +1010,7 @@ def wf3_critic_routing_report(output: Mapping[str, Any]) -> dict[str, Any]:
     }
     return {
         "schema_version": "1.0",
-        "prompt_id": WF3_RESEARCH_CRITIC,
+        "prompt_id": str(prompt_id or WF3_RESEARCH_CRITIC),
         "blocking_finding_count": len(routed),
         "route_counts": counts,
         "routes": routed,

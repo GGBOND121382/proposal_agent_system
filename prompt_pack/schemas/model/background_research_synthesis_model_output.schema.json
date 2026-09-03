@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background_research_synthesis_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "claim_text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "qualifiers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "APPLICATION_SCENARIO",
+              "STAKEHOLDER_AND_PAIN",
+              "INDUSTRY_SCALE_AND_TREND",
+              "POLICY_STANDARD_AND_PROGRAM",
+              "REPRESENTATIVE_CASE",
+              "CURRENT_ADOPTION",
+              "OPERATIONAL_CONSTRAINT",
+              "RESEARCH_SIGNIFICANCE"
+            ]
+          },
+          "target_section_profiles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "SECTION_GENERAL",
+                "ABSTRACT",
+                "PROJECT_OVERVIEW",
+                "BACKGROUND_AND_SIGNIFICANCE",
+                "LITERATURE_REVIEW",
+                "NEED_ANALYSIS",
+                "KEY_ISSUE",
+                "RESEARCH_OBJECTIVE",
+                "RESEARCH_CONTENT",
+                "METHOD_AND_ALGORITHM",
+                "TECHNICAL_ROUTE",
+                "EVALUATION",
+                "INNOVATION",
+                "OUTPUTS_AND_METRICS",
+                "RESEARCH_FOUNDATION",
+                "CONCLUSION",
+                "PROGRESS_BUDGET_RISK",
+                "REFERENCES",
+                "APPENDIX"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "claim_text",
+          "source_ids",
+          "qualifiers",
+          "dimension",
+          "target_section_profiles",
+          "conflicts",
+          "limitations"
+        ]
+      }
+    },
+    "background_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "APPLICATION_SCENARIO",
+              "STAKEHOLDER_AND_PAIN",
+              "INDUSTRY_SCALE_AND_TREND",
+              "POLICY_STANDARD_AND_PROGRAM",
+              "REPRESENTATIVE_CASE",
+              "CURRENT_ADOPTION",
+              "OPERATIONAL_CONSTRAINT",
+              "RESEARCH_SIGNIFICANCE"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "dimension",
+          "reason"
+        ]
+      }
+    },
+    "coverage_summary": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "claims",
+    "background_gaps",
+    "coverage_summary"
+  ]
+}

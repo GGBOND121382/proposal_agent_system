@@ -94,7 +94,7 @@ async def _finish(engine: WorkflowEngine, project_id: str, workflow_type: str, *
 def test_all_30_simulated_outputs_remain_schema_valid(tmp_path, monkeypatch):
     _, pack, *_ = _runtime(tmp_path, monkeypatch)
     simulator = SimulatedLLM(pack)
-    assert len(pack.prompt_ids()) == 31
+    assert len(pack.prompt_ids()) == 35
     for prompt_id in pack.prompt_ids():
         envelope = pack.replay_input(prompt_id)
         output = simulator.invoke(prompt_id, envelope)

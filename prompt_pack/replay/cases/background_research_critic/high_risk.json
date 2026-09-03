@@ -1,0 +1,192 @@
+{
+  "case_id": "background_research_critic-high_risk",
+  "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+  "case_type": "high_risk",
+  "description": "候选卡片用单一企业宣传案例外推行业普遍结论，应阻断",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "BACKGROUND_RESEARCH_CRITIC",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "research_plan": {
+        "plan_id": "bplan-001",
+        "task_type": "PUBLIC_BACKGROUND_RESEARCH",
+        "topic_id": "topic-001",
+        "required_dimensions": [
+          "INDUSTRY_SCALE_AND_TREND",
+          "POLICY_STANDARD_AND_PROGRAM"
+        ],
+        "queries": [
+          {
+            "query_id": "query-001",
+            "query": "水质监测 市场规模 官方统计 2024",
+            "dimension": "INDUSTRY_SCALE_AND_TREND",
+            "purpose": "获取可核验规模数据"
+          }
+        ],
+        "time_scope": "2021-01-01/2026-12-31",
+        "evidence_requirements": [
+          "数字与趋势必须绑定官方统计或可核验一手来源"
+        ],
+        "prohibited_inferences": [
+          "不得推断内部项目身份"
+        ],
+        "binding_contract_version": "1.0"
+      },
+      "synthesis_candidate": {
+        "background_cards": [
+          {
+            "card_id": "card-009",
+            "claim_id": "claim-009",
+            "dimension": "REPRESENTATIVE_CASE",
+            "claim_text": "该行业已普遍实现智能化水质异常预警。",
+            "source_ids": [
+              "src-009"
+            ],
+            "evidence_mode": "DIRECT_SOURCE_SUPPORTED",
+            "scope_qualifiers": [],
+            "target_section_profiles": [
+              "BACKGROUND_AND_SIGNIFICANCE"
+            ],
+            "conflicts": [],
+            "limitations": []
+          }
+        ],
+        "background_gaps": [],
+        "coverage_summary": "声称行业普遍应用。"
+      },
+      "retrieved_sources": [
+        {
+          "source_id": "src-009",
+          "source_type": "PUBLIC_SOURCE",
+          "document_version_id": null,
+          "section_id": null,
+          "span_start": null,
+          "span_end": null,
+          "quoted_text": "某企业宣传稿：我司在某市部署了水质预警系统",
+          "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "authority_rank": 20,
+          "security_level": "PUBLIC"
+        }
+      ],
+      "extracted_passages": [
+        {
+          "passage_id": "pass-009",
+          "source_ref": {
+            "source_id": "src-009",
+            "source_type": "PUBLIC_SOURCE",
+            "document_version_id": null,
+            "section_id": null,
+            "span_start": null,
+            "span_end": null,
+            "quoted_text": "某企业宣传稿：我司在某市部署了水质预警系统",
+            "source_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "authority_rank": 20,
+            "security_level": "PUBLIC"
+          },
+          "channel": "WEB_SEARCH",
+          "text": "某企业宣传稿称其在某市部署了一套水质预警系统。",
+          "relevance": "仅代表单一企业个案"
+        }
+      ],
+      "retrieval_summary": {
+        "status": "SUFFICIENT",
+        "web_hit_count": 1,
+        "academic_hit_count": 1,
+        "uncovered_dimensions": [
+          "POLICY_STANDARD_AND_PROGRAM"
+        ],
+        "blocking_reasons": []
+      },
+      "safe_online_package": {
+        "object_id": "obj-001",
+        "object_type": "GENERIC",
+        "version": 1,
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "security_level": "INTERNAL",
+        "display_name": "示例对象"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/background_research_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "BLOCK",
+    "result": {
+      "verdict": "BLOCK",
+      "unsupported_card_ids": [
+        "card-009"
+      ],
+      "missing_counterevidence_topics": [],
+      "uncovered_dimensions": []
+    },
+    "findings": [
+      {
+        "code": "BACKGROUND_OVERGENERALIZED_SINGLE_CASE",
+        "severity": "P0",
+        "category": "CONTENT",
+        "target_type": "PROMPT_OUTPUT",
+        "target_path_or_span": "payload/synthesis_candidate/background_cards/0",
+        "description": "单一企业宣传案例不得推出行业普遍结论。",
+        "evidence_refs": [
+          "src-009"
+        ],
+        "repairable": false,
+        "repair_instruction": null,
+        "suggested_route": "BLOCK",
+        "blocking": true
+      }
+    ],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "BLOCK"
+  }
+}

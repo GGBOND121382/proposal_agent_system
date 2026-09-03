@@ -3,7 +3,7 @@
   "baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
   "prompt_registry": {
     "version": "2.0",
-    "entry_count": 31,
+    "entry_count": 35,
     "required_fields": [
       "prompt_id",
       "prompt_version",
@@ -15,8 +15,8 @@
       "executor_role",
       "next_human_gate"
     ],
-    "entries_sha256": "a3f307bce915829230de61e47c1573cb11a96d4b1845e0581489fffb1eb75e18",
-    "registry_git_blob_sha": "007747eaa1d8462ce53e573986b7f44a70bc497b"
+    "entries_sha256": "9ff328da370b0bef425636f1ce7634c7c099408754b130a8515ed788955e079f",
+    "registry_git_blob_sha": "8eb483b6d68ccaad2ab38093e171dcba8e5e1184"
   },
   "workflow_state_machine": {
     "workflows": {
@@ -78,6 +78,32 @@
         },
         {
           "prompt_id": "P-PUBLIC-RESEARCH-CRITIC"
+        },
+        {
+          "prompt_id": "P-ONLINE-RESULT-IMPORT-CRITIC"
+        }
+      ],
+      "WF-3B_TOPIC_BACKGROUND_RESEARCH": [
+        {
+          "prompt_id": "P-SAFE-ONLINE-PACKAGE"
+        },
+        {
+          "prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC"
+        },
+        {
+          "prompt_id": "P-BACKGROUND-RESEARCH-PLAN"
+        },
+        {
+          "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC"
+        },
+        {
+          "type": "PUBLIC_SEARCH"
+        },
+        {
+          "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS"
+        },
+        {
+          "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC"
         },
         {
           "prompt_id": "P-ONLINE-RESULT-IMPORT-CRITIC"
@@ -215,6 +241,8 @@
       "P-SAFE-ONLINE-PACKAGE-CRITIC": "P-SAFE-ONLINE-PACKAGE",
       "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC": "P-PUBLIC-RESEARCH-PLAN",
       "P-PUBLIC-RESEARCH-CRITIC": "P-PUBLIC-RESEARCH-SYNTHESIS",
+      "P-BACKGROUND-RESEARCH-PLAN-CRITIC": "P-BACKGROUND-RESEARCH-PLAN",
+      "P-BACKGROUND-RESEARCH-CRITIC": "P-BACKGROUND-RESEARCH-SYNTHESIS",
       "P-SCHEME-CRITIC": "P-SCHEME-EXTRACT",
       "P-PROJECT-DEFINITION-CRITIC": "P-PROJECT-DEFINITION-EXTRACT",
       "P-FACT-CRITIC": "P-FACT-EXTRACT",
@@ -802,6 +830,202 @@
       "owner": "Runtime and Contract Maintainers",
       "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
       "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "app/workflow_defs.py",
+      "blob_sha": "8b09a970065df300fc6114d5dda4eff731b0ccbf",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B_TOPIC_BACKGROUND_RESEARCH workflow steps and background critic-producer mappings added to the frozen state machine.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/config/prompt_registry.json",
+      "blob_sha": "8eb483b6d68ccaad2ab38093e171dcba8e5e1184",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: four background research prompts registered for WF-3B; the plan critic uses the offline security_review profile matching its OFFLINE_LOCAL scope-review role.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/prompt_input_envelope.schema.json",
+      "blob_sha": "72d6893ccce1abb4d930e32b8c8712bbff951e75",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: background research input schemas added to the common input envelope oneOf.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/prompt_output_envelope.schema.json",
+      "blob_sha": "d4d2009b1935fea179c464f56f865ce5125b5e60",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: background research output schemas added to the common output envelope oneOf.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/background_evidence_card.schema.json",
+      "blob_sha": "a1346ff36abeb122e4b444ad82cfcc10ee0cf488",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: deterministic background evidence card contract for WF-3B.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/prompts/background_research/research_plan.md",
+      "blob_sha": "865af3b5a094198d268b0863e4a1d775e3e4ce41",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan prompt.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/prompts/background_research/research_plan_critic.md",
+      "blob_sha": "04007eb5b7e4329df3d61560c4f6b42278ff022b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic prompt.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/prompts/background_research/research_synthesis.md",
+      "blob_sha": "effefde67e0c08617e700f6c57f76a7428a8cd76",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis prompt.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/prompts/background_research/research_critic.md",
+      "blob_sha": "dbf0fe081c8a8c7414b97d4478e6dd4d3822dabe",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic prompt.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_plan_model_input.schema.json",
+      "blob_sha": "78e5fbc3fb7719029d887be1b1406df8e3c9cf9f",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan model input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_plan_model_output.schema.json",
+      "blob_sha": "58abb8aa0edb4d03c8bdcd07dc644224d83ad692",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan model output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_plan_critic_model_input.schema.json",
+      "blob_sha": "58e965d6422945dad8d11ef17833c0b4f048f0e9",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic model input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_plan_critic_model_output.schema.json",
+      "blob_sha": "ce476584fb3d30edc25f5246f467d6422b887584",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic model output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_synthesis_model_input.schema.json",
+      "blob_sha": "f96edf6a521c29c20d8ccbb4e5e55599285a9761",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis model input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_synthesis_model_output.schema.json",
+      "blob_sha": "afec6eff7c17fc8dcab9f97ce33c40a83d170abc",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis model output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_critic_model_input.schema.json",
+      "blob_sha": "b5f78469fd51ddb22ca918f191fc01b651be753b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic model input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_critic_model_output.schema.json",
+      "blob_sha": "36db35d0e99d03aef85abcde01b080997279b52e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic model output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_plan_input.schema.json",
+      "blob_sha": "1e7a48a53e3e85269b6cc4952138f1c22f90c838",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_plan_output.schema.json",
+      "blob_sha": "72f9b78778574e8618b52eee529c2f6cb9cd3cb2",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_plan_critic_input.schema.json",
+      "blob_sha": "df3ff9716853edafadabd5ca9292a4f08fa4992f",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_plan_critic_output.schema.json",
+      "blob_sha": "4215b6e8d04caad507136f0722eef9c682b0ff63",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_synthesis_input.schema.json",
+      "blob_sha": "78b6c7f20c44b8f0f4868911ae67bb964051a74b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_synthesis_output.schema.json",
+      "blob_sha": "0bf5f0e07b87b901f5ec7665eddac527009feceb",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_critic_input.schema.json",
+      "blob_sha": "e45b5d6212767345606bf9061bb1b06f174ceeb1",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_critic_output.schema.json",
+      "blob_sha": "25ce4362ec9bc9a19d6f7a740c79eb3be46aea11",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+      "blob_sha": "157c759a644ce8b0d8e640ee9b3dcffe2d64049f",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+      "blob_sha": "06fa28dabaf62d6cb7f529d0201034e2bdf7ee69",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+      "blob_sha": "99cd5316c55bd3d257895933122b6d613e808c81",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
     }
   ]
 }

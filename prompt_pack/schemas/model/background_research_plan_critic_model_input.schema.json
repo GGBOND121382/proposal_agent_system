@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background_research_plan_critic_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "approved_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task_description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "topic_description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowed_topics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "allowed_context": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "prohibited_inferences": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "prohibited_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "task_description",
+        "topic_description",
+        "allowed_topics",
+        "allowed_context",
+        "prohibited_inferences",
+        "prohibited_outputs"
+      ]
+    },
+    "required_dimensions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "APPLICATION_SCENARIO",
+          "STAKEHOLDER_AND_PAIN",
+          "INDUSTRY_SCALE_AND_TREND",
+          "POLICY_STANDARD_AND_PROGRAM",
+          "REPRESENTATIVE_CASE",
+          "CURRENT_ADOPTION",
+          "OPERATIONAL_CONSTRAINT",
+          "RESEARCH_SIGNIFICANCE"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "executable_queries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "APPLICATION_SCENARIO",
+              "STAKEHOLDER_AND_PAIN",
+              "INDUSTRY_SCALE_AND_TREND",
+              "POLICY_STANDARD_AND_PROGRAM",
+              "REPRESENTATIVE_CASE",
+              "CURRENT_ADOPTION",
+              "OPERATIONAL_CONSTRAINT",
+              "RESEARCH_SIGNIFICANCE"
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "query_index",
+          "query",
+          "dimension",
+          "purpose"
+        ]
+      }
+    }
+  },
+  "required": [
+    "approved_boundary",
+    "required_dimensions",
+    "executable_queries"
+  ]
+}

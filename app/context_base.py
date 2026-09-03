@@ -18,6 +18,13 @@ from .paragraph_order import canonical_candidate_text, ordered_paragraphs, parag
 from .privacy import find_sensitive_values
 from .proposal_quality import SECTION_FUNCTION_ROLE_ALIASES
 from .workflow_repair import repair_override_key, producer_consumer_value
+from .background_research import (
+    WF3B_PLAN_PROMPT,
+    WF3B_RESEARCH_CRITIC,
+    WF3B_SYNTHESIS_PROMPT,
+    WF3B_WORKFLOW_TYPE,
+    build_background_cards,
+)
 from .model_semantic_contracts import project_argument_authoritative_state
 from .wf3_contracts import wf3_safe_package_valid_until
 from .util import new_id, sha256_json, sha256_text
@@ -2615,6 +2622,11 @@ class ContextBuilder:
             "research_plan": ("P-PUBLIC-RESEARCH-PLAN", None),
             "synthesis_candidate": ("P-PUBLIC-RESEARCH-SYNTHESIS", None),
         }
+        is_background_workflow = str(state.get("workflow_type") or "") == WF3B_WORKFLOW_TYPE
+        if is_background_workflow:
+            result_map["research_plan"] = (WF3B_PLAN_PROMPT, None)
+            result_map["synthesis_candidate"] = (WF3B_SYNTHESIS_PROMPT, None)
+        background_critic_synthesis: dict[str, Any] | None = None
         for field, (producer, key) in result_map.items():
             if field in payload:
                 if (
@@ -2635,6 +2647,18 @@ class ContextBuilder:
                     ):
                         value = self._canonicalize_revision_plan_roles(value)
                 if value is not None:
+                    if (
+                        field == "synthesis_candidate"
+                        and is_background_workflow
+                        and prompt_id == WF3B_RESEARCH_CRITIC
+                    ):
+                        # The background critic reviews runtime-built evidence
+                        # cards, not raw model claims.  Defer the replacement
+                        # until the search results and claim-validation bindings
+                        # are available below so the card bundle matches the
+                        # persist path exactly.
+                        background_critic_synthesis = value if isinstance(value, dict) else {}
+                        continue
                     replacements.append((f"payload.{field}", value))
 
         argument_override = canonical_argument_result
@@ -2696,7 +2720,9 @@ class ContextBuilder:
                 workflow_id=workflow_id,
             )
         research_synthesis = self._result(
-            project["id"], "P-PUBLIC-RESEARCH-SYNTHESIS", workflow_id=workflow_id
+            project["id"],
+            WF3B_SYNTHESIS_PROMPT if is_background_workflow else "P-PUBLIC-RESEARCH-SYNTHESIS",
+            workflow_id=workflow_id,
         )
 
         if "proposal_contract" in payload and proposal_contract:
@@ -2873,8 +2899,23 @@ class ContextBuilder:
                 if isinstance(ref, dict) and ref.get("source_id")
             })
             request_hash = sha256_json(safe_package or {"project_id": project["id"], "task": "PUBLIC_RESEARCH"})
+            # The import review partitions canonical claim IDs, so the package
+            # carries the shared WF-3 claim shape.  WF-3B-only background fields
+            # (dimension/target_section_profiles/conflicts/limitations) stay on
+            # the committed synthesis result and the persisted background
+            # artifact; they are projection-only stripped here.
+            package_claims = [
+                {
+                    key: value
+                    for key, value in claim.items()
+                    if key not in ("dimension", "target_section_profiles", "conflicts", "limitations")
+                }
+                if isinstance(claim, dict)
+                else claim
+                for claim in research_synthesis.get("claims", [])
+            ]
             result_core = {
-                "claims": research_synthesis.get("claims", []),
+                "claims": package_claims,
                 "raw_text": json.dumps(research_synthesis, ensure_ascii=False, sort_keys=True),
                 "source_ids": source_ids,
             }
@@ -3085,9 +3126,18 @@ class ContextBuilder:
         if "prohibited_fields" in payload:
             replacements.append(("payload.prohibited_fields", config.get("prohibited_external_fields", [])))
 
-        search_results = state.get("public_search_results")
+        search_results = (
+            state.get("background_search_results")
+            if is_background_workflow
+            else state.get("public_search_results")
+        )
         if search_results:
-            if prompt_id in {"P-PUBLIC-RESEARCH-SYNTHESIS", "P-PUBLIC-RESEARCH-CRITIC"}:
+            synthesis_prompt_ids = (
+                {WF3B_SYNTHESIS_PROMPT, WF3B_RESEARCH_CRITIC}
+                if is_background_workflow
+                else {"P-PUBLIC-RESEARCH-SYNTHESIS", "P-PUBLIC-RESEARCH-CRITIC"}
+            )
+            if prompt_id in synthesis_prompt_ids:
                 sufficiency = search_results.get("research_sufficiency") or {
                     "schema_version": "1.0",
                     "status": "SUFFICIENT",
@@ -3100,12 +3150,36 @@ class ContextBuilder:
                 replacements.append(("payload.research_sufficiency", sufficiency))
             if "retrieved_sources" in payload:
                 replacements.append(("payload.retrieved_sources", search_results.get("sources", [])))
-            if "extracted_passages" in payload or prompt_id == "P-PUBLIC-RESEARCH-CRITIC":
+            critic_prompt_id = WF3B_RESEARCH_CRITIC if is_background_workflow else "P-PUBLIC-RESEARCH-CRITIC"
+            if "extracted_passages" in payload or prompt_id == critic_prompt_id:
                 replacements.append(("payload.extracted_passages", search_results.get("passages", [])))
             if "public_sources" in payload:
                 replacements.append(("payload.public_sources", search_results.get("sources", [])))
             if prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC":
                 replacements.append(("payload.public_source_passages", search_results.get("passages", [])))
+
+        if background_critic_synthesis is not None:
+            wf3b_options = state.get("options") if isinstance(state.get("options"), dict) else {}
+            claim_validation = (
+                state.get("background_claim_validation")
+                if isinstance(state.get("background_claim_validation"), dict)
+                else None
+            )
+            card_bundle = build_background_cards(
+                background_critic_synthesis,
+                search_results if isinstance(search_results, dict) else {},
+                claim_validation,
+                required_dimensions=wf3b_options.get("required_dimensions") or (),
+                topic_id=str(wf3b_options.get("topic_id") or ""),
+            )
+            replacements.append((
+                "payload.synthesis_candidate",
+                {
+                    "background_cards": card_bundle["background_cards"],
+                    "background_gaps": card_bundle["background_gaps"],
+                    "coverage_summary": str(background_critic_synthesis.get("coverage_summary") or ""),
+                },
+            ))
 
         for path, value in replacements:
             self._set_path_if_valid(

@@ -101,7 +101,7 @@ class WorkflowLifecycleService:
             raise ValueError(f"unsupported rebuild scope: {scope}")
         if root["workflow_type"] not in WORKFLOWS:
             raise ValueError(
-                f"{root['workflow_type']} 暂不支持标准 lineage rebuild；仅支持数据库原生 WF-1..WF-5。"
+                f"{root['workflow_type']} 暂不支持标准 lineage rebuild；仅支持数据库原生 WF-1..WF-5 与 WF-3B_TOPIC_BACKGROUND_RESEARCH。"
             )
         if root["status"] == WorkflowStatus.CANCELLED.value:
             raise ValueError("CANCELLED workflow 不能作为 rebuild 源；请选择其最后一个有效版本。")

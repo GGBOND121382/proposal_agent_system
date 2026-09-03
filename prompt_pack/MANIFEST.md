@@ -2,10 +2,10 @@
 
 - 版本：`2.3.0`
 - 校验状态：`PASS`
-- 文件数（不含本清单与校验和文件）：`347`
-- Prompt：`31`
-- Replay：`155`
-- JSON文件：`274`
+- 文件数（不含本清单与校验和文件）：`388`
+- Prompt：`35`
+- Replay：`175`
+- JSON文件：`311`
 - YAML文件：`19`
 - 生成文件 `MANIFEST.md` 与 `SHA256SUMS.txt` 不参与自身校验，避免循环哈希。
 
@@ -13,7 +13,7 @@
 
 | 路径 | 字节 | SHA-256 |
 |---|---:|---|
-| `BUILD_REPORT.json` | 462 | `bb246e98c1f05d984ee5c5b17085ffbba2a50cdb00d3da14f79f68d3def2fc16` |
+| `BUILD_REPORT.json` | 462 | `f3deea54a22ea15b9de3dd08f3b687c8eed7fd189df5122ca8efd0e31ee1fcc6` |
 | `DEVELOPMENT_CHECKLIST.md` | 529 | `c357983692e45c0da2539d5f3e62f7d0c0a5dc5c980dba915f124ffc49a25dc6` |
 | `MODEL_CONFIGURATION.md` | 1904 | `fe91b5d95de6d58724189f167e110415f52f05ee9ef085f01156138d628b21b9` |
 | `README.md` | 3549 | `2d7b7ad1879ae6c85bdcdb9cb4986e509398b176d804e1ef59d05833ac594172` |
@@ -27,7 +27,7 @@
 | `config/model_endpoints.yaml` | 1585 | `7cb7fcd2f2a467f1b0f65d86a3e58b200e2920c30f7475e0e8e616cbd2a6fa24` |
 | `config/models.yaml` | 1648 | `3ec215ea4cd68ec8a24d8705bb06df222be1d0d4ade00331697132d7f8802ebf` |
 | `config/prompt_model_profiles.yaml` | 1147 | `be4f23aad63345bcb13a3967a4cbb798fa763bade86097e72d0ab1825207baf1` |
-| `config/prompt_registry.json` | 17260 | `d70a1240e816c2f9602f5762f12e6c2dc1a1376ea829c3df85b7a5e2027f3141` |
+| `config/prompt_registry.json` | 20254 | `e40e4d37c424fb91d8b017ca50705fc69f2a3a3f978940f3be7865eb9570e67e` |
 | `config/runtime.env.example` | 1390 | `2d6242acc24a595f0895ecc8ac1a69c28d91f906c06150f4d2d521a0700625d7` |
 | `knowledge/project_item_types.yaml` | 2434 | `350b7bc793be881fb54a05ee1e6ce5f40cbcd202ad6f41d8c1f46fa7518fe16d` |
 | `knowledge/proposal_argument_graph.yaml` | 3185 | `b5e0bfa61bc52cac4c8ed7cde600074f26e7191837bbc734b75b1f52ce1d8681` |
@@ -47,6 +47,10 @@
 | `profiles/technical_route.yaml` | 1090 | `0de2264f4a6b3caae20a91a216e5ecabc9671de3740e9b293a41c099535c831c` |
 | `prompts/argument/argument_architecture.md` | 2314 | `a54e6f26dedaa81458e6cc6c64817c330502b1764c84cd119bcfd3d103ef20c5` |
 | `prompts/argument/argument_architecture_critic.md` | 3062 | `25cfd933cc53071e0b3d0a9f584f5f8b115ce6237759b3ac992413ceae367907` |
+| `prompts/background_research/research_critic.md` | 2132 | `e005359156c4ad5e8a2fb897cc7bd4ae9ed44bba3e4ee8472e8d17d8653ac418` |
+| `prompts/background_research/research_plan.md` | 3118 | `6e7e844e3de79989add10f2d1979deec2ca098815d237aa72db164b77192d6cf` |
+| `prompts/background_research/research_plan_critic.md` | 1690 | `6fc323d920673a1dc4e1c11afe8bcea9df78526d4b46c538995117f977da55d4` |
+| `prompts/background_research/research_synthesis.md` | 2772 | `c007576f59fbe326f82b8e40be4c8eeb9fe5a290e304009203ebe0897bbfe275` |
 | `prompts/fact/fact_critic.md` | 5713 | `70278ebf3e591e0f7cf70232080efaad02d452bae6ef423b65130b7c63ff7464` |
 | `prompts/fact/fact_extract.md` | 5839 | `6fde485ef321b0384704f59d6f21cfe873bf465830bb7bb55855f63aff86c744` |
 | `prompts/integration/integration_critic.md` | 8198 | `cc1108fd77dae879660bcb3afae03fb7e9a8132333f3f3f63477fb17b930d56b` |
@@ -95,6 +99,26 @@
 | `replay/cases/argument_architecture_critic/need_user_input.json` | 66765 | `8dc27341d026dc53d6f5b22effc66a148f28f9e21c55367593d950edc82a0708` |
 | `replay/cases/argument_architecture_critic/normal.json` | 65068 | `793c7890b38deb6f5485ad2e691fa02cc0109dcd5fc85a4008ea9dd1e48095de` |
 | `replay/cases/argument_architecture_critic/schema_error.json` | 39617 | `a23e9b384000c58920b084447e56364b52d8cc186e02268dfadf0ddab3c3c2db` |
+| `replay/cases/background_research_critic/high_risk.json` | 6738 | `02d7da5717cbeb62dbe5a047c8105fbd8dcdb7a8c983ecbebdae1decb660f7cd` |
+| `replay/cases/background_research_critic/missing_input.json` | 7409 | `c371461337905168164f0b0b584ed6fb220ca88af75e58080f09bd8dc3688cbe` |
+| `replay/cases/background_research_critic/need_user_input.json` | 7450 | `f153d98b8ac50259d08a21749b1858e994be616543ff5360cbb32147e40476b8` |
+| `replay/cases/background_research_critic/normal.json` | 6582 | `dab613ffda54c03fb50b294ccb272d56d5215ca6338ad5471b71d57cdcc022eb` |
+| `replay/cases/background_research_critic/schema_error.json` | 5712 | `75393425843f16adbc8771bd1c28f34df34ae6f87855ffcdac15900c3294dc92` |
+| `replay/cases/background_research_plan/high_risk.json` | 6889 | `7a08d0c709163e1cee35f5d81582030f37cd308ca5e0b8c1561d41696df1f890` |
+| `replay/cases/background_research_plan/missing_input.json` | 7241 | `b70cd8542cf94361e601e960ef5b4421a6401cd400e5e80b6a6f3820a1ae3428` |
+| `replay/cases/background_research_plan/need_user_input.json` | 7225 | `8980f3afdd888a6be7a0b5bb7657e3757ba036522519439cba089462b0e2e415` |
+| `replay/cases/background_research_plan/normal.json` | 6190 | `a46b820299662e8de1dfe6714d7198f6594cfdf38482870877d412b3ea7025e2` |
+| `replay/cases/background_research_plan/schema_error.json` | 3836 | `3fb0c93597af8229bb206570d374019ab618efd589556446bbc85c271b64b051` |
+| `replay/cases/background_research_plan_critic/high_risk.json` | 4706 | `668026c749bf13f5e1e1e8bcbe3e4db9ad7ed1daec692579f60488553a5e3802` |
+| `replay/cases/background_research_plan_critic/missing_input.json` | 4777 | `1112536fb0b8cae33d66ba4691ff823b4c6ad793a245cb58581c4247a0ec3731` |
+| `replay/cases/background_research_plan_critic/need_user_input.json` | 4834 | `793f13aebdfd7f21527adf26a08ebd66503ae11d36dab5d971f102a54a45927b` |
+| `replay/cases/background_research_plan_critic/normal.json` | 3892 | `90af2ce388a61759055686edd01b53499148b3ebb7b35642194f71f7a93d9f51` |
+| `replay/cases/background_research_plan_critic/schema_error.json` | 3114 | `36b7647e73b0907a96fc7c8debed37bf0b3cd8df984e6700469e6c5cfa74b342` |
+| `replay/cases/background_research_synthesis/high_risk.json` | 8147 | `cd3d545f15cd730de9f32ecc490e2972ceb7bd2d178a48ff103471ca30be5ecc` |
+| `replay/cases/background_research_synthesis/missing_input.json` | 7649 | `7592c7e9640d66e16ab355d6d14f3fe73cadd9ab371da7386d18cb0241bbc271` |
+| `replay/cases/background_research_synthesis/need_user_input.json` | 7739 | `92d06bbfda33eb0e757b61ed36c26acaae06d8f36a8acee28a8d075e2a4715df` |
+| `replay/cases/background_research_synthesis/normal.json` | 9669 | `1e5b3bee391dc5c9e0d223620f7f98f177199fd5675f0d35926261c7c6b1b58d` |
+| `replay/cases/background_research_synthesis/schema_error.json` | 5994 | `40d54df08c06b3152cbeadc3848c39244bdb18c1d53a1535da764261a4f65a10` |
 | `replay/cases/expression_critic/high_risk.json` | 34775 | `f1c5bad0fec38b13f8f35c8b924831e49848af66b83f669933c2e94dc93ffd1c` |
 | `replay/cases/expression_critic/missing_input.json` | 35660 | `ec102446e3eef20164a6c665a879479bb08386dccbd2ddcbcca336127a552c3c` |
 | `replay/cases/expression_critic/need_user_input.json` | 35638 | `7d49076df396e37a204423c5eaece5ead4ecbb211ac7e643a5ed85a2d9f24a27` |
@@ -240,8 +264,9 @@
 | `replay/cases/write_critic/need_user_input.json` | 24233 | `72c22a60e6e2a69fc448195939705c183d35d739e538886a1612cd381fef522f` |
 | `replay/cases/write_critic/normal.json` | 23365 | `bb0aaa67376b0356b02774e53c370b631181b94f07bf3b479bb97e3f96f343e3` |
 | `replay/cases/write_critic/schema_error.json` | 8878 | `13b0e6e898c152443feaa0a39e2069960b801faf1b6971107fd82bdfadfdc668` |
-| `replay/manifest.json` | 30610 | `abcda8d14ba3bca7f9597a80f1bdd3651132036267f2bba22ecb133464890b52` |
+| `replay/manifest.json` | 35925 | `0100efe60f65881c4727235a8bc58b9d42a5b1737561befcbfe95632c8dccd9c` |
 | `schemas/common/argument_graph.schema.json` | 3541 | `b864b8abf2deacd7c6f38d7b85b98aa6d60d7ac614c0f259aaded2ff78b52416` |
+| `schemas/common/background_evidence_card.schema.json` | 2389 | `19609d85e28eeddd74943a52390a16ccc9880fd6a11ca40dd5c5db7dd4f6719e` |
 | `schemas/common/claim.schema.json` | 2659 | `3f971f39349d31e789b542d8e97045be3680e31694a28f833e8c211416eb6880` |
 | `schemas/common/document_context.schema.json` | 1819 | `059fb9c342d792f41c8dce2e6321b97cf27bd01da39f435a62312b62f632f69b` |
 | `schemas/common/document_section.schema.json` | 1597 | `6cab4cf6b6c4f2e18c8513d03a3cc9447ba245b21c1c75abcac5873b180e3911` |
@@ -253,8 +278,8 @@
 | `schemas/common/prior_section_digest.schema.json` | 1174 | `6447fffa1777e609f4b6c61a5e72c0b8baa9de4052b83c84c90f7f50ebda67cd` |
 | `schemas/common/project_item.schema.json` | 93575 | `acdc50a904218563ee706ac609a50638baf8565a2d07248f78512203aea7bde9` |
 | `schemas/common/project_relation.schema.json` | 3374 | `e666404007bc49dac6f247d7dec5ee63baf534a5ab58e23d1147e5b33d173d37` |
-| `schemas/common/prompt_input_envelope.schema.json` | 2849 | `0f4f06684009878ab6f0c55712387936bf0b9e3a84df48eaf549351d76609e9c` |
-| `schemas/common/prompt_output_envelope.schema.json` | 2685 | `9fb1d98b33253b3fe3cf6281c3fa6e7843d5d1858d13325b8a356805e29c0514` |
+| `schemas/common/prompt_input_envelope.schema.json` | 3195 | `694cfc3825180db213c2a7c3aff9fd92aa081eaeb42638e4d96e8ad6b44c6e87` |
+| `schemas/common/prompt_output_envelope.schema.json` | 3035 | `48dee6ce78019d9924fcbd33dfd42b0c685dffc9828d1140c6b5e21c43001ea9` |
 | `schemas/common/proposal_contract.schema.json` | 1437 | `3f915143c1769abe5701e2b5e8ce87b9f8326e0f71eb509bbd2f7e1af169db03` |
 | `schemas/common/quality_scorecard.schema.json` | 884 | `3f162c6862de7302e28b2fda5b5e9c5e6212f508472c85d3bf7f4766963a8c49` |
 | `schemas/common/research_sufficiency.schema.json` | 2428 | `0cd9d096c2b511f4a34ae7f7be14d2ed1c906f41437acbb960a6605d66fa0718` |
@@ -279,6 +304,14 @@
 | `schemas/model/argument_architecture_model_output.schema.json` | 19896 | `e6951234dff1a4b803e3e83648b59bef63819a8f044a69aa307553e6696c3567` |
 | `schemas/model/argument_design_model_output.schema.json` | 14736 | `c2023dbebd6f5e2abac14c638dc3ac12464640b80c260dfa51c554c303e411c0` |
 | `schemas/model/argument_skeleton_model_output.schema.json` | 7339 | `4f8eca3bf8dd7f036fc7a3b3990d6272961c416755e00921f7169c12121d68f4` |
+| `schemas/model/background_research_critic_model_input.schema.json` | 5918 | `8bae9d6229550ac1982d3028c0ed5ffd97401ccc153e604e7c4fc3645ed5bd37` |
+| `schemas/model/background_research_critic_model_output.schema.json` | 2224 | `cd5b1258adc245705de5c1a0fb61a8323407921bb700747bf7024ac9023a71db` |
+| `schemas/model/background_research_plan_critic_model_input.schema.json` | 2964 | `e3fe89534416850a2970a86009742b29cb2fd4c6ac4ce9c3818b90c61ad1f3e2` |
+| `schemas/model/background_research_plan_critic_model_output.schema.json` | 1064 | `1fba59f757f3916c320698e95dd7b765cfdf0378b941d6692e25e0ea529130e4` |
+| `schemas/model/background_research_plan_model_input.schema.json` | 3978 | `de2c964d8ac983310cdc997fd1add81774434f3c7cede2ad9f69c0553f86009c` |
+| `schemas/model/background_research_plan_model_output.schema.json` | 1518 | `b6c5ab814a7b3ac3e1ad33cbe52bded858489960dd49e5882b7e2bac2c783028` |
+| `schemas/model/background_research_synthesis_model_input.schema.json` | 4589 | `470d27ada05a8e85ddaa1efb356aaa90942f411dae3079e98c505f4d13a2b64c` |
+| `schemas/model/background_research_synthesis_model_output.schema.json` | 3724 | `5db22de0a61d4571eaf0a23f2e699db6b2ae8797e0ee223fb425c4d129860358` |
 | `schemas/model/online_result_import_critic_model_input.schema.json` | 2641 | `0a0b7e64e97eaa48456be08889770f127c2917a0c2e2c6466e8956e0a456f6c3` |
 | `schemas/model/online_result_import_critic_model_output.schema.json` | 2106 | `503ef06404528a72e43551ed79245d063c4f6c27c2957bc831f970a763e49cb5` |
 | `schemas/model/public_research_critic_model_input.schema.json` | 6020 | `3f768e3f722ca86a32dcc387334f0bf5fb5b8a64a6279b938b7193c512652e98` |
@@ -299,6 +332,14 @@
 | `schemas/prompts/argument_architecture_critic_output.schema.json` | 14499 | `fade2940f8ff252a7551b2a8c1b1db9698c7a6d4fc571bc7514af9a4fdc31f92` |
 | `schemas/prompts/argument_architecture_input.schema.json` | 12376 | `ecbfe8335de41de0c1c143e067c010c3eaefbe053ecaea985f0a826c69735c60` |
 | `schemas/prompts/argument_architecture_output.schema.json` | 19692 | `4d0e70a5b08950337eeac11e8da12ff26dab9024feb9b94cf61effed2e9fae31` |
+| `schemas/prompts/background_research_critic_input.schema.json` | 12281 | `05cc1ce3630c782dda224055eed766f997e6dd7f5c13b0eb10ceba2f35c9bb0d` |
+| `schemas/prompts/background_research_critic_output.schema.json` | 2719 | `da17fed1abdb7df4b3812ef717f65f809ed5c8e820bd4fb08f36c965e4367780` |
+| `schemas/prompts/background_research_plan_critic_input.schema.json` | 6700 | `9079cdeb8963a5222a55e65cffb54add7785be43fe72315ba89f07f425b206cd` |
+| `schemas/prompts/background_research_plan_critic_output.schema.json` | 2068 | `5feca8c455d17762e366a3766199f00de0f97021a98f6fcc71761ee296bea762` |
+| `schemas/prompts/background_research_plan_input.schema.json` | 9560 | `adde7c366b087f9d2d341c0b91313d326d56f64a1c551ce1eacf1698cc17c4ab` |
+| `schemas/prompts/background_research_plan_output.schema.json` | 5810 | `1803addeb4276a519a1e0737b420d551e1ced687d3dcf79a94ee8e2833671b45` |
+| `schemas/prompts/background_research_synthesis_input.schema.json` | 10321 | `75702b8d03c464f225cf56d8930991c817dc456b0bc1840ef574731868c737a7` |
+| `schemas/prompts/background_research_synthesis_output.schema.json` | 8513 | `ca1f9589ed59c56c3911a834ad9570dbfc2686a204119ea41e7788c17da9d3bb` |
 | `schemas/prompts/expression_critic_input.schema.json` | 32827 | `5c10992b9a21077c2ba27d9d9ff8e1845b131d55b8ad191342e1befe654c1e35` |
 | `schemas/prompts/expression_critic_output.schema.json` | 3282 | `b9af43bb3577c641403e9e4ae03066c3a802c167498b6d0c17e46cc7c8aa7469` |
 | `schemas/prompts/expression_polish_input.schema.json` | 24967 | `2a55030ea67ca4e0fbb466578ea8ca01d57f2c38e14eaf4d5510ff35ec19c041` |
@@ -311,7 +352,7 @@
 | `schemas/prompts/final_confidentiality_review_output.schema.json` | 3187 | `05af425278707f9e7bb5689d0ab54734682d6269f20611a65f96ea00dfde4b35` |
 | `schemas/prompts/integration_critic_input.schema.json` | 11646 | `be44a81b8f29aa1fc84b0b032170229097217b49012884e76117eb719e747e69` |
 | `schemas/prompts/integration_critic_output.schema.json` | 12145 | `497f5b8e87c5146c3cfbe511ad9f905f72f3453200fdc4158c5341c987929c54` |
-| `schemas/prompts/online_result_import_critic_input.schema.json` | 8910 | `24d9012b8b842104fb387593c2f3b96bd9542739f9b5cd10c5208420e41847ee` |
+| `schemas/prompts/online_result_import_critic_input.schema.json` | 8951 | `858c5f971195d2b13102609f34b4881d1941e761e1faba6e8ff8a370b91abd89` |
 | `schemas/prompts/online_result_import_critic_output.schema.json` | 3054 | `19c53d2fa3b6e8298a3154084eb7097163b15a67ed45556e0889c83a3a2be65a` |
 | `schemas/prompts/project_definition_critic_input.schema.json` | 5329 | `19e6b7ed84a7850164f181f3143caa70f3f7bbc8c4ceb43263f69a468b129177` |
 | `schemas/prompts/project_definition_critic_output.schema.json` | 4183 | `381576c391543f15aaf073d21bffff19f6772b5acd99321fa1d18f5972da731d` |
@@ -331,9 +372,9 @@
 | `schemas/prompts/revision_plan_critic_output.schema.json` | 3949 | `c33deaa8355d95bbf0e2d536683f963ac8453ea069e82da3cbd072542383135b` |
 | `schemas/prompts/revision_plan_input.schema.json` | 8247 | `c032dcfee7cb5c774442739a066f12d14c2bf07911ee02497595c727086edea7` |
 | `schemas/prompts/revision_plan_output.schema.json` | 12884 | `31b441573c60f5237a9ac6b0b864b1e4d1361fe134eb0b4d7d57c76eee7067ab` |
-| `schemas/prompts/safe_online_package_critic_input.schema.json` | 8675 | `a19423f6e6cd83adddbfb44e96c139b18bd4af81542e638bb87e32a791f64644` |
+| `schemas/prompts/safe_online_package_critic_input.schema.json` | 8716 | `7208174996c3554f0ba53714eac8a7ebef4679505f80c08b7b68f0672b41acc4` |
 | `schemas/prompts/safe_online_package_critic_output.schema.json` | 2323 | `7b20a34754fb3111c7ba51b7c775c862ff056e57f1a3c6f4296ef03c5956e1dd` |
-| `schemas/prompts/safe_online_package_input.schema.json` | 5374 | `a1e311e4e8634b073ec2916a1bcf76c0ad27e17963589303f1b98e9aadae4d86` |
+| `schemas/prompts/safe_online_package_input.schema.json` | 5415 | `8ab83d65ff18bac7df7dd16a72e54158b467be6dcdf5d622905eaefb41df2515` |
 | `schemas/prompts/safe_online_package_output.schema.json` | 3862 | `55cd50684d5e75db3399e381c4a0c49b99431477cfb69eadae143cd99536befa` |
 | `schemas/prompts/scheme_critic_input.schema.json` | 4174 | `c7799acf78ce4e512613cec0fb3ac3a2168f7a47f8c3c354d1b336d595b4f35f` |
 | `schemas/prompts/scheme_critic_output.schema.json` | 3198 | `d299ea399116b756746b3f7a4986d64385e601378eda170e3b108cd598ac275d` |
@@ -359,4 +400,4 @@
 | `schemas/prompts/write_critic_output.schema.json` | 6682 | `cc17753ff790207c5c400ad0bf03326fb723cf083c7fd706b5116a414e8c316c` |
 | `tools/build_v2.py` | 124268 | `34c670b05805b2393d4c5d8045b157fd108d699db8c0122214025dc7d44a90ac` |
 | `tools/run_validation.sh` | 80 | `5cc493c4b390c41caac3e0af9a81685452a941480ad24716906430f46a736942` |
-| `tools/validate_pack.py` | 13396 | `36def34455248ce58a7625e9651ba78a148bd1a5b2ae4bfd8d59faf37ac20514` |
+| `tools/validate_pack.py` | 13515 | `a16d3f13064709da6c5011915cfb5fd0ea1a7ae6d65d787e5e658d354ba03cc8` |

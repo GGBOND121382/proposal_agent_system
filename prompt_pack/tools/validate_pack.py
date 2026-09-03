@@ -223,10 +223,11 @@ counts['model_endpoints']=len(endpoint_ids); counts['models']=len(models['models
 # Routing and environment invariants
 for p in reg['prompts']:
     pid=p['prompt_id']; env=p['required_environment']
-    offline_public_critics = {'P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC'}
-    if pid.startswith('P-PUBLIC-RESEARCH-') and pid not in offline_public_critics and env!='ONLINE_PUBLIC':
+    online_public_prefixes = ('P-PUBLIC-RESEARCH-', 'P-BACKGROUND-RESEARCH-')
+    offline_public_critics = {'P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC', 'P-BACKGROUND-RESEARCH-PLAN-CRITIC'}
+    if pid.startswith(online_public_prefixes) and pid not in offline_public_critics and env!='ONLINE_PUBLIC':
         errors.append(f'PUBLIC_PROMPT_ENV {pid}: {env}')
-    if not pid.startswith('P-PUBLIC-RESEARCH-') and pid!='P-TARGETED-REPAIR' and env!='OFFLINE_LOCAL': errors.append(f'OFFLINE_PROMPT_ENV {pid}: {env}')
+    if not pid.startswith(online_public_prefixes) and pid!='P-TARGETED-REPAIR' and env!='OFFLINE_LOCAL': errors.append(f'OFFLINE_PROMPT_ENV {pid}: {env}')
     if pid=='P-TARGETED-REPAIR' and env!='SAME_AS_ORIGINAL': errors.append(f'REPAIR_ENV {env}')
 routing=yaml.safe_load((ROOT/'policies/model_routing.yaml').read_text(encoding='utf-8'))
 if routing.get('default',{}).get('deny') is not True: errors.append('MODEL_ROUTING_DEFAULT_NOT_DENY')

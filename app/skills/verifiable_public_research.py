@@ -333,7 +333,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
 
         configured_max = max(1, min(int(payload.get("max_results") or self.settings.public_search_max_results), 100))
         effective_max = configured_max
-        if strict and quality_profile == "proposal_related_work":
+        if strict and quality_profile in {"proposal_related_work", "application_background"}:
             minimum_required = (
                 len(normalized_plan.get("queries") or [])
                 * self._minimum_results_per_query()
@@ -434,7 +434,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             result.output["validation_bundle_dir"] = str(validation_root)
             result.artifacts = list(result.artifacts or []) + [str(validation_root / "00_run_manifest.json"), str(validation_root / "08_quality_summary.json")]
 
-            if strict and quality_profile == "proposal_related_work":
+            if strict and quality_profile in {"proposal_related_work", "application_background"}:
                 sufficiency = result.output.get("research_sufficiency") or {}
                 if sufficiency.get("status") == "BLOCKING_FAILURE":
                     raise PublicResearchRetrievalError(
@@ -498,7 +498,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             max_results=_EFFECTIVE_MAX_RESULTS.get(),
             strict=strict,
             min_per_query=self._minimum_results_per_query(),
-            enforce_semantic_relevance=(strict and _QUALITY_PROFILE.get() == "proposal_related_work"),
+            enforce_semantic_relevance=(strict and _QUALITY_PROFILE.get() in {"proposal_related_work", "application_background"}),
         )
         _SELECTION_REPORT.set(report)
         # Screening performs identity dedup before archive selection.  Re-emit those

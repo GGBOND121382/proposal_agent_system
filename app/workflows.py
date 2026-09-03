@@ -27,6 +27,16 @@ from .secret_redaction import redact_secret_text, redact_secrets
 from .util import new_id, sha256_json, utc_now
 from .workflow_authoring import WorkflowAuthoringMixin
 from .workflow_defs import CRITIC_PRODUCER, WORKFLOWS
+from .background_research import (
+    BACKGROUND_DIMENSIONS,
+    WF3B_PLAN_PROMPT,
+    WF3B_RESEARCH_CRITIC,
+    WF3B_SYNTHESIS_PROMPT,
+    WF3B_WORKFLOW_TYPE,
+    BackgroundResearchService,
+    build_background_cards,
+    normalize_wf3b_options,
+)
 from .workflow_gates import WorkflowGateMixin
 from .workflow_repair import WorkflowRepairMixin
 from .wf3_input import WorkflowInputRequired, normalize_wf3_time_constraints
@@ -260,6 +270,156 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             },
         )
         return artifact_id
+
+    def _persist_wf3b_background_result(self, wf: dict[str, Any], state: dict[str, Any]) -> str | None:
+        """Persist the final WF-3B topic-background result with explicit gaps.
+
+        Completion means the protocol finished; it does not imply every frozen
+        background dimension is covered.  Uncovered dimensions and degraded
+        retrieval sufficiency remain first-class ``background_gaps`` and yield
+        ``COMPLETED_WITH_BACKGROUND_GAPS`` semantics for downstream consumers.
+        """
+        if wf.get("workflow_type") != WF3B_WORKFLOW_TYPE:
+            return None
+
+        existing = str(state.get("wf3b_background_result_artifact_id") or "").strip()
+        if existing:
+            row = self.db.fetchone(
+                "SELECT id FROM artifacts WHERE id=? AND project_id=? AND workflow_id=? AND artifact_type='TOPIC_BACKGROUND_RESULT'",
+                (existing, wf["project_id"], wf["id"]),
+            )
+            if row:
+                return existing
+
+        options = state.get("options") if isinstance(state.get("options"), dict) else {}
+        required_dimensions = [
+            str(item).strip().upper()
+            for item in options.get("required_dimensions") or []
+            if str(item).strip()
+        ] or list(BACKGROUND_DIMENSIONS)
+        topic_id = str(options.get("topic_id") or "")
+        topic = str(options.get("topic") or "")
+
+        search = state.get("background_search_results") if isinstance(state.get("background_search_results"), dict) else {}
+        coverage = search.get("coverage") if isinstance(search.get("coverage"), dict) else {}
+        retrieval_health = search.get("retrieval_health") if isinstance(search.get("retrieval_health"), dict) else {}
+        sufficiency = search.get("research_sufficiency") if isinstance(search.get("research_sufficiency"), dict) else {}
+        if not sufficiency:
+            sufficiency = state.get("background_research_sufficiency") if isinstance(state.get("background_research_sufficiency"), dict) else {}
+        if not sufficiency:
+            # Backward-compatible default for Replay/SIMULATED archives without a
+            # first-class ResearchSufficiency object.
+            sufficiency = {
+                "schema_version": "1.0",
+                "status": "SUFFICIENT",
+                "coverage_status": str(coverage.get("status") or "PASS"),
+                "research_gaps": [],
+                "blocking_reasons": [],
+                "retrieval_health_status": str(retrieval_health.get("status") or "UNOBSERVED"),
+                "may_continue": True,
+            }
+        research_gaps = list(
+            search.get("research_gaps")
+            or sufficiency.get("research_gaps")
+            or state.get("background_research_gaps")
+            or []
+        )
+
+        synthesis = self._context_result(
+            wf["project_id"],
+            WF3B_SYNTHESIS_PROMPT,
+            workflow_id=wf["id"],
+            exact_workflow=True,
+        ) or {}
+        import_result = self._context_result(
+            wf["project_id"],
+            "P-ONLINE-RESULT-IMPORT-CRITIC",
+            workflow_id=wf["id"],
+            exact_workflow=True,
+        ) or {}
+        claim_validation = state.get("background_claim_validation") if isinstance(state.get("background_claim_validation"), dict) else {}
+        card_bundle = build_background_cards(
+            synthesis,
+            search,
+            claim_validation,
+            required_dimensions=required_dimensions,
+            topic_id=topic_id,
+        )
+        background_gaps = list(card_bundle["background_gaps"]) + copy.deepcopy(research_gaps)
+
+        claims = [copy.deepcopy(item) for item in synthesis.get("claims") or [] if isinstance(item, dict)]
+        completion_semantics = (
+            "COMPLETED_WITH_BACKGROUND_GAPS"
+            if background_gaps or str(sufficiency.get("status") or "") == "DEGRADED"
+            else "COMPLETED"
+        )
+        result_payload = {
+            "schema_version": "1.0",
+            "project_id": wf["project_id"],
+            "workflow_id": wf["id"],
+            "topic_id": topic_id,
+            "topic": topic,
+            "topic_origin": str(options.get("topic_origin") or ""),
+            "required_dimensions": required_dimensions,
+            "completion_semantics": completion_semantics,
+            "background_dimensions": card_bundle["background_dimensions"],
+            "background_cards": card_bundle["background_cards"],
+            "background_gaps": background_gaps,
+            "research_sufficiency": copy.deepcopy(sufficiency),
+            "retrieval_health": copy.deepcopy(retrieval_health or {"status": "UNOBSERVED"}),
+            "coverage": copy.deepcopy(coverage),
+            "accepted_claim_ids": [str(v) for v in import_result.get("accepted_claim_ids") or []],
+            "reference_only_claim_ids": [str(v) for v in import_result.get("reference_only_claim_ids") or []],
+            "rejected_claim_ids": [str(v) for v in import_result.get("rejected_claim_ids") or []],
+            "claims": claims,
+            "source_catalog": copy.deepcopy(search.get("source_catalog") or search.get("sources") or []),
+            "archive_manifest": search.get("archive_manifest"),
+            "archive_root": search.get("archive_root"),
+            "validation_bundle_dir": search.get("validation_bundle_dir"),
+            "created_at": utc_now(),
+        }
+        row = self.db.fetchone(
+            "SELECT COALESCE(MAX(version),0) AS v FROM artifacts WHERE project_id=? AND workflow_id=? AND artifact_type='TOPIC_BACKGROUND_RESULT'",
+            (wf["project_id"], wf["id"]),
+        )
+        artifact_id = new_id("artifact")
+        context_hash = sha256_json({key: value for key, value in result_payload.items() if key != "created_at"})
+        self.db.execute(
+            """INSERT INTO artifacts(id,project_id,workflow_id,artifact_type,prompt_id,version,status,security_level,context_hash,content_json,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                artifact_id,
+                wf["project_id"],
+                wf["id"],
+                "TOPIC_BACKGROUND_RESULT",
+                "P-ONLINE-RESULT-IMPORT-CRITIC",
+                int((row or {}).get("v") or 0) + 1,
+                str(sufficiency.get("status") or "SUFFICIENT"),
+                self._project_level(wf["project_id"]),
+                context_hash,
+                json.dumps(result_payload, ensure_ascii=False),
+                result_payload["created_at"],
+            ),
+        )
+        state["wf3b_background_result_artifact_id"] = artifact_id
+        state["background_research_sufficiency"] = copy.deepcopy(sufficiency)
+        state["background_gaps"] = copy.deepcopy(card_bundle["background_gaps"])
+        state["completion_semantics"] = completion_semantics
+        self.db.audit(
+            "WF3B_BACKGROUND_RESULT_PERSISTED",
+            project_id=wf["project_id"],
+            object_id=artifact_id,
+            metadata={
+                "workflow_id": wf["id"],
+                "topic_id": topic_id,
+                "completion_semantics": completion_semantics,
+                "card_count": len(card_bundle["background_cards"]),
+                "gap_count": len(background_gaps),
+                "context_hash": context_hash,
+            },
+        )
+        return artifact_id
+
     def _wf3_accept_complete_candidate(
         self,
         wf: dict[str, Any],
@@ -477,16 +637,34 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         return list(dict.fromkeys(validation_errors))[: max(0, int(limit))]
 
 
-    def __init__(self, db, pack, context_builder, executor, research_service, diagram_enrichment=None, quality_manager=None, dependency_preflight=None):
+    def __init__(self, db, pack, context_builder, executor, research_service, diagram_enrichment=None, quality_manager=None, dependency_preflight=None, background_research_service=None):
         self.db = db
         self.pack = pack
         self.context_builder = context_builder
         self.executor = executor
         self.research_service = research_service
+        self.background_research_service = background_research_service
         self.diagram_enrichment = diagram_enrichment
         self.quality_manager = quality_manager or QualityLifecycleManager(db)
         self.dependency_preflight = dependency_preflight
         self.decision_arbiter = DecisionArbiter()
+
+    def _background_research(self) -> BackgroundResearchService:
+        service = self.background_research_service
+        if service is None:
+            settings = getattr(getattr(self.executor, "gateway", None), "settings", None)
+            skill_executor = getattr(self.research_service, "skill_executor", None)
+            service = BackgroundResearchService(settings, skill_executor)
+            self.background_research_service = service
+        return service
+
+    def _synthesis_claim_validation_scope(self, prompt_id: str) -> tuple[Any, str, str] | None:
+        """Map a synthesis prompt to its research service and state keys."""
+        if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS":
+            return self.research_service, "public_search_results", "public_claim_validation"
+        if prompt_id == WF3B_SYNTHESIS_PROMPT:
+            return self._background_research(), "background_search_results", "background_claim_validation"
+        return None
 
     def _targeted_repair_failure_matches_checkpoint(
         self,
@@ -1950,6 +2128,8 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         required: list[str] = []
         if workflow_type == "WF-3_HYBRID_ONLINE_ASSIST":
             required = ["WF-1_PROJECT_INTAKE"]
+        elif workflow_type == WF3B_WORKFLOW_TYPE:
+            required = ["WF-1_PROJECT_INTAKE"]
         elif workflow_type == "WF-4_PROPOSAL_AUTHORING":
             required = ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION"]
             project = self.db.fetchone("SELECT config_json FROM projects WHERE id=?", (project_id,)) or {}
@@ -2164,9 +2344,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             if step.get("type") == "PUBLIC_SEARCH" and hasattr(
                 self.context_builder, "_result"
             ):
+                plan_prompt = (
+                    WF3B_PLAN_PROMPT
+                    if wf["workflow_type"] == WF3B_WORKFLOW_TYPE
+                    else "P-PUBLIC-RESEARCH-PLAN"
+                )
                 public_plan = self._context_result(
                     wf["project_id"],
-                    "P-PUBLIC-RESEARCH-PLAN",
+                    plan_prompt,
                     workflow_id=wf["id"],
                     exact_workflow=True,
                 ) or {}
@@ -2254,6 +2439,13 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 dict(prerequisite_workflow_ids),
             )
             prerequisite_binding_mode = "EXPLICIT_FROZEN"
+        wf3b_topic_error: str | None = None
+        if workflow_type == WF3B_WORKFLOW_TYPE:
+            resolved_options, wf3b_topic_error = self._normalize_wf3b_start_options(
+                project_id,
+                resolved_options,
+                prerequisite_bindings,
+            )
         state = {
             "workflow_type": workflow_type,
             "options": resolved_options,
@@ -2266,6 +2458,8 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         if lifecycle_context:
             state["workflow_lifecycle"] = copy.deepcopy(lifecycle_context)
         prerequisite_error = self._prerequisite_error(missing_prerequisites)
+        if prerequisite_error is None:
+            prerequisite_error = wf3b_topic_error
         status = (
             WorkflowStatus.WAITING_PREREQUISITE.value
             if prerequisite_error
@@ -2315,6 +2509,43 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
     def _workflow_prerequisite_error(self, project_id: str, workflow_type: str, options: dict[str, Any]) -> str | None:
         _, missing = self._resolve_prerequisite_workflows(project_id, workflow_type, options)
         return self._prerequisite_error(missing)
+
+    def _normalize_wf3b_start_options(
+        self,
+        project_id: str,
+        options: dict[str, Any],
+        prerequisite_bindings: dict[str, str],
+    ) -> tuple[dict[str, Any], str | None]:
+        """Normalize WF-3B options and resolve the topic from the bound WF-1.
+
+        An explicit ``options.topic`` always wins.  Otherwise the topic is
+        derived from the completed WF-1 project definition.  When neither
+        yields a topic the caller applies the existing prerequisite blocking
+        semantics; no input gate is added for WF-3B.
+        """
+        definition = None
+        wf1_id = str((prerequisite_bindings or {}).get("WF-1_PROJECT_INTAKE") or "").strip()
+        if wf1_id:
+            candidate = self._context_result(
+                project_id,
+                "P-PROJECT-DEFINITION-EXTRACT",
+                "project_definition",
+                workflow_id=wf1_id,
+                exact_workflow=True,
+            )
+            if isinstance(candidate, dict):
+                definition = candidate
+        normalized = normalize_wf3b_options(
+            options,
+            project_id=project_id,
+            wf1_project_definition=definition,
+        )
+        if str(normalized.get("topic") or "").strip():
+            return normalized, None
+        return normalized, (
+            "WF-3B 无法确定调研 topic：options.topic 未提供，且前置 WF-1 项目定义结果中没有可用的 "
+            "project_title/problem_statement。请先完成 WF-1，或在 options.topic 显式给出主题后重新启动。"
+        )
 
     @staticmethod
     def _has_nonconfirmable_quality_failure(output: dict[str, Any]) -> bool:
@@ -2912,6 +3143,18 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 state["waiting_prerequisite"] = True
                 self._update(wf, status=WorkflowStatus.WAITING_PREREQUISITE.value, state=state)
                 return self.get(workflow_id)
+            if wf["workflow_type"] == WF3B_WORKFLOW_TYPE:
+                normalized_options, topic_error = self._normalize_wf3b_start_options(
+                    wf["project_id"],
+                    state.get("options") or {},
+                    prerequisite_bindings,
+                )
+                state["options"] = normalized_options
+                if topic_error:
+                    state["last_error"] = topic_error
+                    state["waiting_prerequisite"] = True
+                    self._update(wf, status=WorkflowStatus.WAITING_PREREQUISITE.value, state=state)
+                    return self.get(workflow_id)
             state.pop("last_error", None)
             state.pop("waiting_prerequisite", None)
             state["recovered_from"] = (
@@ -2994,9 +3237,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             if self.dependency_preflight is not None:
                 public_plan = None
                 if step.get("type") == "PUBLIC_SEARCH":
+                    plan_prompt = (
+                        WF3B_PLAN_PROMPT
+                        if wf["workflow_type"] == WF3B_WORKFLOW_TYPE
+                        else "P-PUBLIC-RESEARCH-PLAN"
+                    )
                     public_plan = self._context_result(
                         wf["project_id"],
-                        "P-PUBLIC-RESEARCH-PLAN",
+                        plan_prompt,
                         workflow_id=wf["id"],
                         exact_workflow=True,
                     ) or {}
@@ -3016,7 +3264,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     )
             if step.get("type") == "PUBLIC_SEARCH":
                 try:
-                    await self._run_public_search(wf, state)
+                    if wf["workflow_type"] == WF3B_WORKFLOW_TYPE:
+                        await self._run_background_search(wf, state)
+                    else:
+                        await self._run_public_search(wf, state)
                 except PublicResearchError as exc:
                     report = self._runtime_configuration_report(
                         exc,
@@ -3168,12 +3419,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 return self.get(workflow_id)
 
             candidate_preflight_errors: list[str] = []
-            if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS":
-                candidate_claim_validation = self.research_service.validate_synthesis(
+            claim_scope = self._synthesis_claim_validation_scope(prompt_id)
+            if claim_scope is not None:
+                service, search_state_key, validation_state_key = claim_scope
+                candidate_claim_validation = service.validate_synthesis(
                     (result.get("output") or {}).get("result") or {},
-                    state.get("public_search_results") or {},
+                    state.get(search_state_key) or {},
                 )
-                state["public_claim_validation"] = candidate_claim_validation
+                state[validation_state_key] = candidate_claim_validation
                 if candidate_claim_validation.get("status") != "PASS":
                     candidate_preflight_errors = [
                         (
@@ -3244,19 +3497,28 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     ),
                 )
             output = result["output"]
-            if prompt_id == "P-PUBLIC-RESEARCH-SYNTHESIS":
-                claim_validation = self.research_service.validate_synthesis(
+            post_claim_scope = self._synthesis_claim_validation_scope(prompt_id)
+            if post_claim_scope is not None:
+                service, search_state_key, validation_state_key = post_claim_scope
+                claim_validation = service.validate_synthesis(
                     output.get("result") or {},
-                    state.get("public_search_results") or {},
+                    state.get(search_state_key) or {},
                 )
-                state["public_claim_validation"] = claim_validation
+                state[validation_state_key] = claim_validation
                 if claim_validation.get("status") != "PASS":
                     codes = [str(item.get("code") or "PUBLIC_CLAIM_INVALID") for item in claim_validation.get("findings", [])]
-                    state["last_error"] = (
-                        "公开研究综合未通过确定性 Claim—来源绑定校验："
-                        + "、".join(codes[:12])
-                        + "。不得进入公开结果导入 Gate。"
-                    )
+                    if prompt_id == WF3B_SYNTHESIS_PROMPT:
+                        state["last_error"] = (
+                            "背景研究综合未通过确定性 Claim—来源绑定校验："
+                            + "、".join(codes[:12])
+                            + "。不得进入公开结果导入 Gate。"
+                        )
+                    else:
+                        state["last_error"] = (
+                            "公开研究综合未通过确定性 Claim—来源绑定校验："
+                            + "、".join(codes[:12])
+                            + "。不得进入公开结果导入 Gate。"
+                        )
                     self._update(
                         wf,
                         status=WorkflowStatus.BLOCKED_CONTENT.value,
@@ -3298,18 +3560,23 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 self._update(wf, status="BLOCKED_CONTRACT", state=state)
                 return self.get(workflow_id)
             if (
-                prompt_id == WF3_RESEARCH_CRITIC
+                prompt_id in {WF3_RESEARCH_CRITIC, WF3B_RESEARCH_CRITIC}
                 and effective_status in {"REVISE", "BLOCK"}
             ):
-                routing = wf3_critic_routing_report(effective_output)
-                state.setdefault("wf3_critic_routing_history", []).append(
+                routing = wf3_critic_routing_report(effective_output, prompt_id=prompt_id)
+                routing_history_key = (
+                    "background_critic_routing_history"
+                    if prompt_id == WF3B_RESEARCH_CRITIC
+                    else "wf3_critic_routing_history"
+                )
+                state.setdefault(routing_history_key, []).append(
                     {
                         **routing,
                         "run_id": str(result.get("run_id") or ""),
                         "recorded_at": utc_now(),
                     }
                 )
-                del state["wf3_critic_routing_history"][:-50]
+                del state[routing_history_key][:-50]
                 if routing["has_non_synthesis_route"]:
                     self._clear_workflow_repair_rereview(state, prompt_id)
                     route_counts = ", ".join(
@@ -3317,8 +3584,13 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                         for route, count in routing["route_counts"].items()
                         if count
                     )
+                    critic_label = (
+                        "背景研究 Critic"
+                        if prompt_id == WF3B_RESEARCH_CRITIC
+                        else "公开研究 Critic"
+                    )
                     state["last_error"] = (
-                        "公开研究 Critic 返回了超出 Synthesis 写权限的阻断项（"
+                        f"{critic_label} 返回了超出 Synthesis 写权限的阻断项（"
                         + route_counts
                         + "）。这些问题必须回到对应的检索或计划边界；"
                         "系统已保留精确 Finding，未把它们误送给 Synthesis 定向修复。"
@@ -3592,6 +3864,8 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         state.pop("quality_blocker_ids", None)
         if wf["workflow_type"] == "WF-3_HYBRID_ONLINE_ASSIST":
             self._persist_wf3_research_result(wf, state)
+        if wf["workflow_type"] == WF3B_WORKFLOW_TYPE:
+            self._persist_wf3b_background_result(wf, state)
         self._update(wf, status="COMPLETED", state=state)
         self.db.audit("WORKFLOW_COMPLETED", project_id=wf["project_id"], object_id=workflow_id, metadata={"workflow_type": wf["workflow_type"]})
         return self.get(workflow_id)

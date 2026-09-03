@@ -19,7 +19,7 @@
 - 30 个 Prompt 的动态注册、输入/输出 Schema 严格校验和完整 Schema 内联；
 - OpenAI-compatible 离线/在线模型网关，离线失败不会自动切换在线；
 - `REPLAY`、`MOCK`、`SIMULATED`、`LIVE` 四种运行模式；
-- 五条核心工作流状态机与十三类人工 Gate；
+- 六条核心工作流状态机与十三类人工 Gate；
 - 一次定向修复额度与 Critic/Producer 分离；
 - DOCX、PDF、Markdown、TXT、JSON、CSV 材料解析；
 - 上传存储元数据与 Prompt `document_context` 严格隔离，确保真实材料替换 Replay 种子；
@@ -110,7 +110,7 @@ python scripts/run_logistics_agent_complex_e2e.py \
 - 所有 `ONLINE_PUBLIC` Prompt 在调用模型前再次扫描，发现个人信息或项目专有实体即阻断执行；
 - 新增姓名、组织、地址、地点、电话和邮箱测试夹具，验证内部申请书可保留虚构值、在线任务包必须使用占位符；
 - 修复多章节导出中的列表连续编号、中文表格缺字和重复段落问题；
-- 模拟模型端到端覆盖五条工作流、全部人工 Gate、12 个正式章节、3 次在线 Prompt 调用和最终 DOCX/审计包导出。
+- 模拟模型端到端覆盖当时定义的五条工作流（WF-3B_TOPIC_BACKGROUND_RESEARCH 为后续新增的第六条）、全部人工 Gate、12 个正式章节、3 次在线 Prompt 调用和最终 DOCX/审计包导出。
 
 运行命令：
 
@@ -230,13 +230,14 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 
 工作流 `WF-3_HYBRID_ONLINE_ASSIST` 的顺序是：离线生成 Safe Online Package → 离线 Critic → 人工外发审批 → 在线公开研究 → 离线导入 Critic → 人工导入审批。在线模型只接收 `PUBLIC` 上下文。
 
-## 五条工作流
+## 六条工作流
 
 | 工作流 | 功能 |
 |---|---|
 | `WF-1_PROJECT_INTAKE` | 材料、安全分类、申报规则、项目定义、事实和准备度 |
 | `WF-2_TEMPLATE_EXTRACTION` | 参考申请书结构/风格提取与污染检查 |
 | `WF-3_HYBRID_ONLINE_ASSIST` | 经审批的公共研究与结果隔离导入 |
+| `WF-3B_TOPIC_BACKGROUND_RESEARCH` | topic 应用背景调研（依赖 WF-1 完成），产出 `TOPIC_BACKGROUND_RESULT` |
 | `WF-4_PROPOSAL_AUTHORING` | 修改计划、逐章蓝图与正文、逐章 Critic 和跨章节一致性 |
 | `WF-5_SECURITY_REVIEW_AND_EXPORT` | 正文保密审查、内容审批和最终导出审批 |
 
@@ -277,7 +278,7 @@ bash scripts/validate.sh
 - 未审批在线调用阻断；
 - 在线任务包确定性脱敏与调用前个人信息阻断；
 - 工作流门禁暂停；
-- 五条工作流完整运行；
+- 六条工作流完整运行；
 - 多章节逐章生成、真实候选聚合和终审输入；
 - 模板定义章节的模拟模型端到端申请书生成；
 - 复杂申请书、全部已注册 Prompt 覆盖和定向修复闭环；
@@ -297,7 +298,7 @@ app/
   llm.py           # OpenAI-compatible 模型网关
   security.py      # 安全模型路由
   privacy.py       # 在线出站实体替换、电话邮箱净化和阻断
-  workflows.py     # 五条工作流和人工 Gate
+  workflows.py     # 六条工作流和人工 Gate
   skills/          # Mermaid 与公开研究 Skill、执行日志和注册表
   documents.py     # 材料解析
   exporter.py      # DOCX/审计包导出

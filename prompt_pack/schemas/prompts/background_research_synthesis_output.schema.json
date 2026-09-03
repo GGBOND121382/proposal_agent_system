@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background_research_synthesis_output.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-BACKGROUND-RESEARCH-SYNTHESIS"
+    },
+    "prompt_version": {
+      "const": "1.0.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "REVISE",
+        "NEED_USER_INPUT",
+        "BLOCK"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "claim_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "claim_text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "claim_type": {
+                "type": "string",
+                "enum": [
+                  "FACT",
+                  "PLAN",
+                  "EXPECTED_RESULT",
+                  "REQUIREMENT",
+                  "PUBLIC_CLAIM",
+                  "MODEL_INFERENCE"
+                ]
+              },
+              "subject_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "temporal_status": {
+                "type": "string",
+                "enum": [
+                  "PAST",
+                  "CURRENT",
+                  "PLANNED",
+                  "EXPECTED",
+                  "TIME_INDEPENDENT",
+                  "UNKNOWN"
+                ]
+              },
+              "qualifiers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "numeric_values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "object": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "condition": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "value",
+                    "unit",
+                    "object",
+                    "condition"
+                  ]
+                }
+              },
+              "source_refs": {
+                "type": "array",
+                "items": {
+                  "$ref": "../common/source_ref.schema.json"
+                }
+              },
+              "knowledge_status": {
+                "type": "string",
+                "enum": [
+                  "CONFIRMED",
+                  "USER_ASSERTED",
+                  "DOCUMENT_EXTRACTED",
+                  "ESTIMATED",
+                  "UNKNOWN",
+                  "NOT_APPLICABLE",
+                  "CONFLICTED",
+                  "SUPERSEDED"
+                ]
+              },
+              "security_level": {
+                "type": "string",
+                "enum": [
+                  "PUBLIC",
+                  "INTERNAL",
+                  "SENSITIVE",
+                  "CLASSIFIED"
+                ]
+              },
+              "dimension": {
+                "type": "string",
+                "enum": [
+                  "APPLICATION_SCENARIO",
+                  "STAKEHOLDER_AND_PAIN",
+                  "INDUSTRY_SCALE_AND_TREND",
+                  "POLICY_STANDARD_AND_PROGRAM",
+                  "REPRESENTATIVE_CASE",
+                  "CURRENT_ADOPTION",
+                  "OPERATIONAL_CONSTRAINT",
+                  "RESEARCH_SIGNIFICANCE"
+                ]
+              },
+              "target_section_profiles": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "SECTION_GENERAL",
+                    "ABSTRACT",
+                    "PROJECT_OVERVIEW",
+                    "BACKGROUND_AND_SIGNIFICANCE",
+                    "LITERATURE_REVIEW",
+                    "NEED_ANALYSIS",
+                    "KEY_ISSUE",
+                    "RESEARCH_OBJECTIVE",
+                    "RESEARCH_CONTENT",
+                    "METHOD_AND_ALGORITHM",
+                    "TECHNICAL_ROUTE",
+                    "EVALUATION",
+                    "INNOVATION",
+                    "OUTPUTS_AND_METRICS",
+                    "RESEARCH_FOUNDATION",
+                    "CONCLUSION",
+                    "PROGRESS_BUDGET_RISK",
+                    "REFERENCES",
+                    "APPENDIX"
+                  ]
+                },
+                "uniqueItems": true
+              },
+              "conflicts": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "claim_id",
+              "claim_text",
+              "claim_type",
+              "subject_id",
+              "temporal_status",
+              "qualifiers",
+              "numeric_values",
+              "source_refs",
+              "knowledge_status",
+              "security_level",
+              "dimension",
+              "target_section_profiles",
+              "conflicts",
+              "limitations"
+            ]
+          }
+        },
+        "background_gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "dimension": {
+                "type": "string",
+                "enum": [
+                  "APPLICATION_SCENARIO",
+                  "STAKEHOLDER_AND_PAIN",
+                  "INDUSTRY_SCALE_AND_TREND",
+                  "POLICY_STANDARD_AND_PROGRAM",
+                  "REPRESENTATIVE_CASE",
+                  "CURRENT_ADOPTION",
+                  "OPERATIONAL_CONSTRAINT",
+                  "RESEARCH_SIGNIFICANCE"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "dimension",
+              "reason"
+            ]
+          }
+        },
+        "coverage_summary": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "claims",
+        "background_gaps",
+        "coverage_summary"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/finding.schema.json"
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/unresolved_item.schema.json"
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/user_question.schema.json"
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/source_ref.schema.json"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "status",
+    "result",
+    "findings",
+    "unresolved_items",
+    "user_questions",
+    "source_refs",
+    "warnings"
+  ]
+}

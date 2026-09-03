@@ -880,11 +880,15 @@ class RuntimeDependencyPreflight:
             "WF-1_PROJECT_INTAKE",
             "WF-2_TEMPLATE_EXTRACTION",
             "WF-3_HYBRID_ONLINE_ASSIST",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
             "WF-4_PROPOSAL_AUTHORING",
             "WF-5_SECURITY_REVIEW_AND_EXPORT",
         }:
             report.extend(self._model_environment_report("OFFLINE_LOCAL"))
-        if workflow_type == "WF-3_HYBRID_ONLINE_ASSIST":
+        if workflow_type in {
+            "WF-3_HYBRID_ONLINE_ASSIST",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        }:
             report.extend(self._model_environment_report("ONLINE_PUBLIC"))
             report.extend(self._project_online_report(project_id))
             report.extend(self._search_report())

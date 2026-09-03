@@ -66,7 +66,7 @@
         <div class="card">
           <select id="workflowType">
             <option>WF-1_PROJECT_INTAKE</option><option>WF-2_TEMPLATE_EXTRACTION</option>
-            <option>WF-3_HYBRID_ONLINE_ASSIST</option><option>WF-4_PROPOSAL_AUTHORING</option>
+            <option>WF-3_HYBRID_ONLINE_ASSIST</option><option value="WF-3B_TOPIC_BACKGROUND_RESEARCH">WF-3B Topic 背景调研</option><option>WF-4_PROPOSAL_AUTHORING</option>
             <option>WF-5_SECURITY_REVIEW_AND_EXPORT</option>
           </select>
           <button id="startWorkflow">启动并运行至下一个门禁</button>
@@ -81,6 +81,22 @@
             <label>必须联网的原因<textarea id="wf3Reason">需要检索可公开访问且可核验的资料，以补足内部材料无法独立确认的相关工作、比较基线或评价依据。</textarea></label>
             <label>期望输出<textarea id="wf3Desired">返回带来源绑定的代表性公开资料、方法或基线、评价指标、适用边界及可用于申请书论证的结论摘要。</textarea></label>
             <label>任务类型<select id="wf3TaskType"><option>PUBLIC_RESEARCH</option><option>PUBLIC_TEMPLATE_ANALYSIS</option><option>GENERIC_LANGUAGE_ASSIST</option></select></label>
+          </div>
+          <div id="wf3bOptions" class="workflow-options" hidden>
+            <h4>WF-3B Topic 背景调研（可留空，由系统从 WF-1 结果取 topic 并默认覆盖全部 8 个背景维度；需 WF-1 已完成后启动）</h4>
+            <label>Topic 覆盖（可选）<textarea id="wf3bTopicOverride" placeholder="留空则从 WF-1 结果取 topic；填写后以此 topic 做应用背景调研。"></textarea></label>
+            <label>补充说明 focus（可选）<textarea id="wf3bFocus" placeholder="例如：重点关注近三年的示范应用与成本变化。"></textarea></label>
+            <fieldset>
+              <legend>背景维度（不勾选任何项=默认全部 8 维）</legend>
+              <label><input type="checkbox" class="wf3bDimension" value="APPLICATION_SCENARIO" /> APPLICATION_SCENARIO 应用场景</label>
+              <label><input type="checkbox" class="wf3bDimension" value="STAKEHOLDER_AND_PAIN" /> STAKEHOLDER_AND_PAIN 利益方与痛点</label>
+              <label><input type="checkbox" class="wf3bDimension" value="INDUSTRY_SCALE_AND_TREND" /> INDUSTRY_SCALE_AND_TREND 规模与趋势</label>
+              <label><input type="checkbox" class="wf3bDimension" value="POLICY_STANDARD_AND_PROGRAM" /> POLICY_STANDARD_AND_PROGRAM 政策标准与规划</label>
+              <label><input type="checkbox" class="wf3bDimension" value="REPRESENTATIVE_CASE" /> REPRESENTATIVE_CASE 代表性案例</label>
+              <label><input type="checkbox" class="wf3bDimension" value="CURRENT_ADOPTION" /> CURRENT_ADOPTION 现有应用成熟度</label>
+              <label><input type="checkbox" class="wf3bDimension" value="OPERATIONAL_CONSTRAINT" /> OPERATIONAL_CONSTRAINT 运行约束</label>
+              <label><input type="checkbox" class="wf3bDimension" value="RESEARCH_SIGNIFICANCE" /> RESEARCH_SIGNIFICANCE 研究意义</label>
+            </fieldset>
           </div>
         </div>
         <div id="workflowList"></div>
