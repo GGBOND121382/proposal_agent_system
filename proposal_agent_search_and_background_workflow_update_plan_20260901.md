@@ -13,6 +13,7 @@
 - Phase 2 已完成实现、范围验收并提交：`7a4e8fd update phase 2 (playwright and search fallback)`。
 - Phase 2 详细实施证据 `docs/SEARCH_BACKGROUND_PHASE2_REPORT_20260902.md` 已包含在 `7a4e8fd` 中。
 - Phase 3 已完成实现、范围验收并提交：`f53e98b update phase 3 (wf3 retrieval execution contract and channel sufficiency)`；详细实施证据 `docs/SEARCH_BACKGROUND_PHASE3_REPORT_20260903.md` 已包含在 `f53e98b` 中。
+- Phase 4 已完成实现、范围验收并提交：`7566d63 update phase 4 (wf3b topic background research workflow)`；详细实施证据 `docs/SEARCH_BACKGROUND_PHASE4_REPORT_20260903.md` 已包含在 `7566d63` 中。
 - `docs/video_demo_20260902/` 是用户本地视频材料，已被 `.gitignore` 排除且未进入任何技术提交，**不得强制暂存、提交、删除或混入技术补丁**。
 - `data/capability_tests/` 和 `data/browser_cache/` 已加入 `.gitignore`；真实能力 receipt 保留在本地，但不会误入 Git。
 - Phase 3 提交前已执行 `git status --short` 与 `git diff --cached --name-only` 核对；接手者提交前仍须执行同样检查。
@@ -37,7 +38,7 @@
 | Phase 1 | 已完成并提交 | Search/Fetch/Extract 契约抽离，旧 provider 与 WF-3 行为兼容 |
 | Phase 2 | 已完成并提交 | Browser Search、Playwright Worker、动态读取兜底、安全、缓存、限速、preflight 和真实 Web Search 验收；提交 `7a4e8fd` |
 | Phase 3 | 已完成并提交 | WF-3 检索执行合同（Plan 2.2.0 五字段）、provider channel/profile、required web channel 阻断语义、三级充分性 evidence_funnel；提交 `f53e98b` |
-| Phase 4 | 未开始 | 正式独立 WF-3B 背景调研工作流 |
+| Phase 4 | 已完成并提交 | 独立 WF-3B 背景调研工作流（4 个新 Prompt/Schema/Replay、claims→运行时证据卡、强制 web 证据、TOPIC_BACKGROUND_RESULT、UI 入口、治理清单同步）；提交 `7566d63` |
 | Phase 5 | 未开始 | WF-3B → WF-4 的背景证据确定性路由与 lineage |
 | Phase 6 | 未开始 | 完整回归、恢复测试和经授权的小规模 LIVE LLM 验收 |
 
@@ -66,20 +67,23 @@
 - 原始 HTML SHA-256：`8c4a027242a0fc877af29884695d72e1107b68f1362d284678702f862690e371`。
 - 测试过程中的 Bing CAPTCHA、DuckDuckGo 超时和一次异常 DNS 保留地址均被明确判为失败，未伪装为搜索成功。
 
-### 0.6 已知但不属于 Phase 2/3 的基线问题
+### 0.6 已知但不属于 Phase 2/3/4 的基线问题
 
-- 全量测试仍存在 Phase 0/1 已记录的 Argument `candidate.review_units` 历史契约失败、G0 冻结身份漂移、旧 provenance/semantic closure/quality guard 断言，以及 Full Integration 超时级联。
-- 最新全量尝试首个失败仍是 `tests/test_argument_lifecycle_composition_v9.py::test_v9_argument_repair_paths_are_relative_to_producer_result` 的 `KeyError: review_units`；Phase 2/3 未修改 Argument、WF-4 或其 Model Schema。
-- `tests/test_runtime.py::test_runtime_recovers_safe_package_scalar_source_ref_drift_without_model_call` 在干净 HEAD（`7a4e8fd`）上同样失败，属既有基线问题，与 Phase 3 无关（已用 stash 复验）。
-- 不得为了让范围测试看起来全绿而顺手修改上述非搜索问题。应以 227 项范围回归和既有基线报告进行差异判断。
+- 全量测试仍存在 Phase 0/1 已记录的 Argument `candidate.review_units` 历史契约失败、旧 provenance/semantic closure/quality guard 断言，以及 Full Integration 超时级联。
+- 最新全量尝试首个失败仍是 `tests/test_argument_lifecycle_composition_v9.py::test_v9_argument_repair_paths_are_relative_to_producer_result` 的 `KeyError: review_units`；Phase 2/3/4 未修改 Argument、WF-4 或其 Model Schema。
+- `tests/test_runtime.py::test_runtime_recovers_safe_package_scalar_source_ref_drift_without_model_call` 在干净 HEAD 上同样失败，属既有基线问题（已用 stash 复验）。
+- `tests/test_workflow_input_integrity.py` 的 `test_wf3_downstream_live_inputs_are_complete_and_schema_valid` 与 `test_strict_live_context_completes_full_workflow_with_simulated_provider` 在干净 HEAD（`aea3a6b`）的独立 worktree 上同样失败（`/payload/research_plan` schema 不收 Phase-3 执行合同字段），属既有基线问题，与 Phase 4 无关。
+- Phase 3 曾造成 G0 `entries_sha256` 漂移（版本号变更未同步治理清单）；Phase 4 已把 `governance/g0/interface_contract.json` 的 entry_count/entries_sha256/registry_git_blob_sha 修正为当前真实值并登记 approved_changes，`tests/test_f_agent_matrix.py` 已转绿。
+- 不得为了让范围测试看起来全绿而顺手修改上述非搜索问题。Phase 4 后以 350 项范围回归（372 项口径见 Phase 4 报告）和既有基线报告进行差异判断。
+- LIVE 链路遗留：`P-BACKGROUND-RESEARCH-SYNTHESIS` 尚未纳入 `WF3_MODEL_PROMPTS` canonicalization；Phase 6 经授权运行小规模 LIVE 前需补齐。
 
 ### 0.7 下一位接手者的第一组操作
 
-1. 先阅读本节、`docs/SEARCH_BACKGROUND_PHASE2_REPORT_20260902.md` 和 `docs/SEARCH_BACKGROUND_PHASE3_REPORT_20260903.md`。
-2. 执行 `git show --stat f53e98b` 核对 Phase 3 提交，并执行 `git status --short` 确认没有新的非计划修改。
-3. 重跑 227 项范围测试和 `scripts/check_web_search_capability.py`；真实公网偶发 CAPTCHA/DNS/超时必须保留为真实失败，不能放松私网安全规则或伪造 PASS。
-4. 不重写或拆散 `7a4e8fd`/`f53e98b`；提交后续计划/代码时继续显式排除 `docs/video_demo_20260902/` 和 `data/` 运行证据。
-5. Phase 3 提交稳定后再开始 Phase 4；WF-3B 必须使用正式的新工作流类型、新 Prompt 和新 Schema。
+1. 先阅读本节和 `docs/SEARCH_BACKGROUND_PHASE2_REPORT_20260902.md`、`docs/SEARCH_BACKGROUND_PHASE3_REPORT_20260903.md`、`docs/SEARCH_BACKGROUND_PHASE4_REPORT_20260903.md`。
+2. 执行 `git show --stat 7566d63` 核对 Phase 4 提交，并执行 `git status --short` 确认没有新的非计划修改。
+3. 重跑 Phase 4 报告第 4 节的范围测试和 `scripts/check_web_search_capability.py`；真实公网偶发 CAPTCHA/DNS/超时必须保留为真实失败，不能放松私网安全规则或伪造 PASS。
+4. 不重写或拆散 `7a4e8fd`/`f53e98b`/`7566d63`；提交后续计划/代码时继续显式排除 `docs/video_demo_20260902/` 和 `data/` 运行证据。
+5. Phase 4 提交稳定后再开始 Phase 5（准确范围见 Phase 4 报告第 6 节与本文档 §6、§11.3）；WF-4 接入不得在本阶段之前混改。
 
 ## 1. 结论
 
@@ -416,7 +420,7 @@ Phase 4 才允许新增：
 
 验收：对技术调研测试集，查询覆盖、来源筛选、正文抓取、归档和 Claim 绑定形成闭环。
 
-### Phase 4：新增 WF-3B（尚未开始）
+### Phase 4：新增 WF-3B（已完成并提交：`7566d63`）
 
 - 背景 Plan/Synthesis/Critic/Schema；
 - 背景维度覆盖和证据卡；
