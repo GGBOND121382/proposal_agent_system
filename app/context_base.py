@@ -3342,6 +3342,19 @@ class ContextBuilder:
                 replacements.append(("payload.task_instruction", objective))
         if "recipient_scope" in payload:
             replacements.append(("payload.recipient_scope", config.get("recipient_scope", ["内部用户"])))
+        if "intended_uses" in payload:
+            workflow_options = state.get("options") if isinstance(state.get("options"), dict) else {}
+            intended_uses = (
+                workflow_options.get("intended_uses")
+                or config.get("intended_uses")
+                or ["项目材料安全分类与后续申请书工作流处理"]
+            )
+            if isinstance(intended_uses, str):
+                intended_uses = [intended_uses]
+            replacements.append((
+                "payload.intended_uses",
+                [str(item).strip() for item in intended_uses if str(item).strip()],
+            ))
         if "allowed_topics" in payload and prompt_id != "P-SAFE-ONLINE-PACKAGE":
             wf3_options = state.get("options") if isinstance(state.get("options"), dict) else {}
             nested_wf3 = wf3_options.get("wf3") if isinstance(wf3_options.get("wf3"), dict) else {}

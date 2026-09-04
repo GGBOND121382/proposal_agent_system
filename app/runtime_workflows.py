@@ -68,9 +68,10 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
         state = wf["state"]
         # WAITING_GATE is reconciled by WorkflowGateMixin.  Missing or stale
         # Gate records are fail-closed there rather than silently reopened.
-        recoverable_context_build = str(state.get("last_error") or "").startswith(
-            "LIVE context builder produced invalid input:"
-        )
+        recoverable_context_build = str(state.get("last_error") or "").startswith((
+            "LIVE context builder produced invalid input:",
+            "LIVE context for ",
+        ))
         research_failure = (
             state.get("public_research_failure")
             if isinstance(state.get("public_research_failure"), dict)

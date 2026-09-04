@@ -625,6 +625,7 @@ class WorkflowLifecycleService:
                     options = copy.deepcopy(node.get("options") or {})
                     options["idempotency_key"] = (
                         f"lineage-{operation['id']}-{int(node['position']):03d}"
+                        f"-attempt-{len(node.get('restart_history') or []):03d}"
                     )
                     created = self.workflows.start(
                         operation["project_id"],
