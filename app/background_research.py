@@ -296,7 +296,9 @@ def background_execution_contract(plan: dict[str, Any]) -> dict[str, Any]:
     ``require_web_discovery`` is runtime-owned for background research: a pure
     Academic-only success must never let the background workflow complete, so
     the WEB_SEARCH channel is always required regardless of what the model
-    plan declared.
+    plan declared.  ``browser_search`` is a required provider as well: the
+    background workflow needs at least one independent real web channel beyond
+    the local SearXNG aggregate, whose upstream engines can silently degrade.
     """
 
     contracted = copy.deepcopy(plan) if isinstance(plan, dict) else {}
@@ -309,6 +311,20 @@ def background_execution_contract(plan: dict[str, Any]) -> dict[str, Any]:
     if "WEB_SEARCH" not in channels:
         channels.append("WEB_SEARCH")
     contracted["required_channels"] = channels
+    requirements = contracted.get("provider_execution_requirements")
+    requirements = dict(requirements) if isinstance(requirements, dict) else {}
+    required_providers = [
+        _clean_text(item).lower()
+        for item in requirements.get("required_providers") or []
+        if _clean_text(item)
+    ]
+    if "browser_search" not in required_providers:
+        required_providers.append("browser_search")
+    requirements["required_providers"] = required_providers
+    requirements["execute_all_approved_queries"] = bool(
+        requirements.get("execute_all_approved_queries", True)
+    )
+    contracted["provider_execution_requirements"] = requirements
     return contracted
 
 

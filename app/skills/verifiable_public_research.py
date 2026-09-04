@@ -232,7 +232,17 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                         "message": "The approved execution contract requires browser_search but BROWSER_SEARCH_ENABLED is off.",
                     }
                 )
-            if browser_enabled and (not web_candidates or browser_required):
+            min_hits = max(
+                0,
+                int(getattr(self.settings, "browser_fallback_min_hits_per_query", 0) or 0),
+            )
+            fallback_queries = self._browser_fallback_queries(
+                web_candidates,
+                search_queries,
+                min_hits=min_hits,
+                browser_required=browser_required,
+            )
+            if browser_enabled and fallback_queries:
                 try:
                     browser_batch = SearchGateway(
                         [
@@ -243,7 +253,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                             )
                         ]
                     ).search(
-                        search_queries,
+                        fallback_queries,
                         per_query_limit=per_query,
                         continue_on_error=True,
                     )
@@ -388,6 +398,13 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                     str(exc),
                     details={"code": exc.code, **exc.details},
                 ) from exc
+            except PublicResearchRetrievalError as exc:
+                details = dict(getattr(exc, "details", {}) or {})
+                if not details.get("candidate_count"):
+                    details["selection_report"] = self._selection_summary(_SELECTION_REPORT.get())
+                    details["discovery_provider_summary"] = self._discovery_provider_summary(discovery_manifest)
+                    details["discovery_input"] = str(discovery_file) if discovery_file else None
+                raise PublicResearchRetrievalError(str(exc), details=details) from exc
 
             retrieval_health = build_retrieval_health(
                 discovery_manifest,
@@ -492,6 +509,82 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             _EXECUTION_REPORT.reset(token_execution)
             _EFFECTIVE_MAX_RESULTS.reset(token_max)
             _QUALITY_PROFILE.reset(token_quality)
+
+    @staticmethod
+    def _browser_fallback_queries(
+        web_candidates: list[dict[str, Any]],
+        search_queries: list[Any],
+        *,
+        min_hits: int,
+        browser_required: bool,
+    ) -> list[Any]:
+        """Decide which approved queries the browser search fallback must run.
+
+        The fallback always covers every approved query when SearXNG produced no
+        candidates at all or when the execution contract names browser_search as
+        a required provider.  Otherwise, with ``min_hits > 0``, only queries whose
+        SearXNG hit count is below the threshold are retried through the browser.
+        """
+
+        queries = list(search_queries or [])
+        if browser_required or not web_candidates:
+            return queries
+        if min_hits <= 0:
+            return []
+        hits_by_query: dict[str, int] = {}
+        for candidate in web_candidates:
+            if not isinstance(candidate, dict):
+                continue
+            matched = str(candidate.get("matched_query") or "").strip()
+            if matched:
+                hits_by_query[matched] = hits_by_query.get(matched, 0) + 1
+        return [
+            query
+            for query in queries
+            if hits_by_query.get(str(getattr(query, "query", query) or "").strip(), 0) < min_hits
+        ]
+
+    @staticmethod
+    def _selection_summary(report: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(report, dict):
+            return None
+        summary = {
+            key: report.get(key)
+            for key in (
+                "status",
+                "input_candidate_count",
+                "screened_candidate_count",
+                "deduplicated_candidate_count",
+                "selected_candidate_count",
+                "semantic_relevance_enforced",
+                "semantic_relevance_counts",
+                "selected_by_query",
+            )
+            if key in report
+        }
+        issues = [dict(item) for item in report.get("issues") or [] if isinstance(item, dict)]
+        summary["issue_count"] = len(issues)
+        summary["issues"] = issues[:10]
+        return summary
+
+    @staticmethod
+    def _discovery_provider_summary(discovery_manifest: dict[str, Any] | None) -> dict[str, Any]:
+        summary: dict[str, Any] = {}
+        manifest = discovery_manifest if isinstance(discovery_manifest, dict) else {}
+        for run in manifest.get("provider_runs") or []:
+            if not isinstance(run, dict):
+                continue
+            name = str(run.get("provider") or "unknown")
+            entry = summary.setdefault(name, {"runs": 0, "hits": 0, "failures": 0})
+            entry["runs"] += 1
+            entry["hits"] += int(run.get("result_count") or 0)
+        for failure in manifest.get("failures") or []:
+            if not isinstance(failure, dict):
+                continue
+            name = str(failure.get("provider") or "unknown")
+            entry = summary.setdefault(name, {"runs": 0, "hits": 0, "failures": 0})
+            entry["failures"] += 1
+        return summary
 
     @staticmethod
     def _deduplicate(values: list[dict[str, Any]]) -> list[dict[str, Any]]:

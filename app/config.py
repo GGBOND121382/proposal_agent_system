@@ -38,6 +38,7 @@ class Settings:
     browser_rate_limit_seconds: float
     browser_cache_ttl_seconds: int
     browser_fetch_fallback_enabled: bool
+    browser_fallback_min_hits_per_query: int
     mermaid_js_path: Path
     mermaid_browser_executable: str
     skill_timeout_seconds: int
@@ -93,6 +94,7 @@ class Settings:
             browser_rate_limit_seconds=float(os.getenv("BROWSER_RATE_LIMIT_SECONDS", "1.5")),
             browser_cache_ttl_seconds=int(os.getenv("BROWSER_CACHE_TTL_SECONDS", "86400")),
             browser_fetch_fallback_enabled=os.getenv("BROWSER_FETCH_FALLBACK_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"},
+            browser_fallback_min_hits_per_query=int(os.getenv("PUBLIC_SEARCH_BROWSER_FALLBACK_MIN_HITS_PER_QUERY", "1")),
             mermaid_js_path=Path(os.getenv("MERMAID_JS_PATH", str(root / "third_party" / "mermaid" / "mermaid.min.js"))).resolve(),
             mermaid_browser_executable=os.getenv("MERMAID_BROWSER_EXECUTABLE", ""),
             skill_timeout_seconds=int(os.getenv("SKILL_TIMEOUT_SECONDS", "60")),

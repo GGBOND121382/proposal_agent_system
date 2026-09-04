@@ -316,6 +316,29 @@ def test_background_execution_contract_forces_web_discovery_and_web_channel():
     assert background_execution_contract({})["required_channels"] == ["WEB_SEARCH"]
 
 
+def test_background_execution_contract_requires_browser_search_provider():
+    contracted = background_execution_contract({})
+    requirements = contracted["provider_execution_requirements"]
+    assert requirements["required_providers"] == ["browser_search"]
+    assert requirements["execute_all_approved_queries"] is True
+
+    # An approved plan's own provider requirements are preserved, not replaced.
+    merged = background_execution_contract(
+        {"provider_execution_requirements": {"required_providers": ["searxng"]}}
+    )
+    assert merged["provider_execution_requirements"]["required_providers"] == [
+        "searxng",
+        "browser_search",
+    ]
+
+    # Idempotent on re-application.
+    again = background_execution_contract(merged)
+    assert again["provider_execution_requirements"]["required_providers"] == [
+        "searxng",
+        "browser_search",
+    ]
+
+
 def test_wf3b_synthesis_representation_normalizes_dimension_profiles_and_span_id():
     output = {
         "result": {

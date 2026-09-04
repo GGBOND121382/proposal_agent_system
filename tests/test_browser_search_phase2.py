@@ -307,3 +307,84 @@ def test_browser_provider_preflight_requires_python_package(tmp_path, monkeypatc
 
     assert any(issue.code == "PLAYWRIGHT_PYTHON_PACKAGE_MISSING" for issue in report.blocking_issues)
     assert any(check["name"] == "PUBLIC_SEARCH_BROWSER" for check in report.checks)
+
+
+def test_browser_fallback_queries_cover_empty_required_and_low_hit_cases() -> None:
+    from app.skills.search_gateway import normalize_search_queries
+    from app.skills.verifiable_public_research import VerifiablePublicResearchArchiveSkill
+
+    queries = normalize_search_queries(["q1", "q2", "q3"])
+    candidates = [
+        {"matched_query": "q1", "url": "https://public.example/a"},
+        {"matched_query": "q1", "url": "https://public.example/b"},
+    ]
+
+    # No candidates at all: full fallback regardless of the threshold.
+    assert VerifiablePublicResearchArchiveSkill._browser_fallback_queries(
+        [], queries, min_hits=1, browser_required=False
+    ) == queries
+
+    # Required provider: full coverage even when SearXNG returned hits.
+    assert VerifiablePublicResearchArchiveSkill._browser_fallback_queries(
+        candidates, queries, min_hits=0, browser_required=True
+    ) == queries
+
+    # Threshold zero disables the low-hit fallback.
+    assert VerifiablePublicResearchArchiveSkill._browser_fallback_queries(
+        candidates, queries, min_hits=0, browser_required=False
+    ) == []
+
+    # Only queries below the threshold are retried through the browser.
+    fallback = VerifiablePublicResearchArchiveSkill._browser_fallback_queries(
+        candidates, queries, min_hits=1, browser_required=False
+    )
+    assert [query.query for query in fallback] == ["q2", "q3"]
+
+    fallback = VerifiablePublicResearchArchiveSkill._browser_fallback_queries(
+        candidates, queries, min_hits=3, browser_required=False
+    )
+    assert [query.query for query in fallback] == ["q1", "q2", "q3"]
+
+
+def test_zero_candidate_error_diagnostics_summarize_selection_and_channels() -> None:
+    from app.skills.verifiable_public_research import VerifiablePublicResearchArchiveSkill
+
+    selection = VerifiablePublicResearchArchiveSkill._selection_summary(
+        {
+            "status": "INSUFFICIENT",
+            "input_candidate_count": 12,
+            "screened_candidate_count": 0,
+            "selected_candidate_count": 0,
+            "semantic_relevance_enforced": True,
+            "semantic_relevance_counts": {"OFF_SCOPE": 12},
+            "selected_by_query": {},
+            "query_relevance_profiles": {"large": "object"},
+            "issues": [{"code": "X"} for _ in range(15)],
+        }
+    )
+    assert selection["input_candidate_count"] == 12
+    assert selection["semantic_relevance_counts"] == {"OFF_SCOPE": 12}
+    assert "query_relevance_profiles" not in selection
+    assert selection["issue_count"] == 15
+    assert len(selection["issues"]) == 10
+    assert VerifiablePublicResearchArchiveSkill._selection_summary(None) is None
+
+    summary = VerifiablePublicResearchArchiveSkill._discovery_provider_summary(
+        {
+            "provider_runs": [
+                {"provider": "searxng", "result_count": 7},
+                {"provider": "searxng", "result_count": 0},
+                {"provider": "openalex", "result_count": 8},
+            ],
+            "failures": [
+                {"provider": "searxng", "category": "RETRIEVAL"},
+                {"provider": "crossref", "category": "RETRIEVAL"},
+            ],
+        }
+    )
+    assert summary == {
+        "searxng": {"runs": 2, "hits": 7, "failures": 1},
+        "openalex": {"runs": 1, "hits": 8, "failures": 0},
+        "crossref": {"runs": 0, "hits": 0, "failures": 1},
+    }
+    assert VerifiablePublicResearchArchiveSkill._discovery_provider_summary(None) == {}
