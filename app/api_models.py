@@ -31,6 +31,11 @@ class WorkflowStartRequest(BaseModel):
     auto_advance: bool = True
 
 
+class WF3BTopicRequest(BaseModel):
+    topic: str = Field(min_length=1, max_length=500)
+    auto_advance: bool = True
+
+
 class WorkflowRebuildRequest(BaseModel):
     scope: Literal["SELF", "ALL_DOWNSTREAM"] = "ALL_DOWNSTREAM"
     auto_advance: bool = True

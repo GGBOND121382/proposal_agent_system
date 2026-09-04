@@ -299,6 +299,7 @@ def _query_text(item: Any) -> str:
 
 
 MAX_RESEARCH_QUERIES = 12
+MAX_BACKGROUND_RESEARCH_QUERIES = 24
 
 KNOWN_RETRIEVAL_CHANNELS = ("ACADEMIC", "WEB_SEARCH")
 
@@ -371,7 +372,12 @@ def validate_execution_contract(contract: dict[str, Any]) -> list[dict[str, Any]
     return findings
 
 
-def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+def normalize_and_validate_plan(
+    plan: dict[str, Any],
+    *,
+    strict: bool,
+    max_queries: int = MAX_RESEARCH_QUERIES,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(plan, dict):
         raise ValueError("Research plan must be a JSON object")
     questions = [
@@ -489,12 +495,12 @@ def normalize_and_validate_plan(plan: dict[str, Any], *, strict: bool) -> tuple[
 
     if not queries:
         findings.append({"code": "RESEARCH_PLAN_NO_QUERY", "severity": "P0", "message": "No executable query."})
-    if strict and len(queries) > MAX_RESEARCH_QUERIES:
+    if strict and len(queries) > max_queries:
         findings.append({
             "code": "RESEARCH_PLAN_TOO_MANY_QUERIES",
             "severity": "P1",
             "message": (
-                f"At most {MAX_RESEARCH_QUERIES} executable queries are supported; "
+                f"At most {max_queries} executable queries are supported; "
                 f"received {len(queries)}."
             ),
         })

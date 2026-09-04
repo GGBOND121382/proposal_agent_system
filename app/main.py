@@ -13,6 +13,7 @@ from .api_models import (
     GateDecisionRequest,
     ProjectCreate,
     PromptExecuteRequest,
+    WF3BTopicRequest,
     WorkflowRebuildRequest,
     WorkflowStartRequest,
 )
@@ -286,6 +287,20 @@ async def advance_workflow(workflow_id: str) -> dict[str, Any]:
         return await workflows.advance(workflow_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/wf3b-topic")
+async def provide_wf3b_topic(
+    workflow_id: str,
+    req: WF3BTopicRequest,
+) -> dict[str, Any]:
+    try:
+        workflow = workflows.provide_wf3b_topic(workflow_id, req.topic)
+        return await workflows.advance(workflow_id) if req.auto_advance else workflow
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/workflows")

@@ -78,7 +78,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-08-27.v51-wf3-runtime-provenance"
+OUTPUT_NORMALIZER_VERSION = "2026-09-04.v52-wf3b-synthesis-representation"
 MODEL_CONTEXT_PROJECTION_VERSION = "2026-08-26.v4-wf3-research-dedup"
 MODEL_SYSTEM_PROMPT_VERSION = "2026-08-13.v4-wf3-contract-retry-feedback"
 
@@ -1129,6 +1129,58 @@ class PromptExecutor:
         visit(output, ())
         return errors
 
+    @staticmethod
+    def _normalize_wf3b_synthesis_representation(
+        output: dict[str, Any],
+    ) -> list[str]:
+        """Normalize two unambiguous WF-3B response representation errors."""
+
+        profile_aliases = {
+            "APPLICATION_SCENARIO": "PROJECT_OVERVIEW",
+            "STAKEHOLDER_AND_PAIN": "NEED_ANALYSIS",
+            "INDUSTRY_SCALE_AND_TREND": "BACKGROUND_AND_SIGNIFICANCE",
+            "POLICY_STANDARD_AND_PROGRAM": "BACKGROUND_AND_SIGNIFICANCE",
+            "REPRESENTATIVE_CASE": "LITERATURE_REVIEW",
+            "CURRENT_ADOPTION": "LITERATURE_REVIEW",
+            "OPERATIONAL_CONSTRAINT": "KEY_ISSUE",
+            "RESEARCH_SIGNIFICANCE": "BACKGROUND_AND_SIGNIFICANCE",
+        }
+        changes: list[str] = []
+        result = output.get("result") if isinstance(output.get("result"), dict) else {}
+        for claim_index, claim in enumerate(result.get("claims") or []):
+            if not isinstance(claim, dict):
+                continue
+            profiles = claim.get("target_section_profiles")
+            if not isinstance(profiles, list):
+                continue
+            normalized_profiles: list[Any] = []
+            for profile in profiles:
+                normalized = profile_aliases.get(str(profile), profile)
+                if normalized != profile:
+                    changes.append(
+                        f"/result/claims/{claim_index}/target_section_profiles:"
+                        f"{profile}->{normalized}"
+                    )
+                if normalized not in normalized_profiles:
+                    normalized_profiles.append(normalized)
+            claim["target_section_profiles"] = normalized_profiles
+
+        def strip_redundant_span_id(node: Any, path: str = "") -> None:
+            if isinstance(node, list):
+                for index, item in enumerate(node):
+                    strip_redundant_span_id(item, f"{path}/{index}")
+                return
+            if not isinstance(node, dict):
+                return
+            if "source_id" in node and "span_id" in node:
+                node.pop("span_id", None)
+                changes.append(f"{path}/span_id:removed")
+            for key, value in list(node.items()):
+                strip_redundant_span_id(value, f"{path}/{key}")
+
+        strip_redundant_span_id(output)
+        return changes
+
     def _normalize_output(
         self,
         prompt_id: str,
@@ -1175,6 +1227,15 @@ class PromptExecutor:
             )
 
         normalized = copy.deepcopy(output)
+        if prompt_id == "P-BACKGROUND-RESEARCH-SYNTHESIS":
+            wf3b_representation_changes = (
+                self._normalize_wf3b_synthesis_representation(normalized)
+            )
+            if wf3b_representation_changes:
+                normalized.setdefault("warnings", []).append(
+                    "SYSTEM_WF3B_SYNTHESIS_REPRESENTATION_NORMALIZATION: "
+                    + "; ".join(wf3b_representation_changes[:20])
+                )
         normalized, null_literal_report = normalize_exact_null_literals(
             normalized, output_schema
         )

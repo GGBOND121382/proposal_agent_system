@@ -46,6 +46,9 @@ class UnifiedWorkflowEngine:
             return await self.staged.advance(workflow_id)
         return await self.runtime.advance(workflow_id)
 
+    def provide_wf3b_topic(self, workflow_id, topic):
+        return self.runtime.provide_wf3b_topic(workflow_id, topic)
+
     def get(self, workflow_id):
         row = self.db.fetchone("SELECT workflow_type FROM workflows WHERE id=?", (workflow_id,))
         if row and row["workflow_type"] == STAGED_WORKFLOW_TYPE:

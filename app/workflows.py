@@ -2506,6 +2506,50 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             )
         return self.get(workflow_id)
 
+    def provide_wf3b_topic(self, workflow_id: str, topic: str) -> dict[str, Any]:
+        """Supply the missing topic to an existing prerequisite-waiting WF-3B.
+
+        WF-3B occupies its workflow slot while waiting, so starting a duplicate
+        is intentionally rejected.  This controlled input path updates only the
+        unresolved topic on the existing checkpoint and leaves ``advance`` to
+        re-evaluate every prerequisite before any model or search step runs.
+        """
+
+        wf = self.get(workflow_id)
+        if wf["workflow_type"] != WF3B_WORKFLOW_TYPE:
+            raise ValueError("只有 WF-3B_TOPIC_BACKGROUND_RESEARCH 可以补填调研 Topic")
+        if wf["status"] != WorkflowStatus.WAITING_PREREQUISITE.value:
+            raise ValueError(
+                f"仅 WAITING_PREREQUISITE 状态可以补填调研 Topic；当前状态为 {wf['status']}"
+            )
+        supplied_topic = str(topic or "").strip()
+        if not supplied_topic:
+            raise ValueError("调研 Topic 不能为空")
+
+        state = copy.deepcopy(wf["state"])
+        existing_options = copy.deepcopy(state.get("options") or {})
+        existing_options["topic"] = supplied_topic
+        normalized_options, topic_error = self._normalize_wf3b_start_options(
+            wf["project_id"],
+            existing_options,
+            state.get("prerequisite_workflow_ids") or {},
+        )
+        if topic_error:
+            raise ValueError(topic_error)
+        state["options"] = normalized_options
+        state["wf3b_topic_supplied_at"] = utc_now()
+        self._update(wf, state=state)
+        self.db.audit(
+            "WF3B_TOPIC_SUPPLIED",
+            project_id=wf["project_id"],
+            object_id=workflow_id,
+            metadata={
+                "topic_id": normalized_options.get("topic_id"),
+                "topic_origin": normalized_options.get("topic_origin"),
+            },
+        )
+        return self.get(workflow_id)
+
     def _workflow_prerequisite_error(self, project_id: str, workflow_type: str, options: dict[str, Any]) -> str | None:
         _, missing = self._resolve_prerequisite_workflows(project_id, workflow_type, options)
         return self._prerequisite_error(missing)

@@ -22,12 +22,18 @@ from app.background_research import (
 from app.config import Settings
 from app.db import Database
 from app.dependency_preflight import RuntimeDependencyPreflight
+from app.executor import PromptExecutor
 from app.pack import PromptPack
+from app.runtime_context import LiveContextBuilder
 from app.skills.research_quality import (
     build_background_coverage_dimensions,
     build_research_sufficiency,
 )
-from app.util import new_id, utc_now
+from app.skills.research_plan import (
+    MAX_BACKGROUND_RESEARCH_QUERIES,
+    normalize_and_validate_plan,
+)
+from app.util import new_id, sha256_json, utc_now
 from app.workflow_catalog import ALL_WORKFLOWS
 from app.workflow_defs import CRITIC_PRODUCER, WORKFLOWS
 from app.workflow_lifecycle import WorkflowLifecycleService
@@ -130,6 +136,28 @@ def test_wf3b_explicit_dimension_subset_keeps_canonical_order_and_deduplicates()
     nested = normalize_wf3b_options({"wf3b": {"required_dimensions": ["OPERATIONAL_CONSTRAINT"]}})
     assert nested["required_dimensions"] == ["OPERATIONAL_CONSTRAINT"]
     assert "wf3b" not in nested
+
+    ui_options = normalize_wf3b_options(
+        {
+            "background_research": {
+                "topic_override": "生成式人工智能科研应用",
+                "background_dimensions": [
+                    "POLICY_STANDARD_AND_PROGRAM",
+                    "APPLICATION_SCENARIO",
+                ],
+                "focus": "政策和应用案例",
+            }
+        },
+        project_id="project-ui",
+    )
+    assert ui_options["topic"] == "生成式人工智能科研应用"
+    assert ui_options["topic_origin"] == "WORKFLOW_OPTIONS"
+    assert ui_options["required_dimensions"] == [
+        "APPLICATION_SCENARIO",
+        "POLICY_STANDARD_AND_PROGRAM",
+    ]
+    assert ui_options["focus"] == "政策和应用案例"
+    assert "background_research" not in ui_options
 
 
 def test_wf3b_unknown_or_empty_dimensions_fail_fast():
@@ -235,6 +263,45 @@ def test_background_plan_without_any_query_marks_every_frozen_dimension_uncovere
     assert findings[0]["dimensions"] == ["APPLICATION_SCENARIO"]
 
 
+def test_background_plan_adapts_dimension_queries_to_shared_execution_contract():
+    dimensions = list(BACKGROUND_DIMENSIONS)
+    plan = {
+        "plan_id": "background-plan",
+        "binding_contract_version": "1.0",
+        "time_scope": "2021-01-01/2026-09-04",
+        "evidence_requirements": ["优先使用一手公开来源"],
+        "prohibited_inferences": ["不得推断内部信息"],
+        "queries": [
+            {
+                "query_id": f"query-{index:02d}",
+                "query": f"公开资料检索主题 {index} authoritative source",
+                "dimension": dimensions[index % len(dimensions)],
+                "purpose": "核验公开背景",
+            }
+            for index in range(22)
+        ],
+    }
+
+    normalized, findings = normalize_background_plan(
+        plan,
+        required_dimensions=dimensions,
+    )
+    execution_plan = background_execution_contract(normalized)
+    _, validation = normalize_and_validate_plan(
+        execution_plan,
+        strict=True,
+        max_queries=MAX_BACKGROUND_RESEARCH_QUERIES,
+    )
+
+    assert len(normalized["queries"]) == 22
+    assert {item["dimension"] for item in normalized["queries"]} == set(dimensions)
+    assert all(item["linked_question_indexes"] for item in normalized["queries"])
+    assert normalized["research_questions"]
+    assert normalized["source_priorities"]
+    assert validation["status"] == "PASS"
+    assert findings == []
+
+
 def test_background_execution_contract_forces_web_discovery_and_web_channel():
     contracted = background_execution_contract(
         {"require_web_discovery": False, "required_channels": ["academic"]}
@@ -247,6 +314,104 @@ def test_background_execution_contract_forces_web_discovery_and_web_channel():
     assert again["required_channels"] == ["ACADEMIC", "WEB_SEARCH"]
 
     assert background_execution_contract({})["required_channels"] == ["WEB_SEARCH"]
+
+
+def test_wf3b_synthesis_representation_normalizes_dimension_profiles_and_span_id():
+    output = {
+        "result": {
+            "claims": [
+                {
+                    "target_section_profiles": [
+                        "RESEARCH_SIGNIFICANCE",
+                        "STAKEHOLDER_AND_PAIN",
+                        "BACKGROUND_AND_SIGNIFICANCE",
+                    ],
+                    "source_refs": [
+                        {"source_id": "public-src-1", "span_id": "passage-1"}
+                    ],
+                }
+            ]
+        },
+        "source_refs": [
+            {"source_id": "public-src-1", "span_id": "passage-1"}
+        ],
+    }
+
+    changes = PromptExecutor._normalize_wf3b_synthesis_representation(output)
+
+    assert output["result"]["claims"][0]["target_section_profiles"] == [
+        "BACKGROUND_AND_SIGNIFICANCE",
+        "NEED_ANALYSIS",
+    ]
+    assert "span_id" not in output["result"]["claims"][0]["source_refs"][0]
+    assert "span_id" not in output["source_refs"][0]
+    assert changes
+
+
+def test_live_context_projects_approved_safe_package_into_wf3b_contract(tmp_path):
+    db = make_executor_db(tmp_path)
+    pack = PromptPack(ROOT / "prompt_pack")
+    workflow_id = _add_wf3b(db)
+    state = {
+        "workflow_type": WF3B_WORKFLOW_TYPE,
+        "options": {
+            "topic": "智慧水务应用背景",
+            "topic_id": "topic-smart-water",
+            "topic_origin": "WORKFLOW_OPTIONS",
+            "required_dimensions": [
+                "APPLICATION_SCENARIO",
+                "POLICY_STANDARD_AND_PROGRAM",
+            ],
+            "allowed_public_topics": ["智慧水务", "水质监测"],
+        },
+        "step_results": {},
+        "repair_attempts": {},
+    }
+    safe_output = pack.replay_output("P-SAFE-ONLINE-PACKAGE", "normal")
+    db.execute(
+        """INSERT INTO artifacts(
+             id,project_id,workflow_id,artifact_type,prompt_id,version,status,
+             security_level,context_hash,content_json,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            new_id("artifact"),
+            "project-1",
+            workflow_id,
+            "PROMPT_OUTPUT",
+            "P-SAFE-ONLINE-PACKAGE",
+            1,
+            "PASS",
+            "INTERNAL",
+            sha256_json(safe_output),
+            json.dumps(safe_output, ensure_ascii=False),
+            utc_now(),
+        ),
+    )
+
+    envelope = LiveContextBuilder(db, pack).build(
+        "P-BACKGROUND-RESEARCH-PLAN",
+        "project-1",
+        workflow_id=workflow_id,
+        workflow_state=state,
+    )
+
+    assert pack.validate("P-BACKGROUND-RESEARCH-PLAN", "input", envelope) == []
+    payload = envelope["payload"]
+    assert payload["task_type"] == "PUBLIC_BACKGROUND_RESEARCH"
+    assert payload["safe_online_package_content"]["task_type"] == (
+        "PUBLIC_BACKGROUND_RESEARCH"
+    )
+    assert payload["topic"] == {
+        "topic_id": "topic-smart-water",
+        "topic_description": "智慧水务应用背景",
+    }
+    assert payload["required_dimensions"] == [
+        "APPLICATION_SCENARIO",
+        "POLICY_STANDARD_AND_PROGRAM",
+    ]
+    assert payload["optional_dimensions"] == []
+    assert payload["retrieval_contract"]["require_web_discovery"] is True
+    assert "WEB_SEARCH" in payload["retrieval_contract"]["required_channels"]
 
 
 def _record(source_id: str, provider: str) -> dict:
@@ -555,6 +720,39 @@ def test_wf3b_start_without_resolvable_topic_waits_for_prerequisite(tmp_path):
     created = engine.start(project_id, WF3B_WORKFLOW_TYPE, {})
     assert created["status"] == "WAITING_PREREQUISITE"
     assert "topic" in created["state"]["last_error"]
+
+
+def test_wf3b_waiting_workflow_accepts_topic_and_keeps_same_identity(tmp_path):
+    db = Database(tmp_path / "state.db")
+    project_id = add_project(db)
+    add_workflow(db, project_id, "WF-1_PROJECT_INTAKE")
+    engine = _engine(db)
+    created = engine.start(project_id, WF3B_WORKFLOW_TYPE, {})
+
+    updated = engine.provide_wf3b_topic(created["id"], "智慧水务应用背景")
+
+    assert updated["id"] == created["id"]
+    assert updated["status"] == "WAITING_PREREQUISITE"
+    assert updated["state"]["options"]["topic"] == "智慧水务应用背景"
+    assert updated["state"]["options"]["topic_origin"] == "WORKFLOW_OPTIONS"
+    assert updated["state"]["options"]["topic_id"] == wf3b_topic_id(
+        project_id, "智慧水务应用背景"
+    )
+    event = db.fetchone(
+        "SELECT event_type FROM audit_events WHERE object_id=? ORDER BY created_at DESC LIMIT 1",
+        (created["id"],),
+    )
+    assert event["event_type"] == "WF3B_TOPIC_SUPPLIED"
+
+
+def test_wf3b_topic_input_rejects_non_wf3b_workflow(tmp_path):
+    db = Database(tmp_path / "state.db")
+    project_id = add_project(db)
+    workflow_id = add_workflow(db, project_id, "WF-1_PROJECT_INTAKE")
+    engine = _engine(db)
+
+    with pytest.raises(ValueError, match="WF-3B_TOPIC_BACKGROUND_RESEARCH"):
+        engine.provide_wf3b_topic(workflow_id, "智慧水务")
 
 
 def test_wf3b_start_normalizes_options_and_freezes_topic(tmp_path):

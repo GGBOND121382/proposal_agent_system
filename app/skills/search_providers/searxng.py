@@ -39,6 +39,25 @@ class SearxngSearchProvider(SearchProvider):
             return result
         return []
 
+    @staticmethod
+    def _unresponsive_engines(payload: Any) -> list[dict[str, str]]:
+        if not isinstance(payload, dict):
+            return []
+        result: list[dict[str, str]] = []
+        for item in payload.get("unresponsive_engines") or []:
+            if isinstance(item, (list, tuple)):
+                engine = str(item[0] if item else "").strip()
+                reason = str(item[1] if len(item) > 1 else "unresponsive").strip()
+            elif isinstance(item, dict):
+                engine = str(item.get("engine") or item.get("name") or "").strip()
+                reason = str(item.get("reason") or item.get("error") or "unresponsive").strip()
+            else:
+                engine = str(item or "").strip()
+                reason = "unresponsive"
+            if engine:
+                result.append({"engine": engine, "reason": reason or "unresponsive"})
+        return result
+
     def _search_one(
         self,
         query: SearchQuery,
@@ -120,6 +139,26 @@ class SearxngSearchProvider(SearchProvider):
                             rank=index + 1,
                         )
                     )
+                for item in self._unresponsive_engines(payload):
+                    failures.append(
+                        {
+                            "query": query.query,
+                            "query_id": query.query_id,
+                            "provider": self.provider_id,
+                            "engine": item["engine"],
+                            "category": "RETRIEVAL",
+                            "error_code": "SEARXNG_ENGINE_UNRESPONSIVE",
+                            "message": (
+                                f"SearXNG engine {item['engine']} was skipped: "
+                                f"{item['reason']}"
+                            ),
+                            "details": {
+                                "endpoint": endpoint,
+                                "engine": item["engine"],
+                                "reason": item["reason"],
+                            },
+                        }
+                    )
         except SearchProviderConfigurationError:
             raise
         except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError) as exc:
@@ -137,19 +176,23 @@ class SearxngSearchProvider(SearchProvider):
                     },
                 }
             )
+        run_status = "DEGRADED" if hits and failures else ("ERROR" if failures else "PASS")
         run = ProviderRun(
             provider=self.provider_id,
             engine=engines or None,
             query_id=query.query_id,
             query=query.query,
-            status="PASS" if not failures else "ERROR",
+            status=run_status,
             result_count=len(hits),
             http_status=http_status,
             blockage_type=None,
             started_at=started_at,
             completed_at=utc_now(),
             raw_response=payload,
-            details={"endpoint": endpoint},
+            details={
+                "endpoint": endpoint,
+                "unresponsive_engines": self._unresponsive_engines(payload),
+            },
         )
         return hits, run, failures
 

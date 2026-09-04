@@ -15,6 +15,7 @@ from app.staged_workflows import (
     STAGED_WORKFLOW_TYPE,
     StagedWorkflowCoordinator,
 )
+from app.unified_workflows import UnifiedWorkflowEngine
 from app.util import utc_now
 
 
@@ -111,6 +112,22 @@ def _write_owner_marker(
             "claimed_at": utc_now(),
         },
     )
+
+
+def test_unified_engine_delegates_wf3b_topic_input_to_runtime() -> None:
+    calls = []
+    engine = object.__new__(UnifiedWorkflowEngine)
+    engine.runtime = SimpleNamespace(
+        provide_wf3b_topic=lambda workflow_id, topic: calls.append(
+            (workflow_id, topic)
+        )
+        or {"id": workflow_id, "topic": topic}
+    )
+
+    result = engine.provide_wf3b_topic("wf-3b", "智慧水务")
+
+    assert result == {"id": "wf-3b", "topic": "智慧水务"}
+    assert calls == [("wf-3b", "智慧水务")]
 
 
 def test_file_bridged_pipeline_is_registered_in_main_workflow_store(tmp_path):

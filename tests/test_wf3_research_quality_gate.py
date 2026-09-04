@@ -603,6 +603,78 @@ def test_browser_search_success_satisfies_required_web_channel() -> None:
     assert health["status"] == "DEGRADED"
 
 
+def test_partial_searxng_engine_failure_keeps_successful_web_channel() -> None:
+    query = "query one"
+    health = build_retrieval_health(
+        {
+            "providers": ["openalex", "searxng"],
+            "provider_runs": [
+                {"provider": "openalex", "query": query, "result_count": 1},
+                {
+                    "provider": "searxng",
+                    "query": query,
+                    "status": "DEGRADED",
+                    "result_count": 3,
+                },
+            ],
+            "failures": [
+                {
+                    "provider": "searxng",
+                    "engine": "brave",
+                    "query": query,
+                    "error_code": "SEARXNG_ENGINE_UNRESPONSIVE",
+                }
+            ],
+        },
+        retrieval_provider="hybrid",
+        queries=[query],
+        execution_contract={
+            "required_channels": ["ACADEMIC", "WEB_SEARCH"],
+            "require_web_discovery": True,
+        },
+    )
+
+    assert health["status"] == "PASS"
+    assert health["providers"]["searxng"]["successful_queries"] == 1
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" not in health["reason_codes"]
+
+
+def test_empty_failed_searxng_run_does_not_satisfy_web_channel() -> None:
+    query = "query one"
+    health = build_retrieval_health(
+        {
+            "providers": ["openalex", "searxng"],
+            "provider_runs": [
+                {"provider": "openalex", "query": query, "result_count": 1},
+                {
+                    "provider": "searxng",
+                    "query": query,
+                    "status": "ERROR",
+                    "result_count": 0,
+                },
+            ],
+            "failures": [
+                {
+                    "provider": "searxng",
+                    "engine": "brave",
+                    "query": query,
+                    "error_code": "SEARXNG_ENGINE_UNRESPONSIVE",
+                }
+            ],
+        },
+        retrieval_provider="hybrid",
+        queries=[query],
+        execution_contract={
+            "required_channels": ["ACADEMIC", "WEB_SEARCH"],
+            "require_web_discovery": True,
+        },
+    )
+
+    assert health["status"] == "BLOCKING_FAILURE"
+    assert health["providers"]["searxng"]["successful_queries"] == 0
+    assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" in health["blocking_reason_codes"]
+
+
 def test_required_provider_not_executed_is_blocking() -> None:
     queries = ["query one"]
     health = build_retrieval_health(
@@ -628,6 +700,32 @@ def test_required_provider_not_executed_is_blocking() -> None:
     )
     assert health["status"] == "BLOCKING_FAILURE"
     assert "REQUIRED_PROVIDER_NOT_EXECUTED:browser_search" in health["blocking_reason_codes"]
+
+
+def test_abstract_web_search_requirement_accepts_concrete_web_provider() -> None:
+    query = "query one"
+    health = build_retrieval_health(
+        {
+            "providers": ["openalex", "searxng"],
+            "provider_runs": [
+                {"provider": "openalex", "query": query, "result_count": 3},
+                {"provider": "searxng", "query": query, "result_count": 5},
+            ],
+            "failures": [],
+        },
+        retrieval_provider="hybrid",
+        queries=[query],
+        execution_contract={
+            "required_channels": ["WEB_SEARCH"],
+            "provider_execution_requirements": {
+                "required_providers": ["web_search"],
+                "execute_all_approved_queries": True,
+            },
+            "require_web_discovery": True,
+        },
+    )
+    assert health["status"] == "PASS"
+    assert health["blocking_reason_codes"] == []
 
 
 def test_execution_contract_strict_validation() -> None:

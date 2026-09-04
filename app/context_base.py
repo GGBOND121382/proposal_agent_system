@@ -19,10 +19,13 @@ from .privacy import find_sensitive_values
 from .proposal_quality import SECTION_FUNCTION_ROLE_ALIASES
 from .workflow_repair import repair_override_key, producer_consumer_value
 from .background_research import (
+    BACKGROUND_DIMENSIONS,
     WF3B_PLAN_PROMPT,
+    WF3B_PLAN_CRITIC_PROMPT,
     WF3B_RESEARCH_CRITIC,
     WF3B_SYNTHESIS_PROMPT,
     WF3B_WORKFLOW_TYPE,
+    background_execution_contract,
     build_background_cards,
 )
 from .model_semantic_contracts import project_argument_authoritative_state
@@ -1833,6 +1836,168 @@ class ContextBuilder:
             contract["require_web_discovery"] = bool(options.get("require_web_discovery"))
         return contract
 
+    @staticmethod
+    def _wf3b_retrieval_summary(
+        search_results: dict[str, Any],
+        required_dimensions: list[str],
+    ) -> dict[str, Any]:
+        """Project runtime retrieval evidence into the WF-3B prompt contract."""
+
+        sources = [
+            item
+            for item in (
+                search_results.get("source_catalog")
+                or search_results.get("sources")
+                or []
+            )
+            if isinstance(item, dict)
+        ]
+        academic_providers = {"OPENALEX", "CROSSREF", "SEMANTIC_SCHOLAR"}
+        academic_count = 0
+        web_count = 0
+        for source in sources:
+            verification = (
+                source.get("verification")
+                if isinstance(source.get("verification"), dict)
+                else {}
+            )
+            providers = [
+                str(item).upper()
+                for item in (
+                    verification.get("discovery_providers")
+                    or source.get("discovery_providers")
+                    or [
+                        verification.get("discovery_provider")
+                        or source.get("discovery_provider")
+                    ]
+                )
+                if str(item or "").strip()
+            ]
+            channel = str(
+                verification.get("channel") or source.get("channel") or ""
+            ).upper()
+            if any(provider in academic_providers for provider in providers) or channel == "ACADEMIC":
+                academic_count += 1
+            else:
+                web_count += 1
+
+        sufficiency = (
+            search_results.get("research_sufficiency")
+            if isinstance(search_results.get("research_sufficiency"), dict)
+            else {}
+        )
+        status = str(sufficiency.get("status") or "DEGRADED").upper()
+        if status not in {"SUFFICIENT", "DEGRADED", "BLOCKING_FAILURE"}:
+            status = "DEGRADED" if sufficiency.get("may_continue", True) else "BLOCKING_FAILURE"
+        allowed_dimensions = set(required_dimensions or BACKGROUND_DIMENSIONS)
+        uncovered: list[str] = []
+        for gap in sufficiency.get("research_gaps") or []:
+            if not isinstance(gap, dict):
+                continue
+            dimension = str(gap.get("dimension") or "").upper()
+            if dimension in allowed_dimensions and dimension not in uncovered:
+                uncovered.append(dimension)
+        blocking_reasons = list(
+            dict.fromkeys(
+                str(item).strip()
+                for item in sufficiency.get("blocking_reasons") or []
+                if str(item).strip()
+            )
+        )
+        return {
+            "status": status,
+            "web_hit_count": web_count,
+            "academic_hit_count": academic_count,
+            "uncovered_dimensions": uncovered,
+            "blocking_reasons": blocking_reasons,
+        }
+
+    @staticmethod
+    def _wf3b_extracted_passages(search_results: dict[str, Any]) -> list[dict[str, Any]]:
+        """Add the prompt-contract channel to archived WF-3B passages."""
+
+        academic_providers = {"openalex", "crossref", "semantic_scholar"}
+        web_providers = {"searxng", "browser", "browser_search"}
+        channels_by_source: dict[str, str] = {}
+        for source in search_results.get("source_catalog") or []:
+            if not isinstance(source, dict):
+                continue
+            source_id = str(source.get("source_id") or "").strip()
+            providers = {
+                str(item or "").strip().lower()
+                for item in source.get("discovery_providers") or []
+                if str(item or "").strip()
+            }
+            if providers & web_providers:
+                channel = "WEB_SEARCH"
+            elif providers & academic_providers:
+                channel = "ACADEMIC"
+            else:
+                channel = "WEB_SEARCH"
+            if source_id:
+                channels_by_source[source_id] = channel
+
+        projected: list[dict[str, Any]] = []
+        for passage in search_results.get("passages") or []:
+            if not isinstance(passage, dict):
+                continue
+            source_ref = passage.get("source_ref")
+            if not isinstance(source_ref, dict):
+                continue
+            passage_id = str(passage.get("passage_id") or "").strip()
+            text = str(passage.get("text") or "").strip()
+            relevance = str(passage.get("relevance") or "").strip()
+            if not passage_id or not text or not relevance:
+                continue
+            source_id = str(source_ref.get("source_id") or "").strip()
+            channel = str(passage.get("channel") or "").strip().upper()
+            if channel not in {"ACADEMIC", "WEB_SEARCH"}:
+                channel = channels_by_source.get(source_id, "WEB_SEARCH")
+            projected.append({
+                # The synthesis model must cite source_id.  Giving the same
+                # evidence two unrelated opaque IDs caused it to transform
+                # ``passage-<id>`` into a nonexistent ``public-src-<id>``.
+                # Align the prompt-only passage identifier with its source;
+                # immutable archive identities remain unchanged.
+                "passage_id": source_id or passage_id,
+                "source_ref": source_ref,
+                "channel": channel,
+                "text": text,
+                "relevance": relevance,
+            })
+        return projected
+
+    @staticmethod
+    def _wf3b_prompt_research_plan(plan: dict[str, Any]) -> dict[str, Any]:
+        """Project the runtime plan onto the narrower synthesis/critic schema."""
+
+        source = plan if isinstance(plan, dict) else {}
+        projected_queries: list[dict[str, Any]] = []
+        for item in source.get("queries") or []:
+            if not isinstance(item, dict):
+                continue
+            projected_queries.append({
+                key: copy.deepcopy(item.get(key))
+                for key in ("query_id", "query", "dimension", "purpose")
+                if item.get(key) is not None
+            })
+        projected = {
+            key: copy.deepcopy(source.get(key))
+            for key in (
+                "plan_id",
+                "task_type",
+                "topic_id",
+                "required_dimensions",
+                "time_scope",
+                "evidence_requirements",
+                "prohibited_inferences",
+                "binding_contract_version",
+            )
+            if source.get(key) is not None
+        }
+        projected["queries"] = projected_queries
+        return projected
+
     def _approved_public_claims(
         self,
         project_id: str,
@@ -2351,6 +2516,66 @@ class ContextBuilder:
                 ("payload.research_questions", list(plan.get("research_questions") or [])),
                 ("payload.executable_queries", list(plan.get("queries") or [])),
             ])
+        if prompt_id == WF3B_PLAN_PROMPT:
+            options = state.get("options") if isinstance(state.get("options"), dict) else {}
+            required_dimensions = [
+                str(item).upper()
+                for item in options.get("required_dimensions") or BACKGROUND_DIMENSIONS
+                if str(item).upper() in BACKGROUND_DIMENSIONS
+            ]
+            optional_dimensions = [
+                str(item).upper()
+                for item in options.get("optional_dimensions") or []
+                if str(item).upper() in BACKGROUND_DIMENSIONS
+                and str(item).upper() not in required_dimensions
+            ]
+            retrieval_contract = background_execution_contract(
+                self._wf3_retrieval_contract(options)
+            )
+            replacements.extend([
+                ("payload.task_type", "PUBLIC_BACKGROUND_RESEARCH"),
+                ("payload.topic", {
+                    "topic_id": str(options.get("topic_id") or ""),
+                    "topic_description": str(options.get("topic") or "").strip(),
+                }),
+                ("payload.required_dimensions", required_dimensions),
+                ("payload.optional_dimensions", optional_dimensions),
+                ("payload.known_public_sources", list(options.get("known_public_sources") or [])),
+                ("payload.time_constraints", self._wf3_time_constraints(options)),
+                ("payload.evidence_requirements", self._wf3_evidence_requirements(options)),
+                ("payload.retrieval_contract", retrieval_contract),
+            ])
+        if prompt_id == WF3B_PLAN_CRITIC_PROMPT:
+            options = state.get("options") if isinstance(state.get("options"), dict) else {}
+            safe_package_for_plan = self._result(
+                project["id"],
+                "P-SAFE-ONLINE-PACKAGE",
+                workflow_id=workflow_id,
+                exact_workflow=True,
+            ) or {}
+            plan = self._result(
+                project["id"],
+                WF3B_PLAN_PROMPT,
+                workflow_id=workflow_id,
+                exact_workflow=True,
+            ) or {}
+            approved_topics = list(
+                options.get("allowed_public_topics")
+                or config.get("allowed_public_topics")
+                or [str(options.get("topic") or "").strip()]
+            )
+            replacements.extend([
+                ("payload.approved_boundary", {
+                    "task_description": str(safe_package_for_plan.get("task_description") or options.get("topic") or "").strip(),
+                    "topic_description": str(options.get("topic") or "").strip(),
+                    "allowed_topics": [str(item).strip() for item in approved_topics if str(item).strip()],
+                    "allowed_context": list(safe_package_for_plan.get("allowed_context") or []),
+                    "prohibited_inferences": list(safe_package_for_plan.get("prohibited_inferences") or []),
+                    "prohibited_outputs": list(safe_package_for_plan.get("prohibited_outputs") or []),
+                }),
+                ("payload.required_dimensions", list(options.get("required_dimensions") or BACKGROUND_DIMENSIONS)),
+                ("payload.executable_queries", list(plan.get("queries") or [])),
+            ])
         human_resolutions = self._human_resolutions_for_prompt(state, prompt_id, workflow_id)
         if "human_resolutions" in payload or human_resolutions:
             replacements.append(("payload.human_resolutions", human_resolutions))
@@ -2647,6 +2872,8 @@ class ContextBuilder:
                     ):
                         value = self._canonicalize_revision_plan_roles(value)
                 if value is not None:
+                    if field == "research_plan" and is_background_workflow:
+                        value = self._wf3b_prompt_research_plan(value)
                     if (
                         field == "synthesis_candidate"
                         and is_background_workflow
@@ -2719,6 +2946,11 @@ class ContextBuilder:
                 state=state,
                 workflow_id=workflow_id,
             )
+            if is_background_workflow:
+                # The shared safety prompt emits the generic PUBLIC_RESEARCH
+                # label. WF-3B projects that already-approved package into its
+                # background-research subtype without changing any content.
+                safe_package["task_type"] = "PUBLIC_BACKGROUND_RESEARCH"
         research_synthesis = self._result(
             project["id"],
             WF3B_SYNTHESIS_PROMPT if is_background_workflow else "P-PUBLIC-RESEARCH-SYNTHESIS",
@@ -3147,12 +3379,27 @@ class ContextBuilder:
                     "retrieval_health_status": str((search_results.get("retrieval_health") or {}).get("status") or "UNOBSERVED"),
                     "may_continue": True,
                 }
-                replacements.append(("payload.research_sufficiency", sufficiency))
+                if not is_background_workflow:
+                    replacements.append(("payload.research_sufficiency", sufficiency))
+                if is_background_workflow and "retrieval_summary" in payload:
+                    options = state.get("options") if isinstance(state.get("options"), dict) else {}
+                    replacements.append((
+                        "payload.retrieval_summary",
+                        self._wf3b_retrieval_summary(
+                            search_results,
+                            list(options.get("required_dimensions") or BACKGROUND_DIMENSIONS),
+                        ),
+                    ))
             if "retrieved_sources" in payload:
                 replacements.append(("payload.retrieved_sources", search_results.get("sources", [])))
             critic_prompt_id = WF3B_RESEARCH_CRITIC if is_background_workflow else "P-PUBLIC-RESEARCH-CRITIC"
             if "extracted_passages" in payload or prompt_id == critic_prompt_id:
-                replacements.append(("payload.extracted_passages", search_results.get("passages", [])))
+                replacements.append((
+                    "payload.extracted_passages",
+                    self._wf3b_extracted_passages(search_results)
+                    if is_background_workflow
+                    else search_results.get("passages", []),
+                ))
             if "public_sources" in payload:
                 replacements.append(("payload.public_sources", search_results.get("sources", [])))
             if prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC":

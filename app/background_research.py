@@ -49,12 +49,15 @@ def _clean_text(value: Any) -> str:
 
 def _nested_options(options: dict[str, Any] | None) -> dict[str, Any]:
     source = copy.deepcopy(options or {})
-    nested = source.get("wf3b")
-    if isinstance(nested, dict):
-        merged = copy.deepcopy(source)
-        merged.update(nested)
-        return merged
-    return source
+    merged = copy.deepcopy(source)
+    # ``wf3b`` is the original programmatic shape.  The web UI uses the more
+    # descriptive ``background_research`` envelope; both are accepted at the
+    # same boundary so UI/API callers reach the identical normalized contract.
+    for key in ("wf3b", "background_research"):
+        nested = source.get(key)
+        if isinstance(nested, dict):
+            merged.update(nested)
+    return merged
 
 
 def normalize_required_dimensions(
@@ -112,6 +115,7 @@ def resolve_wf3b_topic(
     source = _nested_options(options)
     explicit = _clean_text(
         source.get("topic")
+        or source.get("topic_override")
         or source.get("topic_description")
         or source.get("background_topic")
     )
@@ -152,6 +156,7 @@ def normalize_wf3b_options(
     source = _nested_options(options)
     normalized = copy.deepcopy(source)
     normalized.pop("wf3b", None)
+    normalized.pop("background_research", None)
     dimensions, dimensions_origin = normalize_required_dimensions(source)
     normalized["required_dimensions"] = dimensions
     normalized["required_dimensions_origin"] = dimensions_origin
@@ -197,11 +202,18 @@ def normalize_background_plan(
     normalized["task_type"] = "PUBLIC_BACKGROUND_RESEARCH"
     normalized["required_dimensions"] = list(required)
 
-    covered: set[str] = set()
-    for item in normalized.get("queries") or []:
+    query_items = [
+        item
+        for item in normalized.get("queries") or []
+        if isinstance(item, dict) and _clean_text(item.get("query") or item.get("query_text"))
+    ]
+    for item in query_items:
         if not isinstance(item, dict):
             continue
-        raw_dimensions = item.get("dimensions") or item.get("background_dimensions") or []
+        raw_dimensions = item.get("dimensions") or item.get("background_dimensions")
+        if raw_dimensions is None and item.get("dimension") is not None:
+            raw_dimensions = [item.get("dimension")]
+        raw_dimensions = raw_dimensions or []
         if isinstance(raw_dimensions, str):
             raw_dimensions = [raw_dimensions]
         kept: list[str] = []
@@ -229,7 +241,40 @@ def normalize_background_plan(
                 kept.append(dimension)
         if raw_dimensions:
             item["dimensions"] = kept
-        covered.update(kept)
+            if kept:
+                item["dimension"] = kept[0]
+
+    # Every model query that passed the plan Critic is approved.  Keep that set
+    # intact here: execute_all_approved_queries is part of the audited retrieval
+    # contract, so silently applying the generic WF-3 twelve-query cap would be
+    # both a destructive plan delta and an incomplete execution.
+    normalized["queries"] = query_items
+
+    normalized["research_questions"] = [
+        f"核验背景维度 {dimension} 的公开事实、代表性来源与适用边界"
+        for dimension in required
+    ]
+    for item in query_items:
+        dimensions = item.get("dimensions") or []
+        item["linked_question_indexes"] = [
+            required.index(dimension)
+            for dimension in dimensions
+            if dimension in required
+        ]
+    normalized["source_priorities"] = list(
+        normalized.get("source_priorities")
+        or [
+            "官方机构、政府或军方公开发布",
+            "标准组织正式文本",
+            "原始论文、研究机构技术报告",
+        ]
+    )
+
+    covered = {
+        dimension
+        for item in query_items
+        for dimension in item.get("dimensions") or []
+    }
 
     missing = [name for name in required if name not in covered]
     if missing:

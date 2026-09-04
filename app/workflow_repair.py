@@ -822,6 +822,12 @@ class WorkflowRepairMixin:
                         approved_lock,
                         plan,
                         allow_additive=True,
+                        # WF-3B deterministically derives query-to-dimension
+                        # bindings from the model-authored dimension field.  A
+                        # legacy lock may predate that adapter, so adding only
+                        # those bindings is a strengthening migration; query IDs
+                        # and text remain immutable.
+                        allow_binding_enrichment=True,
                     )
                 except ResearchExecutionContractError as exc:
                     raise PublicResearchPlanError(

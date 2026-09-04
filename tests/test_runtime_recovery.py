@@ -490,6 +490,202 @@ def test_recoverable_technical_block_resumes_same_step(tmp_path):
     assert recovered["state"]["recovered_from"] == "after_db_transaction"
 
 
+def test_live_context_contract_block_resumes_after_context_fix(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {"topic": "智慧水务"},
+        "step_results": {},
+        "repair_attempts": {},
+        "last_error": (
+            "LIVE context builder produced invalid input: "
+            "/payload/safe_online_package_content/task_type: "
+            "'PUBLIC_BACKGROUND_RESEARCH' was expected"
+        ),
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-context-block",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "BLOCKED_TECHNICAL",
+            2,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    engine = RecoverableWorkflowEngine(
+        db, SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), SimpleNamespace()
+    )
+
+    recovered = engine._recover_status(engine.get("wf-context-block"))
+
+    assert recovered["status"] == "RUNNING"
+    assert recovered["current_step"] == 2
+    assert recovered["state"]["recovered_from"] == "RECOVERABLE_BLOCK"
+
+
+def test_research_plan_contract_block_retries_after_adapter_fix(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {"topic": "智慧水务"},
+        "step_results": {},
+        "repair_attempts": {},
+        "last_error": "Research plan validation failed: RESEARCH_PLAN_TOO_MANY_QUERIES",
+        "public_research_failure": {
+            "category": "PLAN_CONTRACT",
+            "error_code": "PUBLIC_RESEARCH_PLAN_CONTRACT_ERROR",
+        },
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-plan-block",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "BLOCKED_CONTRACT",
+            4,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    engine = RecoverableWorkflowEngine(
+        db, SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), SimpleNamespace()
+    )
+
+    recovered = engine._recover_status(engine.get("wf-plan-block"))
+
+    assert recovered["status"] == "RUNNING"
+    assert recovered["current_step"] == 4
+    assert recovered["state"]["recovered_from"] == "PUBLIC_RESEARCH_PLAN_CONTRACT"
+    assert "public_research_failure" not in recovered["state"]
+
+
+def test_web_provider_capability_alias_block_retries_after_mapping_fix(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {},
+        "step_results": {},
+        "repair_attempts": {},
+        "last_error": "Public research retrieval failed",
+        "public_research_failure": {
+            "category": "RETRIEVAL",
+            "error_code": "PUBLIC_RESEARCH_RETRIEVAL_ERROR",
+            "details": {
+                "research_sufficiency": {
+                    "blocking_reasons": [
+                        "REQUIRED_PROVIDER_NOT_EXECUTED:web_search"
+                    ]
+                },
+                "source_count": 80,
+            },
+        },
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-provider-alias-block",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "BLOCKED_PROVIDER",
+            4,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    engine = RecoverableWorkflowEngine(
+        db, SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), SimpleNamespace()
+    )
+
+    recovered = engine._recover_status(engine.get("wf-provider-alias-block"))
+
+    assert recovered["status"] == "RUNNING"
+    assert recovered["current_step"] == 4
+    assert recovered["state"]["recovered_from"] == "PUBLIC_RESEARCH_WEB_PROVIDER_ALIAS"
+    assert "public_research_failure" not in recovered["state"]
+
+
+def test_wf3b_passage_source_alias_contract_block_retries_after_projection_fix(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {},
+        "step_results": {},
+        "repair_attempts": {},
+        "last_error": (
+            "Provider output contract validation failed: "
+            "Output provenance is not backed by the trusted input envelope"
+        ),
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-passage-alias-block",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "BLOCKED_CONTRACT",
+            5,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    engine = RecoverableWorkflowEngine(
+        db, SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), SimpleNamespace()
+    )
+
+    recovered = engine._recover_status(engine.get("wf-passage-alias-block"))
+
+    assert recovered["status"] == "RUNNING"
+    assert recovered["current_step"] == 5
+    assert recovered["state"]["recovered_from"] == "WF3B_PASSAGE_SOURCE_ALIAS"
+
+
+def test_wf3b_malformed_provider_json_block_can_start_fresh_cycle(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {},
+        "step_results": {},
+        "repair_attempts": {},
+        "last_error": (
+            "MiniMax returned malformed JSON: Model response contains malformed JSON"
+        ),
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-provider-json-block",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "BLOCKED_CONTRACT",
+            5,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    engine = RecoverableWorkflowEngine(
+        db, SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), SimpleNamespace()
+    )
+
+    recovered = engine._recover_status(engine.get("wf-provider-json-block"))
+
+    assert recovered["status"] == "RUNNING"
+    assert recovered["state"]["recovered_from"] == "WF3B_PROVIDER_JSON_RETRY"
+
+
 @pytest.mark.parametrize(
     "blocked_status",
     ["BLOCKED", "BLOCKED_PROVIDER", "BLOCKED_CONTRACT", "BLOCKED_CONTENT"],

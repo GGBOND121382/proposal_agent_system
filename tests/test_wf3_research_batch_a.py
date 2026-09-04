@@ -89,6 +89,25 @@ def test_plan_lock_allows_only_additive_follow_up_queries() -> None:
     assert len(next_lock["projection"]["query_items"]) == 2
 
 
+def test_plan_lock_can_explicitly_allow_binding_only_enrichment() -> None:
+    plan = _plan(1)
+    plan["queries"][0]["linked_question_indexes"] = []
+    lock = build_plan_lock(plan)
+    enriched = json.loads(json.dumps(plan, ensure_ascii=False))
+    enriched["queries"][0]["linked_question_indexes"] = [0]
+
+    with pytest.raises(ResearchExecutionContractError):
+        validate_plan_transition(lock, enriched, allow_additive=True)
+
+    next_lock = validate_plan_transition(
+        lock,
+        enriched,
+        allow_additive=True,
+        allow_binding_enrichment=True,
+    )
+    assert next_lock["projection"]["query_items"][0]["linked_question_indexes"] == [0]
+
+
 def test_strict_connector_missing_approved_query_is_plan_contract_failure(tmp_path: Path) -> None:
     plan = _plan(2)
     first = plan["queries"][0]

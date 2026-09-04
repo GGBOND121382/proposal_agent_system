@@ -89,6 +89,7 @@ def validate_plan_transition(
     candidate_plan: dict[str, Any],
     *,
     allow_additive: bool = True,
+    allow_binding_enrichment: bool = False,
 ) -> dict[str, Any]:
     """Validate retry/research-repair plan continuity and return the new lock.
 
@@ -156,11 +157,23 @@ def validate_plan_transition(
         if isinstance(item, dict) and str(item.get("query_id") or "")
     }
     missing_ids = sorted(set(old_queries) - set(new_queries))
-    changed_ids = sorted(
-        query_id
-        for query_id in set(old_queries) & set(new_queries)
-        if old_queries[query_id] != new_queries[query_id]
-    )
+    changed_ids: list[str] = []
+    for query_id in set(old_queries) & set(new_queries):
+        old_query = old_queries[query_id]
+        new_query = new_queries[query_id]
+        if old_query == new_query:
+            continue
+        binding_only_enrichment = (
+            allow_binding_enrichment
+            and old_query.get("query_id") == new_query.get("query_id")
+            and old_query.get("query") == new_query.get("query")
+            and set(old_query.get("linked_question_indexes") or []).issubset(
+                set(new_query.get("linked_question_indexes") or [])
+            )
+        )
+        if not binding_only_enrichment:
+            changed_ids.append(query_id)
+    changed_ids.sort()
     added_ids = sorted(set(new_queries) - set(old_queries))
     if missing_ids or changed_ids or (added_ids and not allow_additive):
         raise ResearchExecutionContractError(

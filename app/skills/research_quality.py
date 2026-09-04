@@ -342,12 +342,28 @@ def build_retrieval_health(
                         successful_pairs.add((name, query))
             continue
         query = str(run.get("query") or "")
-        if query in query_set:
-            successful_pairs.add((name, query))
+        run_status = str(run.get("status") or "").strip().upper()
         try:
-            stats[name]["result_count"] += int(run.get("result_count") or 0)
+            result_count = int(run.get("result_count") or 0)
         except (TypeError, ValueError):
-            pass
+            result_count = 0
+        stats[name]["result_count"] += result_count
+        if query in query_set:
+            explicitly_failed = run_status in {
+                "ERROR",
+                "FAIL",
+                "FAILED",
+                "PROVIDER_BLOCKED",
+                "BLOCKED",
+            }
+            explicitly_empty = "result_count" in run and result_count <= 0
+            if explicitly_failed or explicitly_empty:
+                failed_pairs.add((name, query))
+            else:
+                # DEGRADED with one or more results is a successful execution for
+                # channel coverage. Its per-engine failures remain observable in
+                # discovery_manifest.failures without discarding usable hits.
+                successful_pairs.add((name, query))
 
     for failure in discovery_manifest.get("failures") or []:
         if not isinstance(failure, dict):
@@ -413,8 +429,23 @@ def build_retrieval_health(
                 blocking_reason_codes.append(code)
             else:
                 reason_codes.append(code)
+    provider_channel_aliases = {
+        "web_search": CHANNEL_WEB_SEARCH,
+        "web": CHANNEL_WEB_SEARCH,
+        "academic_search": CHANNEL_ACADEMIC,
+        "academic": CHANNEL_ACADEMIC,
+    }
     for name in required_providers:
-        if name not in enabled:
+        required_channel = provider_channel_aliases.get(name)
+        if required_channel is not None:
+            # Prompt contracts use capability names such as ``web_search``;
+            # discovery manifests record concrete implementations such as
+            # ``searxng`` or ``browser_search``.  Treat the capability as
+            # executed when any enabled member of that channel ran.  Channel
+            # success/failure is evaluated separately above.
+            if not any(provider_channel(item) == required_channel for item in enabled):
+                blocking_reason_codes.append(f"REQUIRED_PROVIDER_NOT_EXECUTED:{name}")
+        elif name not in enabled:
             blocking_reason_codes.append(f"REQUIRED_PROVIDER_NOT_EXECUTED:{name}")
     reason_codes = list(dict.fromkeys([*blocking_reason_codes, *reason_codes]))
 

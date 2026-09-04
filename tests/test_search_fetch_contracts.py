@@ -149,6 +149,65 @@ def test_searxng_provider_emits_query_level_raw_execution_receipt() -> None:
     assert len(receipt["raw_response_sha256"]) == 64
 
 
+def test_searxng_provider_keeps_hits_when_one_engine_is_unresponsive() -> None:
+    class _PartiallyDegradedClient(_Client):
+        def get(self, _url, *, params):
+            return _Response(
+                payload={
+                    "results": [
+                        {
+                            "title": "Usable Bing result",
+                            "url": "https://example.org/usable",
+                            "content": "usable search snippet",
+                            "engine": "bing",
+                        }
+                    ],
+                    "unresponsive_engines": [
+                        ["brave", "too many requests"],
+                        ["duckduckgo", "timeout"],
+                    ],
+                }
+            )
+
+    result = SearxngSearchProvider(
+        _settings(),
+        client_factory=_PartiallyDegradedClient,
+        max_workers=1,
+    ).search(
+        normalize_search_queries([{"query_id": "Q-WEB", "query": "web-query"}]),
+        per_query_limit=3,
+    )
+
+    assert [item.title for item in result.hits] == ["Usable Bing result"]
+    assert result.runs[0].status == "DEGRADED"
+    assert [item["engine"] for item in result.failures] == ["brave", "duckduckgo"]
+    assert all(item["error_code"] == "SEARXNG_ENGINE_UNRESPONSIVE" for item in result.failures)
+
+
+def test_searxng_provider_marks_all_unresponsive_engines_as_error() -> None:
+    class _AllFailedClient(_Client):
+        def get(self, _url, *, params):
+            return _Response(
+                payload={
+                    "results": [],
+                    "unresponsive_engines": [["brave", "timeout"]],
+                }
+            )
+
+    result = SearxngSearchProvider(
+        _settings(),
+        client_factory=_AllFailedClient,
+        max_workers=1,
+    ).search(
+        normalize_search_queries([{"query_id": "Q-WEB", "query": "web-query"}]),
+        per_query_limit=3,
+    )
+
+    assert result.hits == []
+    assert result.runs[0].status == "ERROR"
+    assert result.failures[0]["engine"] == "brave"
+
+
 def test_academic_adapter_and_gateway_preserve_provider_manifest() -> None:
     class _AcademicClient:
         def __init__(self, _settings):

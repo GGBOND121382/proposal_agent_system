@@ -18,7 +18,11 @@ from .research_execution import (
     build_plan_lock,
     validate_connector_execution,
 )
-from .research_plan import deduplicate_candidates, normalize_and_validate_plan
+from .research_plan import (
+    MAX_BACKGROUND_RESEARCH_QUERIES,
+    deduplicate_candidates,
+    normalize_and_validate_plan,
+)
 from .research_screening import screen_and_select_candidates
 from .research_quality import build_retrieval_health
 from .research_validation import write_validation_bundle
@@ -321,7 +325,15 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             original_provider,
         )
         try:
-            normalized_plan, validation = normalize_and_validate_plan(contracted_plan, strict=strict)
+            normalized_plan, validation = normalize_and_validate_plan(
+                contracted_plan,
+                strict=strict,
+                max_queries=(
+                    MAX_BACKGROUND_RESEARCH_QUERIES
+                    if quality_profile == "application_background"
+                    else 12
+                ),
+            )
         except ValueError as exc:
             raise PublicResearchPlanContractError(str(exc)) from exc
         if validation["status"] == "BLOCK":

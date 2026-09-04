@@ -68,13 +68,85 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
         state = wf["state"]
         # WAITING_GATE is reconciled by WorkflowGateMixin.  Missing or stale
         # Gate records are fail-closed there rather than silently reopened.
+        recoverable_context_build = str(state.get("last_error") or "").startswith(
+            "LIVE context builder produced invalid input:"
+        )
+        research_failure = (
+            state.get("public_research_failure")
+            if isinstance(state.get("public_research_failure"), dict)
+            else {}
+        )
+        recoverable_plan_contract = (
+            wf["status"] == WorkflowStatus.BLOCKED_CONTRACT.value
+            and str(research_failure.get("category") or "").upper() == "PLAN_CONTRACT"
+        )
+        research_failure_details = (
+            research_failure.get("details")
+            if isinstance(research_failure.get("details"), dict)
+            else {}
+        )
+        research_sufficiency = (
+            research_failure_details.get("research_sufficiency")
+            if isinstance(research_failure_details.get("research_sufficiency"), dict)
+            else {}
+        )
+        recoverable_web_provider_alias = (
+            wf["status"] == WorkflowStatus.BLOCKED_PROVIDER.value
+            and str(research_failure.get("category") or "").upper() == "RETRIEVAL"
+            and "REQUIRED_PROVIDER_NOT_EXECUTED:web_search"
+            in [str(item) for item in research_sufficiency.get("blocking_reasons") or []]
+        )
+        last_error = str(state.get("last_error") or "")
+        recoverable_wf3b_passage_alias = (
+            wf["status"] == WorkflowStatus.BLOCKED_CONTRACT.value
+            and str(state.get("workflow_type") or "")
+            == "WF-3B_TOPIC_BACKGROUND_RESEARCH"
+            and int(wf.get("current_step") or 0) == 5
+            and last_error.startswith("Provider output contract validation failed:")
+            and "Output provenance is not backed by the trusted input envelope"
+            in last_error
+        )
+        recoverable_wf3b_provider_json = (
+            wf["status"] == WorkflowStatus.BLOCKED_CONTRACT.value
+            and str(state.get("workflow_type") or "")
+            == "WF-3B_TOPIC_BACKGROUND_RESEARCH"
+            and int(wf.get("current_step") or 0) == 5
+            and last_error.startswith("MiniMax returned malformed JSON:")
+        )
         if (
-            wf["status"] == WorkflowStatus.BLOCKED_TECHNICAL.value
-            and state.get("runtime_recoverable")
+            (
+                wf["status"] == WorkflowStatus.BLOCKED_TECHNICAL.value
+                and (state.get("runtime_recoverable") or recoverable_context_build)
+            )
+            or recoverable_plan_contract
+            or recoverable_web_provider_alias
+            or recoverable_wf3b_passage_alias
+            or recoverable_wf3b_provider_json
         ):
-            state["recovered_from"] = state.get("runtime_failure_point") or "RECOVERABLE_BLOCK"
+            state["recovered_from"] = (
+                state.get("runtime_failure_point")
+                or (
+                    "PUBLIC_RESEARCH_PLAN_CONTRACT"
+                    if recoverable_plan_contract
+                    else (
+                        "PUBLIC_RESEARCH_WEB_PROVIDER_ALIAS"
+                        if recoverable_web_provider_alias
+                        else (
+                            "WF3B_PASSAGE_SOURCE_ALIAS"
+                            if recoverable_wf3b_passage_alias
+                            else (
+                                "WF3B_PROVIDER_JSON_RETRY"
+                                if recoverable_wf3b_provider_json
+                                else "RECOVERABLE_BLOCK"
+                            )
+                        )
+                    )
+                )
+            )
             state["runtime_recoverable"] = False
             state.pop("last_error", None)
+            if recoverable_plan_contract or recoverable_web_provider_alias:
+                state.pop("public_research_failure", None)
             self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
             return self.get(wf["id"])
         return wf
