@@ -23,6 +23,10 @@ from .runtime_failures import (
 from .quality import QualityGateBlocked, QualityLifecycleManager
 from .quality_guard import QualityGuardContractError, require_guard_report
 from .research import PublicResearchError
+from .skills.research_claims import (
+    PUBLIC_CLAIM_VALIDATOR_VERSION,
+    validate_public_claims,
+)
 from .secret_redaction import redact_secret_text, redact_secrets
 from .util import new_id, sha256_json, utc_now
 from .workflow_authoring import WorkflowAuthoringMixin
@@ -825,7 +829,18 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         under a newly deployed deterministic contract adapter.
         """
 
-        if wf["status"] != WorkflowStatus.BLOCKED_CONTRACT.value:
+        pending_cross_status_migration = (
+            wf["status"] == WorkflowStatus.BLOCKED_PROVIDER.value
+            and isinstance(state.get("contract_migration_recovery"), dict)
+            and state["contract_migration_recovery"].get(
+                "replay_over_exhausted_checkpoint"
+            )
+            is True
+        )
+        if (
+            wf["status"] != WorkflowStatus.BLOCKED_CONTRACT.value
+            and not pending_cross_status_migration
+        ):
             return False
         normalizer_version = str(
             getattr(self.executor, "output_normalizer_version", "") or ""
@@ -861,37 +876,78 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             state,
             prompt_id=failure_prompt_id,
         )
+        failed_outputs: list[dict[str, Any]] = []
         if exact_run_id:
             failed_output = self.db.fetchone(
-                """SELECT id FROM prompt_runs
+                """SELECT id,error FROM prompt_runs
                    WHERE id=? AND project_id=? AND workflow_id=? AND prompt_id=?
                      AND status='ERROR' AND output_json IS NOT NULL""",
                 (exact_run_id, wf["project_id"], wf["id"], failure_prompt_id),
             )
-        else:
+            if failed_output is not None:
+                failed_outputs.append(failed_output)
+        if not is_section_step:
             # A section prompt is repeated under the same workflow step.  Old
             # rows without an exact run binding are therefore ambiguous and
-            # must not be selected by recency.  Non-section prompts occur once
-            # per workflow and retain the narrow compatibility fallback.
-            if is_section_step:
-                return False
-            failed_output = self.db.fetchone(
-                """SELECT id FROM prompt_runs
+            # must not be selected by recency.  Non-section provider attempts
+            # may contain a parse failure after an earlier, structurally valid
+            # response.  Keep every JSON-bearing attempt as a bounded fallback;
+            # provider-cycle identity below prevents crossing call generations.
+            older_outputs = self.db.fetchall(
+                """SELECT id,error FROM prompt_runs
                    WHERE project_id=? AND workflow_id=? AND prompt_id=?
                      AND status='ERROR' AND output_json IS NOT NULL
-                   ORDER BY created_at DESC LIMIT 1""",
+                   ORDER BY created_at DESC LIMIT 20""",
                 (wf["project_id"], wf["id"], failure_prompt_id),
             )
-        if failed_output is None:
+            seen_ids = {str(item.get("id") or "") for item in failed_outputs}
+            failed_outputs.extend(
+                item
+                for item in older_outputs
+                if str(item.get("id") or "") not in seen_ids
+            )
+        if not failed_outputs:
             return False
-        prior_normalizer_version = self._failed_run_normalizer_version(
-            wf["project_id"],
-            str(failed_output.get("id") or ""),
-        )
-        if (
-            not prior_normalizer_version
-            or prior_normalizer_version == normalizer_version
-        ):
+
+        provider_wait = state.get("provider_wait")
+        provider_cycle_prefix = ""
+        if isinstance(provider_wait, dict):
+            base_call_key = str(provider_wait.get("base_call_key") or "").strip()
+            cycle_id = str(provider_wait.get("cycle_id") or "").strip()
+            if base_call_key and cycle_id:
+                provider_cycle_prefix = f"{base_call_key}-cycle-{cycle_id}-attempt-"
+
+        failed_output = None
+        prior_normalizer_version = ""
+        for candidate in failed_outputs:
+            candidate_id = str(candidate.get("id") or "")
+            metadata = self._failed_run_recovery_metadata(
+                wf["project_id"], candidate_id
+            )
+            candidate_normalizer = str(
+                metadata.get("output_normalizer_version") or ""
+            )
+            if not candidate_normalizer or candidate_normalizer == normalizer_version:
+                continue
+            if provider_cycle_prefix:
+                checkpoint_call_key = str(
+                    metadata.get("checkpoint_call_key")
+                    or metadata.get("attempt_call_key")
+                    or metadata.get("audit_call_key")
+                    or ""
+                )
+                if not checkpoint_call_key.startswith(provider_cycle_prefix):
+                    continue
+            if (
+                candidate_id != exact_run_id
+                and provider_cycle_prefix
+                and metadata.get("deterministic_recoverable") is not True
+            ):
+                continue
+            failed_output = candidate
+            prior_normalizer_version = candidate_normalizer
+            break
+        if failed_output is None:
             return False
 
         migration_versions[retry_key] = normalizer_version
@@ -908,6 +964,18 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             "output_normalizer_version": normalizer_version,
             "reason": "revalidate persisted provider output under the upgraded contract layer",
         }
+        if (
+            isinstance(provider_wait, dict)
+            and (provider_wait.get("decision") or {}).get("should_retry") is False
+            and str(provider_wait.get("failure_run_id") or "")
+            != str(failed_output.get("id") or "")
+        ):
+            state["contract_migration_recovery"][
+                "replay_over_exhausted_checkpoint"
+            ] = True
+            state["contract_migration_recovery"]["exhausted_failure_run_id"] = (
+                str(provider_wait.get("failure_run_id") or "") or None
+            )
         state["recovered_from"] = (
             state.get("last_error") or WorkflowStatus.BLOCKED_CONTRACT.value
         )
@@ -919,27 +987,176 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         )
         return True
 
+    def _resume_pending_contract_migration(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+    ) -> bool:
+        """Resume one already-selected local replay after an older runtime reblocked it.
+
+        A previous runtime could select a valid historical response, then replay the
+        exhausted malformed call before invoking the upgraded normalizer.  Preserve
+        the selected immutable run and allow exactly one post-upgrade continuation.
+        """
+
+        if not is_recoverable_block(wf["status"]):
+            return False
+        migration = state.get("contract_migration_recovery")
+        if not isinstance(migration, dict):
+            return False
+        if migration.get("replay_over_exhausted_checkpoint") is not True:
+            return False
+        if int(migration.get("step", -1)) != int(wf["current_step"]):
+            return False
+        normalizer_version = str(
+            getattr(self.executor, "output_normalizer_version", "") or ""
+        )
+        if (
+            not normalizer_version
+            or str(migration.get("output_normalizer_version") or "")
+            != normalizer_version
+        ):
+            return False
+        replay_key = (
+            f"{migration.get('retry_key') or wf['current_step']}:"
+            f"{normalizer_version}"
+        )
+        replay_attempts = state.setdefault("contract_migration_replay_attempts", {})
+        if int(replay_attempts.get(replay_key) or 0) >= 1:
+            return False
+        failed_run_id = str(migration.get("failed_run_id") or "").strip()
+        failed_output = self.db.fetchone(
+            """SELECT id FROM prompt_runs
+               WHERE id=? AND project_id=? AND workflow_id=? AND prompt_id=?
+                 AND status='ERROR' AND output_json IS NOT NULL""",
+            (
+                failed_run_id,
+                wf["project_id"],
+                wf["id"],
+                str(migration.get("prompt_id") or ""),
+            ),
+        )
+        if failed_output is None:
+            return False
+        replay_attempts[replay_key] = 1
+        state["recovered_from"] = "PENDING_CONTRACT_MIGRATION_REPLAY"
+        state.pop("last_error", None)
+        self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
+        self.db.audit(
+            "CONTRACT_MIGRATION_REPLAY_RESUMED",
+            project_id=wf["project_id"],
+            object_id=wf["id"],
+            metadata={
+                "step": wf["current_step"],
+                "prompt_id": migration.get("prompt_id"),
+                "failed_run_id": failed_run_id,
+                "output_normalizer_version": normalizer_version,
+            },
+        )
+        return True
+
+    def _recover_wf3b_claim_validation_after_policy_upgrade(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+    ) -> bool:
+        """Revalidate a committed WF-3B synthesis after a claim-policy upgrade."""
+
+        if (
+            wf["status"] != WorkflowStatus.BLOCKED_CONTENT.value
+            or wf["workflow_type"] != WF3B_WORKFLOW_TYPE
+            or int(wf["current_step"]) != 5
+        ):
+            return False
+        prior_report = state.get("background_claim_validation")
+        if not isinstance(prior_report, dict) or prior_report.get("status") == "PASS":
+            return False
+        if (
+            str(prior_report.get("validator_version") or "")
+            == PUBLIC_CLAIM_VALIDATOR_VERSION
+        ):
+            return False
+        step_result = (state.get("step_results") or {}).get("5") or {}
+        if (
+            str(step_result.get("prompt_id") or "") != WF3B_SYNTHESIS_PROMPT
+            or str(step_result.get("status") or "") != "PASS"
+        ):
+            return False
+        run_id = str(step_result.get("run_id") or "").strip()
+        row = self.db.fetchone(
+            """SELECT output_json FROM prompt_runs
+               WHERE id=? AND project_id=? AND workflow_id=? AND prompt_id=?
+                 AND status='PASS' AND output_json IS NOT NULL""",
+            (run_id, wf["project_id"], wf["id"], WF3B_SYNTHESIS_PROMPT),
+        )
+        if row is None:
+            return False
+        try:
+            output = json.loads(row["output_json"])
+        except (TypeError, json.JSONDecodeError):
+            return False
+        report = validate_public_claims(
+            output.get("result") or {},
+            state.get("background_search_results") or {},
+        )
+        state["background_claim_validation"] = report
+        recovery = {
+            "revalidated_at": utc_now(),
+            "run_id": run_id,
+            "from_validator_version": prior_report.get("validator_version"),
+            "validator_version": PUBLIC_CLAIM_VALIDATOR_VERSION,
+            "status": report.get("status"),
+        }
+        state.setdefault("claim_validation_policy_recoveries", []).append(recovery)
+        del state["claim_validation_policy_recoveries"][:-20]
+        if report.get("status") != "PASS":
+            self._update(wf, state=state)
+            return False
+        state["recovered_from"] = "WF3B_CLAIM_VALIDATION_POLICY_UPGRADE"
+        state.pop("last_error", None)
+        self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
+        self.db.audit(
+            "WF3B_CLAIM_VALIDATION_POLICY_RECOVERED",
+            project_id=wf["project_id"],
+            object_id=wf["id"],
+            metadata=recovery,
+        )
+        return True
+
     def _failed_run_normalizer_version(
         self,
         project_id: str,
         run_id: str,
     ) -> str:
+        return str(
+            self._failed_run_recovery_metadata(project_id, run_id).get(
+                "output_normalizer_version"
+            )
+            or ""
+        )
+
+    def _failed_run_recovery_metadata(
+        self,
+        project_id: str,
+        run_id: str,
+    ) -> dict[str, Any]:
         if not run_id:
-            return ""
+            return {}
         row = self.db.fetchone(
-            """SELECT metadata_json FROM audit_events
+            """SELECT object_id,metadata_json FROM audit_events
                WHERE project_id=? AND event_type='MODEL_CALL_FAILED'
                  AND json_extract(metadata_json,'$.run_id')=?
                ORDER BY id DESC LIMIT 1""",
             (project_id, run_id),
         )
         if not row:
-            return ""
+            return {}
         try:
             metadata = json.loads(row.get("metadata_json") or "{}")
         except (TypeError, json.JSONDecodeError):
-            return ""
-        return str(metadata.get("output_normalizer_version") or "")
+            return {}
+        metadata.setdefault("audit_call_key", row.get("object_id"))
+        return metadata
 
     def _record_runtime_failure(
         self,
@@ -1217,8 +1434,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         migration_replays_failed_attempt = bool(
             recovery_run_id
             and wait_matches_cycle
-            and str(persisted_wait.get("failure_run_id") or "")
-            == recovery_run_id
+            and (
+                str(persisted_wait.get("failure_run_id") or "")
+                == recovery_run_id
+                or (
+                    isinstance(migration, dict)
+                    and migration.get("replay_over_exhausted_checkpoint") is True
+                )
+            )
         )
         if migration_replays_failed_attempt:
             replay_attempt = max(
@@ -3124,6 +3347,9 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         if is_terminal(wf["status"]):
             return wf
         state = wf["state"]
+        if self._resume_pending_contract_migration(wf, state):
+            wf = self.get(workflow_id)
+            state = wf["state"]
         if self._seal_persisted_provider_exhaustion(wf, state):
             return self.get(workflow_id)
         if self._recover_provider_block_after_protocol_upgrade(wf, state):
@@ -3133,6 +3359,9 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             wf = self.get(workflow_id)
             state = wf["state"]
         if self._recover_retryable_provider_checkpoint(wf, state):
+            wf = self.get(workflow_id)
+            state = wf["state"]
+        if self._recover_wf3b_claim_validation_after_policy_upgrade(wf, state):
             wf = self.get(workflow_id)
             state = wf["state"]
         if (

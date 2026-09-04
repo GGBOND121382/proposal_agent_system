@@ -3524,17 +3524,28 @@ def build_online_result_import_critic_model_input(canonical_envelope: dict[str, 
     package = payload.get("approved_safe_package_content") if isinstance(payload.get("approved_safe_package_content"), Mapping) else {}
     result_package = payload.get("result_package") if isinstance(payload.get("result_package"), Mapping) else {}
     claims: list[dict[str, Any]] = []
+    claim_source_ids: set[str] = set()
     for claim in result_package.get("claims") or []:
         if not isinstance(claim, Mapping):
             continue
         claim_id = str(claim.get("claim_id") or "").strip()
         text = str(claim.get("claim_text") or "").strip()
         if claim_id and text:
-            claims.append({"claim_id": claim_id, "claim_text": text, "source_ids": _wf3_claim_source_ids(claim)})
+            source_ids = _wf3_claim_source_ids(claim)
+            claim_source_ids.update(source_ids)
+            claims.append({"claim_id": claim_id, "claim_text": text, "source_ids": source_ids})
+    source_snippets = [
+        item
+        for item in _wf3_model_passages(payload.get("public_source_passages"))
+        if item.get("source_id") in claim_source_ids
+    ]
     return {
         "approved_task": _wf3_semantic_safe_package(package),
         "claims": claims,
-        "public_source_snippets": _wf3_model_passages(payload.get("public_source_passages")),
+        # Import review classifies the proposed claims.  It needs the evidence
+        # those claims cite, not every discovered source.  The canonical
+        # envelope and local archive retain the complete source set for audit.
+        "public_source_snippets": source_snippets,
     }
 
 

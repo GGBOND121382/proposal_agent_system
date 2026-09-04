@@ -749,6 +749,29 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 return True, "ADDITIVE_TRUSTED_SOURCE_CATALOG"
             return True, "TRUSTED_SOURCE_CATALOG_REBUILD"
 
+        if prompt_id == "P-BACKGROUND-RESEARCH-SYNTHESIS":
+            # Historical WF-3B checkpoints predate stable task/scope metadata
+            # and rebuilt their trusted catalog with passage aliases.  These
+            # fields are control-plane identity, not research instructions.
+            # The actual synthesis payload must remain byte-equivalent after
+            # removing the gate receipt, and the recovered output is still
+            # checked against the *current* trusted catalog, semantic contract,
+            # quality guard and canonical output schema before acceptance.
+            for candidate in (prior, current):
+                candidate["freshness"] = {}
+                task = candidate.get("task")
+                if isinstance(task, dict):
+                    task.pop("task_id", None)
+                    task.pop("writing_mode", None)
+                scope = candidate.get("scope")
+                if isinstance(scope, dict):
+                    scope.pop("target_object_ids", None)
+                payload = candidate.get("payload")
+                if isinstance(payload, dict):
+                    payload.pop("human_resolutions", None)
+            if sha256_json(prior) == sha256_json(current):
+                return True, "WF3B_SYNTHESIS_CHECKPOINT_METADATA_AND_CATALOG_REBUILD"
+
         if prompt_id != "P-SAFE-ONLINE-PACKAGE":
             return False, None
         prior_payload = prior.get("payload") if isinstance(prior.get("payload"), dict) else {}
@@ -988,10 +1011,12 @@ class RuntimePromptExecutor(BasePromptExecutor):
                         recovery_provider_output = expand_semantic_model_output(
                             prompt_id, model_envelope, recovery_provider_output
                         )
-                    elif self.pack.validate(
-                        prompt_id, "output", recovery_provider_output
-                    ):
-                        continue
+                    # A JSON object rejected by both the compact semantic schema
+                    # and the canonical schema may still be exactly the legacy
+                    # representation an upgraded deterministic normalizer was
+                    # introduced to repair.  Do not reject it before that
+                    # normalizer runs.  The complete canonical schema,
+                    # provenance and quality checks below remain fail-closed.
                 consumed_output = self._normalize_output(
                     prompt_id,
                     copy.deepcopy(recovery_provider_output),
@@ -1128,7 +1153,10 @@ class RuntimePromptExecutor(BasePromptExecutor):
             input_hash=input_hash,
             model_request_spec_hash=model_request_spec_hash,
         )
-        if persisted_failure is not None:
+        recovery_checkpoint_failure = (
+            persisted_failure if recovery_run_id else None
+        )
+        if persisted_failure is not None and not recovery_run_id:
             raise persisted_failure
         if self.policy.enabled and not LIVE_ENVELOPE_REGISTRY.contains_hash(sha256_json(envelope)):
             raise PromptExecutionError(
@@ -1278,6 +1306,13 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     recovery_run_id=recovery_run_id,
                 )
             )
+            if contract_recovery is None and recovery_checkpoint_failure is not None:
+                # The current provider-attempt key may point at a later malformed
+                # response while recovery_run_id selects an earlier complete JSON
+                # object from the same audited cycle.  Try only that immutable
+                # object; if it cannot pass today's full contract, return the
+                # persisted failure without invoking the provider again.
+                raise recovery_checkpoint_failure
             if contract_recovery is not None:
                 result = SimpleNamespace(
                     output=copy.deepcopy(contract_recovery["provider_output"]),

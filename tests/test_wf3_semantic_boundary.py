@@ -256,6 +256,43 @@ def test_import_model_sees_approved_task_claims_and_snippets_without_manifest_ha
     assert "security_policy" not in text
 
 
+def test_import_model_projects_only_sources_referenced_by_claims() -> None:
+    envelope = _envelope("P-ONLINE-RESULT-IMPORT-CRITIC")
+    envelope["payload"]["approved_safe_package_content"] = {
+        "task_description": "public evaluation research",
+        "queries": ["public evaluation methods"],
+        "allowed_context": ["public research"],
+        "prohibited_inferences": ["internal project"],
+        "prohibited_outputs": ["internal data"],
+    }
+    passages = _passages()
+    referenced_ids = {
+        str((ref or {}).get("source_id") or "")
+        for claim in envelope["payload"]["result_package"]["claims"]
+        for ref in claim.get("source_refs") or []
+    }
+    envelope["payload"]["public_source_passages"] = passages + [
+        {
+            "source_id": "public-src-unreferenced",
+            "text": "Unreferenced discovery material " * 5000,
+            "relevance": "discovery only",
+        }
+    ]
+
+    model_input = build_semantic_model_input(
+        "P-ONLINE-RESULT-IMPORT-CRITIC", envelope
+    )
+
+    visible_ids = {
+        item["source_id"] for item in model_input["public_source_snippets"]
+    }
+    assert visible_ids <= referenced_ids
+    assert "public-src-unreferenced" not in visible_ids
+    assert PACK.validate_model(
+        "P-ONLINE-RESULT-IMPORT-CRITIC", "input", model_input
+    ) == []
+
+
 def test_import_semantic_contract_requires_exactly_one_decision_per_claim() -> None:
     envelope = _envelope("P-ONLINE-RESULT-IMPORT-CRITIC")
     envelope["payload"]["approved_safe_package_content"] = {

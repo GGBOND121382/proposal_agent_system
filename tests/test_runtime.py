@@ -1448,6 +1448,121 @@ def test_runtime_renormalizes_prior_enum_only_failure_without_model_call(runtime
     ]
 
 
+def test_runtime_normalizes_wf3b_canonical_shape_before_rejecting_semantic_shape(
+    runtime,
+    monkeypatch,
+):
+    _, pack, db, _, _, executor, _, _ = runtime
+    project_id = create_project(db)
+    workflow_id = new_id("wf")
+    prompt_id = "P-BACKGROUND-RESEARCH-SYNTHESIS"
+    envelope = pack.replay_input(prompt_id)
+    envelope["scope"]["project_id"] = project_id
+    envelope["security_context"]["project_security_level"] = "PUBLIC"
+    envelope["security_context"]["input_max_security_level"] = "PUBLIC"
+    envelope["security_context"]["online_transfer_approval_status"] = "APPROVED"
+    envelope["security_context"]["allowed_model_endpoint_ids"] = [
+        "online-public-primary"
+    ]
+    envelope["payload"]["safe_online_package"]["security_level"] = "PUBLIC"
+    provider_output = pack.replay_output(prompt_id)
+    provider_output["result"]["claims"][0]["target_section_profiles"] = [
+        "RESEARCH_SIGNIFICANCE"
+    ]
+    provider_output["result"]["claims"][0]["source_refs"][0]["span_id"] = (
+        "legacy-passage"
+    )
+
+    model_envelope, _ = executor._prepare_model_envelope(prompt_id, envelope)
+    model_envelope = attach_trusted_source_catalog(model_envelope)
+    prior_model_envelope = copy.deepcopy(model_envelope)
+    prior_model_envelope["freshness"] = {
+        key: None for key in prior_model_envelope.get("freshness", {})
+    }
+    prior_model_envelope["task"]["task_id"] = "legacy-task-id"
+    prior_model_envelope["task"]["writing_mode"] = None
+    prior_model_envelope["scope"]["target_object_ids"] = []
+    prior_model_envelope["payload"]["human_resolutions"] = [
+        {"resolution_id": "legacy-gate-receipt"}
+    ]
+    prior_model_envelope["trusted_source_catalog"] = (
+        prior_model_envelope.get("trusted_source_catalog", [])
+        + [
+            {
+                "source_id": "legacy-passage-alias",
+                "source_type": "PUBLIC_RESEARCH_PASSAGE",
+                "source_hash": "0" * 64,
+                "authority_rank": 4,
+                "object_path": "/payload/legacy_passage",
+            }
+        ]
+    )
+    failed_run_id = new_id("run")
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            failed_run_id,
+            project_id,
+            workflow_id,
+            prompt_id,
+            "ERROR",
+            "online-public-primary",
+            "online-public",
+            sha256_json(prior_model_envelope),
+            sha256_json(provider_output),
+            json.dumps(prior_model_envelope, ensure_ascii=False),
+            json.dumps(provider_output, ensure_ascii=False),
+            "Provider output failed strict schema validation | legacy WF-3B profile",
+            100,
+            utc_now(),
+        ),
+    )
+    db.audit(
+        "MODEL_CALL_FAILED",
+        project_id=project_id,
+        object_id="call-wf3b-legacy-profile",
+        metadata={
+            "run_id": failed_run_id,
+            "prompt_id": prompt_id,
+            "deterministic_recoverable": True,
+            "model_request_spec_hash": executor._model_request_spec_hash(prompt_id),
+            "output_normalizer_version": "older-normalizer",
+        },
+    )
+
+    async def model_must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("the saved WF-3B synthesis must be normalized locally")
+
+    monkeypatch.setattr(executor.gateway, "invoke", model_must_not_be_called)
+    from app.executor import PromptExecutionError
+
+    monkeypatch.setattr(
+        executor,
+        "_persisted_failure",
+        lambda *_args, **_kwargs: PromptExecutionError(
+            "later malformed response is already persisted"
+        ),
+    )
+    result = asyncio.run(
+        executor.execute(
+            prompt_id,
+            envelope,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            recovery_run_id=failed_run_id,
+        )
+    )
+
+    assert result["contract_recovered_from_run_id"] == failed_run_id
+    claim = result["output"]["result"]["claims"][0]
+    assert claim["target_section_profiles"] == ["BACKGROUND_AND_SIGNIFICANCE"]
+    assert "span_id" not in claim["source_refs"][0]
+    assert pack.validate(prompt_id, "output", result["output"]) == []
+
+
 def test_runtime_recovers_expression_polish_action_collision_without_model_call(runtime, monkeypatch):
     _, pack, db, _, _, executor, _, _ = runtime
     project_id = create_project(db)

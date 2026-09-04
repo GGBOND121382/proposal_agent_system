@@ -8,6 +8,7 @@ from typing import Any
 from ..util import utc_now
 
 _INNOVATION_TERMS = {"innovation", "innovative", "novelty", "novel", "first", "no existing", "no prior", "has not been", "创新", "首创", "首次", "突破", "填补空白", "尚无", "未有", "空白"}
+PUBLIC_CLAIM_VALIDATOR_VERSION = "2026-09-04.v2-explicit-innovation-scope"
 
 
 def _compact(text: str) -> str:
@@ -20,10 +21,30 @@ def _searchable(text: str) -> str:
 
 def _innovation_claim(claim: dict[str, Any]) -> bool:
     subject = str(claim.get("subject_id") or "").lower()
-    qualifiers = " ".join(str(item) for item in claim.get("qualifiers") or []).lower()
+    qualifiers = [str(item).strip() for item in claim.get("qualifiers") or []]
+    qualifier_markers = {item.upper() for item in qualifiers}
     claim_text = str(claim.get("claim_text") or "").lower()
-    searchable = f"{qualifiers} {claim_text}"
-    return subject.startswith("innovation") or any(term in searchable for term in _INNOVATION_TERMS)
+    profiles = {
+        str(item).strip().upper()
+        for item in claim.get("target_section_profiles") or []
+    }
+    explicitly_scoped = (
+        subject.startswith("innovation")
+        or bool(
+            qualifier_markers
+            & {"INNOVATION_CLAIM", "PROJECT_INNOVATION", "NOVELTY_CLAIM"}
+        )
+    )
+    if explicitly_scoped:
+        return True
+    # Mentioning an external innovation or a published "novel method" in a
+    # background/case claim is not itself a novelty assertion by this project.
+    # Text heuristics are used only when the model explicitly routes the claim
+    # to the proposal's INNOVATION section.
+    searchable = f"{' '.join(qualifiers).lower()} {claim_text}"
+    return "INNOVATION" in profiles and any(
+        term in searchable for term in _INNOVATION_TERMS
+    )
 
 
 def validate_public_claims(synthesis: dict[str, Any], research_output: dict[str, Any]) -> dict[str, Any]:
@@ -102,6 +123,7 @@ def validate_public_claims(synthesis: dict[str, Any], research_output: dict[str,
         findings.append({"code": "PUBLIC_SOURCE_CONFLICT_SUPPRESSED", "severity": "P0"})
     return {
         "status": "BLOCK" if findings else "PASS",
+        "validator_version": PUBLIC_CLAIM_VALIDATOR_VERSION,
         "validation_mode": "DETERMINISTIC_PUBLIC_CLAIM_BINDING",
         "findings": findings, "bindings": bindings, "claim_count": len(claims), "catalog_source_count": len(catalog),
         "synthesis_sha256": hashlib.sha256(json.dumps(synthesis, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest(),

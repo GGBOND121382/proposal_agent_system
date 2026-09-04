@@ -332,6 +332,38 @@ def test_c5_innovation_claim_requires_recent_baseline_and_limitation_evidence(tm
     assert "PUBLIC_INNOVATION_EVIDENCE_GAP" in {item["code"] for item in report["findings"]}
 
 
+def test_external_innovation_case_is_not_misclassified_as_project_novelty(tmp_path):
+    result = _run(tmp_path)
+    for name in ("recent_work", "comparable_baselines", "limitation_mechanisms"):
+        result.output["coverage"]["dimensions"][name]["status"] = "INSUFFICIENT"
+    source = result.output["sources"][0]
+    synthesis = {
+        "claims": [{
+            "claim_id": "external-case-innovation",
+            "claim_text": "A published case describes a crisis-driven innovation.",
+            "claim_type": "PUBLIC_CLAIM",
+            "subject_id": None,
+            "temporal_status": "CURRENT",
+            "qualifiers": ["External representative case; transferability is limited"],
+            "target_section_profiles": ["BACKGROUND_AND_SIGNIFICANCE", "LITERATURE_REVIEW"],
+            "numeric_values": [],
+            "source_refs": [source],
+            "knowledge_status": "DOCUMENT_EXTRACTED",
+            "security_level": "PUBLIC",
+        }],
+        "source_comparisons": [], "conflicts": [], "limitations": [],
+        "coverage_summary": "External case only",
+    }
+
+    report = validate_public_claims(synthesis, result.output)
+
+    assert report["status"] == "PASS"
+    assert not {
+        "PUBLIC_INNOVATION_EVIDENCE_GAP",
+        "PUBLIC_INNOVATION_RESEARCH_SUFFICIENCY_GAP",
+    } & {item["code"] for item in report["findings"]}
+
+
 def test_cross_language_legacy_queries_are_not_rejected_by_token_overlap():
     from app.skills.research_plan import normalize_and_validate_plan
 

@@ -651,7 +651,7 @@ def test_wf3b_passage_source_alias_contract_block_retries_after_projection_fix(t
     assert recovered["state"]["recovered_from"] == "WF3B_PASSAGE_SOURCE_ALIAS"
 
 
-def test_wf3b_malformed_provider_json_block_can_start_fresh_cycle(tmp_path):
+def test_wf3b_malformed_provider_json_block_does_not_reopen_without_saved_object(tmp_path):
     db = make_executor_db(tmp_path)
     now = utc_now()
     state = {
@@ -682,8 +682,325 @@ def test_wf3b_malformed_provider_json_block_can_start_fresh_cycle(tmp_path):
 
     recovered = engine._recover_status(engine.get("wf-provider-json-block"))
 
+    assert recovered["status"] == "BLOCKED_CONTRACT"
+    assert "recovered_from" not in recovered["state"]
+
+
+def test_wf3b_import_budget_block_reopens_once_after_projection_upgrade(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {},
+        "step_results": {},
+        "last_error": (
+            "WF-3 provider request exceeds its deterministic node budget | "
+            "/provider_request: 138448 chars exceeds 105000 for "
+            "P-ONLINE-RESULT-IMPORT-CRITIC"
+        ),
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-import-budget",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "BLOCKED_CONTRACT",
+            7,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    engine = RecoverableWorkflowEngine(
+        db, SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), SimpleNamespace()
+    )
+
+    recovered = engine._recover_status(engine.get("wf-import-budget"))
+
     assert recovered["status"] == "RUNNING"
-    assert recovered["state"]["recovered_from"] == "WF3B_PROVIDER_JSON_RETRY"
+    assert recovered["state"]["recovered_from"] == (
+        "WF3B_IMPORT_CLAIM_BOUND_SOURCE_PROJECTION"
+    )
+    assert recovered["state"]["wf3b_import_projection_recovery"]["version"] == (
+        "2026-09-04.v2-claim-bound-sources-request-identity"
+    )
+    engine._update(recovered, status="BLOCKED_CONTRACT", state=recovered["state"])
+    assert engine._recover_status(engine.get("wf-import-budget"))["status"] == (
+        "BLOCKED_CONTRACT"
+    )
+
+
+def test_wf3b_contract_migration_selects_valid_earlier_attempt_in_same_cycle(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    base_call_key = "call-provider-synthesis"
+    cycle_id = "cycle-synthesis"
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {},
+        "step_results": {},
+        "provider_wait": {
+            "retry_key": "5:P-BACKGROUND-RESEARCH-SYNTHESIS",
+            "cycle_id": cycle_id,
+            "base_call_key": base_call_key,
+            "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+            "failure_run_id": "run-malformed-latest",
+            "decision": {"should_retry": False},
+            "exhausted": True,
+        },
+        "runtime_failure_history": [
+            {
+                "step": 5,
+                "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+                "run_id": "run-malformed-latest",
+            }
+        ],
+        "last_error": "MiniMax returned malformed JSON: latest response was truncated",
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-synthesis-migration",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "BLOCKED_CONTRACT",
+            5,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    for run_id, output_json, error, attempt, recoverable in (
+        (
+            "run-schema-earlier",
+            json.dumps({"status": "PASS", "result": {}}),
+            "Provider output failed strict schema validation",
+            2,
+            True,
+        ),
+        (
+            "run-malformed-latest",
+            None,
+            "MiniMax returned malformed JSON",
+            3,
+            False,
+        ),
+    ):
+        db.execute(
+            """INSERT INTO prompt_runs(
+                   id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+                   input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                run_id,
+                "project-1",
+                "wf-synthesis-migration",
+                "P-BACKGROUND-RESEARCH-SYNTHESIS",
+                "ERROR",
+                "model",
+                "endpoint",
+                "input-hash",
+                None,
+                "{}",
+                output_json,
+                error,
+                1,
+                now,
+            ),
+        )
+        db.audit(
+            "MODEL_CALL_FAILED",
+            project_id="project-1",
+            object_id=f"{base_call_key}-cycle-{cycle_id}-attempt-{attempt}",
+            metadata={
+                "run_id": run_id,
+                "checkpoint_call_key": (
+                    f"{base_call_key}-cycle-{cycle_id}-attempt-{attempt}"
+                ),
+                "output_normalizer_version": "normalizer-v1",
+                "deterministic_recoverable": recoverable,
+            },
+        )
+    engine = RecoverableWorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(output_normalizer_version="normalizer-v2"),
+        SimpleNamespace(),
+    )
+
+    workflow = engine.get("wf-synthesis-migration")
+    assert engine._recover_contract_block_after_normalizer_upgrade(
+        workflow, workflow["state"]
+    ) is True
+    recovered = engine.get("wf-synthesis-migration")
+
+    assert recovered["status"] == "RUNNING"
+    migration = recovered["state"]["contract_migration_recovery"]
+    assert migration["failed_run_id"] == "run-schema-earlier"
+    assert migration["exhausted_failure_run_id"] == "run-malformed-latest"
+    assert migration["replay_over_exhausted_checkpoint"] is True
+
+
+def test_pending_contract_migration_replay_reopens_once_after_old_runtime_reblock(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {},
+        "step_results": {},
+        "last_error": "cached malformed provider response",
+        "contract_migration_recovery": {
+            "step": 5,
+            "retry_key": "5",
+            "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+            "failed_run_id": "run-schema-earlier",
+            "output_normalizer_version": "normalizer-v2",
+            "replay_over_exhausted_checkpoint": True,
+        },
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-pending-migration",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "BLOCKED_PROVIDER",
+            5,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "run-schema-earlier",
+            "project-1",
+            "wf-pending-migration",
+            "P-BACKGROUND-RESEARCH-SYNTHESIS",
+            "ERROR",
+            "model",
+            "endpoint",
+            "input-hash",
+            None,
+            "{}",
+            "{}",
+            "old schema failure",
+            1,
+            now,
+        ),
+    )
+    engine = RecoverableWorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(output_normalizer_version="normalizer-v2"),
+        SimpleNamespace(),
+    )
+
+    workflow = engine.get("wf-pending-migration")
+    assert engine._resume_pending_contract_migration(workflow, workflow["state"]) is True
+    recovered = engine.get("wf-pending-migration")
+    assert recovered["status"] == "RUNNING"
+    assert recovered["state"]["contract_migration_replay_attempts"] == {
+        "5:normalizer-v2": 1
+    }
+
+    engine._update(recovered, status="BLOCKED_PROVIDER", state=recovered["state"])
+    blocked_again = engine.get("wf-pending-migration")
+    assert engine._resume_pending_contract_migration(
+        blocked_again, blocked_again["state"]
+    ) is False
+
+
+def test_wf3b_claim_validation_policy_upgrade_reuses_committed_synthesis(tmp_path):
+    db = make_executor_db(tmp_path)
+    now = utc_now()
+    output = {
+        "status": "PASS",
+        "result": {
+            "claims": [],
+            "source_comparisons": [],
+            "conflicts": [],
+            "limitations": [],
+        },
+    }
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {},
+        "step_results": {
+            "5": {
+                "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+                "run_id": "run-synthesis-pass",
+                "status": "PASS",
+            }
+        },
+        "background_search_results": {"mode": "REPLAY"},
+        "background_claim_validation": {
+            "status": "BLOCK",
+            "findings": [{"code": "OLD_FALSE_POSITIVE", "severity": "P0"}],
+        },
+        "last_error": "old claim policy blocked synthesis",
+    }
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-claim-policy-upgrade",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "BLOCKED_CONTENT",
+            5,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    db.execute(
+        """INSERT INTO prompt_runs(
+               id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,
+               input_hash,output_hash,input_json,output_json,error,duration_ms,created_at
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "run-synthesis-pass",
+            "project-1",
+            "wf-claim-policy-upgrade",
+            "P-BACKGROUND-RESEARCH-SYNTHESIS",
+            "PASS",
+            "model",
+            "endpoint",
+            "input-hash",
+            "output-hash",
+            "{}",
+            json.dumps(output),
+            None,
+            1,
+            now,
+        ),
+    )
+    engine = RecoverableWorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(output_normalizer_version="normalizer-v2"),
+        SimpleNamespace(),
+    )
+
+    workflow = engine.get("wf-claim-policy-upgrade")
+    assert engine._recover_wf3b_claim_validation_after_policy_upgrade(
+        workflow, workflow["state"]
+    ) is True
+    recovered = engine.get("wf-claim-policy-upgrade")
+
+    assert recovered["status"] == "RUNNING"
+    assert recovered["state"]["background_claim_validation"]["status"] == "PASS"
+    assert recovered["state"]["recovered_from"] == (
+        "WF3B_CLAIM_VALIDATION_POLICY_UPGRADE"
+    )
 
 
 @pytest.mark.parametrize(
@@ -780,6 +1097,105 @@ class SequencePromptExecutor:
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
+
+
+def test_contract_migration_replays_earlier_attempt_over_exhausted_checkpoint(tmp_path):
+    from app.workflows import WorkflowEngine
+
+    db = make_executor_db(tmp_path)
+    envelope = {"payload": {"topic": "public research"}}
+    input_hash = sha256_json(envelope)
+    retry_key = "5:P-BACKGROUND-RESEARCH-SYNTHESIS"
+    cycle_id = "cycle-synthesis"
+    base_call_key = "call-provider-synthesis"
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "options": {"provider_retry_limit": 2, "provider_retry_base_delay_seconds": 0},
+        "step_results": {},
+        "provider_call_cycles": {
+            retry_key: {
+                "cycle_id": cycle_id,
+                "generation": 1,
+                "input_hash": input_hash,
+                "protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
+                "provider_request_spec_hash": "",
+                "base_call_key": base_call_key,
+                "completed_attempts": 3,
+            }
+        },
+        "provider_wait": {
+            "retry_key": retry_key,
+            "cycle_id": cycle_id,
+            "input_hash": input_hash,
+            "protocol_version": MODEL_RESPONSE_PROTOCOL_VERSION,
+            "provider_request_spec_hash": "",
+            "base_call_key": base_call_key,
+            "completed_attempts": 3,
+            "retry_limit": 2,
+            "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+            "failure_run_id": "run-malformed-latest",
+            "decision": {
+                "should_retry": False,
+                "completed_attempts": 3,
+                "max_retries": 2,
+                "max_attempts": 3,
+            },
+            "phase": "FAILED",
+            "exhausted": True,
+        },
+        "contract_migration_recovery": {
+            "checkpoint_identity_version": 1,
+            "step": 5,
+            "section_id": None,
+            "section_phase": None,
+            "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+            "failed_run_id": "run-schema-earlier",
+            "replay_over_exhausted_checkpoint": True,
+        },
+    }
+    now = utc_now()
+    db.execute(
+        "INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "wf-replay-earlier-attempt",
+            "project-1",
+            "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+            "RUNNING",
+            5,
+            json.dumps(state),
+            now,
+            now,
+        ),
+    )
+    executor = SequencePromptExecutor(
+        [{"run_id": "run-recovered", "status": "PASS", "output": {"status": "PASS"}}]
+    )
+    engine = WorkflowEngine(
+        db,
+        SimpleNamespace(),
+        SimpleNamespace(),
+        executor,
+        SimpleNamespace(),
+    )
+    workflow = engine.get("wf-replay-earlier-attempt")
+
+    result = asyncio.run(
+        engine._execute_prompt_with_provider_retry(
+            workflow,
+            workflow["state"],
+            prompt_id="P-BACKGROUND-RESEARCH-SYNTHESIS",
+            envelope=envelope,
+        )
+    )
+
+    assert result["run_id"] == "run-recovered"
+    assert executor.calls == 1
+    assert executor.call_kwargs[0]["recovery_run_id"] == "run-schema-earlier"
+    assert executor.call_kwargs[0]["call_key"].endswith("-attempt-3")
+    persisted = engine.get("wf-replay-earlier-attempt")["state"]
+    assert "provider_wait" not in persisted
+    assert "contract_migration_recovery" not in persisted
+    assert persisted["provider_call_cycles"][retry_key]["successful_attempt"] == 3
 
 
 class SimulatedProcessCrash(BaseException):

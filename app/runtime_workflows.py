@@ -14,6 +14,10 @@ from .workflow_status import (
     is_terminal,
 )
 
+WF3B_IMPORT_PROJECTION_RECOVERY_VERSION = (
+    "2026-09-04.v2-claim-bound-sources-request-identity"
+)
+
 
 class RecoverableWorkflowEngine(BaseWorkflowEngine):
     """Workflow facade that resumes stale RUNNING/WAITING_GATE/recoverable BLOCKED states."""
@@ -107,12 +111,20 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
             and "Output provenance is not backed by the trusted input envelope"
             in last_error
         )
-        recoverable_wf3b_provider_json = (
+        recoverable_wf3b_import_projection = (
             wf["status"] == WorkflowStatus.BLOCKED_CONTRACT.value
             and str(state.get("workflow_type") or "")
             == "WF-3B_TOPIC_BACKGROUND_RESEARCH"
-            and int(wf.get("current_step") or 0) == 5
-            and last_error.startswith("MiniMax returned malformed JSON:")
+            and int(wf.get("current_step") or 0) == 7
+            and last_error.startswith(
+                "WF-3 provider request exceeds its deterministic node budget"
+            )
+            and str(
+                (state.get("wf3b_import_projection_recovery") or {}).get("version")
+                if isinstance(state.get("wf3b_import_projection_recovery"), dict)
+                else ""
+            )
+            != WF3B_IMPORT_PROJECTION_RECOVERY_VERSION
         )
         if (
             (
@@ -122,7 +134,7 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
             or recoverable_plan_contract
             or recoverable_web_provider_alias
             or recoverable_wf3b_passage_alias
-            or recoverable_wf3b_provider_json
+            or recoverable_wf3b_import_projection
         ):
             state["recovered_from"] = (
                 state.get("runtime_failure_point")
@@ -136,8 +148,8 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
                             "WF3B_PASSAGE_SOURCE_ALIAS"
                             if recoverable_wf3b_passage_alias
                             else (
-                                "WF3B_PROVIDER_JSON_RETRY"
-                                if recoverable_wf3b_provider_json
+                                "WF3B_IMPORT_CLAIM_BOUND_SOURCE_PROJECTION"
+                                if recoverable_wf3b_import_projection
                                 else "RECOVERABLE_BLOCK"
                             )
                         )
@@ -148,6 +160,11 @@ class RecoverableWorkflowEngine(BaseWorkflowEngine):
             state.pop("last_error", None)
             if recoverable_plan_contract or recoverable_web_provider_alias:
                 state.pop("public_research_failure", None)
+            if recoverable_wf3b_import_projection:
+                state["wf3b_import_projection_recovery"] = {
+                    "version": WF3B_IMPORT_PROJECTION_RECOVERY_VERSION,
+                    "recovered_at": utc_now(),
+                }
             self._update(wf, status=WorkflowStatus.RUNNING.value, state=state)
             return self.get(wf["id"])
         return wf
