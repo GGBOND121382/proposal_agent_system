@@ -427,3 +427,82 @@ def test_list_operations_recovers_persisted_rebuild_for_frontend(tmp_path: Path)
     assert listed[0]["project_id"] == project_id
     assert listed[0]["plan"]["root_source_workflow_id"] == wf3
     assert listed[0]["created_workflow_ids"] == operation["created_workflow_ids"]
+
+
+def test_abort_rebuild_restores_source_checkpoint_atomically(tmp_path: Path) -> None:
+    db = Database(tmp_path / "state.db")
+    project_id = add_project(db)
+    wf1 = add_workflow(db, project_id, "WF-1_PROJECT_INTAKE")
+    source = add_workflow(
+        db,
+        project_id,
+        "WF-3_HYBRID_ONLINE_ASSIST",
+        status="BLOCKED_CONTRACT",
+        prerequisites={"WF-1_PROJECT_INTAKE": wf1},
+    )
+    source_row = db.fetchone("SELECT state_json FROM workflows WHERE id=?", (source,))
+    source_state = json.loads(source_row["state_json"])
+    source_state["checkpoint_sentinel"] = {"saved_sources": 80}
+    db.execute(
+        "UPDATE workflows SET current_step=5,state_json=? WHERE id=?",
+        (json.dumps(source_state), source),
+    )
+    workflows = CompletingWorkflows(db)
+    service = WorkflowLifecycleService(db, workflows)
+
+    operation = asyncio.run(service.rebuild(source, scope="SELF", auto_advance=False))
+    child_id = operation["plan"]["nodes"][0]["new_workflow_id"]
+    assert operation["status"] == "PAUSED"
+    assert workflows.get(source)["status"] == "CANCELLED"
+    assert workflows.get(child_id)["status"] == "RUNNING"
+
+    aborted = service.abort_and_restore(operation["id"])
+    restored = workflows.get(source)
+    assert aborted["status"] == "ABORTED"
+    assert aborted["active_node"] is None
+    assert restored["status"] == "BLOCKED_CONTRACT"
+    assert restored["current_step"] == 5
+    assert restored["state"]["checkpoint_sentinel"] == {"saved_sources": 80}
+    assert "cancelled_for_rebuild" not in restored["state"]
+    assert restored["state"]["rebuild_restore_history"][-1]["operation_id"] == operation["id"]
+    assert workflows.get(child_id)["status"] == "CANCELLED"
+    assert aborted["plan"]["abort"]["restored_source_workflow_ids"] == [source]
+    assert aborted["plan"]["abort"]["cancelled_child_workflow_ids"] == [child_id]
+    audit = db.fetchone(
+        "SELECT event_type FROM audit_events WHERE object_id=? ORDER BY id DESC LIMIT 1",
+        (operation["id"],),
+    )
+    assert audit["event_type"] == "WORKFLOW_REBUILD_ABORTED_AND_SOURCE_RESTORED"
+
+    # The operation is idempotent and can never be resumed after restoration.
+    assert service.abort_and_restore(operation["id"])["status"] == "ABORTED"
+    with pytest.raises(ValueError, match="cannot be resumed"):
+        asyncio.run(service.resume(operation["id"]))
+
+
+def test_abort_rebuild_refuses_completed_replacement_without_mutation(tmp_path: Path) -> None:
+    db = Database(tmp_path / "state.db")
+    project_id = add_project(db)
+    wf1 = add_workflow(db, project_id, "WF-1_PROJECT_INTAKE")
+    source = add_workflow(
+        db,
+        project_id,
+        "WF-3_HYBRID_ONLINE_ASSIST",
+        status="BLOCKED_CONTRACT",
+        prerequisites={"WF-1_PROJECT_INTAKE": wf1},
+    )
+    workflows = CompletingWorkflows(db)
+    service = WorkflowLifecycleService(db, workflows)
+    operation = asyncio.run(service.rebuild(source, scope="SELF", auto_advance=False))
+    child_id = operation["plan"]["nodes"][0]["new_workflow_id"]
+    db.execute(
+        "UPDATE workflows SET status='COMPLETED',updated_at=? WHERE id=?",
+        (utc_now(), child_id),
+    )
+
+    with pytest.raises(ValueError, match="completed replacement"):
+        service.abort_and_restore(operation["id"])
+
+    assert workflows.get(source)["status"] == "CANCELLED"
+    assert workflows.get(child_id)["status"] == "COMPLETED"
+    assert service.get_operation(operation["id"])["status"] == "PAUSED"

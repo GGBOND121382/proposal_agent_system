@@ -15,6 +15,18 @@ def test_workflow_panel_exposes_one_click_rebuild_and_resume_buttons() -> None:
 def test_frontend_uses_standard_rebuild_apis_and_persisted_operation_listing() -> None:
     js = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
     assert "/api/workflow-rebuilds?project_id=" in js
+
+
+def test_workflow_panel_exposes_abort_and_checkpoint_restore_control() -> None:
+    html = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    js = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+    main_py = (ROOT / "app/main.py").read_text(encoding="utf-8")
+
+    assert 'id="abortRebuild"' in html
+    assert "撤销重建并恢复原工作流" in html
+    assert "/abort-and-restore`" in js
+    assert "['COMPLETED','ABORTED']" in js
+    assert '@app.post("/api/workflow-rebuilds/{operation_id}/abort-and-restore")' in main_py
     assert "/rebuild`" in js
     assert "/resume`" in js
     assert "python scripts/rebuild.py" not in js

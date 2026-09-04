@@ -16,7 +16,14 @@ from .workflow_status import (
 
 REBUILD_SCOPE_SELF = "SELF"
 REBUILD_SCOPE_ALL_DOWNSTREAM = "ALL_DOWNSTREAM"
-REBUILD_OPERATION_STATUSES = {"PLANNED", "RUNNING", "PAUSED", "COMPLETED", "FAILED"}
+REBUILD_OPERATION_STATUSES = {
+    "PLANNED",
+    "RUNNING",
+    "PAUSED",
+    "COMPLETED",
+    "FAILED",
+    "ABORTED",
+}
 
 
 class WorkflowLifecycleService:
@@ -333,11 +340,21 @@ class WorkflowLifecycleService:
         )
         if row is None:
             raise KeyError(f"Rebuild operation not found: {operation_id}")
+        return self._decode_operation(row)
+
+    @staticmethod
+    def _decode_operation(row: dict[str, Any]) -> dict[str, Any]:
+        row = copy.deepcopy(row)
         plan = json.loads(row.pop("plan_json"))
         row["plan"] = plan
         index = int(row["current_index"])
         nodes = plan.get("nodes") or []
-        active = nodes[index] if 0 <= index < len(nodes) else None
+        active = (
+            nodes[index]
+            if row["status"] not in {"COMPLETED", "ABORTED"}
+            and 0 <= index < len(nodes)
+            else None
+        )
         row["active_node"] = copy.deepcopy(active)
         row["created_workflow_ids"] = [
             item["new_workflow_id"] for item in nodes if item.get("new_workflow_id")
@@ -554,6 +571,8 @@ class WorkflowLifecycleService:
 
     async def resume(self, operation_id: str) -> dict[str, Any]:
         operation = self.get_operation(operation_id)
+        if operation["status"] == "ABORTED":
+            raise ValueError("aborted rebuild operation cannot be resumed")
         if operation["status"] == "COMPLETED":
             return operation
         plan = operation["plan"]
@@ -592,6 +611,206 @@ class WorkflowLifecycleService:
                         plan=plan,
                     )
         return await self._run(operation_id, advance_current=True)
+
+    def abort_and_restore(self, operation_id: str) -> dict[str, Any]:
+        """Abort an unfinished rebuild and restore its cancelled source checkpoints.
+
+        Rebuild children are immutable lineage records, so they are cancelled rather
+        than deleted.  A source is restored only when its cancellation marker proves
+        that this exact operation cancelled it.  The whole change is committed in one
+        transaction to avoid leaving the project with both source and replacement
+        workflows occupying the same active slot.
+        """
+
+        with self.db.transaction() as tx:
+            row = tx.fetchone(
+                "SELECT * FROM workflow_rebuild_operations WHERE id=?",
+                (operation_id,),
+            )
+            if row is None:
+                raise KeyError(f"Rebuild operation not found: {operation_id}")
+            if row["status"] == "ABORTED":
+                return self._decode_operation(row)
+            if row["status"] == "COMPLETED":
+                raise ValueError("completed rebuild operation cannot be aborted")
+
+            plan = json.loads(row["plan_json"] or "{}")
+            nodes = plan.get("nodes") or []
+            created_ids = {
+                str(workflow_id)
+                for node in nodes
+                for workflow_id in (
+                    [node.get("new_workflow_id")]
+                    + [item.get("workflow_id") for item in (node.get("restart_history") or [])]
+                )
+                if str(workflow_id or "").strip()
+            }
+
+            child_rows: dict[str, dict[str, Any]] = {}
+            for workflow_id in sorted(created_ids):
+                child = tx.fetchone("SELECT * FROM workflows WHERE id=?", (workflow_id,))
+                if child is None:
+                    raise ValueError(f"rebuild child workflow is missing: {workflow_id}")
+                if child["status"] == WorkflowStatus.COMPLETED.value:
+                    raise ValueError(
+                        "rebuild has a completed replacement workflow and cannot be safely "
+                        f"aborted: {workflow_id}"
+                    )
+                child_rows[workflow_id] = child
+
+            sources_to_restore: list[tuple[dict[str, Any], dict[str, Any], str]] = []
+            source_ids = {str(node.get("source_workflow_id") or "") for node in nodes}
+            for node in nodes:
+                source_id = str(node.get("source_workflow_id") or "").strip()
+                if not source_id:
+                    continue
+                source = tx.fetchone("SELECT * FROM workflows WHERE id=?", (source_id,))
+                if source is None:
+                    raise ValueError(f"rebuild source workflow is missing: {source_id}")
+                state = json.loads(source["state_json"] or "{}")
+                marker = state.get("cancelled_for_rebuild") or {}
+                if marker.get("operation_id") != operation_id:
+                    continue
+                if source["status"] != WorkflowStatus.CANCELLED.value:
+                    raise ValueError(
+                        f"rebuild source has a cancellation marker but is not CANCELLED: {source_id}"
+                    )
+                restore_status = str(node.get("source_status") or "").strip()
+                if restore_status in {"", WorkflowStatus.CANCELLED.value, WorkflowStatus.COMPLETED.value}:
+                    raise ValueError(
+                        f"rebuild source has no recoverable checkpoint status: {source_id}"
+                    )
+                # Validate the persisted snapshot against the canonical ontology.  A
+                # dedicated restore intentionally bypasses the ordinary terminal-state
+                # transition rule after proving operation ownership above.
+                WorkflowStatus(restore_status)
+                sources_to_restore.append((source, state, restore_status))
+
+            if not sources_to_restore:
+                raise ValueError(
+                    "rebuild operation has no source checkpoint cancelled by this operation"
+                )
+
+            active_conflicts: list[str] = []
+            restored_types = {str(source["workflow_type"]) for source, _, _ in sources_to_restore}
+            project_rows = tx.fetchall(
+                "SELECT id,workflow_type,status FROM workflows WHERE project_id=?",
+                (row["project_id"],),
+            )
+            for workflow in project_rows:
+                workflow_id = str(workflow["id"])
+                if (
+                    workflow_id not in source_ids
+                    and workflow_id not in created_ids
+                    and str(workflow["workflow_type"]) in restored_types
+                    and occupies_workflow_slot(str(workflow["status"]))
+                ):
+                    active_conflicts.append(
+                        f"{workflow['workflow_type']}:{workflow_id}({workflow['status']})"
+                    )
+            if active_conflicts:
+                raise ValueError(
+                    "cannot restore source checkpoint while unrelated active workflows "
+                    "occupy the same slot: " + ", ".join(sorted(active_conflicts))
+                )
+
+            now = utc_now()
+            cancelled_children: list[str] = []
+            for workflow_id, child in child_rows.items():
+                if child["status"] == WorkflowStatus.CANCELLED.value:
+                    continue
+                ensure_transition(child["status"], WorkflowStatus.CANCELLED.value)
+                child_state = json.loads(child["state_json"] or "{}")
+                child_state["cancelled_for_rebuild"] = {
+                    "cancelled_at": now,
+                    "operation_id": operation_id,
+                    "branch_id": row["branch_id"],
+                    "reason": "rebuild aborted and source checkpoint restored",
+                }
+                tx.execute(
+                    """UPDATE gates
+                          SET status='CANCELLED',decision_json=?,updated_at=?
+                        WHERE workflow_id=? AND status='OPEN'""",
+                    (
+                        json.dumps(
+                            {
+                                "action": "CANCEL",
+                                "reason": "rebuild aborted and source checkpoint restored",
+                                "rebuild_operation_id": operation_id,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        now,
+                        workflow_id,
+                    ),
+                )
+                tx.update_workflow(
+                    workflow_id=workflow_id,
+                    status=WorkflowStatus.CANCELLED.value,
+                    current_step=int(child["current_step"]),
+                    state=child_state,
+                    expected_updated_at=child["updated_at"],
+                )
+                cancelled_children.append(workflow_id)
+
+            restored_sources: list[str] = []
+            for source, state, restore_status in sources_to_restore:
+                marker = copy.deepcopy(state.pop("cancelled_for_rebuild"))
+                state.setdefault("rebuild_restore_history", []).append(
+                    {
+                        "restored_at": now,
+                        "operation_id": operation_id,
+                        "branch_id": row["branch_id"],
+                        "restored_status": restore_status,
+                        "cancellation": marker,
+                    }
+                )
+                if restore_status == WorkflowStatus.WAITING_GATE.value:
+                    cancelled_gates = tx.fetchall(
+                        """SELECT id,decision_json FROM gates
+                             WHERE workflow_id=? AND status='CANCELLED'""",
+                        (source["id"],),
+                    )
+                    for gate in cancelled_gates:
+                        decision = json.loads(gate.get("decision_json") or "{}")
+                        if decision.get("rebuild_operation_id") == operation_id:
+                            tx.execute(
+                                "UPDATE gates SET status='OPEN',decision_json=NULL,updated_at=? WHERE id=?",
+                                (now, gate["id"]),
+                            )
+                tx.update_workflow(
+                    workflow_id=str(source["id"]),
+                    status=restore_status,
+                    current_step=int(source["current_step"]),
+                    state=state,
+                    expected_updated_at=source["updated_at"],
+                )
+                restored_sources.append(str(source["id"]))
+
+            plan["abort"] = {
+                "aborted_at": now,
+                "reason": "restore source workflow checkpoint",
+                "restored_source_workflow_ids": restored_sources,
+                "cancelled_child_workflow_ids": cancelled_children,
+            }
+            tx.execute(
+                """UPDATE workflow_rebuild_operations
+                      SET status='ABORTED',plan_json=?,updated_at=?
+                    WHERE id=?""",
+                (json.dumps(plan, ensure_ascii=False), now, operation_id),
+            )
+            tx.audit(
+                "WORKFLOW_REBUILD_ABORTED_AND_SOURCE_RESTORED",
+                project_id=row["project_id"],
+                object_id=operation_id,
+                metadata={
+                    "branch_id": row["branch_id"],
+                    "restored_source_workflow_ids": restored_sources,
+                    "cancelled_child_workflow_ids": cancelled_children,
+                },
+            )
+
+        return self.get_operation(operation_id)
 
     async def _run(self, operation_id: str, *, advance_current: bool) -> dict[str, Any]:
         operation = self.get_operation(operation_id)

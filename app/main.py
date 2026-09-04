@@ -265,6 +265,16 @@ async def resume_workflow_rebuild(operation_id: str) -> dict[str, Any]:
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.post("/api/workflow-rebuilds/{operation_id}/abort-and-restore")
+def abort_workflow_rebuild_and_restore(operation_id: str) -> dict[str, Any]:
+    try:
+        return lifecycle.abort_and_restore(operation_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.get("/api/workflow-rebuilds")
 def list_workflow_rebuilds(
     project_id: str = Query(...),
