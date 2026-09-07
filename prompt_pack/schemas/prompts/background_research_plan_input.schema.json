@@ -246,6 +246,27 @@
               },
               "uniqueItems": true
             },
+            "provider_execution_requirements": {
+              "type": "object",
+              "properties": {
+                "required_providers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "execute_all_approved_queries": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "required_providers",
+                "execute_all_approved_queries"
+              ]
+            },
             "minimum_fulltext_sources_per_query": {
               "type": "integer",
               "minimum": 0

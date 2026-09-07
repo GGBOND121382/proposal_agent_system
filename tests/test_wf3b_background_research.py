@@ -435,6 +435,9 @@ def test_live_context_projects_approved_safe_package_into_wf3b_contract(tmp_path
     assert payload["optional_dimensions"] == []
     assert payload["retrieval_contract"]["require_web_discovery"] is True
     assert "WEB_SEARCH" in payload["retrieval_contract"]["required_channels"]
+    requirements = payload["retrieval_contract"]["provider_execution_requirements"]
+    assert "browser_search" in requirements["required_providers"]
+    assert requirements["execute_all_approved_queries"] is True
 
 
 def _record(source_id: str, provider: str) -> dict:
