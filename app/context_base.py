@@ -30,7 +30,7 @@ from .background_research import (
 )
 from .model_semantic_contracts import project_argument_authoritative_state
 from .wf3_contracts import wf3_safe_package_valid_until
-from .util import new_id, sha256_json, sha256_text
+from .util import new_id, sha256_json, sha256_text, utc_now
 from .wf3_input import (
     WF3_INPUT_GATE_TYPE,
     WorkflowInputRequired,

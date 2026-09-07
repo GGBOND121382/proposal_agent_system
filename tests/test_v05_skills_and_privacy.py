@@ -172,3 +172,78 @@ def test_public_retrieval_projection_redacts_contact_details():
     assert {match.entity_type for match in matches} == {"EMAIL", "PHONE"}
     # After redaction the same payload passes the outbound blocker.
     assert_online_payload_safe({"payload": {"retrieved_sources": redacted}}, {})
+
+
+def test_background_synthesis_projection_redacts_and_records_audit():
+    from app.context_base import ContextBuilder
+    from app.privacy import assert_online_payload_safe
+
+    class NullDB:
+        def fetchone(self, sql, params=()):
+            return None
+
+        def fetchall(self, sql, params=()):
+            return []
+
+    class PermissivePack:
+        relation_matrix = {"version": "2.0", "allowed_relations": []}
+
+        def validate(self, prompt_id, kind, value):
+            return []
+
+        def inlined_schema(self, prompt_id, kind):
+            return {
+                "type": "object",
+                "properties": {
+                    "payload": {
+                        "type": "object",
+                        "properties": {"retrieved_sources": {}},
+                        "additionalProperties": {},
+                    }
+                },
+                "additionalProperties": {},
+            }
+
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "background_search_results": {
+            "sources": [
+                {
+                    "source_id": "public-src-xyz789",
+                    "quoted_text": "获取全文请联系 jane.doe@example.edu。",
+                    "url": "https://example.edu/report",
+                    "content_hash": "b" * 64,
+                }
+            ],
+            "passages": [],
+        },
+    }
+    envelope = {"payload": {"retrieved_sources": []}}
+    project = {
+        "id": "project-redaction",
+        "name": "项目",
+        "description": "描述",
+        "security_level": "INTERNAL",
+    }
+
+    ContextBuilder(NullDB(), PermissivePack())._apply_common_payload(
+        envelope,
+        "P-BACKGROUND-RESEARCH-SYNTHESIS",
+        project,
+        {},
+        [],
+        "c" * 64,
+        state,
+        "wf-redaction-test",
+    )
+
+    projected = envelope["payload"]["retrieved_sources"]
+    assert "[EMAIL]" in projected[0]["quoted_text"]
+    assert "jane.doe@example.edu" not in projected[0]["quoted_text"]
+    records = state.get("retrieval_privacy_redactions")
+    assert records, "audit record must be written when redaction fires"
+    assert records[0]["prompt_id"] == "P-BACKGROUND-RESEARCH-SYNTHESIS"
+    assert records[0]["redacted_count"] >= 1
+    assert "EMAIL" in records[0]["entity_types"]
+    assert records[0]["recorded_at"]
+    assert_online_payload_safe({"payload": {"retrieved_sources": projected}}, {})
