@@ -653,6 +653,40 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         self.dependency_preflight = dependency_preflight
         self.decision_arbiter = DecisionArbiter()
 
+    def _safe_package_critic_enabled(self) -> bool:
+        settings = getattr(getattr(self.executor, "gateway", None), "settings", None)
+        return bool(getattr(settings, "safe_package_critic_enabled", True))
+
+    def _bypass_safe_package_critic_revise(
+        self,
+        state: dict[str, Any],
+        prompt_id: str,
+        effective_status: str,
+        effective_output: dict[str, Any],
+        *,
+        run_id: str,
+    ) -> str:
+        if (
+            prompt_id != "P-SAFE-ONLINE-PACKAGE-CRITIC"
+            or effective_status != "REVISE"
+            or self._safe_package_critic_enabled()
+        ):
+            return effective_status
+        state.setdefault("safe_package_critic_bypassed", []).append(
+            {
+                "run_id": run_id,
+                "original_status": "REVISE",
+                "finding_codes": [
+                    str(item.get("code") or "")
+                    for item in effective_output.get("findings") or []
+                    if isinstance(item, dict)
+                ],
+                "recorded_at": utc_now(),
+            }
+        )
+        del state["safe_package_critic_bypassed"][:-50]
+        return "PASS"
+
     def _background_research(self) -> BackgroundResearchService:
         service = self.background_research_service
         if service is None:
@@ -3812,6 +3846,13 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 self._update(wf, state=state)
             decision, effective_status, effective_output = self._record_decision(
                 wf, state, prompt_id, result
+            )
+            effective_status = self._bypass_safe_package_critic_revise(
+                state,
+                prompt_id,
+                effective_status,
+                effective_output,
+                run_id=str(result.get("run_id") or ""),
             )
             if isinstance(pending_rereview, dict):
                 self._complete_repair_rereview(

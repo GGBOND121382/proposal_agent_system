@@ -42,6 +42,7 @@ class Settings:
     mermaid_js_path: Path
     mermaid_browser_executable: str
     skill_timeout_seconds: int
+    safe_package_critic_enabled: bool
 
     @classmethod
     def load(cls) -> "Settings":
@@ -98,4 +99,5 @@ class Settings:
             mermaid_js_path=Path(os.getenv("MERMAID_JS_PATH", str(root / "third_party" / "mermaid" / "mermaid.min.js"))).resolve(),
             mermaid_browser_executable=os.getenv("MERMAID_BROWSER_EXECUTABLE", ""),
             skill_timeout_seconds=int(os.getenv("SKILL_TIMEOUT_SECONDS", "60")),
+            safe_package_critic_enabled=os.getenv("SAFE_PACKAGE_CRITIC_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"},
         )
