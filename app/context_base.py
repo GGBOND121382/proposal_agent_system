@@ -15,7 +15,7 @@ from .candidate_integrity import (
     visible_candidate_snapshot,
 )
 from .paragraph_order import canonical_candidate_text, ordered_paragraphs, paragraph_sequence_error
-from .privacy import find_sensitive_values
+from .privacy import find_sensitive_values, redact_public_retrieval_content
 from .proposal_quality import SECTION_FUNCTION_ROLE_ALIASES
 from .workflow_repair import repair_override_key, producer_consumer_value
 from .background_research import (
@@ -3405,20 +3405,49 @@ class ContextBuilder:
                             list(options.get("required_dimensions") or BACKGROUND_DIMENSIONS),
                         ),
                     ))
+            retrieval_redaction_matches: list[Any] = []
             if "retrieved_sources" in payload:
-                replacements.append(("payload.retrieved_sources", search_results.get("sources", [])))
+                redacted_sources, source_matches = redact_public_retrieval_content(
+                    search_results.get("sources", [])
+                )
+                retrieval_redaction_matches.extend(source_matches)
+                replacements.append(("payload.retrieved_sources", redacted_sources))
             critic_prompt_id = WF3B_RESEARCH_CRITIC if is_background_workflow else "P-PUBLIC-RESEARCH-CRITIC"
             if "extracted_passages" in payload or prompt_id == critic_prompt_id:
-                replacements.append((
-                    "payload.extracted_passages",
+                projected_passages = (
                     self._wf3b_extracted_passages(search_results)
                     if is_background_workflow
-                    else search_results.get("passages", []),
-                ))
+                    else search_results.get("passages", [])
+                )
+                redacted_passages, passage_matches = redact_public_retrieval_content(
+                    projected_passages
+                )
+                retrieval_redaction_matches.extend(passage_matches)
+                replacements.append(("payload.extracted_passages", redacted_passages))
             if "public_sources" in payload:
-                replacements.append(("payload.public_sources", search_results.get("sources", [])))
+                redacted_public, public_matches = redact_public_retrieval_content(
+                    search_results.get("sources", [])
+                )
+                retrieval_redaction_matches.extend(public_matches)
+                replacements.append(("payload.public_sources", redacted_public))
             if prompt_id == "P-ONLINE-RESULT-IMPORT-CRITIC":
-                replacements.append(("payload.public_source_passages", search_results.get("passages", [])))
+                redacted_import, import_matches = redact_public_retrieval_content(
+                    search_results.get("passages", [])
+                )
+                retrieval_redaction_matches.extend(import_matches)
+                replacements.append(("payload.public_source_passages", redacted_import))
+            if retrieval_redaction_matches:
+                state.setdefault("retrieval_privacy_redactions", []).append(
+                    {
+                        "prompt_id": prompt_id,
+                        "redacted_count": len(retrieval_redaction_matches),
+                        "entity_types": sorted(
+                            {match.entity_type for match in retrieval_redaction_matches}
+                        ),
+                        "recorded_at": utc_now(),
+                    }
+                )
+                del state["retrieval_privacy_redactions"][:-50]
 
         if background_critic_synthesis is not None:
             wf3b_options = state.get("options") if isinstance(state.get("options"), dict) else {}

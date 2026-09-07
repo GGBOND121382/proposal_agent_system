@@ -142,3 +142,33 @@ def test_vertical_figure_is_scaled_to_printable_page(tmp_path):
     output = tmp_path / "scaled.docx"
     document.save(output)
     assert output.exists()
+
+
+def test_public_retrieval_projection_redacts_contact_details():
+    from app.privacy import assert_online_payload_safe, redact_public_retrieval_content
+
+    content = [
+        {
+            "source_id": "public-src-abc123",
+            "quoted_text": "联系人邮箱 jane.doe@example.edu，电话 13812345678 详见附录。",
+            "url": "https://example.edu/report",
+            "content_hash": "a" * 64,
+        }
+    ]
+    # Before redaction the strict outbound blocker rejects the same payload.
+    try:
+        assert_online_payload_safe({"payload": {"retrieved_sources": content}}, {})
+        raise AssertionError("expected OutboundPrivacyError")
+    except Exception as exc:
+        assert "EMAIL" in str(exc)
+
+    redacted, matches = redact_public_retrieval_content(content)
+    assert "[EMAIL]" in redacted[0]["quoted_text"]
+    assert "[PHONE]" in redacted[0]["quoted_text"]
+    assert "jane.doe@example.edu" not in redacted[0]["quoted_text"]
+    # Opaque integrity fields are never rewritten.
+    assert redacted[0]["content_hash"] == "a" * 64
+    assert redacted[0]["url"] == "https://example.edu/report"
+    assert {match.entity_type for match in matches} == {"EMAIL", "PHONE"}
+    # After redaction the same payload passes the outbound blocker.
+    assert_online_payload_safe({"payload": {"retrieved_sources": redacted}}, {})

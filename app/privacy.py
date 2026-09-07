@@ -146,6 +146,39 @@ def assert_online_payload_safe(value: Any, config: dict[str, Any]) -> None:
         raise OutboundPrivacyError(matches)
 
 
+def redact_public_retrieval_content(value: Any, path: str = "$") -> tuple[Any, list[PrivacyMatch]]:
+    """Redact generic contact details from publicly retrieved content.
+
+    Retrieved sources and extracted passages originate from the public web, so
+    the strict outbound blocker would otherwise reject public pages merely for
+    containing a contact email.  Projections sent to the online model redact
+    those details in place; the local evidence archive keeps the original text.
+    """
+
+    matches: list[PrivacyMatch] = []
+
+    def redact(node: Any, current: str) -> Any:
+        if isinstance(node, dict):
+            return {key: redact(item, f"{current}.{key}") for key, item in node.items()}
+        if isinstance(node, list):
+            return [redact(item, f"{current}[{index}]") for index, item in enumerate(node)]
+        if not isinstance(node, str) or _is_opaque_machine_field(current):
+            return node
+        text = node
+        if _EMAIL_RE.search(text):
+            text = _EMAIL_RE.sub("[EMAIL]", text)
+            matches.append(PrivacyMatch(current, "EMAIL", "电子邮箱", "[EMAIL]"))
+        if _PHONE_RE.search(text):
+            text = _PHONE_RE.sub("[PHONE]", text)
+            matches.append(PrivacyMatch(current, "PHONE", "联系电话", "[PHONE]"))
+        if contains_secret_material(text):
+            text = redact_secret_text(text)
+            matches.append(PrivacyMatch(current, "CREDENTIAL", "认证凭据", "[REDACTED_CREDENTIAL]"))
+        return text
+
+    return redact(value, path), matches
+
+
 def sanitize_safe_online_package(output: dict[str, Any], config: dict[str, Any]) -> tuple[dict[str, Any], list[PrivacyMatch]]:
     """Redact project-specific entities and generic contact details from a PUBLIC package.
 
