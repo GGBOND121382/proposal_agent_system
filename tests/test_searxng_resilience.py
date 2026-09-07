@@ -84,8 +84,43 @@ def test_searxng_query_timeout_does_not_discard_other_query_results(monkeypatch)
     assert [item["query"] for item in failures] == ["query-one"]
     assert failures[0]["category"] == "RETRIEVAL"
     assert _Client.calls[0]["engines"] == _settings().public_search_engines
-    assert _Client.calls[0]["language"] == "all"
+    assert _Client.calls[0]["language"] == "en-US"
     assert all(item["trust_env"] is False for item in _Client.init_kwargs)
+
+
+def test_searxng_routes_chinese_queries_to_zh_engines(monkeypatch):
+    _Client.calls = []
+    _Client.init_kwargs = []
+    _Client.fail_queries = set()
+    monkeypatch.setattr(public_research.httpx, "Client", _Client)
+
+    settings = _settings()
+    settings.public_search_engines_zh = "bing"
+    settings.public_search_engines_en = "stract,mwmbl"
+
+    candidates, failures = PublicResearchArchiveSkill(settings)._search_searxng(
+        ["人机协同决策 研究现状", "human-machine teaming baseline"],
+        10,
+    )
+
+    assert failures == []
+    calls = {call["q"]: call for call in _Client.calls}
+    assert calls["人机协同决策 研究现状"]["language"] == "zh-CN"
+    assert calls["人机协同决策 研究现状"]["engines"] == "bing"
+    assert calls["human-machine teaming baseline"]["language"] == "en-US"
+    assert calls["human-machine teaming baseline"]["engines"] == "stract,mwmbl"
+
+
+def test_searxng_language_lists_fall_back_to_shared_engines(monkeypatch):
+    _Client.calls = []
+    _Client.init_kwargs = []
+    _Client.fail_queries = set()
+    monkeypatch.setattr(public_research.httpx, "Client", _Client)
+
+    PublicResearchArchiveSkill(_settings())._search_searxng(["中文查询"], 10)
+
+    assert _Client.calls[0]["language"] == "zh-CN"
+    assert _Client.calls[0]["engines"] == _settings().public_search_engines
 
 
 def test_searxng_results_are_interleaved_to_preserve_query_coverage(monkeypatch):

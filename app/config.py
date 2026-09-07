@@ -19,6 +19,8 @@ class Settings:
     public_search_provider: str
     public_search_base_url: str
     public_search_engines: str
+    public_search_engines_zh: str
+    public_search_engines_en: str
     proposal_quality_guard_enabled: bool
     public_research_record_file: str
     public_research_connector_file: str
@@ -70,6 +72,8 @@ class Settings:
             public_search_provider=os.getenv("PUBLIC_SEARCH_PROVIDER", "disabled").lower(),
             public_search_base_url=os.getenv("PUBLIC_SEARCH_BASE_URL", "").rstrip("/"),
             public_search_engines=os.getenv("PUBLIC_SEARCH_ENGINES", "").strip(),
+            public_search_engines_zh=os.getenv("PUBLIC_SEARCH_ENGINES_ZH", "").strip(),
+            public_search_engines_en=os.getenv("PUBLIC_SEARCH_ENGINES_EN", "").strip(),
             proposal_quality_guard_enabled=os.getenv("PROPOSAL_QUALITY_GUARD_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"},
             public_research_record_file=os.getenv("PUBLIC_RESEARCH_RECORD_FILE", ""),
             public_research_connector_file=os.getenv("PUBLIC_RESEARCH_CONNECTOR_FILE", ""),

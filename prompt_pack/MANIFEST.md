@@ -48,7 +48,7 @@
 | `prompts/argument/argument_architecture.md` | 2314 | `a54e6f26dedaa81458e6cc6c64817c330502b1764c84cd119bcfd3d103ef20c5` |
 | `prompts/argument/argument_architecture_critic.md` | 3062 | `25cfd933cc53071e0b3d0a9f584f5f8b115ce6237759b3ac992413ceae367907` |
 | `prompts/background_research/research_critic.md` | 2132 | `e005359156c4ad5e8a2fb897cc7bd4ae9ed44bba3e4ee8472e8d17d8653ac418` |
-| `prompts/background_research/research_plan.md` | 4855 | `1cc8b89b2be4f3872eb40620251d26abb2cf1fb7d12b43e882f34f8becd96a7d` |
+| `prompts/background_research/research_plan.md` | 5314 | `304be769320ed63bc0741be7ef6d8164409756d5c93392f93d110eed66d67e89` |
 | `prompts/background_research/research_plan_critic.md` | 1690 | `6fc323d920673a1dc4e1c11afe8bcea9df78526d4b46c538995117f977da55d4` |
 | `prompts/background_research/research_synthesis.md` | 3208 | `690e6046bf3aaeebee82339e5f45aed871df7e9c12d9a2a07e9e3602536c0bb6` |
 | `prompts/fact/fact_critic.md` | 5713 | `70278ebf3e591e0f7cf70232080efaad02d452bae6ef423b65130b7c63ff7464` |

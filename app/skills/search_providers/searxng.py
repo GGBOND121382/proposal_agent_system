@@ -15,6 +15,8 @@ class SearxngSearchProvider(SearchProvider):
     provider_id = "searxng"
     channel = CHANNEL_WEB_SEARCH
 
+    _CJK_RE = re.compile(r"[一-鿿]")
+
     def __init__(
         self,
         settings,
@@ -25,6 +27,20 @@ class SearxngSearchProvider(SearchProvider):
         self.settings = settings
         self.client_factory = client_factory
         self.max_workers = max(1, int(max_workers))
+
+    def _query_locale(self, query_text: str) -> tuple[str, str]:
+        """Pick the SearXNG language tag and engine list for a query.
+
+        Engines serve region-specific indexes: a China-routed Bing endpoint
+        returns junk for English queries and generic engines return little for
+        Chinese ones, so each direction gets its own engine list.  The
+        language-specific lists fall back to ``public_search_engines``.
+        """
+        if self._CJK_RE.search(query_text or ""):
+            engines = str(getattr(self.settings, "public_search_engines_zh", "") or "").strip()
+            return "zh-CN", engines
+        engines = str(getattr(self.settings, "public_search_engines_en", "") or "").strip()
+        return "en-US", engines
 
     @staticmethod
     def _authors(value: Any) -> list[str]:
@@ -71,11 +87,12 @@ class SearxngSearchProvider(SearchProvider):
                 provider=self.provider_id,
             )
         endpoint = f"{base_url}/search"
-        engines = str(getattr(self.settings, "public_search_engines", "") or "").strip()
+        language, localized_engines = self._query_locale(query.query)
+        engines = localized_engines or str(getattr(self.settings, "public_search_engines", "") or "").strip()
         params: dict[str, Any] = {
             "q": query.query,
             "format": "json",
-            "language": "all",
+            "language": language,
             "safesearch": 1,
         }
         if engines:
