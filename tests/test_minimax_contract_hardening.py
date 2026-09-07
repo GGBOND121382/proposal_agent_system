@@ -401,3 +401,19 @@ def test_wf3b_synthesis_source_refs_stay_provider_accountable(hardening_runtime)
             output,
             pack.replay_input("P-BACKGROUND-RESEARCH-SYNTHESIS"),
         )
+
+
+def test_wf3b_synthesis_uses_direct_tool_arguments(hardening_runtime):
+    from app.runtime_executor import RuntimePromptExecutor
+
+    pack, _ = hardening_runtime
+    executor = RuntimePromptExecutor.__new__(RuntimePromptExecutor)
+    executor.pack = pack
+    executor.runtime_mode = "LIVE"
+
+    synthesis_spec = executor._model_request_spec("P-BACKGROUND-RESEARCH-SYNTHESIS")
+    assert synthesis_spec["semantic_model_contract"]["enabled"] is False
+    assert synthesis_spec["semantic_model_contract"]["direct_tool_arguments"] is True
+
+    plan_spec = executor._model_request_spec("P-BACKGROUND-RESEARCH-PLAN")
+    assert plan_spec["semantic_model_contract"]["direct_tool_arguments"] is False

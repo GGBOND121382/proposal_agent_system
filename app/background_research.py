@@ -33,6 +33,14 @@ WF3B_RUNTIME_OWNED_SOURCE_REFS_PROMPTS = frozenset(
     }
 )
 
+# The synthesis output is the largest WF-3B model output.  The MiniMax wrapper
+# protocol (a hand-serialized JSON string inside the tool arguments) proved too
+# error-prone at that size: three consecutive LIVE attempts on 2026-09-07
+# produced structurally invalid inner JSON while the outer wrapper parsed
+# cleanly every time.  Submit via direct tool arguments instead so the provider
+# serializes the object itself.
+WF3B_DIRECT_TOOL_ARGUMENTS_PROMPTS = frozenset({WF3B_SYNTHESIS_PROMPT})
+
 BACKGROUND_QUALITY_PROFILE = "application_background"
 
 # The eight background dimensions of WF-3B (plan §5.3).  The runtime freezes the

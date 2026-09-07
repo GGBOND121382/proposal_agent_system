@@ -29,6 +29,7 @@ from .argument_two_stage_orchestration import (
     orchestrate_argument_architecture_two_stage,
 )
 from .llm import LLMError, MODEL_RESPONSE_PROTOCOL_VERSION
+from .background_research import WF3B_DIRECT_TOOL_ARGUMENTS_PROMPTS
 from .model_semantic_contracts import (
     SEMANTIC_MODEL_CONTRACT_VERSION,
     build_semantic_model_input,
@@ -466,7 +467,10 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 "semantic_model_contract": {
                     "enabled": semantic_model_contract,
                     "version": SEMANTIC_MODEL_CONTRACT_VERSION if semantic_model_contract else None,
-                    "direct_tool_arguments": semantic_model_contract,
+                    "direct_tool_arguments": bool(
+                        semantic_model_contract
+                        or prompt_id in WF3B_DIRECT_TOOL_ARGUMENTS_PROMPTS
+                    ),
                 },
                 "trusted_source_catalog_contract_version": TRUSTED_SOURCE_CATALOG_VERSION,
                 "model_context_projection_version": MODEL_CONTEXT_PROJECTION_VERSION,
@@ -1126,6 +1130,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
         )
         semantic_model_contract = self._uses_semantic_model_contract(prompt_id)
         argument_two_stage_contract = self._uses_argument_two_stage_contract(prompt_id)
+        direct_tool_arguments = bool(
+            semantic_model_contract or prompt_id in WF3B_DIRECT_TOOL_ARGUMENTS_PROMPTS
+        )
         input_hash = sha256_json(model_envelope)
         model_request_spec_hash = self._model_request_spec_hash(prompt_id)
         call_key = self._call_key(
@@ -1438,7 +1445,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     provider_call_envelope,
                     output_schema,
                     call_key=call_key,
-                    direct_tool_arguments=semantic_model_contract,
+                    direct_tool_arguments=direct_tool_arguments,
                 )
             elif semantic_model_contract:
                 result = await self.gateway.invoke(
