@@ -272,6 +272,10 @@ def test_deduplication_merges_query_and_provider_provenance() -> None:
 
 def _coverage_record(index: int, query: str, *, provider: str, publisher: str, category: str = "PEER_REVIEWED_PAPER") -> dict:
     return {
+        "fetch_mode": "HTTP",
+        "extractor": "HTML_TEXT",
+        "extraction_quality": "USABLE",
+        "text_length": 1200,
         "source_id": f"src-{index:03d}",
         "title": "Systematic review of transport scheduling baselines and limitations" if index == 1 else f"Transport scheduling method {index}",
         "excerpt": "benchmark comparison limitations challenges" if index <= 3 else "recent transport scheduling evidence",

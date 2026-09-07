@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .research_plan import deduplicate_candidates, parse_date, parse_time_scope_bounds, parse_year
+from .research_evidence import is_official_url
 from .research_quality import (
     assess_candidate_relevance,
     assess_source_priorities,
@@ -104,7 +105,7 @@ def _score(candidate: dict[str, Any], query: str, *, end_year: int | None) -> fl
     doi_bonus = 12.0 if candidate.get("doi") else 0.0
     source_type = str(candidate.get("source_type") or "").upper()
     publication_status = str(candidate.get("publication_status") or "").upper()
-    if source_type in {"OFFICIAL_STANDARD", "GOVERNMENT", "STANDARD", "OFFICIAL_SOURCE"}:
+    if source_type in {"OFFICIAL_STANDARD", "GOVERNMENT", "STANDARD", "OFFICIAL_SOURCE"} or is_official_url(candidate.get("url")):
         authority_bonus = 12.0
     elif source_type in {"PEER_REVIEWED_PAPER", "CONFERENCE_PAPER"}:
         authority_bonus = 10.0
@@ -177,7 +178,13 @@ def screen_and_select_candidates(
         original_matched_queries = list(matched_queries)
         relevance_by_query: dict[str, dict[str, Any]] = {}
         qualifying_queries: list[str] = []
-        for query in original_matched_queries or ([str(candidate.get("matched_query") or "")] if candidate.get("matched_query") else []):
+        evaluation_queries = list(dict.fromkeys([
+            *original_matched_queries,
+            # A primary source discovered by a broad query can answer a named
+            # entity query too. Preserve its actual discovery bindings below.
+            *(query for query, profile in relevance_profiles.items() if profile.get("entity_groups")),
+        ]))
+        for query in evaluation_queries:
             assessment = assess_candidate_relevance(query, candidate, relevance_profiles)
             relevance_by_query[query] = assessment
             if assessment.get("qualifies_for_coverage"):
@@ -185,6 +192,8 @@ def screen_and_select_candidates(
         if strict and enforce_semantic_relevance and original_matched_queries and not qualifying_queries:
             labels = {str(item.get("label") or "") for item in relevance_by_query.values()}
             reasons.append("CLEAR_LEXICAL_OFF_TOPIC" if labels == {"OFF_TOPIC"} else "LOW_SEMANTIC_RELEVANCE")
+            if any(item.get("missing_entity_groups") for item in relevance_by_query.values()):
+                reasons.append("TARGET_ENTITY_MISSING")
         elif strict and not enforce_semantic_relevance:
             # Preserve the legacy Track-C behavior: only reject an obvious same-script
             # lexical miss when enough text exists to make that judgement safely.
@@ -270,7 +279,7 @@ def screen_and_select_candidates(
 
     # Guarantee query breadth before global quality fill.  A source that supports
     # several approved queries counts for each binding but is archived once.
-    for query in queries:
+    for query in sorted(queries, key=lambda query: not bool(relevance_profiles.get(query, {}).get("entity_groups"))):
         ranked = sorted(
             (
                 (index, candidate)

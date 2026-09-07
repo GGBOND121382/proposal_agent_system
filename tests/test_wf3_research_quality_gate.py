@@ -634,7 +634,8 @@ def test_partial_searxng_engine_failure_keeps_successful_web_channel() -> None:
         },
     )
 
-    assert health["status"] == "PASS"
+    assert health["status"] == "DEGRADED"
+    assert health["providers"]["searxng"]["degraded_queries"] == 1
     assert health["providers"]["searxng"]["successful_queries"] == 1
     assert "REQUIRED_CHANNEL_FAILED:WEB_SEARCH" not in health["reason_codes"]
 

@@ -796,6 +796,7 @@ class WorkflowRepairMixin:
                 workflow_id=wf["id"],
                 exact_workflow=True,
             ) or {}
+            state["background_last_executed_plan"] = copy.deepcopy(plan)
             options = state.get("options") if isinstance(state.get("options"), dict) else {}
             required_dimensions = [
                 str(item).strip().upper()
@@ -816,6 +817,14 @@ class WorkflowRepairMixin:
                 del state["background_plan_dimension_findings"][:-20]
             candidate_lock = build_plan_lock(plan)
             approved_lock = state.get("background_research_plan_lock")
+            if (
+                state.get("background_search_refinement_rounds")
+                and state.get("background_search_results")
+                and isinstance(approved_lock, dict)
+                and candidate_lock.get("plan_hash") == approved_lock.get("plan_hash")
+            ):
+                state["background_search_refinement_stop"] = "NO_NEW_QUERIES"
+                return
             if isinstance(approved_lock, dict) and approved_lock:
                 try:
                     next_lock = validate_plan_transition(

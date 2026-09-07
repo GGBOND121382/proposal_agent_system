@@ -20,6 +20,7 @@ def _query_projection(item: dict[str, Any]) -> dict[str, Any]:
         "query_id": str(item.get("query_id") or ""),
         "query": str(item.get("query") or "").strip(),
         "linked_question_indexes": list(item.get("linked_question_indexes") or []),
+        **({"entity_groups": item["entity_groups"]} if "entity_groups" in item else {}),
     }
 
 
@@ -167,6 +168,7 @@ def validate_plan_transition(
             allow_binding_enrichment
             and old_query.get("query_id") == new_query.get("query_id")
             and old_query.get("query") == new_query.get("query")
+            and old_query.get("entity_groups") == new_query.get("entity_groups")
             and set(old_query.get("linked_question_indexes") or []).issubset(
                 set(new_query.get("linked_question_indexes") or [])
             )

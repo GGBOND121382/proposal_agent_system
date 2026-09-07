@@ -109,7 +109,11 @@ class SearxngSearchProvider(SearchProvider):
                         provider=self.provider_id,
                         details={"endpoint": endpoint, "query": query.query},
                     )
-                for index, item in enumerate(results[: min(10, per_query_limit)]):
+                # SearXNG has already paid for this result page.  Its aggregate
+                # ranking can interleave irrelevant results from a degraded engine
+                # ahead of primary sources from another engine.  Preserve the page
+                # for semantic screening; the archive budget belongs after ranking.
+                for index, item in enumerate(results):
                     if not isinstance(item, dict):
                         continue
                     candidate = {
@@ -192,6 +196,10 @@ class SearxngSearchProvider(SearchProvider):
             details={
                 "endpoint": endpoint,
                 "unresponsive_engines": self._unresponsive_engines(payload),
+                "requested_per_query_limit": per_query_limit,
+                "raw_result_count": len(payload.get("results", [])) if isinstance(payload, dict) else 0,
+                "normalized_result_count": len(hits),
+                "truncated_result_count": 0,
             },
         )
         return hits, run, failures

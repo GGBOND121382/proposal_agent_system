@@ -1227,6 +1227,11 @@ class PromptExecutor:
             )
 
         normalized = copy.deepcopy(output)
+        if prompt_id == "P-BACKGROUND-RESEARCH-PLAN":
+            from .background_research import merge_background_followup_plan
+
+            feedback = (envelope.get("payload") or {}).get("retrieval_feedback") or {}
+            normalized["result"] = merge_background_followup_plan(normalized.get("result") or {}, feedback)
         if prompt_id == "P-BACKGROUND-RESEARCH-SYNTHESIS":
             wf3b_representation_changes = (
                 self._normalize_wf3b_synthesis_representation(normalized)

@@ -191,6 +191,11 @@ def _merge_duplicate_candidate(original: dict[str, Any], duplicate: dict[str, An
         duplicate_verification.get("matched_queries"),
         matched,
     )
+    if "discovery_matched_queries" in verification or "discovery_matched_queries" in duplicate_verification:
+        verification["discovery_matched_queries"] = _merge_unique_values(
+            verification.get("discovery_matched_queries"),
+            duplicate_verification.get("discovery_matched_queries"),
+        )
     verification["discovery_providers"] = _merge_unique_values(
         verification.get("discovery_providers"),
         [verification.get("discovery_provider")],
@@ -492,6 +497,17 @@ def normalize_and_validate_plan(
             "token_count": len(tokens(query)),
             "source_index": source_index,
         })
+        if structured and "entity_groups" in raw_item:
+            groups = raw_item["entity_groups"]
+            if not isinstance(groups, list) or any(
+                not isinstance(group, list) or not group
+                or any(not isinstance(alias, str) or not alias.strip() for alias in group)
+                for group in groups
+            ):
+                findings.append({"code": "RESEARCH_PLAN_INVALID_ENTITY_GROUPS", "severity": "P1", "query": query,
+                                 "message": "Entity groups must contain non-empty lists of aliases."})
+            else:
+                query_items[-1]["entity_groups"] = [list(dict.fromkeys(alias.strip() for alias in group)) for group in groups]
 
     if not queries:
         findings.append({"code": "RESEARCH_PLAN_NO_QUERY", "severity": "P0", "message": "No executable query."})

@@ -24,7 +24,8 @@ from .research_plan import (
     normalize_and_validate_plan,
 )
 from .research_screening import screen_and_select_candidates
-from .research_quality import build_retrieval_health
+from .research_quality import assess_candidate_relevance, build_query_relevance_profiles, build_retrieval_health
+from .search_providers.base import CHANNEL_WEB_SEARCH, provider_channel
 from .research_validation import write_validation_bundle
 from .search_gateway import SearchGateway, normalize_search_queries
 from .search_providers import (
@@ -42,6 +43,7 @@ _SELECTION_REPORT: ContextVar[dict[str, Any] | None] = ContextVar("research_sele
 _EXECUTION_REPORT: ContextVar[dict[str, Any] | None] = ContextVar("research_execution_report", default=None)
 _EFFECTIVE_MAX_RESULTS: ContextVar[int] = ContextVar("research_effective_max_results", default=40)
 _QUALITY_PROFILE: ContextVar[str] = ContextVar("research_quality_profile", default="legacy")
+_LIVE_DISCOVERY: ContextVar[bool] = ContextVar("research_live_discovery", default=False)
 
 
 class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
@@ -241,6 +243,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
                 search_queries,
                 min_hits=min_hits,
                 browser_required=browser_required,
+                relevance_profiles=build_query_relevance_profiles(normalized_plan),
             )
             if browser_enabled and fallback_queries:
                 try:
@@ -377,6 +380,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         token_execution = _EXECUTION_REPORT.set(None)
         token_max = _EFFECTIVE_MAX_RESULTS.set(effective_max)
         token_quality = _QUALITY_PROFILE.set(quality_profile)
+        token_live = _LIVE_DISCOVERY.set(original_provider in {"academic", "hybrid"})
         discovery_file: Path | None = None
         discovery_manifest: dict[str, Any] | None = None
         try:
@@ -509,6 +513,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
             _EXECUTION_REPORT.reset(token_execution)
             _EFFECTIVE_MAX_RESULTS.reset(token_max)
             _QUALITY_PROFILE.reset(token_quality)
+            _LIVE_DISCOVERY.reset(token_live)
 
     @staticmethod
     def _browser_fallback_queries(
@@ -517,6 +522,7 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         *,
         min_hits: int,
         browser_required: bool,
+        relevance_profiles: dict[str, dict[str, Any]] | None = None,
     ) -> list[Any]:
         """Decide which approved queries the browser search fallback must run.
 
@@ -529,20 +535,43 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         queries = list(search_queries or [])
         if browser_required or not web_candidates:
             return queries
-        if min_hits <= 0:
+        if min_hits <= 0 and relevance_profiles is None:
             return []
         hits_by_query: dict[str, int] = {}
         for candidate in web_candidates:
             if not isinstance(candidate, dict):
                 continue
             matched = str(candidate.get("matched_query") or "").strip()
+            if relevance_profiles is not None and not assess_candidate_relevance(
+                matched, candidate, relevance_profiles
+            ).get("qualifies_for_coverage"):
+                continue
             if matched:
                 hits_by_query[matched] = hits_by_query.get(matched, 0) + 1
         return [
             query
             for query in queries
-            if hits_by_query.get(str(getattr(query, "query", query) or "").strip(), 0) < min_hits
+            if hits_by_query.get(str(getattr(query, "query", query) or "").strip(), 0) < max(1, min_hits)
         ]
+
+    def _archive_candidate(self, candidate, raw_dir, text_dir, meta_dir, provider):
+        discovery_provider = str(candidate.get("discovery_provider") or candidate.get("academic_provider") or "")
+        fetch_live_web = (
+            _LIVE_DISCOVERY.get() and provider == "connector"
+            and provider_channel(discovery_provider) == CHANNEL_WEB_SEARCH
+        )
+        if not fetch_live_web:
+            return super()._archive_candidate(candidate, raw_dir, text_dir, meta_dir, provider)
+        try:
+            return super()._archive_candidate(candidate, raw_dir, text_dir, meta_dir, discovery_provider)
+        except PublicResearchRetrievalError as exc:
+            # Retain the failed discovery receipt, without promoting its snippet
+            # into a fetched document or an admissible source for synthesis.
+            record = super()._archive_candidate(candidate, raw_dir, text_dir, meta_dir, "connector")
+            record.update(fetch_mode="SNIPPET_ONLY", extraction_quality="SHORT",
+                          extraction_failure_reason="WEB_DOCUMENT_FETCH_FAILED", fetch_fallback_reason=str(exc))
+            write_json(Path(record["metadata_path"]), record)
+            return record
 
     @staticmethod
     def _selection_summary(report: dict[str, Any] | None) -> dict[str, Any] | None:

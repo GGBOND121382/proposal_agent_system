@@ -3574,6 +3574,17 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     return self.get(workflow_id)
                 state.pop("public_research_failure", None)
                 state.pop("last_error", None)
+                if wf["workflow_type"] == WF3B_WORKFLOW_TYPE:
+                    from .background_research import background_search_feedback
+
+                    feedback = background_search_feedback(state)
+                    if feedback:
+                        state["background_search_feedback"] = feedback
+                        state["background_search_refinement_rounds"] = feedback["round"]
+                        plan_step = next(index for index, item in enumerate(steps) if item.get("prompt_id") == WF3B_PLAN_PROMPT)
+                        wf["current_step"] = plan_step
+                        self._update(wf, current_step=plan_step, state=state)
+                        continue
                 wf["current_step"] += 1
                 self._update(wf, current_step=wf["current_step"], state=state)
                 continue

@@ -12,6 +12,7 @@ from ..util import new_id, sha256_bytes, sha256_text, utc_now, write_json
 from .research_plan import canonical_url, normalize_doi, parse_year
 from .public_research import PublicResearchIntegrityError
 from .research_quality import build_background_coverage_dimensions, build_research_sufficiency
+from .research_evidence import evidence_kind, is_fulltext, is_official_url
 
 _BASELINE_TERMS = {"baseline", "benchmark", "comparison", "comparative", "survey", "review", "基线", "对比", "比较", "综述", "评测", "现有方法"}
 _LIMITATION_TERMS = {"limitation", "limitations", "challenge", "challenges", "gap", "open problem", "drawback", "局限", "不足", "挑战", "差距", "瓶颈"}
@@ -31,7 +32,7 @@ def source_category(record: dict[str, Any]) -> str:
 
     if any(token in domain for token in ("iso.org", "iec.ch", "rfc-editor.org", "itu.int", "standards.")):
         return "OFFICIAL_STANDARD"
-    if domain.endswith(".gov") or domain.endswith(".gov.cn") or ".gov." in domain:
+    if is_official_url(str(record.get("final_url") or record.get("url") or f"https://{domain}")):
         return "GOVERNMENT"
     if any(term in f"{title} {publisher} {domain}" for term in ("preprint", "research square", "ssrn", "arxiv")) or publication_status == "PREPRINT":
         return "ACADEMIC_PREPRINT"
@@ -123,11 +124,14 @@ def coverage_report(
             if query in _record_queries(record) and _record_query_qualifies(record, query)
         ]
         authoritative = [record for record in matched if int(record.get("authority_rank") or 0) >= 80]
+        fulltext = [record for record in matched if is_fulltext(record)]
         by_query[query] = {
             "source_count": len(matched),
             "authoritative_source_count": len(authoritative),
             "source_ids": [record["source_id"] for record in matched],
             "authoritative_source_ids": [record["source_id"] for record in authoritative],
+            "fulltext_source_count": len(fulltext),
+            "fulltext_source_ids": [record["source_id"] for record in fulltext],
         }
     recent = [record for record in records if record.get("is_recent")]
     baselines = [record for record in records if record.get("supports_baseline")]
@@ -190,7 +194,7 @@ def coverage_report(
     author_teams = sorted({key for record in records if (key := _author_team_key(record))})
     shallow = [query for query, item in by_query.items() if item["source_count"] < query_min]
     authority_shallow = [query for query, item in by_query.items() if item["authoritative_source_count"] < 1]
-    fulltext_shallow = [query for query, item in by_query.items() if item["source_count"] < fulltext_min]
+    fulltext_shallow = [query for query, item in by_query.items() if item["fulltext_source_count"] < fulltext_min]
     authoritative_total = sum(1 for record in records if int(record.get("authority_rank") or 0) >= 80)
 
     provider_counts: dict[str, float] = {}
@@ -449,6 +453,8 @@ def upgrade_archive_result(
         record["is_recent"] = bool(year and year >= recent_reference_year - 5)
         record["supports_baseline"] = _contains_any(searchable, _BASELINE_TERMS)
         record["supports_limitation"] = _contains_any(searchable, _LIMITATION_TERMS)
+        record["evidence_kind"] = evidence_kind(record)
+        record["full_text_available"] = is_fulltext(record)
         record["evidence_layers"] = {
             "raw_snapshot": {"kind": "ORIGINAL_SNAPSHOT", "path": record.get("raw_path"), "sha256": record.get("snapshot_sha256")},
             "extracted_text": {"kind": "SOURCE_EXTRACT", "path": record.get("text_path"), "sha256": record.get("text_sha256")},
@@ -518,7 +524,7 @@ def upgrade_archive_result(
         "search_hits": search_hits,
         "readable_documents": len(evidence_records),
         "full_text_documents": sum(
-            1 for record in evidence_records if int(record.get("text_length") or 0) >= 1000
+            1 for record in evidence_records if is_fulltext(record)
         ),
         "snippet_only_records": len(snippet_only_records),
         "usable_evidence": len(usable_source_ids),
@@ -576,9 +582,8 @@ def upgrade_archive_result(
             "discovery_providers": _record_providers(record), "snapshot_sha256": record.get("snapshot_sha256"),
             "text_sha256": record.get("text_sha256"), "excerpt": record.get("excerpt"),
             "text_length": record.get("text_length"),
-            "full_text_available": bool(
-                not is_snippet_only and int(record.get("text_length") or 0) >= 1000
-            ),
+            "full_text_available": is_fulltext(record),
+            "evidence_kind": evidence_kind(record),
             "fetch_mode": record.get("fetch_mode"),
         })
     verification = verify_research_archive(manifest_path)

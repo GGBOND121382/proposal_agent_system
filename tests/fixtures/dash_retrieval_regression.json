@@ -1,0 +1,895 @@
+{
+  "origin": "wf3b_retrieval_io_wf-66172154c37249b4_20260906.zip",
+  "entity_query": "USAF Dash system operational deployment scenarios human-machine teaming aerial combat decision support public documentation 2021-2026",
+  "broad_query": "human-machine collaborative decision making Air Force command and control sensor-to-shooter timeline compression operational use cases",
+  "web_response": {
+    "query": "human-machine collaborative decision making Air Force command and control sensor-to-shooter timeline compression operational use cases",
+    "results": [
+      {
+        "url": "https://en.wikipedia.org/wiki/Human",
+        "title": "Human - Wikipedia",
+        "content": "The word person is often used interchangeably with human, but philosophical debate exists as to whether personhood applies to all …",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "en.wikipedia.org",
+          "/wiki/Human",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          1
+        ],
+        "score": 1.0,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.airuniversity.af.edu/Wild-Blue-Yonder/Articles/Article-Display/Article/3816647/accelerating-decision-making-through-human-machine-teaming/",
+        "title": "Accelerating Decision-Making Through Human-Machine Teaming > Air University (AU) > Wild Blue Yonder",
+        "content": "The Air Force must create new doctrinal mechanisms that support Third Offset technologies. This paper first explores several human- machine teaming frameworks, then advocates for their incorporation into existing doctrinal authorities.",
+        "publishedDate": "2024-06-28T00:00:00",
+        "thumbnail": "",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.airuniversity.af.edu",
+          "/Wild-Blue-Yonder/Articles/Article-Display/Article/3816647/accelerating-decision-making-through-human-machine-teaming/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          1
+        ],
+        "score": 1.0,
+        "category": "general",
+        "pubdate": "2024-06-28 00:00:00"
+      },
+      {
+        "url": "https://www.merriam-webster.com/dictionary/human",
+        "title": "HUMAN Definition & Meaning - Merriam-Webster",
+        "content": "Sep 2, 2012 · The meaning of HUMAN is of, relating to, or characteristic of humans. How to use human in a sentence.",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "www.merriam-webster.com",
+          "/dictionary/human",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          2
+        ],
+        "score": 0.5,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.scsp.ai/wp-content/uploads/2024/12/DPS-Reimagining-Military-C2-in-the-Age-of-AI.pdf",
+        "title": "Defense Paper Series Reimagining Military C2 in the Age of AI – Revolution,",
+        "content": "capability and methodology advantages we depend upon for operational success….[It is · designed] to deliver information and decision advantage to Joint Force Commanders.” The intent · is for CJADC2 to enhance all-domain awareness, improve precision and lethality, enable greater · battlespace decentralization, and accelerate sensor-to-decision maker, sensor-to-shooter, and",
+        "publishedDate": null,
+        "thumbnail": "",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.scsp.ai",
+          "/wp-content/uploads/2024/12/DPS-Reimagining-Military-C2-in-the-Age-of-AI.pdf",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          2
+        ],
+        "score": 0.5,
+        "category": "general"
+      },
+      {
+        "url": "https://www.youtube.com/watch?v=L3wKzyIN1yk",
+        "title": "Rag'n'Bone Man - Human (Official Video) - YouTube",
+        "content": "Jul 21, 2016 · Official music video for Rag’n’Bone Man’s ‘Human’ Track: Human – Rag’n’Bone Man: https://bit.ly/RnBMHuman ---------- …",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "www.youtube.com",
+          "/watch",
+          "",
+          "v=L3wKzyIN1yk",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          3
+        ],
+        "score": 0.3333333333333333,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "url": "https://www.humana.com/",
+        "title": "Humana | Find Medicare Plans and Health Insurance Coverage",
+        "content": "2 days ago · Explore Medicare plans and health insurance coverage to fit your lifestyle. Turning 65 or recently qualified? Sign up for …",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "www.humana.com",
+          "/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          4
+        ],
+        "score": 0.25,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.scsp.ai/wp-content/uploads/2024/12/DPS-Reimagining-Command-and-Control.pdf",
+        "title": "Defense Paper Series Reimagining Command and Control with Human- Machine Teams",
+        "content": "operations, which will blur the distinctions between man and machine in disruptive ways. These · changes will be particularly evident in the process of commanding military operations. Artificial intelligence has already changed operations by accomplishing tasks such as recognizing · patterns—including identifying targets within clutter—and optimizing weapons to targets. In the · near future, these use cases will expand to many more applications.",
+        "publishedDate": null,
+        "thumbnail": "",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.scsp.ai",
+          "/wp-content/uploads/2024/12/DPS-Reimagining-Command-and-Control.pdf",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          4
+        ],
+        "score": 0.25,
+        "category": "general"
+      },
+      {
+        "url": "https://www.youtube.com/watch?v=AR0E8p2kYHE",
+        "title": "Rag'n'Bone Man - Human (Lyrics) - YouTube",
+        "content": "Mar 15, 2021 · 🎵 Follow 7clouds on Spotify : http://bit.ly/7CLOUDS🎧 Rag'n'Bone Man - Human (Lyrics)⏬ Download / Stream: …",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "www.youtube.com",
+          "/watch",
+          "",
+          "v=AR0E8p2kYHE",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          5
+        ],
+        "score": 0.2,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.atlanticcouncil.org/wp-content/uploads/2023/08/Battlefield-Applications-for-HMT.pdf",
+        "title": "Battlefield Applications for Human-Machine Teaming:",
+        "content": "It is essential to military efficacy in operational environ- ments marked by significant increases in speed, complexity, and available data. They also can generate efficiencies in · logistics and sustainment, training, and back-office admin- istrative tasks that reduce costs and timelines for execution. By combining the processing power and decision support · capabilities of AI with the social intelligence and judgment · of humans and, in some cases, the force-multiplying effects",
+        "publishedDate": null,
+        "thumbnail": "",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.atlanticcouncil.org",
+          "/wp-content/uploads/2023/08/Battlefield-Applications-for-HMT.pdf",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          5
+        ],
+        "score": 0.2,
+        "category": "general"
+      },
+      {
+        "template": "default.html",
+        "url": "https://dsiac.dtic.mil/articles/data-optimized-human-machine-teaming-with-robotic-wingmen/",
+        "title": "Data-Optimized Human-Machine Teaming With Robotic Wingmen - DSIAC",
+        "content": "Current demonstrations of pilot interactions with CCA prototypes leverage handheld tablets to send and receive operational data between the pilot and the machine [4]. Data that feeds CCA algorithms and manifests through CCA mission execution should ideally integrate with the Air Force’s future ABMS infrastructure [20]. However, creating an effective user interface for ABMS data that feeds CCAs is a monumental challenge due to the massive amounts of sensor-to-shooter data expected to be collected [21].",
+        "publishedDate": "2025-09-16T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/JRH_a9_W7V0kHT9ZuM_HBEoqFMI9v4ZAifgqmhZi_v0/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9kc2lh/Yy5kdGljLm1pbC93/cC1jb250ZW50L3Vw/bG9hZHMvMjAyNS8w/OC9oYXlodXJzdC1j/b3Zlci5qcGc",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "dsiac.dtic.mil",
+          "/articles/data-optimized-human-machine-teaming-with-robotic-wingmen/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          3
+        ],
+        "score": 0.3333333333333333,
+        "category": "general",
+        "pubdate": "2025-09-16 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.boozallen.com/insights/defense/c2-command-and-control/modernize-c2-technologies.html",
+        "title": "Streamlining C2 Operations for the U.S. Air Force",
+        "content": "A modern tactical C2 system securely connects sensors, decision makers, and shooters across the battlespace. It builds, fuses, and distributes a common operating picture across the joint and combined forces, and establishes remote voice and data communications for operational control from any location, worldwide. Battle management decisions are aided by AI, which fuses, correlates, and analyzes the vast amounts of data being ingested. Machine learning can also be employed to train AI to provide options to commanders on whether to strike a target or take another action.",
+        "publishedDate": "2024-05-17T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/o_VeT2eTgQm0zcijwTkhSXAxLWgG8hTVd7PTay-yPf0/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly93d3cu/Ym9vemFsbGVuLmNv/bS9hc3NldHMvYm9v/emFsbGVuX3NpdGUv/ZGlnL2ltYWdlcy9i/b2R5L2xhbmRzY2Fw/ZS9zaWxob3VldHRl/LWZpZ2h0ZXItamV0/LWFybXktc29sZGll/cnMtdGh1bWIuanBn/LmltZy5qcGVn",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.boozallen.com",
+          "/insights/defense/c2-command-and-control/modernize-c2-technologies.html",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          6
+        ],
+        "score": 0.16666666666666666,
+        "category": "general",
+        "pubdate": "2024-05-17 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.atlanticcouncil.org/in-depth-research-reports/report/how-modern-militaries-are-leveraging-ai/",
+        "title": "How modern militaries are leveraging AI",
+        "content": "It is essential to military efficacy in operational environments marked by significant increases in speed, complexity, and available data. They also can generate efficiencies in logistics and sustainment, training, and back-office administrative tasks that reduce costs and timelines for execution. By combining the processing power and decision support capabilities of AI with the social intelligence and judgment of humans and, in some cases, the force-multiplying effects of uncrewed systems with different degrees of autonomy, HMT can provide multiple layers of overlapping advantages to the United States and its allies and partners, including those high-level advantages listed in Figure 1.",
+        "publishedDate": "2023-08-17T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/jDNxAfB5C9_-RKTkxqosDmP0QzeNULPTpeXRTpA8P6c/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly93d3cu/YXRsYW50aWNjb3Vu/Y2lsLm9yZy93cC1j/b250ZW50L3VwbG9h/ZHMvMjAyMy8wNy9j/b3Zlci1pbWFnZS1l/MTY5MTYxNzkyNDQ2/OC5qcGc",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.atlanticcouncil.org",
+          "/in-depth-research-reports/report/how-modern-militaries-are-leveraging-ai/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          7
+        ],
+        "score": 0.14285714285714285,
+        "category": "general",
+        "pubdate": "2023-08-17 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://aerospaceamerica.aiaa.org/year-in-review/the-u-s-military-human-machine-teaming-and-decision-dominance/",
+        "title": "The U.S. military, human-machine teaming and decision dominance - Aerospace America",
+        "content": "HMT is already being tested in a command-and-control experiment to optimize the aerial kill chain, called Decision Advantage Sprint for Human-Machine Teaming (DASH). In June, DASH was used by the 805th Combat Training Squadron in an exercise at Nellis Air Force Base to demonstrate increased decision-making speed and accuracy by integrating AI-driven software microservices to assist human operators in battle management.",
+        "publishedDate": "2026-01-02T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/a3zxlyVKRYK18a4SpNo9KG3o6oWspOg3M3VHg24n-RY/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9hZXJv/c3BhY2VhbWVyaWNh/LmFpYWEub3JnL3dw/LWNvbnRlbnQvdXBs/b2Fkcy8yMDI1LzEy/L1hRNThBLXNjYWxl/ZC1lMTc2NjA4NzY5/MzczNC5qcGVn",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "aerospaceamerica.aiaa.org",
+          "/year-in-review/the-u-s-military-human-machine-teaming-and-decision-dominance/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          8
+        ],
+        "score": 0.125,
+        "category": "general",
+        "pubdate": "2026-01-02 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.nellis.af.mil/News/Article-Display/Article/3942111/optimizing-decision-advantage-through-human-machine-team-experimentation/",
+        "title": "Optimizing decision advantage through human-machine team experimentation > Nellis Air Force Base > Article Display",
+        "content": "The Department of the Air Force’s Advanced Battle Management System Cross-Functional Team hosted the first software sprint experiment to examine software solutions for enhanced command and control in conjunction with the Shadow Operations Center – Nellis,,",
+        "publishedDate": "2024-10-16T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/ZS-EkYWUz7Ef3E5jVeQ3H30K54ktGBa3PHWb_FI2sh8/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9tZWRp/YS5kZWZlbnNlLmdv/di8yMDI0L09jdC8x/Ni8yMDAzNTY4ODAw/LzIwMDAvMjAwMC8w/LzI0MDkxMi1GLUVT/OTI4LTEwMDMuSlBH",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.nellis.af.mil",
+          "/News/Article-Display/Article/3942111/optimizing-decision-advantage-through-human-machine-team-experimentation/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          9
+        ],
+        "score": 0.1111111111111111,
+        "category": "general",
+        "pubdate": "2024-10-16 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.af.mil/News/Article-Display/Article/4371071/human-machine-teaming-in-battle-management-a-collaborative-effort-across-borders/",
+        "title": "Human-machine teaming in battle management: A collaborative effort across borders > Air Force > Article Display",
+        "content": "The 2025 series of the DASH-Machine Teaming marked a significant step forward in the integration of artificial intelligence and machine learning by testing and refining AI’s potential to enhance battle management operations.,",
+        "publishedDate": null,
+        "thumbnail": "https://imgs.search.brave.com/qp9hRZEKGX0FjKmeZq1YidzxzL77ubHSyThATUuuDbc/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9tZWRp/YS5kZWZlbnNlLmdv/di8yMDI2L0phbi8w/NS8yMDAzODUxMDY2/LzIwMDAvMjAwMC8w/LzI1MDkyNC1GLVNU/NjgzLTExMjAuSlBH",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.af.mil",
+          "/News/Article-Display/Article/4371071/human-machine-teaming-in-battle-management-a-collaborative-effort-across-borders/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          10
+        ],
+        "score": 0.1,
+        "category": "general"
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.sciencedirect.com/science/article/pii/S2589004226014318",
+        "title": "Applications of human-machine collaborative decision-making: A review of research with recent developments - ScienceDirect",
+        "content": "In high-velocity environments such as real-time combat or emergency medical response, stages compress into extremely short time windows, requiring that collaboration mechanisms be pre-established through system design rather than negotiated ...",
+        "publishedDate": "2026-05-22T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/QBfPVdEWQh6clWZHCh9TI7Xc-pTPQyIkt_EL5WELW9o/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9hcnMu/ZWxzLWNkbi5jb20v/Y29udGVudC9pbWFn/ZS8xLXMyLjAtUzI1/ODkwMDQyMjYwMTQz/MTgtZ2ExLmpwZw",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.sciencedirect.com",
+          "/science/article/pii/S2589004226014318",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          11
+        ],
+        "score": 0.09090909090909091,
+        "category": "general",
+        "pubdate": "2026-05-22 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2022.850628/full",
+        "title": "Frontiers | The Future of Collaborative Human-Artificial Intelligence Decision-Making for Mission Planning",
+        "content": "We highlight three areas of development for future warfighter-machine interfaces: AI-directed decisional guidance, computationally informed decision-making, and realistic representations of decision spaces. Progress in these areas will enable development of effective human-AI collaborative decision-making, to meet the increasing scale and complexity of today’s battlespace. In traditional wargaming, commanders utilize a common map-based operational terrain and model how combinations of factors within the Military Decision Making Process (MDMP, Box 1) produce courses of action (COAs), possible counter-actions, resource usage estimates, and predicted outcomes (Army, 1997, 2014, 2015).",
+        "publishedDate": "2026-06-05T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/z_C8sGBbmV3F_S-hNIujZAzL0jDKH5IoOYIed5Wpm-w/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly93d3cu/ZnJvbnRpZXJzaW4u/b3JnL2FwaS9pcHgv/dz0xMjAwJmY9cG5n/L2h0dHBzOi8vd3d3/LmZyb250aWVyc2lu/Lm9yZy9maWxlcy9B/cnRpY2xlcy84NTA2/MjgvZnBzeWctMTMt/ODUwNjI4LUhUTUwt/cjMvaW1hZ2VfbS9m/cHN5Zy0xMy04NTA2/MjgtZzAwMS5qcGc",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.frontiersin.org",
+          "/journals/psychology/articles/10.3389/fpsyg.2022.850628/full",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          12
+        ],
+        "score": 0.08333333333333333,
+        "category": "general",
+        "pubdate": "2026-06-05 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.karveinternational.com/insights/human-machine-teaming-in-modern-warfare",
+        "title": "Human-Machine Teaming in Modern Warfare: Evolving Collaboration at Edge on the Battlefield » Karve",
+        "content": "FCAS employs onboard AI through edge computing, eliminating reliance on ground stations. AI systems will operate directly on the aircraft processing data in real time for rapid decision-making in dynamic combat scenarios.",
+        "publishedDate": "2025-03-25T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/hwoWjZUr-JH6zB1h6n2VcloWJMJEAzrpPdUFCMz9NI8/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9jZG4u/cHJvZC53ZWJzaXRl/LWZpbGVzLmNvbS82/NTA5M2I5YWVjMjE0/YTk3MjM3YjdmNWUv/NjdlNjg0NzVjODY1/MzE0NzE0Y2VhNjUz/X0h1bWFuLU1hY2hp/bmUtVGVhbWluZy1L/YXJ2ZS1Ecm9uZS5q/cGc",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.karveinternational.com",
+          "/insights/human-machine-teaming-in-modern-warfare",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          13
+        ],
+        "score": 0.07692307692307693,
+        "category": "general",
+        "pubdate": "2025-03-25 00:00:00"
+      },
+      {
+        "url": "https://simple.wikipedia.org/wiki/Human",
+        "title": "Human - Simple English Wikipedia, the free encyclopedia",
+        "content": "A human, or human being, is a member of the species Homo sapiens, which means 'wise man' in Latin. [4] Carolus Linnaeus put …",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "simple.wikipedia.org",
+          "/wiki/Human",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          6
+        ],
+        "score": 0.16666666666666666,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "url": "https://www.britannica.com/science/human-evolution",
+        "title": "Human evolution | History, Stages, Timeline, Tree, Chart, & Facts ...",
+        "content": "Aug 3, 2026 · The only extant members of the human tribe, Hominini, belong to the species Homo sapiens. The exact nature of the …",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "www.britannica.com",
+          "/science/human-evolution",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          7
+        ],
+        "score": 0.14285714285714285,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "url": "https://www.britannica.com/science/human-body",
+        "title": "Human body | Organs, Systems, Structure, Diagram, & Facts - Britannica",
+        "content": "Aug 28, 2026 · Characteristic of the vertebrate form, the human body has an internal skeleton with a backbone, and, as with the …",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "www.britannica.com",
+          "/science/human-body",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          8
+        ],
+        "score": 0.125,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "url": "https://en.wikipedia.org/wiki/Homo",
+        "title": "Homo - Wikipedia",
+        "content": "The discovery of Neanderthal brought the first addition. The genus Homo was given its taxonomic name to suggest that its member …",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "en.wikipedia.org",
+          "/wiki/Homo",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          9
+        ],
+        "score": 0.1111111111111111,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "url": "https://humanbenchmark.com/",
+        "title": "Human Benchmark",
+        "content": "Test and improve your cognitive skills with interactive brain games and competitions on Human Benchmark.",
+        "engine": "bing",
+        "template": "default.html",
+        "parsed_url": [
+          "https",
+          "humanbenchmark.com",
+          "/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "thumbnail": "",
+        "priority": "",
+        "engines": [
+          "bing"
+        ],
+        "positions": [
+          10
+        ],
+        "score": 0.1,
+        "category": "general",
+        "publishedDate": null
+      },
+      {
+        "template": "default.html",
+        "url": "https://55nda.com/blogs/anil-khosla/tag/sensor-to-shooter/",
+        "title": "sensor to shooter – Air Marshal's Perspective",
+        "content": "Fusing Space Assets into a Common Operational Picture ... Q1. Compressing the Sensor-to-Shooter Timeline · In today’s evolving warfare landscape, the true strength and deterrence now come from long-range strike weapons, unmanned systems, loitering munitions, airborne tankers, space-based ISR networks, and the collaboration ...",
+        "publishedDate": "2026-05-02T00:00:00",
+        "thumbnail": "",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "55nda.com",
+          "/blogs/anil-khosla/tag/sensor-to-shooter/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          15
+        ],
+        "score": 0.06666666666666667,
+        "category": "general",
+        "pubdate": "2026-05-02 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://apps.dtic.mil/sti/trecms/pdf/AD1178319.pdf",
+        "title": "Effective Decision-Making Employing Human-Machine Teaming",
+        "content": "Machine learning algorithms can assist commanders in prioritizing sensor allocation · based on the priority level of the target during the \"tracking\" phase and pair weapons to the · shooting assist appropriate for the target. Once this is complete, the commander can review · and approve air operations.",
+        "publishedDate": null,
+        "thumbnail": "",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "apps.dtic.mil",
+          "/sti/trecms/pdf/AD1178319.pdf",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          16
+        ],
+        "score": 0.0625,
+        "category": "general"
+      },
+      {
+        "template": "default.html",
+        "url": "https://scsp222.substack.com/p/human-machine-teaming-in-warfare",
+        "title": "Human-Machine Teaming in Warfare - by SCSP",
+        "content": "DARPA's \"Adapting Cross-Domain Kill-Webs\" (ACK) program is undergoing testing, and intends to provide decision-aid tools to allow mission commanders to dynamically combine assets across domains to create the most efficient \"kill webs\" or pairings of sensors and shooters in real-time.",
+        "publishedDate": "2022-06-30T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/Ov931P3L3_slAZRVSAbqIYAz6A8BPgTHdd3rwrD7Joc/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9idWNr/ZXRlZXItZTA1YmJj/ODQtYmFhMy00Mzdl/LTk1MTgtYWRiMzJi/ZTc3OTg0LnMzLmFt/YXpvbmF3cy5jb20v/cHVibGljL2ltYWdl/cy8zYTcyYzMwNi1k/ZTFiLTQ1NTUtODRl/My04MGE1Mzc4ZGYz/YmFfNDAweDQwMC5w/bmc",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "scsp222.substack.com",
+          "/p/human-machine-teaming-in-warfare",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          14
+        ],
+        "score": 0.07142857142857142,
+        "category": "general",
+        "pubdate": "2022-06-30 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.army.mil/article/223020/from_sensor_to_shooter_faster",
+        "title": "From Sensor to Shooter, Faster | Article | The United States Army",
+        "content": "Using the machine-to-machine translation reduced the chance for human error, while significantly decreasing the time traditional dynamic targeting takes to execute. The process demonstrated the value of leveraging sensors that are not organic ...",
+        "publishedDate": "2019-06-12T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/JWasdrXzcGTPOv-rcYxMTU0XP_4KeHVscngqqsEuVDk/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9hcGku/YXJteS5taWwvZTIv/Yy9pbWFnZXMvMjAx/OS8wNi8xMS81NTU3/MTAvbWF4MTIwMC5q/cGc",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.army.mil",
+          "/article/223020/from_sensor_to_shooter_faster",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          17
+        ],
+        "score": 0.058823529411764705,
+        "category": "general",
+        "pubdate": "2019-06-12 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://www.nist.gov/publications/future-collaborative-human-ai-decision-making-mission-planning",
+        "title": "The future of collaborative human-AI decision-making for mission planning | NIST",
+        "content": "We highlight three areas of development for future warfighter machine interfaces: AI-directed decisional guidance, computationally-informed decision-making, and realistic representations of decision spaces. Progress in these areas will enable development of effective human-AI collaborative decision-making, to meet the increasing scale and complexity of today's battlespace.",
+        "publishedDate": "2022-11-29T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/pP3iLSI94IDRMTmWsQA6PXbF5Djo81w5IGvfgIHem_w/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly93d3cu/bmlzdC5nb3YvdGhl/bWVzL2N1c3RvbS9u/aXN0X3d3dy9pbWcv/aG9tZXBhZ2Uvbmlz/dF9tYXJrLnBuZw",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "www.nist.gov",
+          "/publications/future-collaborative-human-ai-decision-making-mission-planning",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          18
+        ],
+        "score": 0.05555555555555555,
+        "category": "general",
+        "pubdate": "2022-11-29 00:00:00"
+      },
+      {
+        "template": "default.html",
+        "url": "https://csiac.dtic.mil/articles/air-force-dash-sprint-pioneers-human-machine-teaming-for-faster-battle-management-decisions/",
+        "title": "Air Force DASH Sprint Pioneers Human-Machine Teaming for Faster Battle Management Decisions - CSIAC",
+        "content": "“The DASH experiment showed how machine support can dramatically reduce decision time and improve decision quality for air battle managers working in complex operational environments,” said Col.",
+        "publishedDate": "2025-07-07T00:00:00",
+        "thumbnail": "https://imgs.search.brave.com/5HcYYh__Mp2MU3jnXzvJPLUS-WHnVLBKnKhl9AdDP0k/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9jc2lh/Yy5kdGljLm1pbC93/cC1jb250ZW50L3Vw/bG9hZHMvMjAyNS8w/Ni9BRlJMLURBU0gu/anBn",
+        "engine": "brave",
+        "parsed_url": [
+          "https",
+          "csiac.dtic.mil",
+          "/articles/air-force-dash-sprint-pioneers-human-machine-teaming-for-faster-battle-management-decisions/",
+          "",
+          "",
+          ""
+        ],
+        "img_src": "",
+        "priority": "",
+        "engines": [
+          "brave"
+        ],
+        "positions": [
+          19
+        ],
+        "score": 0.05263157894736842,
+        "category": "general",
+        "pubdate": "2025-07-07 00:00:00"
+      }
+    ],
+    "answers": [],
+    "corrections": [],
+    "infoboxes": [],
+    "suggestions": [],
+    "unresponsive_engines": [
+      [
+        "360search",
+        "timeout"
+      ],
+      [
+        "duckduckgo",
+        "timeout"
+      ]
+    ]
+  },
+  "academic_candidates": [
+    {
+      "title": "Renovation Decision Support System for Residential Buildings Based on the Analysis of Operational Documentation, BIM, and Machine Learning",
+      "url": "https://doi.org/10.3390/su18083840",
+      "abstract": "The ongoing digitalization of building operation processes creates new opportunities to improve maintenance and renovation decision-making. Despite the increasing use of BIM, renovation decisions in residential buildings are still often based on fragmented data, heterogeneous documentation, and subjective expert assessments. This challenge is particularly relevant for large-panel housing in Central and Eastern Europe, where aging building stock requires systematic long-term modernization strategies. This paper presents a Renovation Decision Support System (RDSS) integrating a simplified BIM model, technical documentation, diagnostic data, and machine learning methods to support renovation planning. The system consists of five modules: the Building Information Model Module (BIMM), Geometric and Technical Documentation Module (GTDM), Building Condition Assessment Module (BCAM), Building Performance and Condition Prediction Module (BPCM), and Renovation Decision Optimization Module (RDOM). Data exchange is managed through a Common Data Environment (CDE). The system combines multi-criteria building condition assessment with fuzzy inference to determine renovation urgency and long-term optimization using Mixed-Integer Linear Programming (MILP). Budget constraints, activity sequences, time horizons, and user preferences are considered to generate alternative renovation scenarios. The proposed approach supports sustainable management of existing buildings, improves decision transparency, and enables data-driven renovation planning consistent with life-cycle management principles.",
+      "published_at": "2026-04-13",
+      "matched_query": "USAF Dash system operational deployment scenarios human-machine teaming aerial combat decision support public documentation 2021-2026",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "doi": "10.3390/su18083840"
+    },
+    {
+      "title": "Hand Injuries in Combat",
+      "url": "https://doi.org/10.1007/978-981-92-1622-2_15",
+      "abstract": "",
+      "published_at": "2026",
+      "matched_query": "USAF Dash system operational deployment scenarios human-machine teaming aerial combat decision support public documentation 2021-2026",
+      "source_type": "BOOK_CHAPTER",
+      "doi": "10.1007/978-981-92-1622-2_15"
+    },
+    {
+      "title": "Human-Machine Teaming",
+      "url": "https://doi.org/10.7551/mitpress/14806.003.0010",
+      "abstract": "",
+      "published_at": "2024-06-11",
+      "matched_query": "USAF Dash system operational deployment scenarios human-machine teaming aerial combat decision support public documentation 2021-2026",
+      "source_type": "BOOK_CHAPTER",
+      "doi": "10.7551/mitpress/14806.003.0010"
+    },
+    {
+      "title": "Designing for human-AI teaming in power system control room decision support",
+      "url": "https://doi.org/10.54941/ahfe1007180",
+      "abstract": "The integration of renewable energy sources fundamentally alters the operating environment of transmission system operators (TSOs). While essential for achieving a sustainable and low-carbon energy system, their volatility leads to more frequent congestion events, narrower safety margins, and rising information demands for grid operators across multiple distributed systems. In this context, timely and effective decision-making becomes increasingly challenging. AI-based decision support tools (DSTs) have been deployed in TSO control rooms, for example, the GridOptions tool at TenneT TSO. However, these DSTs still offer only one-way assistance, providing context and recommendations without true human-AI collaboration. In contrast, adaptive decision-making and human cognitive needs require human-AI teaming, that is, bi-directional communication through synergetic interactions with ongoing refinements. This study takes a first step towards human-AI teaming for decision support in power-system control rooms. Following a Scenario-Based Design approach, utilizing the Joint Control Framework, we (i) perform a requirements analysis to identify how human-AI teaming requirements shift across different timeframes, (ii) design cognitive human-AI collaboration patterns specific for each timeframe, and (iii) formulate corresponding design guidelines for user interfaces for grid operators. Ultimately, this research seeks to contribute to the design of adaptive DSTs that enhance the resilience of grid control strategies via effective human–AI collaboration.",
+      "published_at": "2026",
+      "matched_query": "USAF Dash system operational deployment scenarios human-machine teaming aerial combat decision support public documentation 2021-2026",
+      "source_type": "CONFERENCE_PAPER",
+      "doi": "10.54941/ahfe1007180"
+    },
+    {
+      "title": "Trust-Aware Hierarchical Decision-Making for AI-Enabled Crewed -Uncrewed Combat Aircraft Teaming",
+      "url": "https://doi.org/10.2139/ssrn.7334481",
+      "abstract": "The integration of artificial intelligence-enabled unmanned aerial vehicles with crewed combat aircraft is transforming the pilot's role from direct platform operator to mission-level commander of a distributed human-autonomy team. However, effective crewed-uncrewed teaming requires more than autonomous flight or independent tactical behavior. It requires a coordinated decisionmaking mechanism capable of combining human intent, machine-speed analysis, distributed sensing, adaptive task allocation, operational constraints, and runtime safety assurance. This paper proposes a Trust-Aware Hierarchical Decision Architecture (TA-HDA) for artificial intelligence-enabled crewed-uncrewed combat aircraft teaming. The architecture separates mission command, cooperative task allocation, platform-level autonomy, and deterministic safety assurance into distinct authority layers. It introduces a dynamic authority-allocation mechanism that adjusts the operational freedom of each uncrewed aircraft according to model confidence, communication quality, environmental validity, mission criticality, pilot workload, and runtime safety status. Hard safety, legal, and mission constraints are enforced independently from the learning-enabled decision policies. The proposed framework combines partially observable multi-agent decision modeling, multi-agent reinforcement learning, model-predictive evaluation, explainable artificial intelligence, calibrated human trust, and runtime assurance. A structured validation methodology is presented using simulation, hardware-in-the-loop testing, human-in-the-loop experimentation, live-virtual-constructive environments, and progressive flight testing. The paper argues that operationally credible crewed-uncrewed teaming should not maximize machine autonomy as an isolated objective. Instead, it should optimize team-level mission effectiveness while preserving human command authority, predictable system behavior, transparent decision support, and verified fallback capability.",
+      "published_at": "2026",
+      "matched_query": "USAF Dash system operational deployment scenarios human-machine teaming aerial combat decision support public documentation 2021-2026",
+      "source_type": "ACADEMIC_PREPRINT",
+      "doi": "10.2139/ssrn.7334481"
+    },
+    {
+      "title": "Public Perceptions of Human-Machine Teaming in International Nuclear Safeguards Scenarios",
+      "url": "https://doi.org/10.2172/2586136",
+      "abstract": "",
+      "published_at": "2024-07-01",
+      "matched_query": "USAF Dash system operational deployment scenarios human-machine teaming aerial combat decision support public documentation 2021-2026",
+      "source_type": "REPORT",
+      "doi": "10.2172/2586136"
+    },
+    {
+      "title": "From Explanation to Clinical Feasibility: A Systematic Review and Integrated Conceptual Framework of Explainable AI, Counterfactual Reasoning, and Human-Machine Teaming in Stroke Decision Support (Preprint)",
+      "url": "https://doi.org/10.2196/preprints.103492",
+      "abstract": "BACKGROUND Machine learning models for ischemic stroke prediction have achieved strong performance, yet clinical adoption remains limited by insufficient interpretability and a lack of integration into collaborative decision-making workflows. Explainable AI (XAI) methods such as SHAP and LIME improve transparency, and counterfactual explanations support \"what-if\" clinical reasoning, but these techniques are typically studied in isolation from one another and from the human-machine teaming (HMT) context in which clinical decisions are made. No prior review has systematically examined how these three elements interact within stroke decision support. OBJECTIVE This review aimed to (1) identify the XAI and counterfactual explanation methods used in ischemic stroke prediction and evaluate how they are implemented and assessed, (2) examine how the literature evaluates the interpretability and clinical value of these methods, (3) determine how integrating XAI with HMT affects clinicians' trust and decision-making, and (4) characterize the limitations preventing full integration of these elements. METHODS A systematic review was conducted following PRISMA 2020 guidelines. PubMed, IEEE Xplore, and Scopus were searched for studies published between January 2019 and April 2026, with Google Scholar used for supplementary identification. The main search was completed on March 15, 2026, with a targeted update on April 30, 2026. Of 4,027 records identified, 2,871 were screened after deduplication, 288 full texts were assessed, and 74 studies were included spanning prediction model development, XAI evaluation, interface usability testing, and HMT experiments. Methodological quality was appraised within each thematic section using dimensions appropriate to each study type. RESULTS Feature attribution methods (SHAP, LIME, Grad-CAM) dominate stroke XAI; counterfactual approaches remain rare and largely absent from deployed systems. Evaluation relies primarily on technical metrics rather than clinical outcomes. Explanation stability is scale-dependent, converging at the population level but unstable for individual patients. No deployed counterfactual interface was identified within an acute stroke workflow. Human-AI teaming on average outperforms clinicians alone but rarely achieves full complementarity, and explanation does not automatically improve performance. A recurring structural bottleneck, termed the causal-feasibility gap, was identified: counterfactual explanations can be mathematically valid yet clinically unusable when they do not account for patient-specific constraints such as treatment windows and modifiable variable ranges. An integrated conceptual framework is proposed in which XAI, counterfactual reasoning, and HMT operate across four stages of the stroke clinical pathway through bidirectional clinician-AI exchange. CONCLUSIONS Transparency alone is insufficient for clinical value in stroke AI. Closing the causal-feasibility gap requires systems that receive feasibility constraints from clinicians rather than only delivering model outputs. The proposed bidirectional framework provides a basis for designing decision-support systems suited to time-critical stroke care. Priority directions include stroke-specific counterfactual benchmarks, case-level explanation stability methods, and prospective clinical outcome evaluation.",
+      "published_at": "2026-06-03",
+      "matched_query": "USAF Dash system operational deployment scenarios human-machine teaming aerial combat decision support public documentation 2021-2026",
+      "source_type": "ACADEMIC_PREPRINT",
+      "doi": "10.2196/preprints.103492"
+    },
+    {
+      "title": "Interpreting Decision-Making Behavior in AI-Piloted Aircraft in Aerial Combat Scenarios: An Approach to Enhance Human-AI Trust",
+      "url": "https://doi.org/10.3390/aerospace12080722",
+      "abstract": "With the continuous advancement of artificial intelligence (AI) technology, AI algorithms have demonstrated exceptional aircraft control capabilities in highly dynamic and complex scenarios such as aerial combat. However, the inherent lack of explainability in AI algorithms poses a significant challenge to gaining sufficient trust, presenting potential safety risks that could lead to aircraft loss of control. This limitation hinders the widespread adoption of AI in practical applications. To enhance human–AI trust, improve system stability and safety, and advance the deployment of AI algorithms in practical settings, this study proposes an approach to describe and explain AI decision-making behaviors using natural language. Natural language is a straightforward medium for expressing information, which avoids the need for additional decoding or interpretation, particularly in rapidly changing battlefield environments, enabling pilots to quickly comprehend the intentions of AI algorithms and thereby fostering trust in AI systems. This study constructs a dataset of AI decision behavior description and interpretation based on adversarial temporal data in an aerial combat scenario and introduces an encoder–decoder framework that integrates an attentional mechanism. Findings from the experiments suggest that this approach effectively delineates and elucidates the AI decision-making behaviors, thereby facilitating mutual trust between humans and AI.",
+      "published_at": "2025-08-13",
+      "matched_query": "USAF Dash system operational deployment scenarios human-machine teaming aerial combat decision support public documentation 2021-2026",
+      "source_type": "PEER_REVIEWED_PAPER",
+      "doi": "10.3390/aerospace12080722"
+    }
+  ]
+}

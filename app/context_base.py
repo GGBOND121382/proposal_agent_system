@@ -2545,6 +2545,8 @@ class ContextBuilder:
                 ("payload.evidence_requirements", self._wf3_evidence_requirements(options)),
                 ("payload.retrieval_contract", retrieval_contract),
             ])
+            if state.get("background_search_feedback"):
+                replacements.append(("payload.retrieval_feedback", copy.deepcopy(state["background_search_feedback"])))
         if prompt_id == WF3B_PLAN_CRITIC_PROMPT:
             options = state.get("options") if isinstance(state.get("options"), dict) else {}
             safe_package_for_plan = self._result(

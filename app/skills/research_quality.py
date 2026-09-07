@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from typing import Any
 
 from .search_providers.base import CHANNEL_ACADEMIC, CHANNEL_WEB_SEARCH, PROVIDER_CHANNELS, provider_channel
+from .research_evidence import is_official_url
 
 _KNOWN_ACADEMIC_PROVIDERS = tuple(
     name for name, channel in PROVIDER_CHANNELS.items() if channel == CHANNEL_ACADEMIC
@@ -72,7 +73,7 @@ def assess_source_priorities(
     haystack = " ".join((title, venue, publisher, publication_kind, url))
 
     peer_reviewed = source_type in {"PEER_REVIEWED_PAPER", "CONFERENCE_PAPER"}
-    official = source_type in {"OFFICIAL_STANDARD", "GOVERNMENT", "STANDARD", "OFFICIAL_SOURCE"}
+    official = source_type in {"OFFICIAL_STANDARD", "GOVERNMENT", "STANDARD", "OFFICIAL_SOURCE"} or is_official_url(url)
     preprint = publication_status == "PREPRINT" or source_type == "ACADEMIC_PREPRINT"
     review = any(term in title for term in ("systematic review", "literature review", "survey", "review"))
 
@@ -103,6 +104,29 @@ def assess_source_priorities(
         "match_count": len(matched),
         "score_bonus": float(min(12, len(matched) * 4)),
     }
+
+
+def query_entity_groups(query: str, item: dict[str, Any]) -> list[list[str]]:
+    """Explicit alias groups, with a conservative fallback for older plans.
+
+    Do not infer arbitrary acronym expansions or treat every capitalized word as
+    a named entity.  Legacy entity declarations such as 'Dash system' and
+    'Project Maven' still must not be satisfied by generic decision-support text.
+    """
+    if item.get("entity_groups"):
+        return [[str(alias).strip() for alias in group if str(alias).strip()]
+                for group in item["entity_groups"] if isinstance(group, list) and group]
+    names = re.findall(r'\b([A-Z][A-Za-z0-9-]+)\s+(?:system|program|project|initiative)\b', query)
+    names += re.findall(r'\b(?:Project|Program)\s+([A-Z][A-Za-z0-9-]+)\b', query)
+    names += re.findall(r'\b[A-Z]+-\d+[A-Za-z]*\b|\b[A-Z][a-z]+[A-Z][A-Za-z]*\b', query)
+    return [[name] for name in dict.fromkeys(names)]
+
+
+def _entity_matches(alias: str, text: str) -> bool:
+    # Hyphens and whitespace vary between official titles, snippets and PDFs.
+    words = re.findall(r"\w+", alias.casefold())
+    normalized = " ".join(re.findall(r"\w+", text.casefold()))
+    return bool(words) and bool(re.search(r"(?<!\w)" + re.escape(" ".join(words)) + r"(?!\w)", normalized))
 
 
 def build_query_relevance_profiles(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -160,6 +184,7 @@ def build_query_relevance_profiles(plan: dict[str, Any]) -> dict[str, dict[str, 
             "query_tokens": sorted(concept_tokens(query)),
             "domain_anchors": sorted(anchors),
             "linked_question_indexes": indexes,
+            "entity_groups": query_entity_groups(query, item),
         }
     return profiles
 
@@ -176,7 +201,7 @@ def assess_candidate_relevance(
     cleaned_title = title
     for pattern in _NON_CONTENT_TITLE_PREFIXES:
         cleaned_title = re.sub(pattern, "", cleaned_title, flags=re.IGNORECASE)
-    text = f"{cleaned_title} {candidate.get('abstract', '')} {candidate.get('excerpt', '')}"
+    text = f"{cleaned_title} {candidate.get('abstract', '')} {candidate.get('excerpt', '')} {candidate.get('content_text', '')}"
     text_tokens = concept_tokens(text)
     overlap = query_tokens & text_tokens
     anchor_hits = anchors & text_tokens
@@ -211,6 +236,14 @@ def assess_candidate_relevance(
         else:
             label = "OFF_TOPIC"
 
+    groups = profile.get("entity_groups") or []
+    missing_entities = [group for group in groups if not any(_entity_matches(alias, text) for alias in group)]
+    if missing_entities:
+        label = "TANGENTIAL" if overlap else "OFF_TOPIC"
+    elif groups and len(overlap) >= 2:
+        # Short entity-focused searches must not need five generic filler words.
+        label = "DIRECT"
+
     return {
         "label": label,
         "overlap_tokens": sorted(overlap),
@@ -220,6 +253,8 @@ def assess_candidate_relevance(
         "overlap_count": len(overlap),
         "overlap_ratio": round(ratio, 4),
         "qualifies_for_coverage": _RELEVANCE_RANK[label] >= _RELEVANCE_RANK["SUPPORTING"],
+        "entity_groups": groups,
+        "missing_entity_groups": missing_entities,
     }
 
 
@@ -314,6 +349,7 @@ def build_retrieval_health(
 
     successful_pairs: set[tuple[str, str]] = set()
     failed_pairs: set[tuple[str, str]] = set()
+    degraded_pairs: set[tuple[str, str]] = set()
     global_failed_providers: set[str] = set()
 
     for run in discovery_manifest.get("provider_runs") or []:
@@ -343,6 +379,8 @@ def build_retrieval_health(
             continue
         query = str(run.get("query") or "")
         run_status = str(run.get("status") or "").strip().upper()
+        if run_status == "DEGRADED" and query in query_set:
+            degraded_pairs.add((name, query))
         try:
             result_count = int(run.get("result_count") or 0)
         except (TypeError, ValueError):
@@ -383,6 +421,7 @@ def build_retrieval_health(
             successes = set()
         failures = {query for provider_name, query in failed_pairs if provider_name == name and query not in successes}
         item["successful_queries"] = len(successes)
+        item["degraded_queries"] = sum(1 for provider_name, _ in degraded_pairs if provider_name == name)
         item["failed_queries"] = len(failures)
         attempted = max(len(query_set), len(successes | failures))
         item["attempted_queries"] = attempted
@@ -402,6 +441,8 @@ def build_retrieval_health(
     if missing_execution_queries:
         blocking_reason_codes.append("APPROVED_QUERY_EXECUTION_MISSING")
     for name, item in stats.items():
+        if item.get("degraded_queries"):
+            reason_codes.append(f"PROVIDER_ENGINE_DEGRADED:{name}")
         if item["successful_queries"] == 0:
             reason_codes.append(f"PROVIDER_UNAVAILABLE:{name}")
         elif item["success_rate"] < 0.5:
@@ -506,6 +547,8 @@ def build_research_sufficiency(
 
     query_min = int((dimensions.get("query_depth") or {}).get("minimum_sources_per_query") or 1)
     authority_min = int((dimensions.get("query_authoritative_depth") or {}).get("minimum_authoritative_sources_per_query") or 1)
+    fulltext_min = int((dimensions.get("query_fulltext_depth") or {}).get("minimum_fulltext_sources_per_query") or 0)
+    profiles = build_query_relevance_profiles(plan)
     gaps: list[dict[str, Any]] = []
     total_bound_sources: set[str] = set()
     for index, query in enumerate(plan.get("queries") or []):
@@ -521,6 +564,10 @@ def build_research_sufficiency(
             gap_types.append("DEPTH")
         if int(item.get("authoritative_source_count") or 0) < authority_min:
             gap_types.append("AUTHORITY")
+        if int(item.get("fulltext_source_count") or 0) < fulltext_min:
+            gap_types.append("FULLTEXT")
+        if not source_ids and (profiles.get(query) or {}).get("entity_groups"):
+            gap_types.append("TARGET_ENTITY")
         if not gap_types:
             continue
         meta = query_meta.get(query) or {}
@@ -539,7 +586,8 @@ def build_research_sufficiency(
             "authoritative_source_ids": authoritative_ids,
             "description": (
                 f"Approved query has {int(item.get('source_count') or 0)}/{query_min} qualifying sources "
-                f"and {int(item.get('authoritative_source_count') or 0)}/{authority_min} authoritative sources."
+                f"and {int(item.get('authoritative_source_count') or 0)}/{authority_min} authoritative sources; "
+                f"{int(item.get('fulltext_source_count') or 0)}/{fulltext_min} fetched full-text sources."
             ),
         })
 
@@ -574,7 +622,7 @@ def build_research_sufficiency(
 
     if blocking_reasons:
         status = "BLOCKING_FAILURE"
-    elif coverage.get("status") == "PASS":
+    elif coverage.get("status") == "PASS" and health.get("status") != "DEGRADED":
         status = "SUFFICIENT"
     else:
         status = "DEGRADED"
@@ -644,7 +692,7 @@ def build_background_coverage_dimensions(
     fulltext_shallow = [
         query
         for query, item in by_query.items()
-        if int(item.get("source_count") or 0) < fulltext_min
+        if int(item.get("fulltext_source_count") or 0) < fulltext_min
     ]
     web_sourced = [
         record

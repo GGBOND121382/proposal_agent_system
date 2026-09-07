@@ -38,6 +38,19 @@
                 "purpose": {
                   "type": "string",
                   "minLength": 1
+                },
+                "entity_groups": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                  },
+                  "maxItems": 8
                 }
               },
               "required": [

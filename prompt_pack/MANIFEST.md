@@ -48,9 +48,9 @@
 | `prompts/argument/argument_architecture.md` | 2314 | `a54e6f26dedaa81458e6cc6c64817c330502b1764c84cd119bcfd3d103ef20c5` |
 | `prompts/argument/argument_architecture_critic.md` | 3062 | `25cfd933cc53071e0b3d0a9f584f5f8b115ce6237759b3ac992413ceae367907` |
 | `prompts/background_research/research_critic.md` | 2132 | `e005359156c4ad5e8a2fb897cc7bd4ae9ed44bba3e4ee8472e8d17d8653ac418` |
-| `prompts/background_research/research_plan.md` | 3118 | `6e7e844e3de79989add10f2d1979deec2ca098815d237aa72db164b77192d6cf` |
+| `prompts/background_research/research_plan.md` | 4526 | `4a6553230728736556931c6c103443fa9fac409a20964085bcdffc32e6b14cdc` |
 | `prompts/background_research/research_plan_critic.md` | 1690 | `6fc323d920673a1dc4e1c11afe8bcea9df78526d4b46c538995117f977da55d4` |
-| `prompts/background_research/research_synthesis.md` | 2772 | `c007576f59fbe326f82b8e40be4c8eeb9fe5a290e304009203ebe0897bbfe275` |
+| `prompts/background_research/research_synthesis.md` | 3208 | `690e6046bf3aaeebee82339e5f45aed871df7e9c12d9a2a07e9e3602536c0bb6` |
 | `prompts/fact/fact_critic.md` | 5713 | `70278ebf3e591e0f7cf70232080efaad02d452bae6ef423b65130b7c63ff7464` |
 | `prompts/fact/fact_extract.md` | 5839 | `6fde485ef321b0384704f59d6f21cfe873bf465830bb7bb55855f63aff86c744` |
 | `prompts/integration/integration_critic.md` | 8198 | `cc1108fd77dae879660bcb3afae03fb7e9a8132333f3f3f63477fb17b930d56b` |
@@ -264,7 +264,7 @@
 | `replay/cases/write_critic/need_user_input.json` | 24233 | `72c22a60e6e2a69fc448195939705c183d35d739e538886a1612cd381fef522f` |
 | `replay/cases/write_critic/normal.json` | 23365 | `bb0aaa67376b0356b02774e53c370b631181b94f07bf3b479bb97e3f96f343e3` |
 | `replay/cases/write_critic/schema_error.json` | 8878 | `13b0e6e898c152443feaa0a39e2069960b801faf1b6971107fd82bdfadfdc668` |
-| `replay/manifest.json` | 35925 | `0100efe60f65881c4727235a8bc58b9d42a5b1737561befcbfe95632c8dccd9c` |
+| `replay/manifest.json` | 34870 | `3b76ff25374d819bfbd3d0c33556536347f6451b52e0c720ecdd93b23bb9517a` |
 | `schemas/common/argument_graph.schema.json` | 3541 | `b864b8abf2deacd7c6f38d7b85b98aa6d60d7ac614c0f259aaded2ff78b52416` |
 | `schemas/common/background_evidence_card.schema.json` | 2389 | `19609d85e28eeddd74943a52390a16ccc9880fd6a11ca40dd5c5db7dd4f6719e` |
 | `schemas/common/claim.schema.json` | 2659 | `3f971f39349d31e789b542d8e97045be3680e31694a28f833e8c211416eb6880` |
@@ -309,7 +309,7 @@
 | `schemas/model/background_research_plan_critic_model_input.schema.json` | 2964 | `e3fe89534416850a2970a86009742b29cb2fd4c6ac4ce9c3818b90c61ad1f3e2` |
 | `schemas/model/background_research_plan_critic_model_output.schema.json` | 1064 | `1fba59f757f3916c320698e95dd7b765cfdf0378b941d6692e25e0ea529130e4` |
 | `schemas/model/background_research_plan_model_input.schema.json` | 3978 | `de2c964d8ac983310cdc997fd1add81774434f3c7cede2ad9f69c0553f86009c` |
-| `schemas/model/background_research_plan_model_output.schema.json` | 1518 | `b6c5ab814a7b3ac3e1ad33cbe52bded858489960dd49e5882b7e2bac2c783028` |
+| `schemas/model/background_research_plan_model_output.schema.json` | 1932 | `cc9c756942648bacad23a1e5329c65d63d9f6490a5832fe5f8c94fb4f471301a` |
 | `schemas/model/background_research_synthesis_model_input.schema.json` | 4589 | `470d27ada05a8e85ddaa1efb356aaa90942f411dae3079e98c505f4d13a2b64c` |
 | `schemas/model/background_research_synthesis_model_output.schema.json` | 3724 | `5db22de0a61d4571eaf0a23f2e699db6b2ae8797e0ee223fb425c4d129860358` |
 | `schemas/model/online_result_import_critic_model_input.schema.json` | 2641 | `0a0b7e64e97eaa48456be08889770f127c2917a0c2e2c6466e8956e0a456f6c3` |
@@ -336,8 +336,8 @@
 | `schemas/prompts/background_research_critic_output.schema.json` | 2719 | `da17fed1abdb7df4b3812ef717f65f809ed5c8e820bd4fb08f36c965e4367780` |
 | `schemas/prompts/background_research_plan_critic_input.schema.json` | 6700 | `9079cdeb8963a5222a55e65cffb54add7785be43fe72315ba89f07f425b206cd` |
 | `schemas/prompts/background_research_plan_critic_output.schema.json` | 2068 | `5feca8c455d17762e366a3766199f00de0f97021a98f6fcc71761ee296bea762` |
-| `schemas/prompts/background_research_plan_input.schema.json` | 9560 | `adde7c366b087f9d2d341c0b91313d326d56f64a1c551ce1eacf1698cc17c4ab` |
-| `schemas/prompts/background_research_plan_output.schema.json` | 5810 | `1803addeb4276a519a1e0737b420d551e1ced687d3dcf79a94ee8e2833671b45` |
+| `schemas/prompts/background_research_plan_input.schema.json` | 16694 | `1d050273515ac678d8bcbac6b4a337e35c286bc4a2eb3055f4a973f0e8f211d2` |
+| `schemas/prompts/background_research_plan_output.schema.json` | 6198 | `a072c8e257ab593a1a464c2afa69a4752a40a2c704cfe7fbe97f3d7f9d0df29e` |
 | `schemas/prompts/background_research_synthesis_input.schema.json` | 10321 | `75702b8d03c464f225cf56d8930991c817dc456b0bc1840ef574731868c737a7` |
 | `schemas/prompts/background_research_synthesis_output.schema.json` | 8513 | `ca1f9589ed59c56c3911a834ad9570dbfc2686a204119ea41e7788c17da9d3bb` |
 | `schemas/prompts/expression_critic_input.schema.json` | 32827 | `5c10992b9a21077c2ba27d9d9ff8e1845b131d55b8ad191342e1befe654c1e35` |

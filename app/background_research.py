@@ -290,6 +290,65 @@ def normalize_background_plan(
     return normalized, findings
 
 
+def merge_background_followup_plan(plan: dict[str, Any], feedback: dict[str, Any]) -> dict[str, Any]:
+    """Append model-authored follow-ups while retaining the reviewed plan verbatim.
+
+    Called before output validation and the plan Critic.  The Critic therefore
+    reviews exactly the queries that the search step will execute.
+    """
+    previous = feedback.get("previous_plan")
+    if not isinstance(previous, dict) or not previous.get("queries"):
+        return plan
+    merged = copy.deepcopy(previous)
+    queries = merged["queries"]
+    seen = {str(item.get("query") or "").strip() for item in queries}
+    ids = {str(item.get("query_id") or "") for item in queries}
+    limit = min(24 - len(queries), max(0, int(feedback.get("max_additional_queries") or 0)))
+    added = 0
+    for item in plan.get("queries") or []:
+        if not isinstance(item, dict):
+            continue
+        query = str(item.get("query") or "").strip()
+        if not query or query in seen or added >= limit:
+            continue
+        new_item = copy.deepcopy(item)
+        next_id = len(queries) + 1
+        while f"query-followup-{next_id:03d}" in ids:
+            next_id += 1
+        new_item["query_id"] = f"query-followup-{next_id:03d}"
+        queries.append(new_item)
+        seen.add(query)
+        ids.add(new_item["query_id"])
+        added += 1
+    return merged
+
+
+def background_search_feedback(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Offer one bounded, source-informed replan when query coverage is missing."""
+    rounds = int(state.get("background_search_refinement_rounds") or 0)
+    if rounds >= 1:
+        return None
+    search = state.get("background_search_results") or {}
+    previous = state.get("background_last_executed_plan") or {}
+    if not previous.get("queries") or len(previous["queries"]) >= 24:
+        return None
+    gaps = search.get("research_gaps") or (search.get("research_sufficiency") or {}).get("research_gaps") or []
+    actionable = [gap for gap in gaps if set(gap.get("gap_types") or []) & {"TARGET_ENTITY", "DEPTH", "AUTHORITY"}]
+    if not actionable:
+        return None
+    summaries = [
+        f"{item.get('title', '')} | {item.get('url', '')}\n{str(item.get('excerpt') or '')[:800]}"
+        for item in search.get("source_catalog") or [] if isinstance(item, dict)
+    ][:20]
+    return {
+        "round": rounds + 1,
+        "previous_plan": copy.deepcopy(previous),
+        "source_summaries": summaries,
+        "gaps": [f"{gap.get('query') or ''}: {gap.get('description') or ''} ({', '.join(gap.get('gap_types') or [])})" for gap in actionable][:24],
+        "max_additional_queries": min(6, 24 - len(previous["queries"])),
+    }
+
+
 def background_execution_contract(plan: dict[str, Any]) -> dict[str, Any]:
     """Force the WF-3B retrieval execution contract onto the approved plan.
 

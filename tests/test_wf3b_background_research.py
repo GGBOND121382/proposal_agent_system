@@ -900,9 +900,41 @@ def test_wf3b_workflow_preflight_covers_online_public_model_and_search(tmp_path,
     assert "PUBLIC_SEARCH" not in wf1_check_names
 
 
-def test_wf3b_simulated_end_to_end_persists_topic_background_result(tmp_path, monkeypatch):
+@pytest.mark.parametrize("refine", [False, True])
+def test_wf3b_simulated_end_to_end_persists_topic_background_result(tmp_path, monkeypatch, refine):
     settings, pack, db, builder, executor, engine = _runtime(tmp_path, monkeypatch)
     project_id = _project(db)
+    search_plans = []
+    if refine:
+        from app.simulated_llm import SimulatedLLM
+
+        service = engine._background_research()
+        original_search = service.simulated_search
+        original_plan = SimulatedLLM._handle_background_research_plan
+
+        def search_with_gap(plan):
+            search_plans.append(json.loads(json.dumps(plan)))
+            result = original_search(plan)
+            if len(search_plans) == 1:
+                result["research_gaps"] = [{"query": plan["queries"][0]["query"], "description": "Need a direct program source", "gap_types": ["TARGET_ENTITY"]}]
+                result["source_catalog"] = [{"title": "Public program overview", "url": "https://example.org/overview", "excerpt": "An official pilot program was identified."}]
+            return result
+
+        def plan_with_followup(self, base, envelope):
+            output = original_plan(self, base, envelope)
+            feedback = envelope.get("payload", {}).get("retrieval_feedback")
+            if feedback:
+                assert feedback["source_summaries"]
+                assert feedback["gaps"]
+                output["result"]["queries"].append({
+                    "query_id": "Q-followup", "query": "智能体系统 official pilot program case study",
+                    "dimension": "APPLICATION_SCENARIO", "purpose": "核验首轮发现的公开试点",
+                    "entity_groups": [],
+                })
+            return output
+
+        monkeypatch.setattr(service, "simulated_search", search_with_gap)
+        monkeypatch.setattr(SimulatedLLM, "_handle_background_research_plan", plan_with_followup)
 
     async def finish():
         intake = await _finish(engine, project_id, "WF-1_PROJECT_INTAKE")
@@ -933,6 +965,12 @@ def test_wf3b_simulated_end_to_end_persists_topic_background_result(tmp_path, mo
         return wf
 
     wf = asyncio.run(finish())
+    if refine:
+        assert len(search_plans) == 2
+        assert wf["state"]["background_search_refinement_rounds"] == 1
+        assert search_plans[1]["queries"][:len(search_plans[0]["queries"])] == search_plans[0]["queries"]
+        assert len(search_plans[1]["queries"]) == len(search_plans[0]["queries"]) + 1
+        assert wf["state"]["background_research_plan_lock_history"][-1]["transition"] == "ADDITIVE_PLAN_DELTA"
     options = wf["state"]["options"]
     assert options["required_dimensions"] == list(BACKGROUND_DIMENSIONS)
     assert options["topic"] == "后勤保障智能体应用背景"
