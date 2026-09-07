@@ -349,3 +349,55 @@ def test_argument_prompt_keeps_business_boundary_without_duplicating_runtime_val
     assert "最终`status`必须为`NEED_USER_INPUT`" not in prompt
     assert "source_hash" not in system_prompt
     assert "protected_hash" not in system_prompt
+
+
+def test_wf3b_plan_fabricated_source_refs_are_cleared(hardening_runtime):
+    pack, executor = hardening_runtime
+    output = pack.replay_output("P-BACKGROUND-RESEARCH-PLAN", "normal")
+    output["source_refs"] = [
+        {
+            "source_id": "src-invented-by-model",
+            "source_type": "EVIDENCE_MATERIAL",
+            "security_level": "PUBLIC",
+            "authority_rank": 1,
+        }
+    ]
+
+    normalized = executor._normalize_output(
+        "P-BACKGROUND-RESEARCH-PLAN",
+        output,
+        pack.replay_input("P-BACKGROUND-RESEARCH-PLAN"),
+    )
+
+    assert normalized["source_refs"] == []
+    assert any(
+        "SYSTEM_WF3B_SOURCE_REFS_RUNTIME_OWNED" in warning
+        for warning in normalized["warnings"]
+    )
+
+
+def test_wf3b_plan_critic_fabricated_source_refs_are_cleared(hardening_runtime):
+    pack, executor = hardening_runtime
+    output = pack.replay_output("P-BACKGROUND-RESEARCH-PLAN-CRITIC", "normal")
+    output["source_refs"] = [{"source_id": "src-invented-by-model"}]
+
+    normalized = executor._normalize_output(
+        "P-BACKGROUND-RESEARCH-PLAN-CRITIC",
+        output,
+        pack.replay_input("P-BACKGROUND-RESEARCH-PLAN-CRITIC"),
+    )
+
+    assert normalized["source_refs"] == []
+
+
+def test_wf3b_synthesis_source_refs_stay_provider_accountable(hardening_runtime):
+    pack, executor = hardening_runtime
+    output = pack.replay_output("P-BACKGROUND-RESEARCH-SYNTHESIS", "normal")
+    output["source_refs"] = [{"source_id": "src-invented-by-model"}]
+
+    with pytest.raises(PromptExecutionError, match="provenance"):
+        executor._normalize_output(
+            "P-BACKGROUND-RESEARCH-SYNTHESIS",
+            output,
+            pack.replay_input("P-BACKGROUND-RESEARCH-SYNTHESIS"),
+        )

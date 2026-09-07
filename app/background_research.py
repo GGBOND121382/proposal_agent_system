@@ -21,6 +21,18 @@ WF3B_PLAN_CRITIC_PROMPT = "P-BACKGROUND-RESEARCH-PLAN-CRITIC"
 WF3B_SYNTHESIS_PROMPT = "P-BACKGROUND-RESEARCH-SYNTHESIS"
 WF3B_RESEARCH_CRITIC = "P-BACKGROUND-RESEARCH-CRITIC"
 
+# WF-3B nodes whose top-level source_refs are runtime-owned but which are not
+# yet enrolled in canonicalize_wf3_machine_fields.  The synthesis node is
+# deliberately excluded: its claim-level provenance is real model work and its
+# enrollment is tracked as pending LIVE-hardening debt.
+WF3B_RUNTIME_OWNED_SOURCE_REFS_PROMPTS = frozenset(
+    {
+        WF3B_PLAN_PROMPT,
+        WF3B_PLAN_CRITIC_PROMPT,
+        WF3B_RESEARCH_CRITIC,
+    }
+)
+
 BACKGROUND_QUALITY_PROFILE = "application_background"
 
 # The eight background dimensions of WF-3B (plan §5.3).  The runtime freezes the

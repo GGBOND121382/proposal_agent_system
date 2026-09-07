@@ -934,10 +934,6 @@ def test_all_prompts_reject_invented_root_provenance(pack: PromptPack) -> None:
         "security_level": "PUBLIC",
     }
     accepted: list[str] = []
-    authoritative_reprojected = {
-        "P-ARGUMENT-ARCHITECTURE",
-        "P-ARGUMENT-ARCHITECTURE-CRITIC",
-    }
     for prompt_id in pack.prompt_ids():
         output = pack.replay_output(prompt_id)
         output["source_refs"] = [dict(invented)]
@@ -945,13 +941,16 @@ def test_all_prompts_reject_invented_root_provenance(pack: PromptPack) -> None:
             normalized = executor._normalize_output(prompt_id, output, pack.replay_input(prompt_id))
         except PromptExecutionError:
             continue
-        if prompt_id in authoritative_reprojected:
-            # v8 treats root provenance as a derived projection for Argument
-            # Architecture.  Tampered cache is discarded and rebuilt from the
-            # authoritative state + visible evidence catalog rather than trusted.
-            assert all(ref.get("source_id") != invented["source_id"] for ref in normalized["source_refs"])
-            continue
-        accepted.append(prompt_id)
+        # Runtime-owned root provenance (WF-3 canonicalization, v8 Argument
+        # reprojection, WF-3B runtime-owned nodes) discards provider-authored
+        # refs deterministically instead of rejecting the output.  Both are
+        # safe; only survival of the invented reference is a defect.
+        surviving = [
+            ref for ref in normalized.get("source_refs") or []
+            if isinstance(ref, dict) and ref.get("source_id") == invented["source_id"]
+        ]
+        if surviving:
+            accepted.append(prompt_id)
     assert not accepted, f"invented provenance accepted by: {accepted}"
 
 

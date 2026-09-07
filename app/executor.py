@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from .llm import LLMError, ModelGateway, ProviderError
+from .background_research import WF3B_RUNTIME_OWNED_SOURCE_REFS_PROMPTS
 from .model_semantic_contracts import (
     SEMANTIC_MODEL_CONTRACT_VERSION,
     build_semantic_model_input,
@@ -1423,6 +1424,20 @@ class PromptExecutor:
                 normalized.setdefault("warnings", []).append(
                     "SYSTEM_SAFE_PACKAGE_SOURCE_NORMALIZATION: "
                     f"{safe_package_changes}"
+                )
+
+        if prompt_id in WF3B_RUNTIME_OWNED_SOURCE_REFS_PROMPTS:
+            # These WF-3B nodes are not enrolled in canonicalize_wf3_machine_fields
+            # yet.  Their top-level provenance is runtime-owned and the provider
+            # never sees trusted catalog IDs, so any provider-authored source_ref
+            # is necessarily fabricated.  Clear it deterministically instead of
+            # exhausting provider retries on an unfixable provenance error.
+            background_refs = normalized.get("source_refs")
+            if isinstance(background_refs, list) and background_refs:
+                normalized["source_refs"] = []
+                normalized.setdefault("warnings", []).append(
+                    "SYSTEM_WF3B_SOURCE_REFS_RUNTIME_OWNED: "
+                    f"cleared {len(background_refs)} provider-authored refs"
                 )
 
         if envelope:
