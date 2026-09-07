@@ -408,6 +408,70 @@ def download_research_archive(project_id: str, session_id: str) -> FileResponse:
     return FileResponse(path, media_type="application/zip", filename=path.name)
 
 
+_SOURCE_DETAIL_FIELDS = (
+    "source_id", "title", "url", "domain", "source_category", "authority_rank",
+    "fetch_mode", "fetch_fallback_reason", "full_text_available", "text_length", "matched_query",
+)
+
+
+@app.get("/api/projects/{project_id}/research-archives/{session_id}/detail")
+def research_archive_detail(project_id: str, session_id: str) -> dict[str, Any]:
+    root = settings.data_dir / "research_archive" / safe_filename(project_id) / safe_filename(session_id)
+    manifest_path = root / "manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(404, "Research archive not found")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    sources = [
+        {field: record.get(field) for field in _SOURCE_DETAIL_FIELDS}
+        for record in manifest.get("records") or []
+    ]
+
+    claims: list[dict[str, Any]] = []
+    workflow_id = manifest.get("workflow_id")
+    if workflow_id:
+        row = db.fetchone(
+            "SELECT output_json FROM prompt_runs WHERE workflow_id=? AND prompt_id IN ('P-BACKGROUND-RESEARCH-SYNTHESIS','P-PUBLIC-RESEARCH-SYNTHESIS') AND status='PASS' ORDER BY created_at DESC LIMIT 1",
+            (workflow_id,),
+        )
+        if row and row.get("output_json"):
+            output = json.loads(row["output_json"])
+            for claim in (output.get("result") or {}).get("claims") or []:
+                claims.append({
+                    "claim_id": claim.get("claim_id"),
+                    "claim_text": claim.get("claim_text"),
+                    "dimension": claim.get("dimension"),
+                    "knowledge_status": claim.get("knowledge_status"),
+                    "subject_id": claim.get("subject_id"),
+                })
+
+    claim_bindings: list[dict[str, Any]] = []
+    binding_dir = root / "claim_bindings"
+    if binding_dir.exists():
+        binding_files = sorted(binding_dir.glob("claim-binding-*.json"), key=lambda p: p.stat().st_mtime)
+        if binding_files:
+            binding_payload = json.loads(binding_files[-1].read_text(encoding="utf-8"))
+            for binding in binding_payload.get("bindings") or []:
+                claim_bindings.append({
+                    "claim_id": binding.get("claim_id"),
+                    "source_ids": binding.get("source_ids") or [],
+                    "evidence_mode": binding.get("evidence_mode"),
+                })
+
+    return {
+        "session_id": manifest.get("session_id"),
+        "workflow_id": workflow_id,
+        "created_at": manifest.get("created_at"),
+        "retrieval_mode": manifest.get("retrieval_mode"),
+        "queries": manifest.get("queries") or [],
+        "sufficiency": manifest.get("research_sufficiency"),
+        "gaps": manifest.get("research_gaps") or [],
+        "sources": sources,
+        "claims": claims,
+        "claim_bindings": claim_bindings,
+    }
+
+
 @app.get("/api/runs")
 def list_runs(project_id: str | None = None, workflow_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     sql = "SELECT id,project_id,workflow_id,prompt_id,status,model_id,endpoint_id,input_hash,output_hash,error,duration_ms,created_at FROM prompt_runs WHERE 1=1"

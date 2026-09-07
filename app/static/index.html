@@ -19,6 +19,7 @@
     <aside>
       <button class="nav active" data-panel="projects">项目与材料</button>
       <button class="nav" data-panel="workflows">工作流</button>
+      <button class="nav" data-panel="research">调研结果</button>
       <button class="nav" data-panel="gates">人工门禁</button>
       <button class="nav" data-panel="prompts">提示词调试</button>
       <button class="nav" data-panel="runs">运行记录</button>
@@ -101,6 +102,15 @@
           </div>
         </div>
         <div id="workflowList"></div>
+      </div>
+
+      <div id="research" class="panel">
+        <div class="panel-head"><h2>调研结果</h2><button id="refreshResearch">刷新</button></div>
+        <div class="card row"><select id="researchSessionSelect"></select></div>
+        <div id="researchSummary"></div>
+        <div class="card"><h3>调研结论（claim 与来源绑定）</h3><div id="researchClaims"></div></div>
+        <div class="card"><h3>研究缺口</h3><div id="researchGaps"></div></div>
+        <div class="card"><h3>来源清单</h3><div id="researchSources"></div></div>
       </div>
 
       <div id="gates" class="panel">
