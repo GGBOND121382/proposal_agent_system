@@ -172,14 +172,13 @@ docker compose up --build
 
 uvicorn 无热重载：`app/` 代码、`.env`、`prompt_pack/`（含 schema）改动后必须重启进程才生效。以下命令自动找到当前监听 8080 的进程、停掉并以原参数重启。
 
-Git Bash：
+Git Bash（启动走 PowerShell `Start-Process`，服务独立于终端存活；不要用 `nohup ... &`，Git Bash 窗口关闭后进程会被一并杀掉）：
 
 ```bash
 PID=$(netstat -ano | grep ":8080" | grep LISTEN | awk '{print $NF}' | head -1) \
   && powershell -NoProfile -Command "Stop-Process -Id $PID -Force"
 sleep 2
-nohup py -3 -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8080 \
-  > data/logs/uvicorn-8080.out.log 2> data/logs/uvicorn-8080.err.log &
+powershell -NoProfile -Command "Start-Process py -ArgumentList '-3','-m','uvicorn','app.main:app','--env-file','.env','--host','127.0.0.1','--port','8080' -WorkingDirectory '$PWD' -RedirectStandardOutput 'data\logs\uvicorn-8080.out.log' -RedirectStandardError 'data\logs\uvicorn-8080.err.log' -WindowStyle Hidden"
 sleep 6 && curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/
 ```
 
