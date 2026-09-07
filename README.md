@@ -168,6 +168,34 @@ cp .env.example .env
 docker compose up --build
 ```
 
+### 重启本机服务
+
+uvicorn 无热重载：`app/` 代码、`.env`、`prompt_pack/`（含 schema）改动后必须重启进程才生效。以下命令自动找到当前监听 8080 的进程、停掉并以原参数重启。
+
+Git Bash：
+
+```bash
+PID=$(netstat -ano | grep ":8080" | grep LISTEN | awk '{print $NF}' | head -1) \
+  && powershell -NoProfile -Command "Stop-Process -Id $PID -Force"
+sleep 2
+nohup py -3 -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8080 \
+  > data/logs/uvicorn-8080.out.log 2> data/logs/uvicorn-8080.err.log &
+sleep 6 && curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/
+```
+
+Windows PowerShell：
+
+```powershell
+$c = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($c) { Stop-Process -Id $c.OwningProcess -Force }
+Start-Sleep 2
+Start-Process py -ArgumentList '-3','-m','uvicorn','app.main:app','--env-file','.env','--host','127.0.0.1','--port','8080' `
+  -RedirectStandardOutput data/logs/uvicorn-8080.out.log -RedirectStandardError data/logs/uvicorn-8080.err.log
+Start-Sleep 6; (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/).StatusCode
+```
+
+输出 `200` 即重启完成。
+
 ## 运行依赖预检
 
 模型、公开搜索、证据目录、Mermaid、LibreOffice、字体及 Stage 输入由统一预检器检查。缺失依赖时工作流进入 `WAITING_CONFIGURATION`，修正配置并重启后从原步骤继续。详见 `docs/RUNTIME_DEPENDENCY_PREFLIGHT_20260730.md`。
