@@ -123,8 +123,13 @@ class HttpFetchGateway:
 
     def fetch(self, url: str) -> FetchedDocument:
         headers = {
-            "User-Agent": "ProposalAgentResearchArchiver/1.0 (+public-source-verification)",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
             "Accept": "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.1",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
         limit = int(self.settings.research_max_source_bytes)
         try:
@@ -182,10 +187,46 @@ class HttpFetchGateway:
         except FetchGatewayError:
             raise
         except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError) as exc:
+            if (
+                isinstance(exc, httpx.HTTPStatusError)
+                and exc.response is not None
+                and int(exc.response.status_code) in {403, 429}
+                and self.browser_worker is not None
+            ):
+                recovered = self._browser_error_fallback(url, int(exc.response.status_code))
+                if recovered is not None:
+                    return recovered
             raise FetchGatewayRetrievalError(
                 f"Public source fetch failed: {exc}",
                 details={"url": url, "exception_type": type(exc).__name__},
             ) from exc
+
+    def _browser_error_fallback(self, url: str, http_status: int) -> FetchedDocument | None:
+        """Retry a hard HTTP 403/429 with a real browser render.
+
+        Anti-bot pages reject the plain HTTP client before any content exists,
+        so the extraction-quality fallback never fires for them.  A recovered
+        page is returned as PLAYWRIGHT_RENDERED; a blocked or failed render
+        returns None and the caller raises the original retrieval error.
+        """
+        try:
+            rendered = self.browser_worker.fetch(url)
+        except Exception:
+            return None
+        if rendered.status == "PASS" and rendered.html.strip():
+            return FetchedDocument(
+                requested_url=url,
+                final_url=rendered.final_url or url,
+                content_type=rendered.content_type or "text/html",
+                http_status=rendered.http_status or http_status,
+                raw_bytes=rendered.html.encode("utf-8"),
+                fetch_mode="PLAYWRIGHT_RENDERED",
+                fallback_reason=f"HTTP_{http_status}_BROWSER_RECOVERED",
+                browser_status=rendered.status,
+                blockage_type=rendered.blockage_type,
+                cache_hit=rendered.cache_hit,
+            )
+        return None
 
     def _browser_fallback(self, fetched: FetchedDocument) -> FetchedDocument:
         if self.browser_worker is None:

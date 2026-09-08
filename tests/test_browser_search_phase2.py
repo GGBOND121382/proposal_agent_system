@@ -388,3 +388,65 @@ def test_zero_candidate_error_diagnostics_summarize_selection_and_channels() -> 
         "crossref": {"runs": 0, "hits": 0, "failures": 1},
     }
     assert VerifiablePublicResearchArchiveSkill._discovery_provider_summary(None) == {}
+
+
+def test_http_403_falls_back_to_browser_render(tmp_path) -> None:
+    import httpx
+
+    from app.skills.fetch_gateway import FetchGatewayRetrievalError
+
+    class ForbiddenClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def stream(self, _method, url):
+            request = httpx.Request("GET", url)
+            response = httpx.Response(403, request=request)
+            raise httpx.HTTPStatusError(
+                "Client error '403 Forbidden'", request=request, response=response
+            )
+
+    rendered = "<html><body><main>" + ("Recovered full text. " * 30) + "</main></body></html>"
+    worker = BrowserWorker(
+        _settings(tmp_path),
+        renderer=lambda url, _timeout: _page(url, html=rendered, text="Recovered full text"),
+        url_validator=lambda _url, *, resolve_dns: None,
+    )
+    fetcher = HttpFetchGateway(
+        _settings(tmp_path),
+        client_factory=ForbiddenClient,
+        url_validator=lambda _url, *, resolve_dns: None,
+        browser_worker=worker,
+    )
+
+    fetched = fetcher.fetch("https://example.org/closed")
+
+    assert fetched.fetch_mode == "PLAYWRIGHT_RENDERED"
+    assert fetched.fallback_reason == "HTTP_403_BROWSER_RECOVERED"
+    assert b"Recovered full text" in fetched.raw_bytes
+
+    class BlockedWorker:
+        def fetch(self, url):
+            return _page(
+                url,
+                html="captcha",
+                text="CAPTCHA verify you are human",
+                status="PROVIDER_BLOCKED",
+                http_status=403,
+            )
+
+    fetcher_blocked = HttpFetchGateway(
+        _settings(tmp_path),
+        client_factory=ForbiddenClient,
+        url_validator=lambda _url, *, resolve_dns: None,
+        browser_worker=BlockedWorker(),
+    )
+
+    with pytest.raises(FetchGatewayRetrievalError):
+        fetcher_blocked.fetch("https://example.org/closed")

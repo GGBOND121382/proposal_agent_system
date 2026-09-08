@@ -13,6 +13,20 @@ from urllib.parse import urlparse
 from .fetch_gateway import FetchGatewaySecurityError, validate_public_url
 from ..util import sha256_text, utc_now
 
+STEALTH_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
+Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+window.chrome = window.chrome || {runtime: {}};
+const __originalPermissionsQuery = window.navigator.permissions && window.navigator.permissions.query;
+if (__originalPermissionsQuery) {
+  window.navigator.permissions.query = (parameters) =>
+    parameters && parameters.name === 'notifications'
+      ? Promise.resolve({state: Notification.permission})
+      : __originalPermissionsQuery(parameters);
+}
+"""
+
 
 @dataclass(frozen=True)
 class BrowserPageResult:
@@ -206,9 +220,13 @@ class BrowserWorker:
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/128.0 Safari/537.36 ProposalAgentResearch/1.0"
+                "Chrome/128.0.0.0 Safari/537.36"
             ),
+            locale="zh-CN",
+            timezone_id="Asia/Shanghai",
+            viewport={"width": 1366, "height": 768},
         )
+        self._context.add_init_script(STEALTH_INIT_SCRIPT)
         return self._context
 
     @staticmethod
@@ -261,6 +279,7 @@ class BrowserWorker:
         try:
             response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             page.wait_for_timeout(min(1500, max(250, timeout_ms // 20)))
+            self._humanize_page(page)
             final_url = str(page.url or url)
             self._validate(final_url)
             html = page.content()
@@ -290,6 +309,24 @@ class BrowserWorker:
             )
         finally:
             page.close()
+
+    def _humanize_page(self, page) -> None:
+        """Light human-like interaction so behavioral bot scores see real events.
+
+        Bounded to well under a second; every action is optional and failures
+        (non-HTML pages, closed pages) are ignored.
+        """
+        if not bool(getattr(self.settings, "browser_humanize_enabled", True)):
+            return
+        try:
+            page.mouse.move(200, 200)
+            page.wait_for_timeout(120)
+            page.mouse.move(520, 360, steps=8)
+            page.mouse.wheel(0, 480)
+            page.wait_for_timeout(150)
+            page.mouse.wheel(0, -160)
+        except Exception:
+            pass
 
     @classmethod
     def _classify(cls, result: BrowserPageResult) -> BrowserPageResult:
