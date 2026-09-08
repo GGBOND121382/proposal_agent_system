@@ -380,13 +380,14 @@ def list_research_archives(project_id: str) -> list[dict[str, Any]]:
     if not root.exists():
         return []
     result = []
-    for manifest in sorted(root.glob("*/manifest.json"), reverse=True):
+    for manifest in root.glob("*/manifest.json"):
         try:
             payload = json.loads(manifest.read_text(encoding="utf-8"))
         except Exception:
             continue
         result.append({
             "session_id": payload.get("session_id"),
+            "workflow_id": payload.get("workflow_id"),
             "retrieval_mode": payload.get("retrieval_mode"),
             "provider": payload.get("provider"),
             "created_at": payload.get("created_at"),
@@ -394,6 +395,7 @@ def list_research_archives(project_id: str) -> list[dict[str, Any]]:
             "warning_count": payload.get("warning_count"),
             "manifest_path": str(manifest),
         })
+    result.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     return result
 
 
