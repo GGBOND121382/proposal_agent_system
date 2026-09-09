@@ -79,6 +79,9 @@ def _source_catalog(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "snapshot_sha256": record.get("snapshot_sha256"),
                 "text_sha256": record.get("text_sha256"),
                 "excerpt": record.get("excerpt"),
+                **({"merge_provenance": record["merge_provenance"],
+                    "selected_snapshot_origin": record.get("selected_snapshot_origin")}
+                   if record.get("merge_provenance") else {}),
             }
         )
     return catalog

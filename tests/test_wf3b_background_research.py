@@ -371,6 +371,54 @@ def test_wf3b_synthesis_representation_normalizes_dimension_profiles_and_span_id
     assert changes
 
 
+def test_wf3b_synthesis_representation_slugifies_free_text_subject_id():
+    output = {
+        "result": {
+            "claims": [
+                {"subject_id": "DASH experiment"},
+                {"subject_id": "military AI DSS integration"},
+                {"subject_id": "USAF_DASH_outcomes"},
+                {"subject_id": None},
+                {"subject_id": "   "},
+            ]
+        }
+    }
+
+    changes = PromptExecutor._normalize_wf3b_synthesis_representation(output)
+
+    claims = output["result"]["claims"]
+    assert claims[0]["subject_id"] == "DASH_experiment"
+    assert claims[1]["subject_id"] == "military_AI_DSS_integration"
+    # Already-valid slugs and null pass through untouched.
+    assert claims[2]["subject_id"] == "USAF_DASH_outcomes"
+    assert claims[3]["subject_id"] is None
+    # A value with no usable slug character degrades to the schema-allowed null.
+    assert claims[4]["subject_id"] is None
+    assert any("subject_id" in change for change in changes)
+
+
+def test_wf3b_synthesis_representation_coerces_claim_type_to_public_claim():
+    output = {
+        "result": {
+            "claims": [
+                {"claim_type": "FACT"},
+                {"claim_type": "PUBLIC_CLAIM"},
+                {"claim_type": "MODEL_INFERENCE"},
+            ]
+        }
+    }
+
+    changes = PromptExecutor._normalize_wf3b_synthesis_representation(output)
+
+    claims = output["result"]["claims"]
+    assert [claim["claim_type"] for claim in claims] == [
+        "PUBLIC_CLAIM",
+        "PUBLIC_CLAIM",
+        "PUBLIC_CLAIM",
+    ]
+    assert sum("claim_type" in change for change in changes) == 2
+
+
 def test_live_context_projects_approved_safe_package_into_wf3b_contract(tmp_path):
     db = make_executor_db(tmp_path)
     pack = PromptPack(ROOT / "prompt_pack")

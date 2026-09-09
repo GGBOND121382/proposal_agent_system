@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from __future__ import annotations
+
 import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
 
+from ..privacy import redact_public_retrieval_content
 from ..util import utc_now
 
 _INNOVATION_TERMS = {"innovation", "innovative", "novelty", "novel", "first", "no existing", "no prior", "has not been", "创新", "首创", "首次", "突破", "填补空白", "尚无", "未有", "空白"}
-PUBLIC_CLAIM_VALIDATOR_VERSION = "2026-09-04.v2-explicit-innovation-scope"
+PUBLIC_CLAIM_VALIDATOR_VERSION = "2026-09-08.v3-quote-against-archived-fulltext"
 
 
 def _compact(text: str) -> str:
@@ -47,11 +51,62 @@ def _innovation_claim(claim: dict[str, Any]) -> bool:
     )
 
 
+def _archive_text_index(research_output: dict[str, Any]) -> dict[str, tuple[str, str]]:
+    """Map source_id to its hash-pinned archive text file, when available."""
+    manifest_path = str(research_output.get("archive_manifest") or "").strip()
+    if not manifest_path:
+        return {}
+    try:
+        manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    index: dict[str, tuple[str, str]] = {}
+    for record in manifest.get("records") or []:
+        if not isinstance(record, dict):
+            continue
+        source_id = str(record.get("source_id") or "")
+        text_path = str(record.get("text_path") or "")
+        text_sha256 = str(record.get("text_sha256") or "")
+        if source_id and text_path and text_sha256:
+            index[source_id] = (text_path, text_sha256)
+    return index
+
+
+def _load_archived_text(
+    index: dict[str, tuple[str, str]],
+    cache: dict[str, str],
+    source_id: str,
+) -> str:
+    """Load a source's archived text only when its sha256 matches the manifest.
+
+    The archive keeps the original page text while the model saw the privacy
+    projection ([EMAIL]/[PHONE]/credentials redacted).  Apply the same
+    redaction here so genuine quotes from the projection remain verifiable.
+    """
+    if source_id in cache:
+        return cache[source_id]
+    text = ""
+    entry = index.get(source_id)
+    if entry:
+        text_path, expected_sha256 = entry
+        try:
+            candidate = Path(text_path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            candidate = ""
+        if candidate and hashlib.sha256(candidate.encode("utf-8")).hexdigest() == expected_sha256:
+            redacted, _ = redact_public_retrieval_content(candidate)
+            text = redacted if isinstance(redacted, str) else ""
+    cache[source_id] = text
+    return text
+
+
 def validate_public_claims(synthesis: dict[str, Any], research_output: dict[str, Any]) -> dict[str, Any]:
     mode = str(research_output.get("mode") or "")
     if mode in {"REPLAY", "MOCK", "SIMULATED_EMPTY"}:
         return {"status": "PASS", "validation_mode": "ORCHESTRATION_ONLY", "findings": [], "bindings": [], "validated_at": utc_now()}
     catalog = {str(item.get("source_id")): item for item in research_output.get("source_catalog", []) if item.get("source_id")}
+    archive_text_index = _archive_text_index(research_output)
+    archive_text_cache: dict[str, str] = {}
     coverage = research_output.get("coverage") or {}
     findings: list[dict[str, Any]] = []
     bindings: list[dict[str, Any]] = []
@@ -92,10 +147,18 @@ def validate_public_claims(synthesis: dict[str, Any], research_output: dict[str,
                 findings.append({"code": "PUBLIC_CLAIM_HASH_MISMATCH", "severity": "P0", "claim_id": claim_id, "source_id": source_id})
             quoted = _compact(str((ref or {}).get("quoted_text") or ""))
             if quoted:
-                if _searchable(quoted) in _searchable(f"{record.get('title', '')}\n{record.get('excerpt', '')}"):
+                searchable_quote = _searchable(quoted)
+                if searchable_quote in _searchable(f"{record.get('title', '')}\n{record.get('excerpt', '')}"):
                     direct.append(source_id)
                 else:
-                    findings.append({"code": "PUBLIC_CLAIM_QUOTE_NOT_FOUND", "severity": "P1", "claim_id": claim_id, "source_id": source_id})
+                    # Legitimate quotes often come from the fetched full text,
+                    # which the catalog deliberately does not inline.  Verify
+                    # against the hash-pinned archive snapshot before flagging.
+                    archived_text = _load_archived_text(archive_text_index, archive_text_cache, source_id)
+                    if archived_text and searchable_quote in _searchable(archived_text):
+                        direct.append(source_id)
+                    else:
+                        findings.append({"code": "PUBLIC_CLAIM_QUOTE_NOT_FOUND", "severity": "P1", "claim_id": claim_id, "source_id": source_id})
         if _innovation_claim(claim):
             sufficiency = research_output.get("research_sufficiency") or {}
             if sufficiency.get("status") == "DEGRADED":

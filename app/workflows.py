@@ -8,7 +8,7 @@ from typing import Any
 
 from .candidate_integrity import visible_document_snapshot
 from .dependency_preflight import DependencyIssue, DependencyReport
-from .executor import PromptExecutionError
+from .executor import PromptExecutionError, PromptExecutor
 from .llm import MODEL_RESPONSE_PROTOCOL_VERSION
 from .decision_arbiter import DecisionArbiter
 from .repair_ledger import RepairLedger
@@ -1105,11 +1105,10 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         prior_report = state.get("background_claim_validation")
         if not isinstance(prior_report, dict) or prior_report.get("status") == "PASS":
             return False
-        if (
+        validator_changed = (
             str(prior_report.get("validator_version") or "")
-            == PUBLIC_CLAIM_VALIDATOR_VERSION
-        ):
-            return False
+            != PUBLIC_CLAIM_VALIDATOR_VERSION
+        )
         step_result = (state.get("step_results") or {}).get("5") or {}
         if (
             str(step_result.get("prompt_id") or "") != WF3B_SYNTHESIS_PROMPT
@@ -1129,6 +1128,15 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             output = json.loads(row["output_json"])
         except (TypeError, json.JSONDecodeError):
             return False
+        # Outputs committed under an older output normalizer may predate
+        # deterministic claim representation fixes (subject_id slugging,
+        # claim_type coercion).  Re-apply them before revalidating; if nothing
+        # changes and the validator did not move either, retrying is pointless.
+        representation_changes = (
+            PromptExecutor._normalize_wf3b_synthesis_representation(output)
+        )
+        if not validator_changed and not representation_changes:
+            return False
         report = validate_public_claims(
             output.get("result") or {},
             state.get("background_search_results") or {},
@@ -1139,6 +1147,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             "run_id": run_id,
             "from_validator_version": prior_report.get("validator_version"),
             "validator_version": PUBLIC_CLAIM_VALIDATOR_VERSION,
+            "representation_changes": representation_changes[:20],
             "status": report.get("status"),
         }
         state.setdefault("claim_validation_policy_recoveries", []).append(recovery)
@@ -3740,8 +3749,14 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             claim_scope = self._synthesis_claim_validation_scope(prompt_id)
             if claim_scope is not None:
                 service, search_state_key, validation_state_key = claim_scope
+                candidate_output = result.get("output") or {}
+                if prompt_id == WF3B_SYNTHESIS_PROMPT:
+                    # Replays of runs committed under an older output normalizer
+                    # may predate claim representation fixes; re-apply the
+                    # idempotent representation pass before validating.
+                    PromptExecutor._normalize_wf3b_synthesis_representation(candidate_output)
                 candidate_claim_validation = service.validate_synthesis(
-                    (result.get("output") or {}).get("result") or {},
+                    candidate_output.get("result") or {},
                     state.get(search_state_key) or {},
                 )
                 state[validation_state_key] = candidate_claim_validation
@@ -3818,6 +3833,8 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             post_claim_scope = self._synthesis_claim_validation_scope(prompt_id)
             if post_claim_scope is not None:
                 service, search_state_key, validation_state_key = post_claim_scope
+                if prompt_id == WF3B_SYNTHESIS_PROMPT:
+                    PromptExecutor._normalize_wf3b_synthesis_representation(output)
                 claim_validation = service.validate_synthesis(
                     output.get("result") or {},
                     state.get(search_state_key) or {},
@@ -4105,6 +4122,63 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     checkpoint_state=state,
                 )
                 return self.get(workflow_id)
+
+            if effective_status == "REVISE" and prompt_id not in CRITIC_PRODUCER:
+                # A producer self-reporting REVISE has no machine repair route
+                # of its own: targeted repair is critic-driven and semantic
+                # regeneration only covers blocking evidence gaps.  When the
+                # workflow definition places the paired critic immediately
+                # after this producer, hand the persisted output to that
+                # independent review instead of content-blocking the run; the
+                # critic remains the sole authority that can route findings
+                # into targeted repair or producer regeneration.
+                paired_critic = next(
+                    (
+                        critic_id
+                        for critic_id, producer_id in CRITIC_PRODUCER.items()
+                        if producer_id == prompt_id
+                    ),
+                    None,
+                )
+                workflow_steps = WORKFLOWS.get(wf["workflow_type"]) or []
+                next_step = (
+                    workflow_steps[wf["current_step"] + 1]
+                    if wf["current_step"] + 1 < len(workflow_steps)
+                    else None
+                )
+                if (
+                    paired_critic
+                    and isinstance(next_step, dict)
+                    and str(next_step.get("prompt_id") or "") == paired_critic
+                ):
+                    self._clear_workflow_repair_rereview(state, prompt_id)
+                    state.setdefault("producer_self_revise_history", []).append(
+                        {
+                            "prompt_id": prompt_id,
+                            "run_id": result.get("run_id"),
+                            "paired_critic": paired_critic,
+                            "finding_codes": [
+                                str(item.get("code") or "")
+                                for item in effective_output.get("findings") or []
+                                if isinstance(item, dict)
+                            ],
+                            "recorded_at": utc_now(),
+                        }
+                    )
+                    del state["producer_self_revise_history"][:-50]
+                    wf["current_step"] += 1
+                    self._update(wf, current_step=wf["current_step"], state=state)
+                    self.db.audit(
+                        "PRODUCER_SELF_REVISE_ROUTED_TO_CRITIC",
+                        project_id=wf["project_id"],
+                        object_id=wf["id"],
+                        metadata={
+                            "producer_prompt": prompt_id,
+                            "paired_critic": paired_critic,
+                            "step": wf["current_step"],
+                        },
+                    )
+                    return self.get(workflow_id)
 
             if effective_status == "REVISE":
                 self._clear_workflow_repair_rereview(state, prompt_id)

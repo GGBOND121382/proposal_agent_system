@@ -16,6 +16,12 @@ _GENERIC_TERMS = {
     "analysis", "approach", "approaches", "framework", "frameworks", "latest", "method", "methods", "model", "models", "paper", "papers", "recent", "research", "review", "reviews", "study", "studies", "survey", "surveys", "system", "systems",
 }
 _RELEVANCE_RANK = {"OFF_TOPIC": 0, "TANGENTIAL": 1, "SUPPORTING": 2, "DIRECT": 3}
+_CJK_RANGE = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002fa1f"
+_CJK_RUN = re.compile(f"[{_CJK_RANGE}]+")
+_CJK_GENERIC_TERMS = {
+    "系统", "体系", "研究", "论文", "综述", "分析", "方法", "模型", "框架",
+    "技术", "应用", "发展", "现状", "趋势", "最新", "基于", "面向", "以及",
+}
 _NON_CONTENT_TITLE_PREFIXES = (
     r"^\s*decision\s+letter(?:\s+for)?\s*[:\-–—]?\s*",
     r"^\s*editorial\s*[:\-–—]?\s*",
@@ -37,7 +43,20 @@ def _stem(token: str) -> str:
 def concept_tokens(value: Any) -> set[str]:
     text = str(value or "").lower().replace("-", " ")
     values = {_stem(token) for token in re.findall(r"[a-z][a-z0-9]{1,}", text)}
+    # Overlapping Han bigrams work with and without word separators. Do not add
+    # unigrams for every character: shared characters would inflate relevance.
+    for run in _CJK_RUN.findall(text):
+        values.update(run[index:index + 2] for index in range(len(run) - 1))
+        if len(run) == 1:
+            values.add(run)
+    values.difference_update(_CJK_GENERIC_TERMS)
     return {token for token in values if token not in _GENERIC_TERMS}
+
+
+def _relevance_tokens(value: Any) -> set[str]:
+    # Keep isolated characters available to tokenizer callers, but they cannot
+    # establish topic relevance (e.g. dictionary results for the character 多).
+    return {token for token in concept_tokens(value) if len(token) > 1}
 
 
 
@@ -126,7 +145,14 @@ def _entity_matches(alias: str, text: str) -> bool:
     # Hyphens and whitespace vary between official titles, snippets and PDFs.
     words = re.findall(r"\w+", alias.casefold())
     normalized = " ".join(re.findall(r"\w+", text.casefold()))
-    return bool(words) and bool(re.search(r"(?<!\w)" + re.escape(" ".join(words)) + r"(?!\w)", normalized))
+    if not words:
+        return False
+    phrase = " ".join(words)
+    # Chinese names occur inside unspaced sentences. Latin names still need
+    # Latin word boundaries so DASH never matches dashboard, even in CJK text.
+    left = r"(?<![a-z0-9_])" if re.match(r"[a-z0-9_]", phrase) else ""
+    right = r"(?![a-z0-9_])" if re.search(r"[a-z0-9_]$", phrase) else ""
+    return bool(re.search(left + re.escape(phrase) + right, normalized))
 
 
 def build_query_relevance_profiles(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -159,7 +185,7 @@ def build_query_relevance_profiles(plan: dict[str, Any]) -> dict[str, dict[str, 
 
     anchors_by_question: dict[int, set[str]] = {}
     for index, queries in question_queries.items():
-        token_sets = [concept_tokens(query) for query in queries]
+        token_sets = [_relevance_tokens(query) for query in queries]
         if len(token_sets) < 2:
             anchors_by_question[index] = set()
             continue
@@ -180,8 +206,14 @@ def build_query_relevance_profiles(plan: dict[str, Any]) -> dict[str, dict[str, 
                 continue
             indexes.append(index)
             anchors.update(anchors_by_question.get(index) or set())
+        tokens = _relevance_tokens(query)
+        scripts = {bool(_CJK_RUN.search(token)) for token in tokens}
+        # Shared questions can mix Chinese and English queries. An English-only
+        # anchor set must not veto Chinese evidence (and vice versa).
+        anchors = {token for token in anchors if bool(_CJK_RUN.search(token)) in scripts
+                   and (not _CJK_RUN.search(token) or token in tokens)}
         profiles[query] = {
-            "query_tokens": sorted(concept_tokens(query)),
+            "query_tokens": sorted(tokens),
             "domain_anchors": sorted(anchors),
             "linked_question_indexes": indexes,
             "entity_groups": query_entity_groups(query, item),
@@ -194,7 +226,7 @@ def assess_candidate_relevance(
     candidate: dict[str, Any],
     profiles: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    profile = profiles.get(query) or {"query_tokens": sorted(concept_tokens(query)), "domain_anchors": []}
+    profile = profiles.get(query) or {"query_tokens": sorted(_relevance_tokens(query)), "domain_anchors": []}
     query_tokens = set(profile.get("query_tokens") or [])
     anchors = set(profile.get("domain_anchors") or [])
     title = str(candidate.get("title") or "")
@@ -202,12 +234,24 @@ def assess_candidate_relevance(
     for pattern in _NON_CONTENT_TITLE_PREFIXES:
         cleaned_title = re.sub(pattern, "", cleaned_title, flags=re.IGNORECASE)
     text = f"{cleaned_title} {candidate.get('abstract', '')} {candidate.get('excerpt', '')} {candidate.get('content_text', '')}"
-    text_tokens = concept_tokens(text)
+    text_tokens = _relevance_tokens(text)
     overlap = query_tokens & text_tokens
     anchor_hits = anchors & text_tokens
     ratio = len(overlap) / max(1, len(query_tokens))
 
-    if anchors:
+    if any(_CJK_RUN.search(token) for token in query_tokens):
+        # Bigrams overlap: five matches can come from a single long phrase.
+        # Require proportional intent coverage as well as an anchor, when one
+        # exists, rather than applying English absolute word-count thresholds.
+        cjk_anchors = {token for token in anchors if _CJK_RUN.search(token)}
+        anchored = not cjk_anchors or bool(cjk_anchors & text_tokens)
+        if anchored and len(overlap) >= 3 and ratio >= 0.7:
+            label = "DIRECT"
+        elif anchored and len(overlap) >= 3 and ratio >= 0.55:
+            label = "SUPPORTING"
+        else:
+            label = "TANGENTIAL" if overlap else "OFF_TOPIC"
+    elif anchors:
         # A repeated domain anchor is necessary but not sufficient.  A single generic
         # anchor such as ``decision`` plus two coincidental words caused real false
         # coverage (E3SM versioning, parasite feedback, supply-chain blockchain).

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -587,3 +589,79 @@ def test_all_security_rejected_candidates_remain_security_failures(tmp_path: Pat
 
     assert caught.value.category == "SECURITY"
     assert caught.value.details["candidate_failures"][0]["category"] == "SECURITY"
+
+
+def test_claim_quote_verifies_against_archived_fulltext_with_privacy_redaction(tmp_path):
+    # The model quotes the privacy projection ([EMAIL]) while the archive keeps
+    # the original text.  Quotes must verify against the hash-pinned snapshot
+    # after applying the same redaction, not just against title/excerpt.
+    archive = tmp_path / "archive"
+    (archive / "text").mkdir(parents=True)
+    body = (
+        "Evaluation and Benchmarking of Multi-Agent LLM Systems. "
+        "Contact the corresponding author at editor@example.org for details. "
+        "This sentence only appears deep inside the fetched full text."
+    )
+    text_path = archive / "text" / "public-src-fulltext.txt"
+    text_path.write_text(body, encoding="utf-8")
+    text_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    manifest = {
+        "records": [{
+            "source_id": "public-src-fulltext",
+            "text_path": str(text_path),
+            "text_sha256": text_sha256,
+        }]
+    }
+    manifest_path = archive / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    research_output = {
+        "mode": "LIVE",
+        "archive_manifest": str(manifest_path),
+        "source_catalog": [{
+            "source_id": "public-src-fulltext",
+            "title": "Multi-Agent LLM Systems Review",
+            "excerpt": "A short abstract without the quoted sentences.",
+            "snapshot_sha256": "0" * 64,
+        }],
+    }
+
+    def synthesis_with_quote(quote: str) -> dict:
+        return {
+            "claims": [{
+                "claim_id": "public-claim-fulltext-001",
+                "claim_text": "全文中的论述支持该主张。",
+                "claim_type": "PUBLIC_CLAIM",
+                "subject_id": None,
+                "temporal_status": "CURRENT",
+                "qualifiers": [],
+                "numeric_values": [],
+                "source_refs": [{
+                    "source_id": "public-src-fulltext",
+                    "source_type": "PUBLIC_SOURCE",
+                    "source_hash": "0" * 64,
+                    "quoted_text": quote,
+                    "authority_rank": 50,
+                    "security_level": "PUBLIC",
+                }],
+                "knowledge_status": "DOCUMENT_EXTRACTED",
+                "security_level": "PUBLIC",
+            }],
+            "source_comparisons": [],
+            "conflicts": [],
+            "limitations": [],
+            "coverage_summary": "",
+        }
+
+    deep_quote = "This sentence only appears deep inside the fetched full text."
+    report = validate_public_claims(synthesis_with_quote(deep_quote), research_output)
+    assert report["status"] == "PASS"
+    assert report["bindings"][0]["evidence_mode"] == "DIRECT_SOURCE_SUPPORTED"
+
+    redacted_quote = "Contact the corresponding author at [EMAIL] for details."
+    report = validate_public_claims(synthesis_with_quote(redacted_quote), research_output)
+    assert report["status"] == "PASS"
+
+    fabricated = "This sentence was never published anywhere."
+    report = validate_public_claims(synthesis_with_quote(fabricated), research_output)
+    assert report["status"] == "BLOCK"
+    assert report["findings"][0]["code"] == "PUBLIC_CLAIM_QUOTE_NOT_FOUND"

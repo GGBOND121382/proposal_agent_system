@@ -29,6 +29,7 @@ from .workflow_defs import CRITIC_PRODUCER
 from .background_research import (
     BACKGROUND_DIMENSIONS,
     WF3B_PLAN_PROMPT,
+    compare_background_search_candidates,
     normalize_background_plan,
 )
 from .contracts.semantic_contract import get_semantic_contract
@@ -874,7 +875,21 @@ class WorkflowRepairMixin:
 
         accepted = state.get("background_search_results")
         if isinstance(accepted, dict) and accepted:
-            comparison = compare_public_search_candidates(accepted, candidate)
+            # LIVE follow-ups extend the verified evidence pool. Raw rounds stay
+            # immutable; synthesis and downstream exports use the cumulative one.
+            # Legacy simulation fixtures have no on-disk archives to consolidate.
+            if accepted.get("archive_manifest") or candidate.get("archive_manifest"):
+                raw_comparison = compare_public_search_candidates(accepted, candidate)
+                candidate = await self._background_research().merge_search_results(
+                    accepted, candidate, project_id=wf["project_id"], workflow_id=wf["id"],
+                )
+                state.setdefault("background_search_merge_history", []).append({
+                    "recorded_at": utc_now(), "archive_session_id": candidate.get("archive_session_id"),
+                    "archive_manifest": candidate.get("archive_manifest"),
+                    "raw_round_comparison": raw_comparison, "merge_report": candidate.get("merge_report"),
+                })
+                del state["background_search_merge_history"][:-20]
+            comparison = compare_background_search_candidates(accepted, candidate)
             state.setdefault("background_search_candidate_history", []).append(
                 {
                     "recorded_at": utc_now(),

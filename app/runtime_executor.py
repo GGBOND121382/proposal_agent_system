@@ -38,7 +38,7 @@ from .model_semantic_contracts import (
     supports_semantic_model_contract,
 )
 from .privacy import OutboundPrivacyError, assert_online_payload_safe, load_project_config, sanitize_safe_online_package
-from .output_integrity import TRUSTED_SOURCE_CATALOG_VERSION, attach_trusted_source_catalog
+from .output_integrity import TRUSTED_SOURCE_CATALOG_VERSION, attach_trusted_source_catalog, inject_reference_targets_into_schema
 from .runtime_evidence import EvidenceIntegrityError, InjectedFailure, ModelCallEvidenceStore
 from .runtime_policy import CapabilityModeError, CapabilityPolicy, LIVE_ENVELOPE_REGISTRY
 from .runtime_failures import classify_runtime_failure, persistence_safe_failure_classification
@@ -1025,6 +1025,7 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     prompt_id,
                     copy.deepcopy(recovery_provider_output),
                     model_envelope,
+                    project_id=project_id,
                 )
                 self.policy.assert_output_unchanged(
                     recovery_provider_output,
@@ -1257,6 +1258,21 @@ class RuntimePromptExecutor(BasePromptExecutor):
             else:
                 output_schema = self.pack.inlined_schema(prompt_id, "output")
 
+            if not argument_two_stage_contract:
+                # Show the model the exact reference namespace the output
+                # validator will enforce (e.g. document_id is citable while
+                # document_version_id is protocol-only), inline in the tool
+                # schema as a validation-neutral enum branch.
+                pre_injection_output_schema = output_schema
+                output_schema, reference_injection = inject_reference_targets_into_schema(
+                    output_schema, provider_call_envelope
+                )
+                if reference_injection.get("injected_fields"):
+                    input_compaction = {
+                        **(input_compaction or {}),
+                        "reference_target_injection": reference_injection,
+                    }
+
             if route.environment == "ONLINE_PUBLIC" and not argument_two_stage_contract:
                 assert_online_payload_safe(provider_call_envelope, project_config)
             if argument_two_stage_contract:
@@ -1283,6 +1299,35 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 wf3_budget = wf3_provider_request_budget_report(
                     prompt_id, system_prompt, provider_call_envelope
                 )
+                if (
+                    wf3_budget
+                    and not wf3_budget["within_budget"]
+                    and reference_injection.get("injected_fields")
+                ):
+                    # The enum injection is best-effort guidance for the model;
+                    # it must never break the deterministic WF-3 request
+                    # budget.  Fall back to the original schema and re-measure.
+                    output_schema = pre_injection_output_schema
+                    input_compaction = {
+                        **(input_compaction or {}),
+                        "reference_target_injection": {
+                            "injected_fields": [],
+                            "budget_fallback": True,
+                        },
+                    }
+                    system_prompt = self._system_prompt(
+                        prompt_id,
+                        output_schema,
+                        provider_call_envelope,
+                        semantic_model_contract=semantic_model_contract,
+                    )
+                    if contract_retry_feedback:
+                        system_prompt += self._contract_retry_feedback_prompt(
+                            contract_retry_feedback
+                        )
+                    wf3_budget = wf3_provider_request_budget_report(
+                        prompt_id, system_prompt, provider_call_envelope
+                    )
                 if wf3_budget:
                     input_compaction = {
                         **(input_compaction or {}),
@@ -1484,7 +1529,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
                             prompt_id, model_envelope, provider_output
                         )
                     consumed_output = self._normalize_output(
-                        prompt_id, provider_output, model_envelope
+                        prompt_id, provider_output, model_envelope,
+                        project_id=project_id,
                     )
             except PromptExecutionError as exc:
                 raise self._provider_contract_failure(

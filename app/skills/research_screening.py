@@ -14,6 +14,7 @@ from .research_quality import (
     assess_candidate_relevance,
     assess_source_priorities,
     build_query_relevance_profiles,
+    concept_tokens,
 )
 
 _GENERIC_LATIN = {
@@ -90,10 +91,13 @@ def _candidate_providers(candidate: dict[str, Any]) -> list[str]:
 
 
 def _query_alignment(query: str, candidate: dict[str, Any]) -> tuple[float, int, int]:
-    query_tokens = _latin_tokens(query)
-    text_tokens = _latin_tokens(
-        f"{candidate.get('title', '')} {candidate.get('abstract', '')} {candidate.get('excerpt', '')}"
-    )
+    def tokens(value: str) -> set[str]:
+        return _latin_tokens(value) | {
+            token for token in concept_tokens(value) if not token.isascii() and len(token) > 1
+        }
+
+    query_tokens = tokens(query)
+    text_tokens = tokens(f"{candidate.get('title', '')} {candidate.get('abstract', '')} {candidate.get('excerpt', '')}")
     if not query_tokens or not text_tokens:
         return 0.0, len(query_tokens), len(text_tokens)
     overlap = len(query_tokens & text_tokens)

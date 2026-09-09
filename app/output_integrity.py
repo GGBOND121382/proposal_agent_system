@@ -490,6 +490,380 @@ def _collect_inherited_repair_entity_ids(value: Any) -> set[str]:
     }
 
 
+def collect_allowed_reference_ids(envelope: Any) -> set[str]:
+    """The exact reference namespace the validator will accept for this call.
+
+    Shared by output validation and by the provider-schema injection below so
+    the model is guided by the same set it is later judged against.
+    """
+    return (
+        _collect_defined_ids(envelope)
+        | _collect_visible_reference_ids(envelope)
+        | _collect_inherited_repair_entity_ids(envelope)
+        | set(_REGISTERED_DIAGNOSTIC_REFS)
+    )
+
+
+_REFERENCE_ENUM_INJECTION_LIMIT = 256
+
+
+def inject_reference_targets_into_schema(
+    output_schema: Any,
+    envelope: Any,
+    *,
+    max_ids: int = _REFERENCE_ENUM_INJECTION_LIMIT,
+) -> tuple[Any, dict[str, Any]]:
+    """Surface the call's citable reference IDs inside the submitted tool schema.
+
+    The model cannot otherwise tell citable entity IDs apart from
+    visible-but-protocol IDs (e.g. ``document_version_id``): both sit side by
+    side in the input envelope, and the output schema only carries a pattern.
+    Wrap each reference-typed string schema as ``anyOf[enum(allowed), original]``
+    so the legal values appear inline in the tool definition.  The original
+    branch keeps acceptance exactly as before (validation-neutral), and enum
+    candidates are filtered through the field's own pattern/length bounds so no
+    new value becomes acceptable.  References to entities defined inside the
+    output itself therefore remain valid.
+    """
+    report: dict[str, Any] = {
+        "injected_fields": [],
+        "allowed_id_count": 0,
+        "truncated": False,
+    }
+    if not isinstance(output_schema, dict):
+        return output_schema, report
+    allowed_full = sorted(collect_allowed_reference_ids(envelope))
+    report["truncated"] = len(allowed_full) > max_ids
+    allowed = allowed_full[:max_ids]
+    report["allowed_id_count"] = len(allowed)
+    contract = get_semantic_contract()
+    target_fields = {
+        field_name
+        for field_name, semantic in contract.reference_field_semantics.items()
+        if semantic in _EXISTING_TARGET_SEMANTICS
+    }
+    # Protocol-owned fields (project_id, document_version_id, ...) are never
+    # citable references, but their legal values are equally fixed by the
+    # input: the envelope's own values for that field name.  Listing them as an
+    # enum stops the model from inventing ids like "proj-dash-survey-v1".
+    protocol_fields = {
+        field_name
+        for field_name, semantic in contract.reference_field_semantics.items()
+        if semantic is ReferenceSemantic.PROTOCOL_REF
+    }
+    protocol_values: dict[str, list[str]] = {}
+
+    def collect_protocol(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                collect_protocol(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        for key, item in node.items():
+            if (
+                key in protocol_fields
+                and isinstance(item, str)
+                and item.strip()
+                and item.strip() not in protocol_values.setdefault(key, [])
+            ):
+                protocol_values[key].append(item.strip())
+            collect_protocol(item)
+
+    collect_protocol(envelope)
+    protocol_values = {
+        key: values[:8] for key, values in protocol_values.items() if values
+    }
+    if not target_fields and not protocol_values:
+        return output_schema, report
+
+    def fits(node: Mapping, value: str) -> bool:
+        if "const" in node and node["const"] != value:
+            return False
+        existing_enum = node.get("enum")
+        if isinstance(existing_enum, list) and value not in existing_enum:
+            return False
+        pattern = node.get("pattern")
+        if isinstance(pattern, str) and not re.search(pattern, value):
+            return False
+        min_length = node.get("minLength")
+        if isinstance(min_length, int) and len(value) < min_length:
+            return False
+        max_length = node.get("maxLength")
+        if isinstance(max_length, int) and len(value) > max_length:
+            return False
+        return True
+
+    def wrap_string_schema(node: Any, path: str, candidates: list[str]) -> Any:
+        if not isinstance(node, dict) or node.get("type") != "string":
+            return node
+        values = [value for value in candidates if fits(node, value)]
+        if not values:
+            return node
+        report["injected_fields"].append(path)
+        return {
+            "anyOf": [
+                {"enum": values},
+                copy.deepcopy(node),
+            ]
+        }
+
+    def visit(node: Any, path: str) -> Any:
+        if isinstance(node, list):
+            return [visit(item, path) for item in node]
+        if not isinstance(node, dict):
+            return node
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            node = dict(node)
+            rebuilt: dict[str, Any] = {}
+            for key, subschema in properties.items():
+                field_path = f"{path}/{key}"
+                if key in target_fields and isinstance(subschema, dict):
+                    if subschema.get("type") == "array" and isinstance(
+                        subschema.get("items"), dict
+                    ):
+                        items = wrap_string_schema(
+                            subschema["items"], field_path + "[]", allowed
+                        )
+                        if items is not subschema["items"]:
+                            subschema = {**subschema, "items": items}
+                    else:
+                        subschema = wrap_string_schema(subschema, field_path, allowed)
+                elif key in protocol_values and isinstance(subschema, dict):
+                    # anyOf string/null branches: wrap the string branch.
+                    branches = subschema.get("anyOf")
+                    if isinstance(branches, list):
+                        subschema = {
+                            **subschema,
+                            "anyOf": [
+                                wrap_string_schema(
+                                    branch, field_path, protocol_values[key]
+                                )
+                                for branch in branches
+                            ],
+                        }
+                    else:
+                        subschema = wrap_string_schema(
+                            subschema, field_path, protocol_values[key]
+                        )
+                rebuilt[key] = visit(subschema, field_path)
+            node["properties"] = rebuilt
+            return node
+        return {key: visit(item, f"{path}/{key}") for key, item in node.items()}
+
+    return visit(output_schema, ""), report
+
+
+def canonicalize_protocol_refs(
+    output: Any,
+    envelope: Any,
+) -> tuple[Any, dict[str, Any]]:
+    """Replace protocol-owned field values with the envelope's authoritative one.
+
+    Fields whose semantic is PROTOCOL_REF (project_id, document_version_id, ...)
+    are runtime-owned: when the input envelope admits exactly one value for the
+    field name, a model-invented alternative (e.g. ``proj-dash-survey-v1``) is a
+    representation error, not content.  Rewriting it deterministically prevents
+    both the producer-level protocol mismatch and the targeted-repair deadlock
+    where the repair model must touch a path outside its allowed_paths.
+    """
+    report: dict[str, Any] = {"changes": []}
+    if not isinstance(output, dict):
+        return output, report
+    contract = get_semantic_contract()
+    protocol_fields = {
+        field_name
+        for field_name, semantic in contract.reference_field_semantics.items()
+        if semantic is ReferenceSemantic.PROTOCOL_REF
+    }
+    if not protocol_fields:
+        return output, report
+    envelope_values: dict[str, set[str]] = {}
+
+    def collect(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                collect(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        for key, item in node.items():
+            if key in protocol_fields and isinstance(item, str) and item.strip():
+                envelope_values.setdefault(key, set()).add(item.strip())
+            collect(item)
+
+    collect(envelope)
+    singletons = {
+        key: next(iter(values))
+        for key, values in envelope_values.items()
+        if len(values) == 1
+    }
+    if not singletons:
+        return output, report
+
+    def visit(node: Any, path: str) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, f"{path}/{index}")
+            return
+        if not isinstance(node, dict):
+            return
+        for key, item in node.items():
+            authoritative = singletons.get(key)
+            if (
+                authoritative is not None
+                and isinstance(item, str)
+                and item.strip()
+                and item.strip() != authoritative
+            ):
+                report["changes"].append(f"{path}/{key}:{item!r}->{authoritative!r}")
+                node[key] = authoritative
+            visit(item, f"{path}/{key}")
+
+    visit(output, "")
+    return output, report
+
+
+def drop_finding_self_reference_evidence(output: Any) -> tuple[Any, dict[str, Any]]:
+    """Drop finding ``evidence_refs`` entries that cite the output itself.
+
+    A value such as ``scheme_profile.profile_hash`` anchors on a top-level key
+    of the output's own ``result`` object.  It is not an input entity, not a
+    registered input-object name and not an entity defined by this output, so
+    it carries no provenance and only trips the reference validator (and then
+    sends the targeted-repair model chasing paths outside its allowed scope).
+    The finding itself is preserved; only the self-referential entry is
+    removed.  Entries anchored on an entity actually defined in this output
+    (e.g. ``R-SCOPE-001.statement``) are legitimate and kept.
+    """
+    report: dict[str, Any] = {"changes": []}
+    if not isinstance(output, dict):
+        return output, report
+    result = output.get("result")
+    findings = output.get("findings")
+    if not isinstance(result, Mapping) or not isinstance(findings, list):
+        return output, report
+    self_anchors = {str(key) for key in result.keys()} | {"result"}
+    defined = _collect_defined_ids(output)
+    for finding_index, finding in enumerate(findings):
+        if not isinstance(finding, dict):
+            continue
+        refs = finding.get("evidence_refs")
+        if not isinstance(refs, list):
+            continue
+        kept: list[Any] = []
+        for ref_index, ref in enumerate(refs):
+            if isinstance(ref, str):
+                anchor = ref.split(".", 1)[0].strip()
+                if (
+                    anchor in self_anchors
+                    and anchor not in defined
+                    and ref.strip() not in defined
+                ):
+                    report["changes"].append(
+                        f"/findings/{finding_index}/evidence_refs/{ref_index}:{ref!r}"
+                    )
+                    continue
+            kept.append(ref)
+        if len(kept) != len(refs):
+            finding["evidence_refs"] = kept
+    return output, report
+
+
+def rebuild_scheme_extraction_coverage(output: Any) -> tuple[Any, dict[str, Any]]:
+    """Rebuild ``result.extraction_coverage`` from the rules' own source_refs.
+
+    The coverage table is a derived index: every extracted rule already binds
+    its sources via ``rules[*].source_refs[*].source_id``.  Models periodically
+    fill ``covered_rule_ids`` with input section/block IDs instead of the
+    rule_ids they just defined, which trips the deterministic coverage audit
+    (QG_SCHEME_RULE_NOT_COVERED) even though the underlying rule→source
+    bindings are present and validated separately.  Recomputing the index from
+    those bindings changes no binding; it only re-expresses them.  A rule
+    without usable source_refs stays uncovered, so the audit still catches
+    genuinely unsourced rules.
+    """
+    report: dict[str, Any] = {"changes": []}
+    if not isinstance(output, dict):
+        return output, report
+    result = output.get("result")
+    if not isinstance(result, dict):
+        return output, report
+    scheme = result.get("scheme_profile")
+    if not isinstance(scheme, dict):
+        return output, report
+    rules = [item for item in scheme.get("rules") or [] if isinstance(item, dict)]
+    if not rules:
+        return output, report
+    derived: dict[str, list[str]] = {}
+    for rule in rules:
+        rule_id = str(rule.get("rule_id") or "").strip()
+        if not rule_id:
+            continue
+        for ref in rule.get("source_refs") or []:
+            if not isinstance(ref, dict):
+                continue
+            source_id = str(ref.get("source_id") or "").strip()
+            if not source_id:
+                continue
+            covered = derived.setdefault(source_id, [])
+            if rule_id not in covered:
+                covered.append(rule_id)
+    if not derived:
+        return output, report
+    rebuilt = [
+        {"source_id": source_id, "covered_rule_ids": covered}
+        for source_id, covered in derived.items()
+    ]
+    if result.get("extraction_coverage") != rebuilt:
+        result["extraction_coverage"] = rebuilt
+        report["changes"].append(
+            "/result/extraction_coverage: rebuilt from rules[*].source_refs"
+        )
+    return output, report
+
+
+def _collect_document_version_aliases(envelope: Any) -> dict[str, str]:
+    """Map each visible document_version_id to its owning document_id.
+
+    Conflicting mappings (the same version id under two documents) are dropped
+    so the alias never guesses.
+    """
+    aliases: dict[str, str] = {}
+    conflicts: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        doc = node.get("document_id")
+        version = node.get("document_version_id")
+        if (
+            isinstance(doc, str)
+            and doc.strip()
+            and isinstance(version, str)
+            and version.strip()
+        ):
+            version = version.strip()
+            doc = doc.strip()
+            existing = aliases.get(version)
+            if existing is not None and existing != doc:
+                conflicts.add(version)
+            else:
+                aliases[version] = doc
+        for value in node.values():
+            visit(value)
+
+    visit(envelope)
+    for version in conflicts:
+        aliases.pop(version, None)
+    return aliases
+
+
 def _collect_source_ids(value: Any) -> set[str]:
     """Collect source identifiers that are explicitly materialized as sources."""
     found: set[str] = set()
@@ -1272,6 +1646,7 @@ def normalize_reference_id_aliases(
         | _collect_defined_ids(normalized)
         | _REGISTERED_DIAGNOSTIC_REFS
     )
+    document_version_aliases = _collect_document_version_aliases(envelope or {})
     named_input_objects = _collect_named_input_object_ids(envelope or {})
     contract = get_semantic_contract()
     prompt_id = (
@@ -1297,9 +1672,25 @@ def normalize_reference_id_aliases(
         identifier = raw.strip()
         if semantic not in _EXISTING_TARGET_SEMANTICS:
             return identifier
+        known = known_for(field_name)
+        if identifier not in known:
+            # A document_version_id is protocol-only and never citable, but it
+            # unambiguously names the one document that carries it in this
+            # envelope.  Rewrite it to the citable document_id instead of
+            # rejecting the reference outright.
+            version_target = document_version_aliases.get(identifier)
+            if version_target and version_target in known:
+                changes.append({
+                    "path": _pointer(path),
+                    "action": "BIND_REFERENCE_ALIAS",
+                    "provider_reference_id": identifier,
+                    "reference_id": version_target,
+                    "alias_kind": "DOCUMENT_VERSION_TO_DOCUMENT",
+                })
+                return version_target
         resolved, alias_kind = _resolve_reference_id_alias(
             identifier,
-            known_for(field_name),
+            known,
             registered_descriptor_suffixes=(
                 contract.registered_reference_suffixes(field_name)
             ),

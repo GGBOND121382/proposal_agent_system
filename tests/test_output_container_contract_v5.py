@@ -14,6 +14,7 @@ from app.pack import PromptPack
 from app.output_integrity import (
     attach_trusted_source_catalog,
     bind_trusted_source_refs,
+    inject_reference_targets_into_schema,
     normalize_reference_id_aliases,
     validate_reference_ids,
 )
@@ -1440,3 +1441,311 @@ def test_staged_contract_gateway_applies_source_alias_normalization(tmp_path) ->
     assert report["source_alias_report"]["normalized_count"] == 1
     assert report["reference_alias_report"]["normalized_count"] == 1
     assert report["reference_integrity_errors"] == []
+
+
+def test_reference_target_injection_surfaces_citable_ids_without_widening_validation():
+    import jsonschema
+
+    envelope = {
+        "prompt_id": "P-SCHEME-EXTRACT",
+        "payload": {
+            "guide_documents": [{
+                "document_id": "doc-aaa111bbb222",
+                # Protocol-owned field: visible in the input but NOT a citable
+                # evidence reference (the WF-1 2026-09-09 failure mode).
+                "document_version_id": "docv-zzz999yyy888",
+            }],
+        },
+    }
+    schema = {
+        "type": "object",
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "evidence_refs": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                            },
+                        }
+                    },
+                },
+            }
+        },
+    }
+
+    injected, report = inject_reference_targets_into_schema(schema, envelope)
+
+    items = injected["properties"]["findings"]["items"]["properties"]["evidence_refs"]["items"]
+    assert "anyOf" in items
+    enum_values = items["anyOf"][0]["enum"]
+    assert "doc-aaa111bbb222" in enum_values
+    assert "docv-zzz999yyy888" not in enum_values
+    assert report["injected_fields"]
+
+    # Validation-neutral: entities newly defined inside the output itself keep
+    # validating through the original branch.
+    jsonschema.validate({"findings": [{"evidence_refs": ["NEW-OUTPUT-ENTITY-001"]}]}, injected)
+    jsonschema.validate({"findings": [{"evidence_refs": ["doc-aaa111bbb222"]}]}, injected)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"findings": [{"evidence_refs": ["has space"]}]}, injected)
+
+
+def test_reference_target_injection_noop_without_allowed_ids():
+    schema = {
+        "type": "object",
+        "properties": {
+            "evidence_refs": {"type": "array", "items": {"type": "string"}}
+        },
+    }
+    injected, report = inject_reference_targets_into_schema(schema, {"payload": {}})
+    assert injected == schema
+    assert report["injected_fields"] == []
+
+
+def test_reference_target_injection_lists_protocol_field_values_from_envelope():
+    import jsonschema
+
+    envelope = {
+        "prompt_id": "P-SCHEME-EXTRACT",
+        "payload": {
+            "scope": {"project_id": "project-real-001"},
+        },
+        "project_id": "project-real-001",
+    }
+    schema = {
+        "type": "object",
+        "properties": {
+            "result": {
+                "type": "object",
+                "properties": {
+                    "scheme_profile": {
+                        "type": "object",
+                        "properties": {
+                            "project_id": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                            }
+                        },
+                    }
+                },
+            }
+        },
+    }
+
+    injected, report = inject_reference_targets_into_schema(schema, envelope)
+
+    project_schema = injected["properties"]["result"]["properties"]["scheme_profile"]["properties"]["project_id"]
+    assert project_schema["anyOf"][0]["enum"] == ["project-real-001"]
+    # Validation-neutral: the original branch still governs acceptance.
+    jsonschema.validate({"result": {"scheme_profile": {"project_id": "project-real-001"}}}, injected)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"result": {"scheme_profile": {"project_id": "has space"}}}, injected)
+
+
+def test_canonicalize_protocol_refs_rewrites_invented_project_id():
+    from app.output_integrity import canonicalize_protocol_refs
+
+    envelope = {
+        "prompt_id": "P-SCHEME-EXTRACT",
+        "payload": {"scope": {"project_id": "project-real-001"}},
+        "project_id": "project-real-001",
+    }
+    output = {
+        "result": {
+            "scheme_profile": {
+                "project_id": "proj-dash-survey-v1",
+                "scheme_name": "调研报告编写规则",
+            }
+        }
+    }
+
+    normalized, report = canonicalize_protocol_refs(output, envelope)
+
+    assert normalized["result"]["scheme_profile"]["project_id"] == "project-real-001"
+    assert report["changes"]
+    # Human-authored content is untouched.
+    assert normalized["result"]["scheme_profile"]["scheme_name"] == "调研报告编写规则"
+
+
+def test_canonicalize_protocol_refs_leaves_ambiguous_fields_untouched():
+    from app.output_integrity import canonicalize_protocol_refs
+
+    # Two distinct document versions in the input: the runtime cannot decide
+    # which one the model meant, so the value stays for the validator to judge.
+    envelope = {
+        "payload": {
+            "guide_documents": [
+                {"document_version_id": "docv-aaa"},
+                {"document_version_id": "docv-bbb"},
+            ]
+        }
+    }
+    output = {"source_refs": [{"document_version_id": "docv-ccc"}]}
+
+    normalized, report = canonicalize_protocol_refs(output, envelope)
+
+    assert normalized["source_refs"][0]["document_version_id"] == "docv-ccc"
+    assert report["changes"] == []
+
+
+def test_drop_finding_self_reference_evidence_removes_output_field_paths():
+    from app.output_integrity import drop_finding_self_reference_evidence
+
+    output = {
+        "result": {
+            "scheme_profile": {
+                "profile_id": "scheme-doc-1-v1",
+                "rules": [{"rule_id": "R-SCOPE-001"}],
+            }
+        },
+        "findings": [
+            {
+                "finding_instance_id": "FIND-1",
+                "evidence_refs": [
+                    "doc-d06185783c2e426d",
+                    "scheme_profile.profile_hash",
+                    "R-SCOPE-001.statement",
+                ],
+            }
+        ],
+    }
+
+    normalized, report = drop_finding_self_reference_evidence(output)
+
+    # Input entity and output-entity-anchored field path stay; the
+    # output-object self-reference is dropped.
+    assert normalized["findings"][0]["evidence_refs"] == [
+        "doc-d06185783c2e426d",
+        "R-SCOPE-001.statement",
+    ]
+    assert report["changes"] == [
+        "/findings/0/evidence_refs/1:'scheme_profile.profile_hash'"
+    ]
+
+
+def test_drop_finding_self_reference_evidence_noop_without_self_references():
+    from app.output_integrity import drop_finding_self_reference_evidence
+
+    output = {
+        "result": {"scheme_profile": {"profile_id": "scheme-doc-1-v1"}},
+        "findings": [{"finding_instance_id": "FIND-1", "evidence_refs": ["doc-1"]}],
+    }
+
+    normalized, report = drop_finding_self_reference_evidence(output)
+
+    assert normalized["findings"][0]["evidence_refs"] == ["doc-1"]
+    assert report["changes"] == []
+    # Missing result/findings containers are tolerated.
+    other, other_report = drop_finding_self_reference_evidence({"findings": []})
+    assert other == {"findings": []}
+    assert other_report["changes"] == []
+
+
+def test_rebuild_scheme_extraction_coverage_derives_index_from_rule_source_refs():
+    from app.output_integrity import rebuild_scheme_extraction_coverage
+
+    output = {
+        "result": {
+            "scheme_profile": {
+                "rules": [
+                    {
+                        "rule_id": "rule-a",
+                        "source_refs": [{"source_id": "doc-1"}, {"source_id": "sec-9"}],
+                    },
+                    {"rule_id": "rule-b", "source_refs": [{"source_id": "doc-1"}]},
+                    # No source_refs: stays uncovered so the quality audit
+                    # still flags it as a genuinely unsourced rule.
+                    {"rule_id": "rule-c", "source_refs": []},
+                ]
+            },
+            # Model filled section IDs instead of rule_ids.
+            "extraction_coverage": [
+                {"source_id": "doc-1", "covered_rule_ids": ["sec-1", "block-2"]}
+            ],
+        }
+    }
+
+    normalized, report = rebuild_scheme_extraction_coverage(output)
+
+    assert report["changes"]
+    assert normalized["result"]["extraction_coverage"] == [
+        {"source_id": "doc-1", "covered_rule_ids": ["rule-a", "rule-b"]},
+        {"source_id": "sec-9", "covered_rule_ids": ["rule-a"]},
+    ]
+
+
+def test_rebuild_scheme_extraction_coverage_keeps_consistent_model_table():
+    from app.output_integrity import rebuild_scheme_extraction_coverage
+
+    coverage = [{"source_id": "doc-1", "covered_rule_ids": ["rule-a"]}]
+    output = {
+        "result": {
+            "scheme_profile": {
+                "rules": [{"rule_id": "rule-a", "source_refs": [{"source_id": "doc-1"}]}]
+            },
+            "extraction_coverage": copy.deepcopy(coverage),
+        }
+    }
+
+    normalized, report = rebuild_scheme_extraction_coverage(output)
+
+    assert normalized["result"]["extraction_coverage"] == coverage
+    assert report["changes"] == []
+    # No rules at all: nothing to derive, model output untouched.
+    empty, empty_report = rebuild_scheme_extraction_coverage(
+        {"result": {"scheme_profile": {"rules": []}}}
+    )
+    assert "extraction_coverage" not in empty["result"]
+    assert empty_report["changes"] == []
+
+
+def test_document_version_reference_resolves_to_owning_document():
+    from app.output_integrity import normalize_reference_id_aliases
+
+    envelope = {
+        "payload": {
+            "source_documents": [
+                {
+                    "document_id": "doc-real-001",
+                    "document_version_id": "docv-real-001",
+                }
+            ]
+        }
+    }
+    output = {
+        "prompt_id": "P-PROJECT-DEFINITION-EXTRACT",
+        "findings": [
+            {
+                "finding_instance_id": "FIND-1",
+                "evidence_refs": ["doc-real-001", "docv-real-001"],
+            }
+        ],
+    }
+
+    normalized, report = normalize_reference_id_aliases(output, envelope)
+
+    assert normalized["findings"][0]["evidence_refs"] == ["doc-real-001", "doc-real-001"]
+    docv_changes = [
+        c for c in report["changes"] if c["alias_kind"] == "DOCUMENT_VERSION_TO_DOCUMENT"
+    ]
+    assert docv_changes and docv_changes[0]["reference_id"] == "doc-real-001"
+
+
+def test_document_version_alias_dropped_when_conflicting():
+    from app.output_integrity import _collect_document_version_aliases
+
+    envelope = {
+        "payload": {
+            "source_documents": [
+                {"document_id": "doc-a", "document_version_id": "docv-shared"},
+                {"document_id": "doc-b", "document_version_id": "docv-shared"},
+            ]
+        }
+    }
+
+    assert _collect_document_version_aliases(envelope) == {}

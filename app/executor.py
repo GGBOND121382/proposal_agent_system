@@ -30,7 +30,10 @@ from .output_integrity import (
     TRUSTED_SOURCE_CATALOG_VERSION,
     attach_trusted_source_catalog,
     bind_trusted_source_refs,
+    canonicalize_protocol_refs,
+    drop_finding_self_reference_evidence,
     normalize_reference_id_aliases,
+    rebuild_scheme_extraction_coverage,
     validate_reference_ids,
 )
 from .proposal_quality import ProposalQualityGuard, SECTION_FUNCTION_ROLE_ALIASES
@@ -79,7 +82,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-09-04.v53-wf3b-checkpoint-recovery"
+OUTPUT_NORMALIZER_VERSION = "2026-09-09.v59-document-version-alias"
 MODEL_CONTEXT_PROJECTION_VERSION = "2026-09-04.v5-wf3b-claim-bound-import-sources"
 MODEL_SYSTEM_PROMPT_VERSION = "2026-08-13.v4-wf3-contract-retry-feedback"
 
@@ -1151,6 +1154,32 @@ class PromptExecutor:
         for claim_index, claim in enumerate(result.get("claims") or []):
             if not isinstance(claim, dict):
                 continue
+            # The schema constrains subject_id to a slug, but the synthesis
+            # prompt only shows that pattern inside the embedded schema dump,
+            # so the model keeps answering with free text ("DASH experiment").
+            # Slugify deterministically instead of burning the retry budget.
+            subject_id = claim.get("subject_id")
+            if isinstance(subject_id, str):
+                slug = re.sub(r"[^A-Za-z0-9._:-]+", "_", subject_id.strip())
+                slug = re.sub(r"^[^A-Za-z0-9]+", "", slug)[:128]
+                normalized_subject = slug or None
+                if normalized_subject != subject_id:
+                    changes.append(
+                        f"/result/claims/{claim_index}/subject_id:"
+                        f"{subject_id!r}->{normalized_subject!r}"
+                    )
+                    claim["subject_id"] = normalized_subject
+            # Every WF-3B synthesis claim is built from public retrieval by
+            # construction; the deterministic claim validator rejects any other
+            # claim_type, so a model-authored "FACT" label is a mislabel, not
+            # content.  Coerce it instead of blocking the workflow.
+            claim_type = claim.get("claim_type")
+            if isinstance(claim_type, str) and claim_type != "PUBLIC_CLAIM":
+                changes.append(
+                    f"/result/claims/{claim_index}/claim_type:"
+                    f"{claim_type!r}->'PUBLIC_CLAIM'"
+                )
+                claim["claim_type"] = "PUBLIC_CLAIM"
             profiles = claim.get("target_section_profiles")
             if not isinstance(profiles, list):
                 continue
@@ -1187,6 +1216,7 @@ class PromptExecutor:
         prompt_id: str,
         output: Any,
         envelope: dict[str, Any] | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Apply representation-only normalization and deterministic validation.
 
@@ -1228,6 +1258,26 @@ class PromptExecutor:
             )
 
         normalized = copy.deepcopy(output)
+        protocol_envelope = envelope or {}
+        if project_id and isinstance(protocol_envelope, dict):
+            # The runtime knows the authoritative project identity even when
+            # the model-facing envelope does not carry it; make it visible so
+            # protocol-owned fields can be canonicalized deterministically.
+            protocol_envelope = {**protocol_envelope, "project_id": project_id}
+        normalized, protocol_ref_report = canonicalize_protocol_refs(
+            normalized, protocol_envelope
+        )
+        if protocol_ref_report.get("changes"):
+            normalized.setdefault("warnings", []).append(
+                "SYSTEM_PROTOCOL_REF_CANONICALIZATION: "
+                + "; ".join(protocol_ref_report["changes"][:12])
+            )
+        normalized, self_ref_report = drop_finding_self_reference_evidence(normalized)
+        if self_ref_report.get("changes"):
+            normalized.setdefault("warnings", []).append(
+                "SYSTEM_FINDING_SELF_REFERENCE_DROP: "
+                + "; ".join(self_ref_report["changes"][:12])
+            )
         if prompt_id == "P-BACKGROUND-RESEARCH-PLAN":
             from .background_research import merge_background_followup_plan
 
@@ -1461,6 +1511,15 @@ class PromptExecutor:
                     "SYSTEM_TRUSTED_SOURCE_REF_NORMALIZATION: "
                     f"{provenance_report.get('normalized_count')}"
                 )
+            if prompt_id == "P-SCHEME-EXTRACT":
+                # Derived from the rules' final, alias- and provenance-normalized
+                # source_refs, so it must run after both binding passes above.
+                normalized, coverage_report = rebuild_scheme_extraction_coverage(normalized)
+                if coverage_report.get("changes"):
+                    normalized.setdefault("warnings", []).append(
+                        "SYSTEM_EXTRACTION_COVERAGE_REBUILD: "
+                        + "; ".join(coverage_report["changes"][:4])
+                    )
             reference_errors = validate_reference_ids(normalized, envelope)
             if reference_errors:
                 raise PromptExecutionError(
@@ -1946,7 +2005,7 @@ class PromptExecutor:
                             validation_errors=semantic_output_errors,
                         )
                     provider_output = expand_semantic_model_output(prompt_id, model_envelope, provider_output)
-                output = self._normalize_output(prompt_id, provider_output, model_envelope)
+                output = self._normalize_output(prompt_id, provider_output, model_envelope, project_id=project_id)
             except PromptExecutionError as exc:
                 raise ProviderError(
                     f"Provider output contract validation failed: {exc}",

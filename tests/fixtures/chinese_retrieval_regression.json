@@ -1,0 +1,1202 @@
+{
+  "workflow_id": "wf-ca873b49d8db42b6",
+  "session_id": "research-5f4f68f03e8e4d3c",
+  "normalized_plan": {
+    "plan_id": "plan-1b1e784b78fdabfd9a15-001",
+    "task_type": "PUBLIC_BACKGROUND_RESEARCH",
+    "binding_contract_version": "1.0",
+    "research_questions": [
+      "核验背景维度 APPLICATION_SCENARIO 的公开事实、代表性来源与适用边界",
+      "核验背景维度 STAKEHOLDER_AND_PAIN 的公开事实、代表性来源与适用边界",
+      "核验背景维度 INDUSTRY_SCALE_AND_TREND 的公开事实、代表性来源与适用边界",
+      "核验背景维度 POLICY_STANDARD_AND_PROGRAM 的公开事实、代表性来源与适用边界",
+      "核验背景维度 REPRESENTATIVE_CASE 的公开事实、代表性来源与适用边界",
+      "核验背景维度 CURRENT_ADOPTION 的公开事实、代表性来源与适用边界",
+      "核验背景维度 OPERATIONAL_CONSTRAINT 的公开事实、代表性来源与适用边界",
+      "核验背景维度 RESEARCH_SIGNIFICANCE 的公开事实、代表性来源与适用边界"
+    ],
+    "queries": [
+      "US Air Force DASH autonomous decision system",
+      "human-AI collaborative decision making military operations application scenarios",
+      "AI agent cognitive load reduction military commander decision fatigue",
+      "agentic workflow functional decomposition decision units interface contracts",
+      "state evidence versioning temporal dependencies feedback loops AI agents",
+      "dynamic task allocation human AI agents attention budget military",
+      "US Air Force AI decision support combat operations deployment",
+      "agent workflow evaluation metrics benchmarks LLM planning tool integration",
+      "intelligent autonomous systems rollback mechanism short-cycle coordination",
+      "智能作战 人机协同决策 系统",
+      "智能体 多智能体系统 人在回路 协同决策",
+      "DASH system Air Force acquisition program",
+      "human-in-the-loop AI system safety critical domains rollback",
+      "DoD AI ethics principles responsible AI military",
+      "defense AI investment growth trend 2023 2024 2025",
+      "multi-agent system data latency resource constraints operational realism",
+      "空军 人机协同 智能决策 辅助系统 作战应用",
+      "多智能体 系统 人在回路 决策协同 论文",
+      "site:af.mil OR site:csaf.mil DASH Decision Advantage Sprint",
+      "multi-agent workflow functional decomposition modular interface design LLM",
+      "autonomous system rollback recovery mechanism human oversight short-cycle",
+      "Responsible AI Department of Defense implementation framework policy 2024 2025"
+    ],
+    "query_items": [
+      {
+        "query_id": "Q-001",
+        "query": "US Air Force DASH autonomous decision system",
+        "linked_question_indexes": [
+          4
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 7,
+        "source_index": 0,
+        "entity_groups": [
+          [
+            "DASH",
+            "Decision Advantage Sprint Hub",
+            "US Air Force DASH"
+          ]
+        ]
+      },
+      {
+        "query_id": "Q-002",
+        "query": "human-AI collaborative decision making military operations application scenarios",
+        "linked_question_indexes": [
+          0
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 8,
+        "source_index": 1
+      },
+      {
+        "query_id": "Q-003",
+        "query": "AI agent cognitive load reduction military commander decision fatigue",
+        "linked_question_indexes": [
+          1
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 9,
+        "source_index": 2
+      },
+      {
+        "query_id": "Q-004",
+        "query": "agentic workflow functional decomposition decision units interface contracts",
+        "linked_question_indexes": [
+          0
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 8,
+        "source_index": 3
+      },
+      {
+        "query_id": "Q-005",
+        "query": "state evidence versioning temporal dependencies feedback loops AI agents",
+        "linked_question_indexes": [
+          5
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 9,
+        "source_index": 4
+      },
+      {
+        "query_id": "Q-006",
+        "query": "dynamic task allocation human AI agents attention budget military",
+        "linked_question_indexes": [
+          5
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 9,
+        "source_index": 5
+      },
+      {
+        "query_id": "Q-007",
+        "query": "US Air Force AI decision support combat operations deployment",
+        "linked_question_indexes": [
+          0
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 9,
+        "source_index": 6
+      },
+      {
+        "query_id": "Q-008",
+        "query": "agent workflow evaluation metrics benchmarks LLM planning tool integration",
+        "linked_question_indexes": [
+          5
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 9,
+        "source_index": 7
+      },
+      {
+        "query_id": "Q-009",
+        "query": "intelligent autonomous systems rollback mechanism short-cycle coordination",
+        "linked_question_indexes": [
+          5
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 7,
+        "source_index": 8
+      },
+      {
+        "query_id": "Q-010",
+        "query": "智能作战 人机协同决策 系统",
+        "linked_question_indexes": [
+          0
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 11,
+        "source_index": 9
+      },
+      {
+        "query_id": "Q-011",
+        "query": "智能体 多智能体系统 人在回路 协同决策",
+        "linked_question_indexes": [
+          5
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 14,
+        "source_index": 10
+      },
+      {
+        "query_id": "Q-012",
+        "query": "DASH system Air Force acquisition program",
+        "linked_question_indexes": [
+          4
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 6,
+        "source_index": 11
+      },
+      {
+        "query_id": "Q-013",
+        "query": "human-in-the-loop AI system safety critical domains rollback",
+        "linked_question_indexes": [
+          5
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 7,
+        "source_index": 12
+      },
+      {
+        "query_id": "Q-014",
+        "query": "DoD AI ethics principles responsible AI military",
+        "linked_question_indexes": [
+          3
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 6,
+        "source_index": 13
+      },
+      {
+        "query_id": "Q-015",
+        "query": "defense AI investment growth trend 2023 2024 2025",
+        "linked_question_indexes": [
+          2
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 8,
+        "source_index": 14
+      },
+      {
+        "query_id": "Q-016",
+        "query": "multi-agent system data latency resource constraints operational realism",
+        "linked_question_indexes": [
+          6
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 8,
+        "source_index": 15
+      },
+      {
+        "query_id": "query-followup-017",
+        "query": "空军 人机协同 智能决策 辅助系统 作战应用",
+        "linked_question_indexes": [
+          0
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 17,
+        "source_index": 16,
+        "entity_groups": []
+      },
+      {
+        "query_id": "query-followup-018",
+        "query": "多智能体 系统 人在回路 决策协同 论文",
+        "linked_question_indexes": [
+          5
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 15,
+        "source_index": 17,
+        "entity_groups": []
+      },
+      {
+        "query_id": "query-followup-019",
+        "query": "site:af.mil OR site:csaf.mil DASH Decision Advantage Sprint",
+        "linked_question_indexes": [
+          4
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 9,
+        "source_index": 18,
+        "entity_groups": [
+          [
+            "DASH",
+            "Decision Advantage Sprint Hub",
+            "USAF DASH program"
+          ]
+        ]
+      },
+      {
+        "query_id": "query-followup-020",
+        "query": "multi-agent workflow functional decomposition modular interface design LLM",
+        "linked_question_indexes": [
+          0
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 8,
+        "source_index": 19,
+        "entity_groups": []
+      },
+      {
+        "query_id": "query-followup-021",
+        "query": "autonomous system rollback recovery mechanism human oversight short-cycle",
+        "linked_question_indexes": [
+          5
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 8,
+        "source_index": 20,
+        "entity_groups": []
+      },
+      {
+        "query_id": "query-followup-022",
+        "query": "Responsible AI Department of Defense implementation framework policy 2024 2025",
+        "linked_question_indexes": [
+          3
+        ],
+        "binding_basis": "EXPLICIT",
+        "token_count": 10,
+        "source_index": 21,
+        "entity_groups": [
+          [
+            "RAI Strategy",
+            "Responsible AI Strategy",
+            "DoD RAI",
+            "Department of Defense AI policy"
+          ]
+        ]
+      }
+    ],
+    "source_priorities": [
+      "官方机构、政府或军方公开发布",
+      "标准组织正式文本",
+      "原始论文、研究机构技术报告"
+    ],
+    "time_scope": "2021-09-08 to 2026-09-08",
+    "evidence_requirements": [
+      "优先使用官方机构、标准组织、原始论文或其他一手公开来源",
+      "每个实质结论必须绑定可访问来源并记录发布日期或访问时间",
+      "明确区分来源事实、跨来源综合和模型推断",
+      "比较代表性方法时同时记录适用边界、局限和时间范围"
+    ],
+    "prohibited_inferences": [
+      "禁止推断或暴露内部项目名称、所属单位、人员或团队信息",
+      "禁止推断或暴露内部决策功能单元的具体划分、内部接口契约、内部参数或阈值",
+      "禁止推断或暴露内部状态、事实、证据或版本模型的实现细节与数据结构",
+      "禁止推断或暴露内部角色分配规则、注意力分配权重或回退触发条件的具体取值",
+      "禁止将公开检索结果与任何内部成果、未公开材料进行关联或映射"
+    ],
+    "required_channels": [
+      "WEB_SEARCH"
+    ],
+    "provider_execution_requirements": {
+      "required_providers": [
+        "browser_search"
+      ],
+      "execute_all_approved_queries": true
+    },
+    "minimum_fulltext_sources_per_query": 2,
+    "allow_snippet_only": false,
+    "require_web_discovery": true
+  },
+  "chinese_queries": [
+    "智能作战 人机协同决策 系统",
+    "智能体 多智能体系统 人在回路 协同决策",
+    "空军 人机协同 智能决策 辅助系统 作战应用",
+    "多智能体 系统 人在回路 决策协同 论文"
+  ],
+  "candidates": [
+    {
+      "title": "美军人机协同智能决策关键技术在智能化战争中的应用展望",
+      "url": "https://www.sohu.com/a/1046147087_358040",
+      "excerpt": "2026年7月5日 · 本文系统解析美军人机协同智能决策的核心技术体系、典型场景与发展趋势，深入剖析支撑智能决策的四大技术支 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "智能指控丨美空军“人机协同决策优势冲刺”（DASH）实验",
+      "url": "https://www.sohu.com/a/945720072_121245527",
+      "excerpt": "2025年10月20日 · 为了促进人工智能技术在作战决策方面的应用，美空军自今年起开始实施一系列实验活动，名为“人机协同决策优势 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "智能化战争作战体系前瞻 - 中国指挥与控制学会",
+      "url": "https://www.c2.org.cn/h-nd-1331.html",
+      "excerpt": "2024年10月17日 · 智能化战争中，战争的复杂性呈指数级增长，即使拥有信息优势，也不能正确决策，作战重心从以信息为中心向以 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "基于人机环境系统的新时代军事智能化体系研究_腾讯新闻",
+      "url": "https://news.qq.com/rain/a/20260705A026VE00",
+      "excerpt": "2026年7月5日 · 人机协同是军事智能化的核心运行模式，区别于简单的人机配合，成熟的有人-无人协同体系包含三层逻辑维度与五级 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "人机协同决策探索：美国空军ABMS系统DASH系列试验研究 ...",
+      "url": "https://news.qq.com/rain/a/20260309A03BCW00",
+      "excerpt": "2026年3月9日 · 在快速演变的现代战场上，决策速度和准确性往往决定胜败。美国空军先进作战管理系统(ABMS)正通过创新的人机协 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "人机协同决策探索：美国空军ABMS系统DASH系列试验研究 ...",
+      "url": "https://m.163.com/news/article/KNIP922B0552V9YV.html",
+      "excerpt": "2026年3月9日 · 在快速演变的现代战场上，决策速度和准确性往往决定胜败。 美国空军先进作战管理系统(ABMS)正通过创新的人机协 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "军事论坛丨智能化指挥“智”在何处 - 中国军网",
+      "url": "http://www.81.mil.cn/yw_208727/16426450.html",
+      "excerpt": "2025年12月11日 · 智能化战争时代的态势认知已从传统的“观察—报告”模式进化为“感知—理解—预测—防护”的闭环系统。 指挥员需要 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "典型作战场景下的分布式协同作战关键技术发展综述 - 中国 ...",
+      "url": "https://www.c2.org.cn/h-nd-2386.html",
+      "excerpt": "2025年11月20日 · 本文围绕分布式协同作战理念，系统阐述其体系框架下的态势感知、任务规划、战损评估及数据链信息传递，剖析 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "认识智能化作战 - 中华人民共和国国防部",
+      "url": "http://www.mod.gov.cn/gfbw/jmsd/4805633.html",
+      "excerpt": "2018年3月1日 · 引 言 智能化作战，是以人工智能为核心的前沿科技在作战指挥、装备、战术等领域渗透、拓展的必然发展方向。 对于 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "人机协同作战中的智能决策支持系统-洞察及研究 - 豆丁网",
+      "url": "https://www.docin.com/p-4891049591.html",
+      "excerpt": "2025年7月13日 · 2阅读文档大小：165.34K35页 玉兔文档 上传于2025-07-13格式：PPTX 多模态人机协同决策-剖析洞察 热度： 人机 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "美军 人机协同智能决策 关键技术在 智能 化战争中的应用展望",
+      "url": "https://www.sohu.com/a/1046147087_358040",
+      "excerpt": "2026年7月5日 · 本文系统解析美军人机协同智能决策的核心技术体系、典型场景与发展趋势，深入剖析支撑智能决策的四大技术支 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "智能 指控丨美空军“ 人机协同决策 优势冲刺”（DASH）实验",
+      "url": "https://www.sohu.com/a/945720072_121245527",
+      "excerpt": "2025年10月20日 · 为了促进人工智能技术在作战决策方面的应用，美空军自今年起开始实施一系列实验活动，名为“人机协同决策优势 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "智能 化战争 作战 体系前瞻 - 中国指挥与控制学会",
+      "url": "https://www.c2.org.cn/h-nd-1331.html",
+      "excerpt": "2024年10月17日 · 智能化战争中，战争的复杂性呈指数级增长，即使拥有信息优势，也不能正确决策，作战重心从以信息为中心向以 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "基于 人机 环境 系统 的新时代军事 智能 化体系研究_腾讯新闻",
+      "url": "https://news.qq.com/rain/a/20260705A026VE00",
+      "excerpt": "2026年7月5日 · 人机协同是军事智能化的核心运行模式，区别于简单的人机配合，成熟的有人-无人协同体系包含三层逻辑维度与五级 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "人机协同决策 探索：美国空军ABMS 系统 DASH系列试验研究 ...",
+      "url": "https://news.qq.com/rain/a/20260309A03BCW00",
+      "excerpt": "2026年3月9日 · 在快速演变的现代战场上，决策速度和准确性往往决定胜败。美国空军先进作战管理系统(ABMS)正通过创新的人机协 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "人机协同决策 探索：美国空军ABMS 系统 DASH系列试验研究 ...",
+      "url": "https://m.163.com/news/article/KNIP922B0552V9YV.html",
+      "excerpt": "2026年3月9日 · 在快速演变的现代战场上，决策速度和准确性往往决定胜败。 美国空军先进作战管理系统(ABMS)正通过创新的人机协 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "军事论坛丨 智能 化指挥“智”在何处 - 中国军网",
+      "url": "http://www.81.mil.cn/yw_208727/16426450.html",
+      "excerpt": "2025年12月11日 · 智能化战争时代的态势认知已从传统的“观察—报告”模式进化为“感知—理解—预测—防护”的闭环系统。 指挥员需要 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "典型 作战 场景下的分布式 协同作战 关键技术发展综述 - 中国 ...",
+      "url": "https://www.c2.org.cn/h-nd-2386.html",
+      "excerpt": "2025年11月20日 · 本文围绕分布式协同作战理念，系统阐述其体系框架下的态势感知、任务规划、战损评估及数据链信息传递，剖析 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能作战 人机协同决策 系统",
+      "matched_queries": [
+        "智能作战 人机协同决策 系统"
+      ]
+    },
+    {
+      "title": "基于人在回路的多智能体系统协同控制研究",
+      "url": "https://d.wanfangdata.com.cn/thesis/ChhUaGVzaXNOZXdTMjAyNDA5MjAxNTE3MjUSCUQwMzQwNjE4NhoIOHo3NWR2a3U%3D",
+      "excerpt": "5 天之前 · 绑定机构 扫描成功请在APP上操作 打开万方数据APP，点击右上角\"扫一扫\"，扫描二维码即可将您登录的个人账号与机构账 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "多智能体协同研究进展综述: 博弈和控制交叉视角",
+      "url": "https://www.aas.net.cn/cn/article/doi/10.16383/j.aas.c240508",
+      "excerpt": "2024年12月13日 · 多智能体协同研究进展综述: 博弈和控制交叉视角. 自动化学报, 2025, 51(3): 489−509doi: 10.16383/j.aas.c240508 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "当一个智能体不够用：多智能体协同的路径与挑战 - 知乎",
+      "url": "https://zhuanlan.zhihu.com/p/1929279908141572273",
+      "excerpt": "2025年7月17日 · 因此，多智能体系统（Multi-Agent Systems, MAS）正在成为下一代AI系统设计的重要方向。 本文将围绕多智能体系 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "多智能体（Multi-Agent）系统：复杂场景下的协作革命与 ...",
+      "url": "https://zhuanlan.zhihu.com/p/1892981769592084101",
+      "excerpt": "2025年4月8日 · 多智能体系统：复杂场景下的协作革命与技术挑战在人工智能向通用化演进的今天，多智能体系统正成为解决复杂场 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "模型越智能，越离不开 HITL：人在回路是大模型时代控制论 ...",
+      "url": "https://cloud.tencent.com/developer/article/2691920",
+      "excerpt": "2026年6月17日 · AI智能化程度越高，系统失控风险越大。HITL（人在回路）机制通过人类介入修正、安全把关和目标校准，解决AI自 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "智能体人工智能架构解析：单智能体与多智能体系统的协作 ...",
+      "url": "https://developer.baidu.com/article/detail.html?id=7383096",
+      "excerpt": "2026年6月2日 · 本文深入解析智能体人工智能（Agentic AI）中单智能体与多智能体系统的底层运行逻辑，通过对比两种架构的协作模 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "多智能体系统协同决策与控制深度剖析-百度开发者中心",
+      "url": "https://developer.baidu.com/article/detail.html?id=3407959",
+      "excerpt": "2024年12月1日 · 通过信息共享、任务分配、协同控制与优化算法以及信任与激励机制等关键技术的综合运用，可以显著提高多智能体 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "一文搞懂多智能体协同机制：五大协作框架与应用实践",
+      "url": "https://www.sohu.com/a/935440301_121732761",
+      "excerpt": "2025年9月16日 · 多智能体系统的组织方式如同人类社会的治理模式，决定了智能体如何通信、协作与分配权力。 选择合适的协作框架 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "大语言模型下的多智能体协作机制：全面综述_多智能体协 ...",
+      "url": "https://blog.csdn.net/m0_63171455/article/details/145167154",
+      "excerpt": "2026年6月12日 · 这些基于大语言模型的多智能体系统（MASs）使得一组智能体能够协作解决复杂任务，并以大规模方式实现集体行 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "多智能体AI原生应用可控性挑战：协同决策中的风险控制_基于 ...",
+      "url": "https://blog.csdn.net/2502_91865303/article/details/149640729",
+      "excerpt": "2026年8月13日 · 文章浏览阅读1k次，点赞10次，收藏18次。多智能体AI原生应用指以多个异构AI智能体为核心组件，通过动态协同自 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "基于 人在回路的多智能体系统协同 控制研究",
+      "url": "https://d.wanfangdata.com.cn/thesis/ChhUaGVzaXNOZXdTMjAyNDA5MjAxNTE3MjUSCUQwMzQwNjE4NhoIOHo3NWR2a3U%3D",
+      "excerpt": "5 天之前 · 绑定机构 扫描成功请在APP上操作 打开万方数据APP，点击右上角\"扫一扫\"，扫描二维码即可将您登录的个人账号与机构账 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "多智能体协同 研究进展综述: 博弈和控制交叉视角",
+      "url": "https://www.aas.net.cn/cn/article/doi/10.16383/j.aas.c240508",
+      "excerpt": "2024年12月13日 · 多智能体协同研究进展综述: 博弈和控制交叉视角. 自动化学报, 2025, 51(3): 489−509doi: 10.16383/j.aas.c240508 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "当一个 智能体 不够用： 多智能 体协同的路径与挑战 - 知乎",
+      "url": "https://zhuanlan.zhihu.com/p/1929279908141572273",
+      "excerpt": "2025年7月17日 · 因此，多智能体系统（Multi-Agent Systems, MAS）正在成为下一代AI系统设计的重要方向。 本文将围绕多智能体系 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "多智能体 （Multi-Agent） 系统 ：复杂场景下的协作革命与 ...",
+      "url": "https://zhuanlan.zhihu.com/p/1892981769592084101",
+      "excerpt": "2025年4月8日 · 多智能体系统：复杂场景下的协作革命与技术挑战在人工智能向通用化演进的今天，多智能体系统正成为解决复杂场 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "模型越 智能 ，越离不开 HITL： 人在回路 是大模型时代控制论 ...",
+      "url": "https://cloud.tencent.com/developer/article/2691920",
+      "excerpt": "2026年6月17日 · AI智能化程度越高，系统失控风险越大。HITL（人在回路）机制通过人类介入修正、安全把关和目标校准，解决AI自 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "智能体 人工 智能 架构解析：单 智能体 与 多智能体系统 的协作 ...",
+      "url": "https://developer.baidu.com/article/detail.html?id=7383096",
+      "excerpt": "2026年6月2日 · 本文深入解析智能体人工智能（Agentic AI）中单智能体与多智能体系统的底层运行逻辑，通过对比两种架构的协作模 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "多智能体系统协同决策 与控制深度剖析-百度开发者中心",
+      "url": "https://developer.baidu.com/article/detail.html?id=3407959",
+      "excerpt": "2024年12月1日 · 通过信息共享、任务分配、协同控制与优化算法以及信任与激励机制等关键技术的综合运用，可以显著提高多智能体 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "一文搞懂 多智能 体协同机制：五大协作框架与应用实践",
+      "url": "https://www.sohu.com/a/935440301_121732761",
+      "excerpt": "2025年9月16日 · 多智能体系统的组织方式如同人类社会的治理模式，决定了智能体如何通信、协作与分配权力。 选择合适的协作框架 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "智能体 多智能体系统 人在回路 协同决策",
+      "matched_queries": [
+        "智能体 多智能体系统 人在回路 协同决策"
+      ]
+    },
+    {
+      "title": "中国人民解放军空军_百度百科",
+      "url": "https://baike.baidu.com/item/%E4%B8%AD%E5%9B%BD%E4%BA%BA%E6%B0%91%E8%A7%A3%E6%94%BE%E5%86%9B%E7%A9%BA%E5%86%9B/1156380",
+      "excerpt": "中国人民解放军空军（Air Force of the CPLA），于1949年11月11日正式成立，是中国人民解放军的空中武装力量，是中国人民解放军 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "空军 - 中国军网",
+      "url": "https://www.81.cn/kj_208559/index.html",
+      "excerpt": "1 天前 · 74载向战奋飞！ 致敬，海军航空兵！ 多媒体稿件，阅读全文约需 3 分钟 2026-09-06 09:00 空军雷达某旅优化偏远点位官兵办 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "空军 - 中华人民共和国国防部",
+      "url": "http://www.mod.gov.cn/gfbw/wzll/kj/index.html",
+      "excerpt": "1 天前 · 陆军某团组织实弹射击训练 第82集团军某旅开展实弹射击训练 凌云出击！ 东部战区空军航空兵某旅开展空战对抗训练 振翅远 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "空军（进行空中作战的军种）_百度百科",
+      "url": "https://baike.baidu.com/item/%E7%A9%BA%E5%86%9B/2526",
+      "excerpt": "空军是主要进行空中作战的军种，多数国家的空军由航空兵、地空导弹兵、高射炮兵和雷达兵种组成，有的还编有地上战略导弹部队和 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "全方位了解新时代中国空军 - 知乎",
+      "url": "https://zhuanlan.zhihu.com/p/1894202497700176804",
+      "excerpt": "2025年4月11日 · 在抗美援朝的战场上，年轻的中国空军飞行员们不畏强敌，驾驶着米格 - 15战机，与世界顶尖的美国空军展开激烈空 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "军史速递：细数中国空军现役装备（一） - 知乎",
+      "url": "https://zhuanlan.zhihu.com/p/16618876224",
+      "excerpt": "2025年1月6日 · 空军，号称&#34;天之骄子&#34;，是各国军队中的精英。因为空军驾驶飞机，居高临下，对于地面和水面目标具有天 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "空军 - 中华人民共和国国防部",
+      "url": "http://www.mod.gov.cn/gfbw/wzll/kj/index_2.html",
+      "excerpt": "2026年3月28日 · 陆军某团组织实弹射击训练 第82集团军某旅开展实弹射击训练 凌云出击！ 东部战区空军航空兵某旅开展空战对抗训 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "空军 - 中国军网",
+      "url": "https://www.81.cn/kj_208559/index_2.html",
+      "excerpt": "2026年6月30日 · 2026-04-22 08:32 中国空军运-20B赴韩接迎第十三批在韩志愿军烈士遗骸回国 多媒体稿件，阅读全文约需 3 分钟 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "2024中国空军有多强？53个航空旅，1900多架先进战机",
+      "url": "https://www.sohu.com/a/934832005_122471282",
+      "excerpt": "2025年9月14日 · 人员方面，空军有大约40万现役军人，其中飞行员和地勤占比大，确保这些飞机随时能飞起来。 装备是空军实力的核 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "2026-2027年度空军直接选拔招录军官公告——中国人民解放 ...",
+      "url": "http://81rc.81.cn/sy/gzdt_210283/16484179.html",
+      "excerpt": "1 天前 · 根据《现役军官管理暂行条例》《现役军官选拔补充暂行规定》等相关规定和全军统一部署，空军部队将组织开展2026-2027 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "智能 指控丨美 空军 “ 人机协同决策 优势冲刺”（DASH）实验",
+      "url": "https://www.sohu.com/a/945720072_121245527",
+      "excerpt": "2025年10月20日 · 为了促进人工智能技术在作战决策方面的应用，美空军自今年起开始实施一系列实验活动，名为“人机协同决策优势 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "美军 人机协同智能决策 关键技术在 智能 化战争中的 应用 展望",
+      "url": "https://www.sohu.com/a/1046147087_358040",
+      "excerpt": "2026年7月5日 · 本文系统解析美军人机协同智能决策的核心技术体系、典型场景与发展趋势，深入剖析支撑智能决策的四大技术支 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "首发 | 美军 人机协同智能决策 关键技术在 智能 化战争中的 应用 ...",
+      "url": "https://news.qq.com/rain/a/20260706A000AO00",
+      "excerpt": "2026年7月6日 · 引入人工智能技术构建人机协同、智能增强的新型决策范式，已成为掌握未来智能化战争主动权的核心路径。 美军人 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "人机协同决策 探索：美国 空军 ABMS 系统 DASH系列试验研究 ...",
+      "url": "https://news.qq.com/rain/a/20260309A03BCW00",
+      "excerpt": "2026年3月9日 · 在快速演变的现代战场上，决策速度和准确性往往决定胜败。美国空军先进作战管理系统(ABMS)正通过创新的人机协 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "人机协同决策 探索：美国 空军 ABMS 系统 DASH系列试验研究",
+      "url": "https://www.163.com/dy/article/KNIP922B0552V9YV.html",
+      "excerpt": "2026年3月9日 · 在快速演变的现代战场上，决策速度和准确性往往决定胜败。 美国空军先进作战管理系统(ABMS)正通过创新的人机协 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "作战 力量 | 美及其盟友开展 人机协同作战 管理试验，加速推进 ...",
+      "url": "https://zhuanlan.zhihu.com/p/1994359799022900347",
+      "excerpt": "2026年1月13日 · 文章围绕人工智能（AI）与机器学习在现代战场管理中的深度整合，突出强调人机协同、多国联盟合作、技术信任构 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "智能 指控丨美 空军 “ 人机协同决策 优势冲刺”（DASH）实验",
+      "url": "https://www.toutiao.com/article/7563199424525124131/",
+      "excerpt": "2025年10月20日 · 为了促进人工智能技术在作战决策方面的应用，美空军自今年起开始实施一系列实验活动，名为“人机协同决策优势 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "【前沿技术】美 空军 利用人工 智能 微服务开创 人机协同决策 新 ...",
+      "url": "https://post.smzdm.com/p/aognnme6/",
+      "excerpt": "2025年9月23日 · 智能速览 美空军启动DASH兵棋推演，探索人机协同决策优势。 DASH 2推演聚焦于AI辅助匹配最佳武器系统，决策 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "空军 人机协同 智能决策 辅助系统 作战应用",
+      "matched_queries": [
+        "空军 人机协同 智能决策 辅助系统 作战应用"
+      ]
+    },
+    {
+      "title": "多（汉语文字）_百度百科",
+      "url": "https://baike.baidu.com/item/%e5%a4%9a/17805",
+      "excerpt": "多，现代汉语规范一级字（常用字），读作duō。最早见于甲骨文。六书属会意字。从甲骨文到楷书，字形都是两个“夕”相重。其本义 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "多的意思,多的解释,多的拼音,多的部首,多的笔顺-汉语国学",
+      "url": "https://www.hanyuguoxue.com/zidian/zi-22810",
+      "excerpt": "多的拼音是duō，多字共6画，部首是夕部，本页介绍多字的意思，多的详细解释，多的读音、笔顺，还包括多的翻译、输入法、异体 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "Duolingo",
+      "url": "https://www.duolingo.cn/",
+      "excerpt": "多邻国是世界上最受欢迎的语言学习平台，免费、有趣、科学。",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "《多》的拼音,多字的意思、组词、部首、笔画、笔顺 - 汉语查",
+      "url": "https://www.hgcha.com/zidian/619756ae.html",
+      "excerpt": "1 天前 · 详细解释 多duō（ㄉㄨㄛ） 〈形容词〉 (1) 会意。 甲骨文字形，从二“夕”。 表示数量大。 本义：多，数量大，与“少”、“寡”相 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "百度地图",
+      "url": "https://map.baidu.com/",
+      "excerpt": "浏览地图、搜索地点、查询公交驾车线路、查看实时路况，您的出行指南、生活助手。提供地铁线路图浏览，乘车方案查询 ...",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "< 多 : ㄉㄨㄛˊ >辭典檢視 - 教育部《重編國語辭典修訂本》2021",
+      "url": "https://dict.revised.moe.edu.tw/dictView.jsp?ID=2319&la=0&powerMode=0",
+      "excerpt": "2021年7月22日 · 字詞:多,注音:ㄉㄨㄛˊ,夕部+3畫 共6畫 (常用字),釋義: [副] 何等、如何。 表疑問、感嘆的語氣。 如：「多好」、「多 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "多个_百度百科",
+      "url": "https://baike.baidu.com/item/%E5%A4%9A%E4%B8%AA/1848126",
+      "excerpt": "多个，读音duō gè，是汉语词语，意思是属于几个或许多的。",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "多怎么读_多的拼音 - 新华字典",
+      "url": "https://zidian.gushici.net/6/591a.html",
+      "excerpt": "5 天之前 · 如:这个字多了一个点;多因(多应。 多半，大概);多时间(很久);多管(多敢。 多半);多定(多半;肯定);多分(多半;差不多) (5)重。 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "多 - 维基词典，自由的多语言词典",
+      "url": "https://zh.wiktionary.org/wiki/%E5%A4%9A",
+      "excerpt": "2026年3月12日 · 吳音: た (ta，常用) 漢音: た (ta，常用) 訓讀: おおい (ō i， 多い, 常用)← おほい (ofo i， 多い, 歷史)、 さわ (sawa， …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "多_多怎么读_多的意思 - 汉语字典",
+      "url": "https://www.chagushici.com/zidian/%E5%A4%9A",
+      "excerpt": "两丈多高。 三年多。 5.表示相差的程度大：他比我强多了。 这样摆好看得多。 6.姓。 7.用在感叹句里，表示程度很高：你看他老人家 …",
+      "published_at": null,
+      "academic_provider": "searxng",
+      "discovery_provider": "searxng",
+      "doi": null,
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "基于 人在回路的多智能体系统协同 控制研究",
+      "url": "https://d.wanfangdata.com.cn/thesis/ChhUaGVzaXNOZXdTMjAyNDA5MjAxNTE3MjUSCUQwMzQwNjE4NhoIOHo3NWR2a3U%3D",
+      "excerpt": "5 天之前 · 万方数据学术资源发现获取服务系统[简称：万方智搜] V3.0 证书号：软著登字第11363462号. 京ICP证：010071. 营业执照.  …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "基于 人在回路的多智能体系统协同 控制研究-学位-万方数据知识 ...",
+      "url": "https://d.wanfangdata.com.cn/thesis/ChhUaGVzaXNOZXdTMjAyNDA5MjAxNTE3MjUSCUQwMzQwNjE4NhoIYzl4aXIyemg%3D",
+      "excerpt": "2026年7月14日 · 为了实现控制设计，本研究采用反步递推技术作为框架，并结合神经网络控制、模糊逻辑系统、事件触发控制、有限 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "多智能体协同 研究进展综述: 博弈和控制交叉视角",
+      "url": "https://www.aas.net.cn/cn/article/doi/10.16383/j.aas.c240508",
+      "excerpt": "2024年12月13日 · 多智能体协同研究进展综述: 博弈和控制交叉视角. 自动化学报, 2025, 51(3): 489−509 doi: 10.16383/j.aas.c240508  …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "论文 速读——Human-in-the-Loop Consensus Control for ...",
+      "url": "https://zhuanlan.zhihu.com/p/667928010",
+      "excerpt": "2023年11月21日 · 具有未知匹配非线性函数和执行器故障的多智能体系统：这说明系统中的智能体可能面临复杂的挑战。 \"未知匹配非 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "多智能 体协同规划综述：问题分类与前沿进展",
+      "url": "https://xk.sia.cn/article/doi/10.13976/j.cnki.xk.2025.1911",
+      "excerpt": "2026年7月8日 · 多智能体系统作为人工智能的核心领域，近年来在机器人与无人机等领域取得了显著进展。 然而，随着应用场景的拓 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "多智能 体协同 决策 的综述 - 知乎",
+      "url": "https://zhuanlan.zhihu.com/p/1971141252046127523",
+      "excerpt": "2025年11月10日 · 简介 多智能体协同决策已经成为人工智能研究的一个关键前沿领域，它代表了多个智能体协同工作以解决问题的复 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "人机 协同决策 的异质 多智能体 路径规划",
+      "url": "https://www.jcad.cn/cn/article/pdf/preview/10.3724/SP.J.1089.2024-00359.pdf",
+      "excerpt": "2026年8月24日 · 在2D、3D和混合现实场景下的实验结果表明,所提方法不仅适用于异质多智能体路径规划,还能在混合现实场景下实现 …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    },
+    {
+      "title": "多智能体系统的协同决策 与行为规划研究 - 百度文库",
+      "url": "https://wenku.baidu.com/view/950dc8f424284b73f242336c1eb91a37f11132ff.html",
+      "excerpt": "多智能体系统的协同决策与行为规划研究-多智能体系统的协同决策与行为规划研究 摘要：多智能体系统（multi-agent systems, …",
+      "academic_provider": "browser_search",
+      "discovery_provider": "browser_search",
+      "matched_query": "多智能体 系统 人在回路 决策协同 论文",
+      "matched_queries": [
+        "多智能体 系统 人在回路 决策协同 论文"
+      ]
+    }
+  ]
+}

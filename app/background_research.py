@@ -369,6 +369,24 @@ def background_search_feedback(state: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def compare_background_search_candidates(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    from .wf3_contracts import compare_public_search_candidates
+
+    comparison = compare_public_search_candidates(baseline, candidate)
+    retained = (candidate.get("merge_report") or {}).get("baseline_coverage")
+    if isinstance(retained, dict):
+        old_passed = {name for name, row in (baseline.get("coverage") or {}).get("dimensions", {}).items()
+                      if row.get("status") == "PASS"}
+        retained_passed = {name for name, row in retained.get("dimensions", {}).items() if row.get("status") == "PASS"}
+        if old_passed <= retained_passed:
+            # Added queries may still have gaps. They must not make the union
+            # appear to have lost evidence for the original, unchanged queries.
+            comparison["regressions"] = [code for code in comparison["regressions"] if code != "COVERAGE_DIMENSION_REGRESSED"]
+            comparison["accepted"] = not comparison["regressions"]
+        comparison["dimension_comparison_scope"] = "BASELINE_QUERIES"
+    return comparison
+
+
 def background_execution_contract(plan: dict[str, Any]) -> dict[str, Any]:
     """Force the WF-3B retrieval execution contract onto the approved plan.
 
@@ -514,6 +532,26 @@ class BackgroundResearchService(PublicResearchService):
 
     def __init__(self, settings, skill_executor: SkillExecutor | None = None):
         super().__init__(settings, skill_executor)
+
+    async def merge_search_results(
+        self, baseline: dict[str, Any], candidate: dict[str, Any], *,
+        project_id: str, workflow_id: str | None,
+    ) -> dict[str, Any]:
+        from .skills.base import SkillContext
+        from .skills.public_research import PublicResearchIntegrityError as ArchiveIntegrityError
+        from .skills.public_research import PublicResearchPlanContractError as ArchivePlanError
+        from .skills.research_merge import merge_research_archives
+        from .research import PublicResearchPlanError
+
+        try:
+            return await asyncio.to_thread(
+                merge_research_archives, baseline, candidate,
+                context=SkillContext(project_id, workflow_id, "PUBLIC", str(self.settings.data_dir)),
+            )
+        except ArchiveIntegrityError as exc:
+            raise PublicResearchIntegrityError(str(exc), details=exc.details) from exc
+        except ArchivePlanError as exc:
+            raise PublicResearchPlanError(str(exc), details=exc.details) from exc
 
     def simulated_search(self, plan: dict[str, Any]) -> dict[str, Any]:
         result = copy.deepcopy(super().simulated_search(plan))

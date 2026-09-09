@@ -3348,3 +3348,81 @@ def test_semantic_producer_blocking_deficiency_regenerates_without_gate(
     assert exhausted["status"] == "BLOCKED_CONTENT"
     assert engine.list_gates(workflow_id=workflow["id"]) == []
     assert "不转为空问题人工 Gate" in exhausted["state"]["last_error"]
+
+
+def test_producer_self_revise_is_routed_to_paired_critic(runtime, monkeypatch):
+    """Producer REVISE without routable machine repair advances to its critic."""
+    _, pack, db, _, builder, executor, engine, _ = runtime
+    project_id = create_project(db)
+    add_standard_materials(runtime[0], db, project_id)
+    workflow = engine.start(project_id, "WF-2_TEMPLATE_EXTRACTION")
+
+    def build(prompt_id, project_id_arg, **_kwargs):
+        envelope = pack.replay_input(prompt_id)
+        envelope["scope"]["project_id"] = project_id_arg
+        return envelope
+
+    calls: list[str] = []
+
+    async def execute(prompt_id, envelope, **_kwargs):
+        calls.append(prompt_id)
+        output = pack.replay_output(prompt_id)
+        if prompt_id == "P-TEMPLATE-EXTRACT":
+            output["status"] = "REVISE"
+            output["findings"] = [
+                {
+                    "finding_instance_id": "FIND-SELF-REVISE-001",
+                    "defect_namespace": "SEMANTIC_OBSERVATION",
+                    "code": "TEMPLATE_UNSOURCED_RULE",
+                    "severity": "P1",
+                    "category": "TEMPLATE",
+                    "target_type": "rule",
+                    "target_path_or_span": "result.template_profile.rules",
+                    "description": "producer self-reported repairable issue",
+                    "evidence_refs": [],
+                    "repairable": True,
+                    "repair_instruction": "bind sources",
+                    "suggested_route": "PROJECT_KNOWLEDGE_AGENT",
+                    "blocking": False,
+                }
+            ]
+        guard_enabled = bool(executor.quality_guard_enabled)
+        guard_report = (
+            build_guard_report(prompt_id, output, [])
+            if guard_enabled
+            else disabled_guard_report(prompt_id, output)
+        )
+        return {
+            "run_id": new_id("run"),
+            "status": output["status"],
+            "route": {
+                "environment": "OFFLINE_LOCAL",
+                "model_id": "test-model",
+                "endpoint_id": "test-endpoint",
+            },
+            "output": output,
+            "guard_report": guard_report,
+            "quality_guard_enabled": guard_enabled,
+            "guard_observation_status": guard_report["observation_status"],
+        }
+
+    monkeypatch.setattr(builder, "build", build)
+    monkeypatch.setattr(executor, "execute", execute)
+
+    first = asyncio.run(engine.advance(workflow["id"]))
+
+    assert calls == ["P-TEMPLATE-EXTRACT"]
+    assert first["status"] not in {"BLOCKED_CONTENT", "BLOCKED_CONTRACT"}, first[
+        "state"
+    ].get("last_error")
+    assert first["current_step"] == 1
+    history = first["state"].get("producer_self_revise_history") or []
+    assert history and history[-1]["prompt_id"] == "P-TEMPLATE-EXTRACT"
+    assert history[-1]["paired_critic"] == "P-TEMPLATE-CRITIC"
+
+    second = asyncio.run(engine.advance(workflow["id"]))
+
+    assert calls == ["P-TEMPLATE-EXTRACT", "P-TEMPLATE-CRITIC"], second["state"].get(
+        "last_error"
+    )
+    assert second["status"] != "BLOCKED_CONTENT", second["state"].get("last_error")
