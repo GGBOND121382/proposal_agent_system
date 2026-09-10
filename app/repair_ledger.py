@@ -8,7 +8,7 @@ from .util import utc_now
 
 @dataclass(frozen=True)
 class RepairBudget:
-    provider_retry_limit: int = 2
+    provider_retry_limit: int = 3
     technical_retry_limit: int = 2
     semantic_repair_limit: int = 1
 

@@ -4,7 +4,7 @@
   "counts": {
     "registry_entries": 35,
     "replay_manifest_entries": 175,
-    "json_files": 311,
+    "json_files": 319,
     "yaml_files": 19,
     "valid_replay_inputs": 140,
     "intentional_invalid_replay_inputs": 35,

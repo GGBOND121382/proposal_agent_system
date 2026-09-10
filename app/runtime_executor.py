@@ -32,6 +32,7 @@ from .llm import LLMError, MODEL_RESPONSE_PROTOCOL_VERSION
 from .background_research import WF3B_DIRECT_TOOL_ARGUMENTS_PROMPTS
 from .model_semantic_contracts import (
     SEMANTIC_MODEL_CONTRACT_VERSION,
+    apply_semantic_model_output_defaults,
     build_semantic_model_input,
     expand_semantic_model_output,
     semantic_model_reference_errors,
@@ -1258,12 +1259,16 @@ class RuntimePromptExecutor(BasePromptExecutor):
             else:
                 output_schema = self.pack.inlined_schema(prompt_id, "output")
 
-            if not argument_two_stage_contract:
+            reference_injection: dict[str, Any] = {"injected_fields": []}
+            pre_injection_output_schema = output_schema
+            if not argument_two_stage_contract and not semantic_model_contract:
                 # Show the model the exact reference namespace the output
                 # validator will enforce (e.g. document_id is citable while
                 # document_version_id is protocol-only), inline in the tool
-                # schema as a validation-neutral enum branch.
-                pre_injection_output_schema = output_schema
+                # schema as a validation-neutral enum branch.  Semantic model
+                # contracts use local evidence ids (S1..Sn) instead of the
+                # canonical reference namespace, so injection would both
+                # mislead the model and inflate the request budget.
                 output_schema, reference_injection = inject_reference_targets_into_schema(
                     output_schema, provider_call_envelope
                 )
@@ -1512,6 +1517,9 @@ class RuntimePromptExecutor(BasePromptExecutor):
                     consumed_output = copy.deepcopy(contract_recovery["consumed_output"])
                 else:
                     if semantic_model_contract and not argument_two_stage_contract:
+                        provider_output = apply_semantic_model_output_defaults(
+                            self.pack.model_schema(prompt_id, "output"), provider_output
+                        )
                         semantic_output_errors = self.pack.validate_model(
                             prompt_id, "output", provider_output
                         )

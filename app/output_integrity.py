@@ -864,6 +864,63 @@ def _collect_document_version_aliases(envelope: Any) -> dict[str, str]:
     return aliases
 
 
+def scrub_code_owned_fields_for_repair_diff(value: Any) -> Any:
+    """Project a repair baseline/candidate to the fields the model actually owns.
+
+    The targeted-repair closure check must compare the model's semantic patch,
+    not the metadata the runtime itself completes.  Source-reference metadata
+    (``quoted_text``, spans, hashes, version IDs, authority ranks, security
+    labels, source types) is rebound from the trusted catalog by
+    ``bind_trusted_source_refs``; protocol-owned fields (``project_id`` and
+    friends) are canonicalized by ``canonicalize_protocol_refs``; ``*_hash``
+    digests are recomputed by the runtime.  Applying this projection to BOTH
+    sides of the diff keeps the comparison symmetric: a code-completed field
+    never shows up as a model-made change, while any change to a business
+    field (statements, structure, which source/section is cited, added or
+    removed references) still produces a diff path.
+    """
+    contract = get_semantic_contract()
+    protocol_fields = {
+        field_name
+        for field_name, semantic in contract.reference_field_semantics.items()
+        if semantic is ReferenceSemantic.PROTOCOL_REF
+    }
+
+    def visit(node: Any) -> Any:
+        if isinstance(node, list):
+            return [visit(item) for item in node]
+        if not isinstance(node, Mapping):
+            return node
+        projected: dict[str, Any] = {}
+        for key, item in node.items():
+            if key in protocol_fields or key.endswith("_hash"):
+                continue
+            if key in ("source_refs", "source_ref"):
+                # Only the model-chosen identity (which source, which section)
+                # is semantic; every other field is rebound by the runtime.
+                if isinstance(item, list):
+                    projected[key] = [
+                        {
+                            "source_id": ref.get("source_id"),
+                            "section_id": ref.get("section_id"),
+                        }
+                        if isinstance(ref, Mapping)
+                        else ref
+                        for ref in item
+                    ]
+                    continue
+                if isinstance(item, Mapping):
+                    projected[key] = {
+                        "source_id": item.get("source_id"),
+                        "section_id": item.get("section_id"),
+                    }
+                    continue
+            projected[key] = visit(item)
+        return projected
+
+    return visit(value)
+
+
 def _collect_source_ids(value: Any) -> set[str]:
     """Collect source identifiers that are explicitly materialized as sources."""
     found: set[str] = set()

@@ -21,7 +21,7 @@ from .runtime_failures import (
     semantic_revise_classification,
 )
 from .quality import QualityGateBlocked, QualityLifecycleManager
-from .quality_guard import QualityGuardContractError, require_guard_report
+from .quality_guard import MODEL_REPAIRABLE_QUALITY_CODES, QualityGuardContractError, require_guard_report
 from .research import PublicResearchError
 from .skills.research_claims import (
     PUBLIC_CLAIM_VALIDATOR_VERSION,
@@ -93,6 +93,51 @@ def technical_retry_key(
     if section_id and phase:
         return f"{step_key}:{section_id}:{phase}"
     return step_key
+
+
+def semantic_quality_revision_finding(
+    finding: dict[str, Any],
+    *,
+    producer_prompt: str,
+    round_number: int,
+    index: int,
+) -> dict[str, Any]:
+    """Project one model-repairable quality-gate finding into a canonical Finding.
+
+    Same ownership split as semantic_gap_revision_finding: the guard owns the
+    defect description and repair instruction; runtime owns identity, route and
+    repair policy.
+    """
+
+    code = str(finding.get("code") or "QUALITY_GATE_FAILURE")
+    target_path = str(
+        finding.get("target_path_or_span") or finding.get("target_path") or ""
+    ).strip() or "/result"
+    description = str(finding.get("description") or code).strip()
+    action = str(finding.get("repair_instruction") or "").strip() or (
+        "按关系语义修正该问题；保持其他有效语义不变，不得虚构内容。"
+    )
+    return {
+        "finding_instance_id": (
+            f"runtime-quality-gate-{producer_prompt}-{round_number}-{index}"
+        ),
+        "defect_key": None,
+        "code": code,
+        "severity": str(finding.get("severity") or "P1"),
+        "category": str(finding.get("category") or "PROJECT_DEFINITION"),
+        "target_type": str(finding.get("target_type") or "PROJECT_DEFINITION"),
+        "target_path_or_span": target_path,
+        "description": description,
+        "evidence_refs": [],
+        # Routed back to the original producer; not a local targeted-repair op.
+        "repairable": False,
+        "repair_instruction": action,
+        "semantic_component": str(finding.get("category") or "PROJECT_DEFINITION"),
+        "semantic_thread": None,
+        "semantic_review_unit_key": None,
+        "suggested_route": "ORIGINAL_PRODUCER",
+        "blocking": True,
+    }
 
 
 def semantic_gap_revision_finding(
@@ -2906,14 +2951,22 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             and str(item.get("suggested_route") or "ORIGINAL_PRODUCER").upper()
             == "ORIGINAL_PRODUCER"
         ]
+        quality_findings: list[dict[str, Any]] = []
         if not gap_report:
-            return "NOT_APPLICABLE"
+            quality_findings = [
+                copy.deepcopy(item)
+                for item in output.get("findings") or []
+                if isinstance(item, dict)
+                and str(item.get("code") or "") in MODEL_REPAIRABLE_QUALITY_CODES
+            ]
+            if not quality_findings:
+                return "NOT_APPLICABLE"
 
         options = state.get("options") or {}
         try:
-            limit = int(options.get("semantic_producer_regeneration_limit", 1))
+            limit = int(options.get("semantic_producer_regeneration_limit", 2))
         except (TypeError, ValueError):
-            limit = 1
+            limit = 2
         limit = max(0, min(limit, 3))
 
         rounds = state.get("semantic_producer_regeneration_rounds") or {}
@@ -2933,15 +2986,26 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             return "EXHAUSTED"
 
         round_number = completed + 1
-        feedback = [
-            semantic_gap_revision_finding(
-                gap,
-                producer_prompt=producer_prompt,
-                round_number=round_number,
-                index=index,
-            )
-            for index, gap in enumerate(gap_report, 1)
-        ]
+        if gap_report:
+            feedback = [
+                semantic_gap_revision_finding(
+                    gap,
+                    producer_prompt=producer_prompt,
+                    round_number=round_number,
+                    index=index,
+                )
+                for index, gap in enumerate(gap_report, 1)
+            ]
+        else:
+            feedback = [
+                semantic_quality_revision_finding(
+                    finding,
+                    producer_prompt=producer_prompt,
+                    round_number=round_number,
+                    index=index,
+                )
+                for index, finding in enumerate(quality_findings, 1)
+            ]
         validation_errors: list[str] = []
         for index, finding in enumerate(feedback):
             validation_errors.extend(
@@ -2990,6 +3054,11 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     str(item.get("defect_key") or "")
                     for item in gap_report
                     if item.get("defect_key")
+                ],
+                "quality_codes": [
+                    str(item.get("code") or "")
+                    for item in quality_findings
+                    if item.get("code")
                 ],
                 "baseline_run_id": baseline_run_id,
                 "created_at": utc_now(),

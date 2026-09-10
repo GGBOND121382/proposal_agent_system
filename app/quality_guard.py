@@ -9,6 +9,20 @@ from .contracts import get_semantic_contract
 
 GUARD_REPORT_SCHEMA_VERSION = "1.0"
 GUARD_RESPONSIBILITY = "DETERMINISTIC_GUARD"
+
+# Deterministic quality-gate codes whose fix is a model-owned semantic
+# correction (e.g. an illegal relation direction).  They are routed back to the
+# original producer as bounded revision feedback instead of hard-blocking the
+# workflow on the first occurrence, and they do not disqualify a concrete
+# blocking human gate: human answers add information, the repair loop runs on
+# the post-gate regeneration if the defects persist.
+MODEL_REPAIRABLE_QUALITY_CODES = {
+    "QG_PROJECT_RELATION_DIRECTION_INVALID",
+    "QG_PROJECT_RELATION_TYPE_MISMATCH",
+    "QG_PROJECT_RELATION_ENDPOINT_INVALID",
+    "QG_PROJECT_RELATION_ID_DUPLICATE",
+    "QG_CONFIRMED_ITEM_WITHOUT_EVIDENCE",
+}
 _GUARD_STATUSES = {"PASS", "REVISE", "BLOCK"}
 
 

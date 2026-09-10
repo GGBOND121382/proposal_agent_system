@@ -12,6 +12,8 @@ from jsonschema import Draft202012Validator
 
 from .contracts.semantic_contract import get_semantic_contract
 from .gate_answer_contract import semantic_question_answer_schema
+from .output_integrity import _source_type
+from .util import sha256_json
 from .json_pointer import (
     JsonPointerError,
     format_pointer,
@@ -33,6 +35,10 @@ SEMANTIC_PROMPTS = frozenset({
     "P-PUBLIC-RESEARCH-SYNTHESIS",
     "P-PUBLIC-RESEARCH-CRITIC",
     "P-ONLINE-RESULT-IMPORT-CRITIC",
+    "P-SCHEME-EXTRACT",
+    "P-SCHEME-CRITIC",
+    "P-PROJECT-DEFINITION-EXTRACT",
+    "P-PROJECT-DEFINITION-CRITIC",
 })
 
 _ARGUMENT_CHAIN_RULE_ID = "SC-ARGUMENT-DETERMINISTIC-CHAINS"
@@ -4162,6 +4168,1568 @@ def expand_online_result_import_critic_model_output(canonical_envelope: dict[str
     }
     return output
 
+_WF1_SEMANTIC_PROMPTS = frozenset({
+    "P-SCHEME-EXTRACT",
+    "P-SCHEME-CRITIC",
+    "P-PROJECT-DEFINITION-EXTRACT",
+    "P-PROJECT-DEFINITION-CRITIC",
+})
+
+_WF1_SECURITY_LEVELS = ("PUBLIC", "INTERNAL", "SENSITIVE", "CLASSIFIED")
+
+_WF1_ARGUMENT_CHECK_DIMENSIONS = (
+    "DOCUMENT_CONTRACT",
+    "CENTRAL_PROPOSITION",
+    "RESEARCH_GAP",
+    "RESEARCH_QUESTIONS",
+    "CLOSEST_PRIOR_WORK",
+    "OBJECTIVE_TASK_ALIGNMENT",
+    "METHOD_AND_EVALUATION",
+    "FOUNDATION_EVIDENCE",
+)
+
+_WF1_NODE_TYPE_BY_ITEM_TYPE = {
+    "GAP": "RESEARCH_GAP",
+    "PROBLEM": "PROBLEM",
+    "OBJECTIVE": "OBJECTIVE",
+    "WORK_PACKAGE": "WORK_PACKAGE",
+    "METHOD": "FORMAL_MODEL",
+    "EXPERIMENT": "EXPERIMENT_DESIGN",
+    "INNOVATION": "NOVEL_MECHANISM",
+    "ACHIEVEMENT": "TEAM_EVIDENCE",
+    "CAPABILITY": "TEAM_EVIDENCE",
+    "EXISTING_APPROACH": "CLOSEST_PRIOR_WORK",
+}
+
+# Content-field fill plan per project item_type.  kind grammar:
+#   text        required string, model attribute wins, fallback = item summary
+#   text:XXX    required string, model attribute wins, fallback = XXX
+#   text?       nullable string, default None
+#   texts       list[str], default []
+#   texts1      list[str], minItems 1, default [summary]
+#   bool        default False
+#   num / num?  number, default 0 / None
+#   enum:XXX    enum string, model attribute wins when valid, default XXX
+_WF1_ITEM_CONTENT_SPECS: dict[str, tuple[tuple[str, str], ...]] = {
+    "PROJECT_BASIC": (
+        ("project_name", "text"),
+        ("short_name", "text?"),
+        ("project_type", "text"),
+        ("domain", "texts1"),
+        ("target_users", "texts"),
+        ("maturity_stage", "enum:CONCEPT"),
+        ("scope_summary", "text"),
+    ),
+    "STAKEHOLDER": (
+        ("name", "text"),
+        ("stakeholder_type", "text"),
+        ("role", "text"),
+        ("needs", "texts"),
+        ("affected_by", "texts"),
+    ),
+    "DEMAND": (
+        ("demand_statement", "text"),
+        ("source_type", "enum:USER_REPORTED_PROBLEM"),
+        ("requester", "text"),
+        ("urgency", "enum:MEDIUM"),
+        ("why_now", "texts"),
+        ("non_execution_consequences", "texts"),
+    ),
+    "SCENARIO": (
+        ("scenario_name", "text"),
+        ("actors", "texts1"),
+        ("trigger_conditions", "texts"),
+        ("current_process", "text"),
+        ("constraints", "texts"),
+        ("frequency_or_scale", "text?"),
+    ),
+    "CURRENT_STATE": (
+        ("description", "text"),
+        ("capabilities", "texts"),
+        ("limitations", "texts"),
+        ("baseline_metrics", "texts"),
+    ),
+    "EXISTING_APPROACH": (
+        ("name", "text"),
+        ("owner_or_source", "text"),
+        ("applicable_scope", "texts"),
+        ("strengths", "texts"),
+        ("limitations", "texts"),
+    ),
+    "GAP": (
+        ("gap_type", "enum:TECHNICAL"),
+        ("description", "text"),
+        ("affected_scenarios", "texts"),
+        ("impact", "text"),
+    ),
+    "ROOT_CAUSE": (
+        ("description", "text"),
+        ("cause_type", "text"),
+        ("evidence_summary", "text"),
+        ("controllable", "bool"),
+    ),
+    "PROBLEM": (
+        ("problem_class", "enum:TECHNICAL"),
+        ("statement", "text"),
+        ("why_difficult", "text"),
+        ("constraints", "texts"),
+        ("expected_breakthrough", "text"),
+    ),
+    "OBJECTIVE": (
+        ("statement", "text"),
+        ("baseline_state", "text"),
+        ("target_state", "text"),
+        ("success_definition", "text"),
+        ("out_of_scope", "texts"),
+    ),
+    "WORK_PACKAGE": (
+        ("name", "text"),
+        ("research_object", "text"),
+        ("inputs", "texts"),
+        ("main_activities", "texts1"),
+        ("methods", "texts"),
+        ("outputs", "texts1"),
+        ("responsible_organization", "text?"),
+        ("acceptance_refs", "texts"),
+    ),
+    "METHOD": (
+        ("name", "text"),
+        ("method_type", "enum:ANALYTICAL_METHOD"),
+        ("purpose", "text"),
+        ("principle", "text"),
+        ("inputs", "texts"),
+        ("outputs", "texts"),
+        ("constraints", "texts"),
+        ("selection_reason", "text"),
+        ("maturity", "enum:PROPOSED"),
+    ),
+    "DATA_RESOURCE": (
+        ("name", "text"),
+        ("data_type", "text"),
+        ("source", "text"),
+        ("availability", "enum:UNKNOWN"),
+        ("security_level", "enum:INTERNAL"),
+        ("quality_constraints", "texts"),
+    ),
+    "EXPERIMENT": (
+        ("name", "text"),
+        ("purpose", "text"),
+        ("test_object", "text"),
+        ("dataset_or_scenario", "text"),
+        ("conditions", "texts"),
+        ("procedure", "texts1"),
+        ("expected_evidence", "texts"),
+    ),
+    "INNOVATION": (
+        ("innovation_type", "enum:METHOD"),
+        ("existing_baseline", "text"),
+        ("existing_limitation", "text"),
+        ("proposed_change", "text"),
+        ("novel_mechanism", "text"),
+        ("expected_advantage", "text"),
+        ("applicable_conditions", "texts"),
+        ("confidence", "enum:PROPOSED"),
+    ),
+    "DELIVERABLE": (
+        ("deliverable_type", "enum:REPORT"),
+        ("name", "text"),
+        ("description", "text"),
+        ("delivery_time", "text?"),
+        ("acceptance_form", "text"),
+    ),
+    "METRIC": (
+        ("name", "text"),
+        ("object", "text"),
+        ("metric_type", "enum:PERFORMANCE"),
+        ("baseline_value", "num?"),
+        ("target_value", "num?"),
+        ("comparison", "enum:DESCRIPTIVE"),
+        ("unit", "text"),
+        ("measurement_method", "text"),
+        ("test_dataset_or_scenario", "text"),
+        ("test_conditions", "texts"),
+        ("verifier", "text"),
+    ),
+    "ACHIEVEMENT": (
+        ("owner_type", "enum:TEAM"),
+        ("owner_name", "text"),
+        ("achievement_type", "text"),
+        ("title", "text"),
+        ("status", "enum:PLANNED"),
+        ("date", "text?"),
+        ("contribution", "text"),
+        ("project_relevance", "text"),
+    ),
+    "CAPABILITY": (
+        ("owner_type", "enum:TEAM"),
+        ("owner_name", "text"),
+        ("capability", "text"),
+        ("current_status", "text"),
+        ("project_support", "text"),
+        ("limitations", "texts"),
+    ),
+    "TEAM_MEMBER": (
+        ("name", "text"),
+        ("organization", "text"),
+        ("role", "text"),
+        ("expertise", "texts"),
+        ("work_package_refs", "texts"),
+        ("time_commitment", "num?"),
+    ),
+    "SCHEDULE_PHASE": (
+        ("name", "text"),
+        ("start", "text"),
+        ("end", "text"),
+        ("milestones", "texts"),
+        ("deliverable_refs", "texts"),
+    ),
+    "RISK": (
+        ("risk_type", "enum:TECHNICAL"),
+        ("description", "text"),
+        ("probability", "enum:MEDIUM"),
+        ("impact", "enum:MEDIUM"),
+        ("trigger", "text"),
+        ("mitigation", "texts"),
+        ("contingency", "texts"),
+        ("owner", "text"),
+    ),
+    "RESOURCE_REQUIREMENT": (
+        ("resource_type", "enum:DATA"),
+        ("description", "text"),
+        ("quantity_or_scale", "text"),
+        ("availability", "enum:UNKNOWN"),
+        ("acquisition_plan", "text?"),
+    ),
+    "BUDGET_ITEM": (
+        ("category", "text"),
+        ("amount", "num"),
+        ("currency", "text:CNY"),
+        ("calculation_basis", "text"),
+        ("work_package_refs", "texts"),
+    ),
+    "COMPLIANCE_ITEM": (
+        ("compliance_type", "enum:OTHER"),
+        ("requirement", "text"),
+        ("applicability", "enum:UNKNOWN"),
+        ("measure", "text"),
+        ("evidence_required", "texts"),
+    ),
+}
+
+_WF1_ENUM_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "PROJECT_BASIC.maturity_stage": ("CONCEPT", "PRELIMINARY_RESEARCH", "PROTOTYPE", "PILOT", "ENGINEERING_VALIDATION", "APPLICATION_DEMONSTRATION"),
+    "DEMAND.source_type": ("NATIONAL_STRATEGY", "POLICY_REQUIREMENT", "MILITARY_OR_OPERATIONAL_REQUIREMENT", "INDUSTRY_DEMAND", "ORGANIZATION_BUSINESS_NEED", "SCIENTIFIC_FRONTIER", "USER_REPORTED_PROBLEM", "GUIDE_REQUIREMENT"),
+    "DEMAND.urgency": ("LOW", "MEDIUM", "HIGH", "CRITICAL"),
+    "GAP.gap_type": ("SCIENTIFIC", "TECHNICAL", "ENGINEERING", "DATA", "PROCESS", "ORGANIZATION", "RESOURCE", "APPLICATION"),
+    "PROBLEM.problem_class": ("SCIENTIFIC", "TECHNICAL", "ENGINEERING", "MANAGEMENT_PROCESS"),
+    "METHOD.method_type": ("ALGORITHM", "MODEL", "MECHANISM", "EXPERIMENTAL_METHOD", "ENGINEERING_METHOD", "ANALYTICAL_METHOD"),
+    "METHOD.maturity": ("EXISTING", "PRELIMINARY_VALIDATED", "PROPOSED", "TO_BE_SELECTED", "UNKNOWN"),
+    "DATA_RESOURCE.availability": ("AVAILABLE", "PARTIALLY_AVAILABLE", "TO_BE_COLLECTED", "UNKNOWN"),
+    "DATA_RESOURCE.security_level": ("PUBLIC", "INTERNAL", "SENSITIVE", "CLASSIFIED"),
+    "INNOVATION.innovation_type": ("THEORY", "METHOD", "MECHANISM", "SYSTEM", "APPLICATION"),
+    "INNOVATION.confidence": ("CONFIRMED", "PROPOSED", "UNCERTAIN"),
+    "DELIVERABLE.deliverable_type": ("THEORY", "METHOD", "ALGORITHM", "DATASET", "SOFTWARE", "PROTOTYPE_SYSTEM", "STANDARD", "REPORT", "PATENT", "PAPER", "DEMONSTRATION"),
+    "METRIC.metric_type": ("QUANTITY", "TECHNICAL", "QUALITY", "PERFORMANCE", "APPLICATION", "ECONOMIC", "SOCIAL", "INTELLECTUAL_PROPERTY"),
+    "METRIC.comparison": ("GREATER_THAN", "GREATER_THAN_OR_EQUAL", "LESS_THAN", "LESS_THAN_OR_EQUAL", "EQUAL", "RANGE", "DESCRIPTIVE"),
+    "ACHIEVEMENT.owner_type": ("APPLICANT", "TEAM", "ORGANIZATION", "PARTNER", "EXTERNAL"),
+    "ACHIEVEMENT.status": ("PLANNED", "IN_PROGRESS", "COMPLETED", "ACCEPTED", "PUBLISHED", "AUTHORIZED"),
+    "CAPABILITY.owner_type": ("APPLICANT", "TEAM", "ORGANIZATION", "PARTNER"),
+    "RISK.risk_type": ("SCIENTIFIC", "TECHNICAL", "DATA", "ENGINEERING", "SCHEDULE", "RESOURCE", "COLLABORATION", "APPLICATION", "SECURITY", "COMPLIANCE"),
+    "RISK.probability": ("LOW", "MEDIUM", "HIGH"),
+    "RISK.impact": ("LOW", "MEDIUM", "HIGH", "CRITICAL"),
+    "RESOURCE_REQUIREMENT.resource_type": ("EQUIPMENT", "COMPUTING", "DATA", "SITE", "EXTERNAL_SERVICE", "PERSONNEL"),
+    "RESOURCE_REQUIREMENT.availability": ("AVAILABLE", "PARTIALLY_AVAILABLE", "NOT_AVAILABLE", "UNKNOWN"),
+    "COMPLIANCE_ITEM.compliance_type": ("ETHICS", "DATA_SECURITY", "CONFIDENTIALITY", "INTELLECTUAL_PROPERTY", "HUMAN_SUBJECTS", "ANIMAL_SUBJECTS", "EXPORT_CONTROL", "OTHER"),
+    "COMPLIANCE_ITEM.applicability": ("APPLICABLE", "NOT_APPLICABLE", "UNKNOWN"),
+}
+
+
+def _wf1_security_level(canonical_envelope: dict[str, Any]) -> str:
+    context = canonical_envelope.get("security_context")
+    if not isinstance(context, Mapping):
+        return "INTERNAL"
+    for key in ("project_security_level", "input_max_security_level"):
+        value = str(context.get(key) or "").strip().upper()
+        if value in _WF1_SECURITY_LEVELS:
+            return value
+    return "INTERNAL"
+
+
+def _wf1_project_id(canonical_envelope: dict[str, Any]) -> str:
+    scope = canonical_envelope.get("scope")
+    if isinstance(scope, Mapping):
+        value = str(scope.get("project_id") or "").strip()
+        if value:
+            return value
+    value = str(canonical_envelope.get("project_id") or "").strip()
+    return value or "project-unknown"
+
+
+def _wf1_stable_id(prefix: str, *parts: Any) -> str:
+    payload = json.dumps(list(parts), ensure_ascii=False, sort_keys=True, default=str)
+    return f"{prefix}-{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _wf1_hash_object(obj: dict[str, Any], hash_key: str) -> str:
+    return sha256_json({key: value for key, value in obj.items() if key != hash_key})
+
+
+def _wf1_evidence_cards(
+    canonical_envelope: dict[str, Any],
+    doc_field: str,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Build bounded evidence cards plus the full SourceRef record per card.
+
+    Cards are the only document text the model sees; records rebuild canonical
+    source_refs at expansion time from the trusted envelope documents.
+    """
+    payload = _wf3_payload(canonical_envelope)
+    cards: list[dict[str, Any]] = []
+    records: dict[str, dict[str, Any]] = {}
+    for document in payload.get(doc_field) or []:
+        if not isinstance(document, Mapping):
+            continue
+        document_id = str(document.get("document_id") or "").strip()
+        if not document_id:
+            continue
+        source_type = _source_type(document.get("document_role"), "HISTORICAL_DOCUMENT")
+        for index, section in enumerate(document.get("sections") or [], 1):
+            if not isinstance(section, Mapping):
+                continue
+            text = str(section.get("text") or "").strip()
+            if not text:
+                continue
+            evidence_id = f"S{len(cards) + 1}"
+            locator = str(section.get("title") or "").strip() or f"section-{index}"
+            cards.append({
+                "evidence_id": evidence_id,
+                "document_title": str(document.get("title") or document_id).strip() or document_id,
+                "locator": locator,
+                "excerpt": text[:1200],
+            })
+            source_hash = str(section.get("text_hash") or document.get("document_hash") or "").strip().lower()
+            records[evidence_id] = {
+                "source_id": document_id,
+                "source_type": source_type,
+                "document_version_id": document.get("document_version_id"),
+                "section_id": str(section.get("section_id") or "").strip() or None,
+                "span_start": 0,
+                "span_end": len(text),
+                "quoted_text": text,
+                "source_hash": source_hash or None,
+                "authority_rank": document.get("authority_rank"),
+                "security_level": str(section.get("security_level") or document.get("security_level") or "INTERNAL"),
+            }
+    return cards, records
+
+
+def _wf1_refs_for_evidence(
+    evidence_ids: Iterable[Any],
+    records: Mapping[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for evidence_id in evidence_ids or []:
+        record = records.get(str(evidence_id))
+        if record:
+            refs.append(copy.deepcopy(record))
+    return _dedupe_source_refs(refs)
+
+
+def _wf1_evidence_ref_ids(
+    evidence_ids: Iterable[Any],
+    records: Mapping[str, dict[str, Any]],
+) -> list[str]:
+    result: list[str] = []
+    for evidence_id in evidence_ids or []:
+        record = records.get(str(evidence_id))
+        if not record:
+            continue
+        visible = str(record.get("section_id") or record.get("source_id") or "").strip()
+        if visible and visible not in result:
+            result.append(visible)
+    return result
+
+
+def _wf1_human_resolutions(canonical_envelope: dict[str, Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in _human_resolutions(canonical_envelope):
+        answer = item.get("answer")
+        if answer is None:
+            continue
+        answer_text = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False, default=str)
+        answer_text = str(answer_text).strip()
+        target = str(item.get("target") or "").strip()
+        question = str(item.get("question") or item.get("question_id") or target).strip()
+        if not answer_text or not target or not question:
+            continue
+        result.append({"question": question, "answer_text": answer_text, "target": target})
+    return result
+
+
+def _wf1_scheme_summary(profile: Any) -> dict[str, Any]:
+    source = profile if isinstance(profile, Mapping) else {}
+    rules: list[dict[str, Any]] = []
+    for rule in source.get("rules") or []:
+        if not isinstance(rule, Mapping):
+            continue
+        statement = str(rule.get("statement") or "").strip()
+        if not statement:
+            continue
+        rules.append({
+            "rule_type": str(rule.get("rule_type") or "COMPLIANCE"),
+            "statement": statement,
+            "mandatory": bool(rule.get("mandatory")),
+        })
+    return {
+        "scheme_name": (str(source.get("scheme_name")).strip() or None) if source.get("scheme_name") is not None else None,
+        "scheme_type": (str(source.get("scheme_type")).strip() or None) if source.get("scheme_type") is not None else None,
+        "guide_direction_name": (str(source.get("guide_direction_name")).strip() or None) if source.get("guide_direction_name") is not None else None,
+        "rules": rules,
+    }
+
+
+def _wf1_canonical_base(canonical_envelope: dict[str, Any], prompt_id: str) -> dict[str, Any]:
+    return {
+        "schema_version": str(canonical_envelope.get("schema_version") or "2.0"),
+        "prompt_id": prompt_id,
+        "prompt_version": str(canonical_envelope.get("prompt_version") or "2.0.0"),
+        "status": "PASS",
+        "result": {},
+        "findings": [],
+        "unresolved_items": [],
+        "user_questions": [],
+        "source_refs": [],
+        "warnings": [],
+    }
+
+
+def _wf1_canonical_findings(
+    semantic_output: Mapping[str, Any],
+    records: Mapping[str, dict[str, Any]],
+    *,
+    category: str,
+    prefix: str,
+    package_target_type: str,
+    target_map: Mapping[str, tuple[str, str]],
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for index, raw in enumerate(semantic_output.get("findings") or [], 1):
+        if not isinstance(raw, Mapping):
+            continue
+        local_id = str(raw.get("target_local_id") or "").strip() or None
+        target_type, target_path = target_map.get(local_id or "", (package_target_type, None))
+        route = str(raw.get("route") or "ORIGINAL_PRODUCER").strip().upper()
+        if route not in {"ORIGINAL_PRODUCER", "PROJECT_KNOWLEDGE_AGENT", "USER", "BLOCK"}:
+            route = "ORIGINAL_PRODUCER"
+        blocking = bool(raw.get("blocking"))
+        repair_instruction = raw.get("repair_instruction")
+        findings.append({
+            "finding_instance_id": f"F-{prefix}-{index:03d}",
+            "defect_namespace": "SEMANTIC_OBSERVATION",
+            "code": str(raw.get("code") or "WF1_SEMANTIC_FINDING"),
+            "severity": str(raw.get("severity") or "P2"),
+            "category": category,
+            "target_type": target_type,
+            "target_path_or_span": target_path,
+            "description": str(raw.get("description") or "模型语义审查发现。"),
+            "evidence_refs": _wf1_evidence_ref_ids(raw.get("evidence_ids"), records),
+            "repairable": not (blocking and route == "USER"),
+            "repair_instruction": str(repair_instruction) if repair_instruction is not None else None,
+            "suggested_route": route,
+            "blocking": blocking,
+        })
+    return findings
+
+
+def _wf1_canonical_unresolved(
+    semantic_output: Mapping[str, Any],
+    *,
+    prefix: str,
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for index, raw in enumerate(semantic_output.get("unresolved_items") or [], 1):
+        if not isinstance(raw, Mapping):
+            continue
+        result.append({
+            "item_id": f"UNR-{prefix}-{index:03d}",
+            "type": str(raw.get("type") or "UNCERTAIN"),
+            "description": str(raw.get("description") or "存在未闭合的语义事项。"),
+            "target_paths": ["/result"],
+            "required_action": str(raw.get("required_action") or "补充材料或重新生成。"),
+            "blocking": bool(raw.get("blocking")),
+        })
+    return result
+
+
+def _wf1_canonical_questions(
+    semantic_output: Mapping[str, Any],
+    *,
+    prefix: str,
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for index, raw in enumerate(semantic_output.get("user_questions") or [], 1):
+        if not isinstance(raw, Mapping):
+            continue
+        result.append({
+            "question_id": f"UQ-{prefix}-{index:03d}",
+            "question_type": str(raw.get("question_type") or "CONFIRMATION"),
+            "question": str(raw.get("question") or ""),
+            "reason": str(raw.get("reason") or ""),
+            "target_paths": ["/result"],
+            "answer_schema": semantic_question_answer_schema(dict(raw)),
+            "blocking": bool(raw.get("blocking")),
+            "priority": str(raw.get("priority") or "P2"),
+        })
+    return result
+
+
+def _wf1_final_status(
+    findings: list[dict[str, Any]],
+    unresolved: list[dict[str, Any]],
+    questions: list[dict[str, Any]],
+    *,
+    prefix: str,
+    verdict: str | None = None,
+) -> str:
+    block = verdict == "BLOCK" or any(
+        bool(f.get("blocking")) and str(f.get("suggested_route")) == "BLOCK"
+        for f in findings
+    )
+    if block:
+        for question in questions:
+            question["blocking"] = False
+        return "BLOCK"
+    user_blocking = any(
+        bool(f.get("blocking")) and str(f.get("suggested_route")) == "USER"
+        for f in findings
+    )
+    has_blocking_question = any(bool(q.get("blocking")) for q in questions)
+    if user_blocking and not has_blocking_question:
+        source = next(
+            f for f in findings
+            if bool(f.get("blocking")) and str(f.get("suggested_route")) == "USER"
+        )
+        questions.append({
+            "question_id": f"UQ-{prefix}-D{len(questions) + 1:02d}",
+            "question_type": "MISSING_INFORMATION",
+            "question": str(source.get("description") or ""),
+            "reason": "由阻断性 USER 路由 finding 确定性派生。",
+            "target_paths": ["/result"],
+            "answer_schema": {"type": "STRING"},
+            "blocking": True,
+            "priority": str(source.get("severity") or "P1"),
+        })
+        has_blocking_question = True
+    if user_blocking or has_blocking_question:
+        return "NEED_USER_INPUT"
+    if (
+        verdict == "REVISE"
+        or any(bool(f.get("blocking")) for f in findings)
+        or any(bool(u.get("blocking")) for u in unresolved)
+    ):
+        return "REVISE"
+    return "PASS"
+
+
+_WF1_STATUS_VERDICTS = {
+    "PASS": "ACCEPT",
+    "REVISE": "REVISE",
+    "NEED_USER_INPUT": "REVISE",
+    "BLOCK": "BLOCK",
+}
+
+
+def build_scheme_extract_model_input(canonical_envelope: dict[str, Any]) -> dict[str, Any]:
+    payload = _wf3_payload(canonical_envelope)
+    cards, _ = _wf1_evidence_cards(canonical_envelope, "guide_documents")
+    scope_values = [str(item).strip() for item in payload.get("extraction_scope") or [] if str(item).strip()]
+    existing_raw = payload.get("existing_profile")
+    existing = None
+    if isinstance(existing_raw, Mapping):
+        version = existing_raw.get("version")
+        existing = {
+            "display_name": (str(existing_raw.get("display_name")).strip() or None)
+            if existing_raw.get("display_name") is not None else None,
+            "version": int(version) if isinstance(version, int) and not isinstance(version, bool) and version >= 1 else 1,
+        }
+    return {
+        "extraction_scope": scope_values,
+        "existing_profile": existing,
+        "human_resolutions": _wf1_human_resolutions(canonical_envelope),
+        "evidence_cards": cards,
+    }
+
+
+def _wf1_rule_evidence_lookup(
+    canonical_envelope: dict[str, Any],
+    doc_field: str,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Map trusted (section_id, document_id) to evidence card ids for candidates."""
+    payload = _wf3_payload(canonical_envelope)
+    by_section: dict[str, str] = {}
+    by_document: dict[str, str] = {}
+    counter = 0
+    for document in payload.get(doc_field) or []:
+        if not isinstance(document, Mapping):
+            continue
+        document_id = str(document.get("document_id") or "").strip()
+        if not document_id:
+            continue
+        for section in document.get("sections") or []:
+            if not isinstance(section, Mapping):
+                continue
+            text = str(section.get("text") or "").strip()
+            if not text:
+                continue
+            counter += 1
+            evidence_id = f"S{counter}"
+            by_document.setdefault(document_id, evidence_id)
+            section_id = str(section.get("section_id") or "").strip()
+            if section_id:
+                by_section.setdefault(section_id, evidence_id)
+    return by_section, by_document
+
+
+def _wf1_candidate_rule_evidence_ids(
+    rule: Mapping[str, Any],
+    by_section: Mapping[str, str],
+    by_document: Mapping[str, str],
+) -> list[str]:
+    result: list[str] = []
+    for ref in rule.get("source_refs") or []:
+        if not isinstance(ref, Mapping):
+            continue
+        evidence_id = None
+        section_id = str(ref.get("section_id") or "").strip()
+        if section_id:
+            evidence_id = by_section.get(section_id)
+        if evidence_id is None:
+            evidence_id = by_document.get(str(ref.get("source_id") or "").strip())
+        if evidence_id and evidence_id not in result:
+            result.append(evidence_id)
+    return result
+
+
+def build_scheme_critic_model_input(canonical_envelope: dict[str, Any]) -> dict[str, Any]:
+    payload = _wf3_payload(canonical_envelope)
+    candidate = payload.get("scheme_candidate") if isinstance(payload.get("scheme_candidate"), Mapping) else {}
+    cards, _ = _wf1_evidence_cards(canonical_envelope, "guide_documents")
+    by_section, by_document = _wf1_rule_evidence_lookup(canonical_envelope, "guide_documents")
+    rules: list[dict[str, Any]] = []
+    for index, rule in enumerate(candidate.get("rules") or [], 1):
+        if not isinstance(rule, Mapping):
+            continue
+        rules.append({
+            "local_id": f"R{index}",
+            "rule_type": str(rule.get("rule_type") or "COMPLIANCE"),
+            "statement": str(rule.get("statement") or "").strip() or f"规则 {index}",
+            "mandatory": bool(rule.get("mandatory")),
+            "evidence_ids": _wf1_candidate_rule_evidence_ids(rule, by_section, by_document),
+        })
+    findings: list[dict[str, Any]] = []
+    for finding in payload.get("deterministic_findings") or []:
+        if isinstance(finding, Mapping):
+            findings.append({
+                "code": str(finding.get("code") or "DETERMINISTIC"),
+                "description": str(finding.get("description") or ""),
+            })
+    return {
+        "scheme_candidate": {
+            "scheme_name": str(candidate.get("scheme_name") or "").strip(),
+            "scheme_type": str(candidate.get("scheme_type") or "").strip(),
+            "guide_direction_name": str(candidate.get("guide_direction_name") or "").strip(),
+            "funding_organization": str(candidate.get("funding_organization") or "").strip(),
+            "application_year": candidate.get("application_year") if isinstance(candidate.get("application_year"), int) and not isinstance(candidate.get("application_year"), bool) else None,
+            "duration_months": candidate.get("duration_months") if isinstance(candidate.get("duration_months"), int) and not isinstance(candidate.get("duration_months"), bool) else None,
+            "rules": rules,
+        },
+        "deterministic_findings": findings,
+        "human_resolutions": _wf1_human_resolutions(canonical_envelope),
+        "evidence_cards": cards,
+    }
+
+
+def _wf1_revision_issues(canonical_envelope: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project runtime-owned revision findings into the model-visible issue list."""
+
+    payload = _wf3_payload(canonical_envelope)
+    issues: list[dict[str, Any]] = []
+    for item in payload.get("revision_findings") or []:
+        if not isinstance(item, Mapping):
+            continue
+        code = str(item.get("code") or "").strip()
+        description = str(item.get("description") or "").strip()
+        problem = f"{code}: {description}" if code else description
+        action = str(item.get("repair_instruction") or "").strip() or (
+            "修正该问题；保持其他有效语义不变。"
+        )
+        issues.append({
+            "problem": problem[:240] or "上一轮输出存在确定性校验问题。",
+            "severity": str(item.get("severity") or "P1"),
+            "component": str(item.get("category") or "PROJECT_DEFINITION"),
+            "required_action": action[:500],
+            "evidence_ids": [],
+        })
+    return issues[:12]
+
+
+def build_project_definition_extract_model_input(canonical_envelope: dict[str, Any]) -> dict[str, Any]:
+    payload = _wf3_payload(canonical_envelope)
+    cards, _ = _wf1_evidence_cards(canonical_envelope, "source_documents")
+    scope_values = [str(item).strip() for item in payload.get("extraction_scope") or [] if str(item).strip()]
+    existing_raw = payload.get("existing_project_definition")
+    existing = None
+    if isinstance(existing_raw, Mapping):
+        project_name = None
+        domains: list[str] = []
+        items = existing_raw.get("items") or []
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            domain = str(item.get("domain") or "").strip()
+            if domain and domain not in domains:
+                domains.append(domain)
+            if str(item.get("item_type") or "") == "PROJECT_BASIC" and project_name is None:
+                content = item.get("content") if isinstance(item.get("content"), Mapping) else {}
+                name = str(content.get("project_name") or "").strip()
+                if name:
+                    project_name = name
+        version = existing_raw.get("version")
+        existing = {
+            "version": int(version) if isinstance(version, int) and not isinstance(version, bool) and version >= 1 else 1,
+            "project_name": project_name,
+            "item_count": len(items),
+            "domains": domains,
+        }
+    result = {
+        "extraction_scope": scope_values,
+        "scheme_summary": _wf1_scheme_summary(payload.get("scheme_profile")),
+        "existing_project_definition": existing,
+        "human_resolutions": _wf1_human_resolutions(canonical_envelope),
+        "evidence_cards": cards,
+    }
+    revision_issues = _wf1_revision_issues(canonical_envelope)
+    if revision_issues:
+        result["revision_issues"] = revision_issues
+    return result
+
+
+def build_project_definition_critic_model_input(canonical_envelope: dict[str, Any]) -> dict[str, Any]:
+    payload = _wf3_payload(canonical_envelope)
+    candidate = payload.get("project_definition_candidate") if isinstance(payload.get("project_definition_candidate"), Mapping) else {}
+    cards, _ = _wf1_evidence_cards(canonical_envelope, "source_documents")
+    items: list[dict[str, Any]] = []
+    key_by_item_id: dict[str, str] = {}
+    for item in candidate.get("items") or []:
+        if not isinstance(item, Mapping):
+            continue
+        item_id = str(item.get("item_id") or "").strip()
+        if not item_id:
+            continue
+        local_key = f"K{len(items) + 1}"
+        key_by_item_id[item_id] = local_key
+        content = item.get("content") if isinstance(item.get("content"), Mapping) else {}
+        items.append({
+            "local_key": local_key,
+            "item_type": str(item.get("item_type") or ""),
+            "domain": str(item.get("domain") or ""),
+            "summary": _project_item_statement(dict(item))[:400],
+            "content": copy.deepcopy(dict(content)),
+        })
+    relations: list[dict[str, Any]] = []
+    for relation in candidate.get("relations") or []:
+        if not isinstance(relation, Mapping):
+            continue
+        from_key = key_by_item_id.get(str(relation.get("source_item_id") or ""))
+        to_key = key_by_item_id.get(str(relation.get("target_item_id") or ""))
+        if not from_key or not to_key:
+            continue
+        relations.append({
+            "local_id": f"L{len(relations) + 1}",
+            "from_key": from_key,
+            "to_key": to_key,
+            "relation_type": str(relation.get("relation_type") or ""),
+        })
+    project_name = None
+    for item in candidate.get("items") or []:
+        if isinstance(item, Mapping) and str(item.get("item_type") or "") == "PROJECT_BASIC":
+            content = item.get("content") if isinstance(item.get("content"), Mapping) else {}
+            name = str(content.get("project_name") or "").strip()
+            if name:
+                project_name = name
+                break
+    contract = payload.get("proposal_contract_candidate") if isinstance(payload.get("proposal_contract_candidate"), Mapping) else {}
+    max_pages = contract.get("max_main_pages")
+    max_questions = contract.get("max_core_research_questions")
+    argument = payload.get("argument_graph_candidate") if isinstance(payload.get("argument_graph_candidate"), Mapping) else {}
+    central = argument.get("central_proposition") if isinstance(argument.get("central_proposition"), Mapping) else {}
+    scope_boundaries = argument.get("scope_boundaries") if isinstance(argument.get("scope_boundaries"), Mapping) else {}
+    research_questions: list[dict[str, Any]] = []
+    for question in argument.get("research_questions") or []:
+        if not isinstance(question, Mapping):
+            continue
+        statement = str(question.get("statement") or "").strip()
+        if not statement:
+            continue
+        research_questions.append({
+            "statement": statement,
+            "question_type": str(question.get("question_type") or "TECHNICAL"),
+            "gap_keys": [
+                key_by_item_id[gap_id]
+                for gap_id in question.get("linked_gap_ids") or []
+                if str(gap_id) in key_by_item_id
+            ],
+        })
+    matrix = payload.get("relation_matrix") if isinstance(payload.get("relation_matrix"), Mapping) else {}
+    allowed = [
+        [str(part) for part in triple]
+        for triple in matrix.get("allowed_relations") or []
+        if isinstance(triple, list) and len(triple) >= 3
+    ]
+    findings: list[dict[str, Any]] = []
+    for finding in payload.get("deterministic_findings") or []:
+        if isinstance(finding, Mapping):
+            findings.append({
+                "code": str(finding.get("code") or "DETERMINISTIC"),
+                "description": str(finding.get("description") or ""),
+            })
+    return {
+        "candidate": {
+            "project_name": project_name,
+            "items": items,
+            "relations": relations,
+        },
+        "proposal_contract_candidate": {
+            "document_type": str(contract.get("document_type") or "UNKNOWN"),
+            "primary_evaluation_logic": str(contract.get("primary_evaluation_logic") or "UNKNOWN"),
+            "max_main_pages": int(max_pages) if isinstance(max_pages, int) and not isinstance(max_pages, bool) else None,
+            "max_core_research_questions": int(max_questions) if isinstance(max_questions, int) and not isinstance(max_questions, bool) and 1 <= max_questions <= 6 else 4,
+            "mandatory_sections": _wf3_strings(contract.get("mandatory_sections")),
+            "status": str(contract.get("status") or "UNKNOWN"),
+        },
+        "argument_graph_candidate": {
+            "central_proposition": {
+                "statement": str(central.get("statement") or "").strip() or "未提供中心命题。",
+                "proposition_type": str(central.get("proposition_type") or "UNKNOWN"),
+            },
+            "research_questions": research_questions,
+            "in_scope": _wf3_strings(scope_boundaries.get("in_scope")),
+            "out_of_scope": _wf3_strings(scope_boundaries.get("out_of_scope")),
+        },
+        "scheme_summary": _wf1_scheme_summary(payload.get("scheme_profile")),
+        "relation_matrix_allowed": allowed,
+        "deterministic_findings": findings,
+        "human_resolutions": _wf1_human_resolutions(canonical_envelope),
+        "evidence_cards": cards,
+    }
+
+
+def _wf1_item_content(item_type: str, summary: str, attributes: Mapping[str, Any], project_name: str) -> dict[str, Any]:
+    content: dict[str, Any] = {}
+    for field, kind in _WF1_ITEM_CONTENT_SPECS.get(item_type, ()):
+        raw = attributes.get(field)
+        if kind in ("texts", "texts1"):
+            values = raw if isinstance(raw, list) else ([raw] if raw is not None else [])
+            cleaned = [str(value) for value in values if str(value).strip()]
+            if kind == "texts1" and not cleaned:
+                cleaned = [summary]
+            content[field] = cleaned
+        elif kind == "bool":
+            content[field] = bool(raw) if raw is not None else False
+        elif kind == "num":
+            content[field] = float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0
+        elif kind == "num?":
+            content[field] = float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
+        elif kind == "text?":
+            content[field] = str(raw).strip() or None if raw is not None else None
+        elif kind.startswith("enum:"):
+            default = kind.split(":", 1)[1]
+            allowed = _WF1_ENUM_FALLBACKS.get(f"{item_type}.{field}", ())
+            value = str(raw).strip().upper() if raw is not None else ""
+            content[field] = value if value in allowed else default
+        elif kind.startswith("text:"):
+            content[field] = str(raw).strip() if raw is not None and str(raw).strip() else kind.split(":", 1)[1]
+        else:
+            content[field] = str(raw).strip() if raw is not None and str(raw).strip() else summary
+    if item_type == "PROJECT_BASIC":
+        content["project_name"] = project_name
+    return content
+
+
+_WF1_PENDING_TEXT = "待定（待用户确认）"
+
+
+def _wf1_pending_text(value: Any) -> str:
+    text = str(value or "").strip()
+    return text if text else _WF1_PENDING_TEXT
+
+
+def expand_scheme_extract_model_output(canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:
+    payload = _wf3_payload(canonical_envelope)
+    _, records = _wf1_evidence_cards(canonical_envelope, "guide_documents")
+    security = _wf1_security_level(canonical_envelope)
+    existing_raw = payload.get("existing_profile")
+    existing = existing_raw if isinstance(existing_raw, Mapping) else None
+    if existing is not None and str(existing.get("object_id") or "").strip():
+        profile_id = str(existing["object_id"]).strip()
+        base_version = existing.get("version")
+        version = int(base_version) + 1 if isinstance(base_version, int) and not isinstance(base_version, bool) else 1
+    else:
+        profile_id = _wf1_stable_id("scheme-profile", str(semantic_output.get("scheme_name") or ""), _wf1_project_id(canonical_envelope))
+        version = 1
+    rules: list[dict[str, Any]] = []
+    used_refs: list[dict[str, Any]] = []
+    for rule in semantic_output.get("rules") or []:
+        if not isinstance(rule, Mapping):
+            continue
+        statement = str(rule.get("statement") or "").strip()
+        rule_type = str(rule.get("rule_type") or "COMPLIANCE")
+        refs = _wf1_refs_for_evidence(rule.get("evidence_ids"), records)
+        used_refs.extend(refs)
+        rules.append({
+            "rule_id": _wf1_stable_id("rule", rule_type, statement),
+            "rule_type": rule_type,
+            "statement": statement,
+            "mandatory": bool(rule.get("mandatory")),
+            "source_refs": refs,
+            "security_level": security,
+        })
+    research_attribute = semantic_output.get("research_attribute")
+    application_year = semantic_output.get("application_year")
+    duration_months = semantic_output.get("duration_months")
+    profile = {
+        "schema_version": str(canonical_envelope.get("schema_version") or "2.0"),
+        "profile_id": profile_id,
+        "project_id": _wf1_project_id(canonical_envelope),
+        "version": version,
+        # Required minLength-1 protocol fields.  For non-application documents
+        # (e.g. a research brief) values like funding_organization legitimately
+        # do not exist; the model reports the gap via findings/user_questions
+        # and the runtime writes an explicit pending placeholder instead of
+        # forcing the model to fabricate one.
+        "scheme_name": _wf1_pending_text(semantic_output.get("scheme_name")),
+        "scheme_type": _wf1_pending_text(semantic_output.get("scheme_type")),
+        "funding_organization": _wf1_pending_text(semantic_output.get("funding_organization")),
+        "application_year": int(application_year) if isinstance(application_year, int) and not isinstance(application_year, bool) else None,
+        "guide_direction_name": _wf1_pending_text(semantic_output.get("guide_direction_name")),
+        "research_attribute": str(research_attribute).strip() if research_attribute is not None else None,
+        "duration_months": int(duration_months) if isinstance(duration_months, int) and not isinstance(duration_months, bool) else None,
+        "rules": rules,
+        "status": "DRAFT",
+        "security_level": security,
+        "profile_hash": "",
+    }
+    profile["profile_hash"] = _wf1_hash_object(profile, "profile_hash")
+    target_map = {
+        str(rule.get("local_id") or ""): ("SCHEME_RULE", f"/result/scheme_profile/rules/{index}")
+        for index, rule in enumerate(semantic_output.get("rules") or [])
+        if isinstance(rule, Mapping) and str(rule.get("local_id") or "")
+    }
+    findings = _wf1_canonical_findings(
+        semantic_output, records,
+        category="SCHEME", prefix="SCX",
+        package_target_type="SCHEME_PROFILE", target_map=target_map,
+    )
+    unresolved = _wf1_canonical_unresolved(semantic_output, prefix="SCX")
+    questions = _wf1_canonical_questions(semantic_output, prefix="SCX")
+    status = _wf1_final_status(findings, unresolved, questions, prefix="SCX")
+    output = _wf1_canonical_base(canonical_envelope, "P-SCHEME-EXTRACT")
+    output["status"] = status
+    output["result"] = {
+        "scheme_profile": profile,
+        "extraction_coverage": [],
+        "ambiguous_rule_ids": [],
+    }
+    output["findings"] = findings
+    output["unresolved_items"] = unresolved
+    output["user_questions"] = questions
+    output["source_refs"] = _dedupe_source_refs(used_refs)
+    document_kind = str(semantic_output.get("document_kind") or "UNKNOWN")
+    if document_kind not in {"APPLICATION_GUIDE", "TASK_BOOK"}:
+        output["warnings"].append(
+            f"SYSTEM_DOCUMENT_KIND_NOTE: 输入文种判定为 {document_kind}，提取结果按语义内容保留。"
+        )
+    return output
+
+
+def expand_scheme_critic_model_output(canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:
+    payload = _wf3_payload(canonical_envelope)
+    candidate = payload.get("scheme_candidate") if isinstance(payload.get("scheme_candidate"), Mapping) else {}
+    _, records = _wf1_evidence_cards(canonical_envelope, "guide_documents")
+    candidate_rules = [rule for rule in candidate.get("rules") or [] if isinstance(rule, Mapping)]
+    local_ids = [f"R{index}" for index in range(1, len(candidate_rules) + 1)]
+    rule_id_by_local = {
+        local: str(rule.get("rule_id") or "")
+        for local, rule in zip(local_ids, candidate_rules)
+    }
+
+    def real_rule_id(local: Any) -> str | None:
+        value = rule_id_by_local.get(str(local or ""))
+        return value or None
+
+    checked = [rid for rid in (real_rule_id(x) for x in semantic_output.get("checked_local_ids") or []) if rid]
+    numeric_checks = []
+    for check in semantic_output.get("numeric_checks") or []:
+        if not isinstance(check, Mapping):
+            continue
+        rule_id = real_rule_id(check.get("local_id"))
+        if not rule_id:
+            continue
+        numeric_checks.append({
+            "rule_id": rule_id,
+            "value_correct": bool(check.get("value_correct")),
+            "note": str(check.get("note") or "数值核对。"),
+        })
+    missing_candidates = []
+    for item in semantic_output.get("missing_rule_candidates") or []:
+        if not isinstance(item, Mapping):
+            continue
+        statement = str(item.get("statement") or "").strip()
+        record = records.get(str(item.get("evidence_id") or ""))
+        if not statement or not record:
+            continue
+        missing_candidates.append({"statement": statement, "source_ref": copy.deepcopy(record)})
+    target_map = {
+        local: ("SCHEME_RULE", f"/payload/scheme_candidate/rules/{index}")
+        for index, local in enumerate(local_ids)
+    }
+    findings = _wf1_canonical_findings(
+        semantic_output, records,
+        category="SCHEME", prefix="SCC",
+        package_target_type="SCHEME_PROFILE", target_map=target_map,
+    )
+    unresolved = _wf1_canonical_unresolved(semantic_output, prefix="SCC")
+    questions = _wf1_canonical_questions(semantic_output, prefix="SCC")
+    status = _wf1_final_status(
+        findings, unresolved, questions, prefix="SCC",
+        verdict=str(semantic_output.get("verdict") or ""),
+    )
+    used_refs = _wf1_refs_for_evidence(
+        [item.get("evidence_id") for item in semantic_output.get("missing_rule_candidates") or [] if isinstance(item, Mapping)],
+        records,
+    )
+    output = _wf1_canonical_base(canonical_envelope, "P-SCHEME-CRITIC")
+    output["status"] = status
+    output["result"] = {
+        "verdict": _WF1_STATUS_VERDICTS[status],
+        "checked_rule_ids": checked,
+        "missing_rule_candidates": missing_candidates,
+        "numeric_checks": numeric_checks,
+    }
+    output["findings"] = findings
+    output["unresolved_items"] = unresolved
+    output["user_questions"] = questions
+    output["source_refs"] = used_refs
+    return output
+
+
+def expand_project_definition_extract_model_output(canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:
+    payload = _wf3_payload(canonical_envelope)
+    _, records = _wf1_evidence_cards(canonical_envelope, "source_documents")
+    security = _wf1_security_level(canonical_envelope)
+    project_name = str(semantic_output.get("project_name") or "").strip()
+    existing_raw = payload.get("existing_project_definition")
+    existing = existing_raw if isinstance(existing_raw, Mapping) else None
+    base_version = existing.get("version") if existing else None
+    version = int(base_version) + 1 if isinstance(base_version, int) and not isinstance(base_version, bool) else 1
+
+    items: list[dict[str, Any]] = []
+    item_id_by_key: dict[str, str] = {}
+    item_by_id: dict[str, dict[str, Any]] = {}
+    used_refs: list[dict[str, Any]] = []
+    for raw in semantic_output.get("items") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        local_key = str(raw.get("local_key") or "").strip()
+        item_type = str(raw.get("item_type") or "").strip()
+        if not local_key or item_type not in _WF1_ITEM_CONTENT_SPECS:
+            continue
+        summary = str(raw.get("summary") or "").strip() or item_type
+        attributes = raw.get("attributes") if isinstance(raw.get("attributes"), Mapping) else {}
+        evidence_ids = raw.get("evidence_ids") or []
+        refs = _wf1_refs_for_evidence(evidence_ids, records)
+        used_refs.extend(refs)
+        content = _wf1_item_content(item_type, summary, attributes, project_name)
+        item_id = _wf1_stable_id("item", item_type, content)
+        has_evidence = bool(refs)
+        item = {
+            "item_id": item_id,
+            "item_type": item_type,
+            "domain": str(raw.get("domain") or "RESOURCES_BUDGET_RISK_COMPLIANCE"),
+            "content": content,
+            "knowledge_status": "DOCUMENT_EXTRACTED" if has_evidence else "ESTIMATED",
+            "owner_ref": None,
+            "source_refs": refs,
+            "security_level": security,
+            "locked": False,
+            "confidence": "MEDIUM" if has_evidence else "LOW",
+            "item_hash": "",
+        }
+        item["item_hash"] = _wf1_hash_object(item, "item_hash")
+        items.append(item)
+        item_id_by_key[local_key] = item_id
+        item_by_id[item_id] = item
+
+    relations: list[dict[str, Any]] = []
+    for raw in semantic_output.get("relations") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        source_id = item_id_by_key.get(str(raw.get("from_key") or ""))
+        target_id = item_id_by_key.get(str(raw.get("to_key") or ""))
+        if not source_id or not target_id or source_id == target_id:
+            continue
+        relation_type = str(raw.get("relation_type") or "").strip()
+        refs = _wf1_refs_for_evidence(raw.get("evidence_ids"), records)
+        used_refs.extend(refs)
+        relation = {
+            "relation_id": _wf1_stable_id("relation", source_id, relation_type, target_id),
+            "source_item_id": source_id,
+            "source_item_type": str(item_by_id[source_id].get("item_type") or ""),
+            "relation_type": relation_type,
+            "target_item_id": target_id,
+            "target_item_type": str(item_by_id[target_id].get("item_type") or ""),
+            "status": "CANDIDATE",
+            "confidence": "MEDIUM" if refs else "LOW",
+            "source_refs": refs,
+            "security_level": security,
+            "relation_hash": "",
+        }
+        relation["relation_hash"] = _wf1_hash_object(relation, "relation_hash")
+        relations.append(relation)
+
+    domain_readiness: list[dict[str, Any]] = []
+    extraction_coverage: list[dict[str, Any]] = []
+    domains = list(dict.fromkeys(str(item.get("domain")) for item in items))
+    for domain in domains:
+        domain_items = [item for item in items if str(item.get("domain")) == domain]
+        evidenced = [item for item in domain_items if item.get("source_refs")]
+        ratio = len(evidenced) / len(domain_items) if domain_items else 0.0
+        domain_readiness.append({
+            "domain": domain,
+            "completeness": 1.0,
+            "confirmation_ratio": ratio,
+            "evidence_ratio": ratio,
+            "open_conflicts": 0,
+            "readiness": "READY" if ratio >= 1.0 else "READY_WITH_WARNINGS",
+            "missing_item_types": [],
+        })
+        source_ids = list(dict.fromkeys(
+            str(ref.get("source_id"))
+            for item in domain_items
+            for ref in item.get("source_refs") or []
+            if isinstance(ref, Mapping) and str(ref.get("source_id") or "")
+        ))
+        extraction_coverage.append({
+            "domain": domain,
+            "source_ids": source_ids,
+            "item_ids": [str(item.get("item_id")) for item in domain_items],
+        })
+
+    package = {
+        "schema_version": str(canonical_envelope.get("schema_version") or "2.0"),
+        "project_id": _wf1_project_id(canonical_envelope),
+        "version": version,
+        "parent_version_id": None,
+        "items": items,
+        "relations": relations,
+        "domain_readiness": domain_readiness,
+        "open_conflict_ids": [],
+        "status": "DRAFT",
+        "security_level": security,
+        "package_hash": "",
+    }
+    package["package_hash"] = _wf1_hash_object(package, "package_hash")
+
+    scheme_profile = payload.get("scheme_profile") if isinstance(payload.get("scheme_profile"), Mapping) else {}
+    contract_hint = semantic_output.get("proposal_contract") if isinstance(semantic_output.get("proposal_contract"), Mapping) else {}
+    document_kind = str(semantic_output.get("document_kind") or "UNKNOWN")
+    document_type = {
+        "RESEARCH_PROPOSAL": "RESEARCH_PROPOSAL",
+        "ENGINEERING_PROPOSAL": "ENGINEERING_PROPOSAL",
+        "UNKNOWN": "UNKNOWN",
+    }.get(document_kind, "TECHNICAL_REPORT")
+    seed = semantic_output.get("argument_seed") if isinstance(semantic_output.get("argument_seed"), Mapping) else {}
+    seed_questions = [q for q in seed.get("research_questions") or [] if isinstance(q, Mapping)]
+    max_questions_hint = contract_hint.get("max_core_research_questions")
+    max_pages_hint = contract_hint.get("max_main_pages")
+    evaluation_logic = str(contract_hint.get("primary_evaluation_logic") or "UNKNOWN")
+    if evaluation_logic not in {"SCIENTIFIC_MERIT", "TECHNICAL_INNOVATION", "ENGINEERING_FEASIBILITY", "MIXED"}:
+        evaluation_logic = "UNKNOWN"
+    proposal_contract = {
+        "contract_id": _wf1_stable_id("proposal-contract", project_name, document_kind),
+        "document_type": document_type,
+        "funding_scheme": (str(scheme_profile.get("scheme_name")).strip() or None) if scheme_profile.get("scheme_name") is not None else None,
+        "primary_evaluation_logic": evaluation_logic,
+        "target_evaluators": _wf3_strings(contract_hint.get("target_evaluators")),
+        "max_main_pages": int(max_pages_hint) if isinstance(max_pages_hint, int) and not isinstance(max_pages_hint, bool) and max_pages_hint >= 1 else None,
+        "max_core_research_questions": int(max_questions_hint) if isinstance(max_questions_hint, int) and not isinstance(max_questions_hint, bool) and 1 <= max_questions_hint <= 6 else max(1, min(6, len(seed_questions) or 1)),
+        "mandatory_sections": _wf3_strings(contract_hint.get("mandatory_sections")),
+        "appendix_only_topics": _wf3_strings(contract_hint.get("appendix_only_topics")),
+        "forbidden_main_body_topics": _wf3_strings(contract_hint.get("forbidden_main_body_topics")),
+        "status": "CONFIRMED" if contract_hint else ("UNKNOWN" if document_kind == "UNKNOWN" else "PARTIAL"),
+    }
+
+    central = seed.get("central_question") if isinstance(seed.get("central_question"), Mapping) else {}
+    central_refs = _wf1_refs_for_evidence(central.get("evidence_ids"), records)
+    used_refs.extend(central_refs)
+    proposition_type = str(central.get("proposition_type") or "UNKNOWN")
+    if proposition_type not in {"SCIENTIFIC_HYPOTHESIS", "TECHNICAL_PRINCIPLE", "DESIGN_PROPOSITION"}:
+        proposition_type = "UNKNOWN"
+    nodes: list[dict[str, Any]] = []
+    node_item_ids: set[str] = set()
+    for item in items:
+        node_type = _WF1_NODE_TYPE_BY_ITEM_TYPE.get(str(item.get("item_type") or ""))
+        if not node_type:
+            continue
+        nodes.append({
+            "node_id": str(item["item_id"]),
+            "node_type": node_type,
+            "statement": _project_item_statement(item)[:500],
+            "status": "SUPPORTED" if item.get("source_refs") else "PLANNED",
+            "source_refs": copy.deepcopy(item.get("source_refs") or []),
+        })
+        node_item_ids.add(str(item["item_id"]))
+    edges: list[dict[str, Any]] = []
+    for relation in relations:
+        source_id = str(relation.get("source_item_id") or "")
+        target_id = str(relation.get("target_item_id") or "")
+        if source_id not in node_item_ids or target_id not in node_item_ids:
+            continue
+        edges.append({
+            "edge_id": f"arg-edge-{len(edges) + 1:03d}",
+            "source_id": source_id,
+            "relation": str(relation.get("relation_type") or "SUPPORTS"),
+            "target_id": target_id,
+            "rationale": f"由项目定义关系 {relation.get('relation_type')} 派生。",
+        })
+    research_questions: list[dict[str, Any]] = []
+    for index, question in enumerate(seed_questions, 1):
+        statement = str(question.get("statement") or "").strip()
+        if not statement:
+            continue
+        node_id = f"rq-{index:03d}"
+        question_type = str(question.get("question_type") or "TECHNICAL")
+        if question_type not in {"SCIENTIFIC", "TECHNICAL", "ENGINEERING"}:
+            question_type = "TECHNICAL"
+        answerability = str(question.get("answerability") or "UNCLEAR")
+        if answerability not in {"TESTABLE", "COMPARABLE", "DESIGN_VERIFIABLE"}:
+            answerability = "UNCLEAR"
+        linked_gap_ids = [
+            item_id_by_key[str(key)]
+            for key in question.get("gap_keys") or []
+            if str(key) in item_id_by_key
+        ]
+        research_questions.append({
+            "node_id": node_id,
+            "statement": statement,
+            "question_type": question_type,
+            "linked_gap_ids": list(dict.fromkeys(linked_gap_ids)),
+            "answerability": answerability,
+            "success_evidence": _wf3_strings(question.get("success_evidence")),
+        })
+        used_refs.extend(_wf1_refs_for_evidence(question.get("evidence_ids"), records))
+        for gap_id in dict.fromkeys(linked_gap_ids):
+            if gap_id in node_item_ids:
+                edges.append({
+                    "edge_id": f"arg-edge-{len(edges) + 1:03d}",
+                    "source_id": gap_id,
+                    "relation": "MOTIVATES",
+                    "target_id": node_id,
+                    "rationale": "研究问题由该差距驱动。",
+                })
+    if not research_questions:
+        research_questions.append({
+            "node_id": "rq-001",
+            "statement": str(central.get("statement") or "").strip() or f"{project_name}的核心研究问题待确认。",
+            "question_type": "TECHNICAL",
+            "linked_gap_ids": [],
+            "answerability": "UNCLEAR",
+            "success_evidence": [],
+        })
+    argument_graph_seed = {
+        "graph_id": _wf1_stable_id("argument-seed", project_name, str(central.get("statement") or "")),
+        "central_proposition": {
+            "node_id": _wf1_stable_id("prop", str(central.get("statement") or project_name)),
+            "statement": str(central.get("statement") or "").strip() or project_name,
+            "proposition_type": proposition_type,
+            "falsifiable_or_comparable": bool(central.get("falsifiable_or_comparable")),
+            "boundary_conditions": _wf3_strings(central.get("boundary_conditions")),
+            "source_refs": central_refs,
+        },
+        "research_questions": research_questions,
+        "scope_boundaries": {
+            "in_scope": _wf3_strings(seed.get("in_scope")),
+            "out_of_scope": _wf3_strings(seed.get("out_of_scope")),
+        },
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+    target_map = {
+        str(raw.get("local_key") or ""): ("PROJECT_ITEM", f"/result/project_definition/items/{index}")
+        for index, raw in enumerate(semantic_output.get("items") or [])
+        if isinstance(raw, Mapping) and str(raw.get("local_key") or "")
+    }
+    findings = _wf1_canonical_findings(
+        semantic_output, records,
+        category="PROJECT_DEFINITION", prefix="PDX",
+        package_target_type="PROJECT_DEFINITION_PACKAGE", target_map=target_map,
+    )
+    unresolved = _wf1_canonical_unresolved(semantic_output, prefix="PDX")
+    questions = _wf1_canonical_questions(semantic_output, prefix="PDX")
+    status = _wf1_final_status(findings, unresolved, questions, prefix="PDX")
+    output = _wf1_canonical_base(canonical_envelope, "P-PROJECT-DEFINITION-EXTRACT")
+    output["status"] = status
+    output["result"] = {
+        "project_definition": package,
+        "extraction_coverage": extraction_coverage,
+        "unmapped_source_spans": [],
+        "proposal_contract": proposal_contract,
+        "argument_graph_seed": argument_graph_seed,
+    }
+    output["findings"] = findings
+    output["unresolved_items"] = unresolved
+    output["user_questions"] = questions
+    output["source_refs"] = _dedupe_source_refs(used_refs)
+    return output
+
+
+def expand_project_definition_critic_model_output(canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:
+    payload = _wf3_payload(canonical_envelope)
+    candidate = payload.get("project_definition_candidate") if isinstance(payload.get("project_definition_candidate"), Mapping) else {}
+    _, records = _wf1_evidence_cards(canonical_envelope, "source_documents")
+    candidate_items = [
+        item for item in candidate.get("items") or []
+        if isinstance(item, Mapping) and str(item.get("item_id") or "").strip()
+    ]
+    candidate_relations = [rel for rel in candidate.get("relations") or [] if isinstance(rel, Mapping)]
+    item_id_by_key = {f"K{index}": str(item.get("item_id")) for index, item in enumerate(candidate_items, 1)}
+    relation_id_by_key = {
+        f"L{index}": str(rel.get("relation_id") or "")
+        for index, rel in enumerate(candidate_relations, 1)
+    }
+    # The model input drops relations whose endpoints are not both present; mirror that.
+    known_item_ids = {str(item.get("item_id")) for item in candidate_items}
+    relation_id_by_key = {
+        key: rid
+        for key, rid in relation_id_by_key.items()
+        if rid
+    }
+
+    def real_item(local: Any) -> str | None:
+        return item_id_by_key.get(str(local or ""))
+
+    def real_relation(local: Any) -> str | None:
+        value = relation_id_by_key.get(str(local or ""))
+        return value or None
+
+    checked_items = [rid for rid in (real_item(x) for x in semantic_output.get("checked_item_keys") or []) if rid]
+    checked_relations = [rid for rid in (real_relation(x) for x in semantic_output.get("checked_relation_keys") or []) if rid]
+    invalid_relations = [rid for rid in (real_relation(x) for x in semantic_output.get("invalid_relation_keys") or []) if rid]
+    upgrade_items = [rid for rid in (real_item(x) for x in semantic_output.get("status_upgrade_item_keys") or []) if rid]
+    checks_by_dimension: dict[str, dict[str, Any]] = {}
+    for check in semantic_output.get("argument_checks") or []:
+        if not isinstance(check, Mapping):
+            continue
+        dimension = str(check.get("dimension") or "")
+        if dimension in _WF1_ARGUMENT_CHECK_DIMENSIONS and dimension not in checks_by_dimension:
+            checks_by_dimension[dimension] = {
+                "dimension": dimension,
+                "passed": bool(check.get("passed")),
+                "evidence": str(check.get("evidence") or "").strip() or "语义审查记录。",
+                "blocking_ids": [
+                    rid for rid in (real_item(x) for x in check.get("blocking_item_keys") or []) if rid
+                ],
+            }
+    argument_checks = [
+        checks_by_dimension.get(dimension) or {
+            "dimension": dimension,
+            "passed": False,
+            "evidence": "模型未返回该维度的审查记录。",
+            "blocking_ids": [],
+        }
+        for dimension in _WF1_ARGUMENT_CHECK_DIMENSIONS
+    ]
+    target_map: dict[str, tuple[str, str]] = {}
+    for index, key in enumerate(item_id_by_key):
+        target_map[key] = ("PROJECT_ITEM", f"/payload/project_definition_candidate/items/{index}")
+    for index, key in enumerate(relation_id_by_key):
+        target_map[key] = ("PROJECT_RELATION", f"/payload/project_definition_candidate/relations/{index}")
+    findings = _wf1_canonical_findings(
+        semantic_output, records,
+        category="PROJECT_DEFINITION", prefix="PDC",
+        package_target_type="PROJECT_DEFINITION_PACKAGE", target_map=target_map,
+    )
+    unresolved = _wf1_canonical_unresolved(semantic_output, prefix="PDC")
+    questions = _wf1_canonical_questions(semantic_output, prefix="PDC")
+    status = _wf1_final_status(
+        findings, unresolved, questions, prefix="PDC",
+        verdict=str(semantic_output.get("verdict") or ""),
+    )
+    output = _wf1_canonical_base(canonical_envelope, "P-PROJECT-DEFINITION-CRITIC")
+    output["status"] = status
+    output["result"] = {
+        "verdict": _WF1_STATUS_VERDICTS[status],
+        "checked_item_ids": checked_items,
+        "checked_relation_ids": checked_relations,
+        "invalid_relation_ids": invalid_relations,
+        "status_upgrade_item_ids": upgrade_items,
+        "argument_checks": argument_checks,
+    }
+    output["findings"] = findings
+    output["unresolved_items"] = unresolved
+    output["user_questions"] = questions
+    output["source_refs"] = []
+    return output
+
+
+def _wf1_semantic_reference_errors(prompt_id: str, canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> list[str]:
+    model_input = build_semantic_model_input(prompt_id, canonical_envelope)
+    known_evidence = {str(c.get("evidence_id")) for c in model_input.get("evidence_cards") or [] if isinstance(c, Mapping)}
+    errors: list[str] = []
+
+    def visit(node: Any, path: tuple[str, ...] = ()) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, path + (str(index),))
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                child = path + (key,)
+                if key == "evidence_ids" and isinstance(value, list):
+                    for index, evidence_id in enumerate(value):
+                        if str(evidence_id) not in known_evidence:
+                            errors.append(
+                                "/" + "/".join(child + (str(index),))
+                                + f": evidence_id {evidence_id!r} is not present in evidence_cards"
+                            )
+                elif key == "evidence_id" and isinstance(value, str):
+                    if value not in known_evidence:
+                        errors.append(
+                            "/" + "/".join(child)
+                            + f": evidence_id {value!r} is not present in evidence_cards"
+                        )
+                else:
+                    visit(value, child)
+
+    visit(semantic_output)
+
+    for index, question in enumerate(semantic_output.get("user_questions") or []):
+        if (
+            isinstance(question, Mapping)
+            and question.get("question_type") == "CHOICE"
+            and not question.get("allowed_values")
+        ):
+            errors.append(
+                f"/user_questions/{index}/allowed_values: CHOICE requires at least one allowed value"
+            )
+
+    findings = [f for f in semantic_output.get("findings") or [] if isinstance(f, Mapping)]
+
+    if prompt_id == "P-SCHEME-EXTRACT":
+        local_ids: list[str] = []
+        for index, rule in enumerate(semantic_output.get("rules") or []):
+            if not isinstance(rule, Mapping):
+                continue
+            local_id = str(rule.get("local_id") or "")
+            if local_id in local_ids:
+                errors.append(f"/rules/{index}/local_id: duplicate local_id {local_id!r}")
+            local_ids.append(local_id)
+        known = set(local_ids)
+        for index, finding in enumerate(findings):
+            target = finding.get("target_local_id")
+            if target is not None and str(target) not in known:
+                errors.append(f"/findings/{index}/target_local_id: unknown rule local_id {target!r}")
+    elif prompt_id == "P-SCHEME-CRITIC":
+        known = {
+            str(rule.get("local_id"))
+            for rule in (model_input.get("scheme_candidate") or {}).get("rules") or []
+            if isinstance(rule, Mapping)
+        }
+        for field in ("checked_local_ids",):
+            for index, local in enumerate(semantic_output.get(field) or []):
+                if str(local) not in known:
+                    errors.append(f"/{field}/{index}: unknown rule local_id {local!r}")
+        for index, check in enumerate(semantic_output.get("numeric_checks") or []):
+            if isinstance(check, Mapping) and str(check.get("local_id") or "") not in known:
+                errors.append(f"/numeric_checks/{index}/local_id: unknown rule local_id {check.get('local_id')!r}")
+        for index, finding in enumerate(findings):
+            target = finding.get("target_local_id")
+            if target is not None and str(target) not in known:
+                errors.append(f"/findings/{index}/target_local_id: unknown rule local_id {target!r}")
+    elif prompt_id == "P-PROJECT-DEFINITION-EXTRACT":
+        keys: list[str] = []
+        for index, item in enumerate(semantic_output.get("items") or []):
+            if not isinstance(item, Mapping):
+                continue
+            key = str(item.get("local_key") or "")
+            if key in keys:
+                errors.append(f"/items/{index}/local_key: duplicate local_key {key!r}")
+            keys.append(key)
+        known = set(keys)
+        for index, relation in enumerate(semantic_output.get("relations") or []):
+            if not isinstance(relation, Mapping):
+                continue
+            from_key = str(relation.get("from_key") or "")
+            to_key = str(relation.get("to_key") or "")
+            if from_key not in known:
+                errors.append(f"/relations/{index}/from_key: unknown item local_key {from_key!r}")
+            if to_key not in known:
+                errors.append(f"/relations/{index}/to_key: unknown item local_key {to_key!r}")
+            if from_key == to_key:
+                errors.append(f"/relations/{index}: self-referencing relation {from_key!r}")
+        seed = semantic_output.get("argument_seed") if isinstance(semantic_output.get("argument_seed"), Mapping) else {}
+        for qindex, question in enumerate(seed.get("research_questions") or []):
+            if not isinstance(question, Mapping):
+                continue
+            for kindex, key in enumerate(question.get("gap_keys") or []):
+                if str(key) not in known:
+                    errors.append(f"/argument_seed/research_questions/{qindex}/gap_keys/{kindex}: unknown item local_key {key!r}")
+        for index, finding in enumerate(findings):
+            target = finding.get("target_local_id")
+            if target is not None and str(target) not in known:
+                errors.append(f"/findings/{index}/target_local_id: unknown item local_key {target!r}")
+    elif prompt_id == "P-PROJECT-DEFINITION-CRITIC":
+        candidate_input = model_input.get("candidate") if isinstance(model_input.get("candidate"), Mapping) else {}
+        known_items = {
+            str(item.get("local_key"))
+            for item in candidate_input.get("items") or []
+            if isinstance(item, Mapping)
+        }
+        known_relations = {
+            str(rel.get("local_id"))
+            for rel in candidate_input.get("relations") or []
+            if isinstance(rel, Mapping)
+        }
+        for field in ("checked_item_keys", "status_upgrade_item_keys"):
+            for index, key in enumerate(semantic_output.get(field) or []):
+                if str(key) not in known_items:
+                    errors.append(f"/{field}/{index}: unknown item local_key {key!r}")
+        for field in ("checked_relation_keys", "invalid_relation_keys"):
+            for index, key in enumerate(semantic_output.get(field) or []):
+                if str(key) not in known_relations:
+                    errors.append(f"/{field}/{index}: unknown relation local_id {key!r}")
+        dimensions = [
+            str(check.get("dimension"))
+            for check in semantic_output.get("argument_checks") or []
+            if isinstance(check, Mapping)
+        ]
+        if sorted(dimensions) != sorted(_WF1_ARGUMENT_CHECK_DIMENSIONS):
+            errors.append(
+                "/argument_checks: must contain each of the eight argument review dimensions exactly once"
+            )
+        for cindex, check in enumerate(semantic_output.get("argument_checks") or []):
+            if not isinstance(check, Mapping):
+                continue
+            for kindex, key in enumerate(check.get("blocking_item_keys") or []):
+                if str(key) not in known_items:
+                    errors.append(f"/argument_checks/{cindex}/blocking_item_keys/{kindex}: unknown item local_key {key!r}")
+        for index, finding in enumerate(findings):
+            target = str(finding.get("target_local_id") or "")
+            if target and target not in known_items and target not in known_relations:
+                errors.append(f"/findings/{index}/target_local_id: unknown candidate local id {target!r}")
+    return errors
+
+
 def build_semantic_model_input(prompt_id: str, canonical_envelope: dict[str, Any]) -> dict[str, Any]:
     if prompt_id=="P-ARGUMENT-ARCHITECTURE": return build_argument_architecture_model_input(canonical_envelope)
     if prompt_id=="P-ARGUMENT-ARCHITECTURE-CRITIC": return build_argument_architecture_critic_model_input(canonical_envelope)
@@ -4173,6 +5741,10 @@ def build_semantic_model_input(prompt_id: str, canonical_envelope: dict[str, Any
     if prompt_id=="P-PUBLIC-RESEARCH-SYNTHESIS": return build_public_research_synthesis_model_input(canonical_envelope)
     if prompt_id=="P-PUBLIC-RESEARCH-CRITIC": return build_public_research_critic_model_input(canonical_envelope)
     if prompt_id=="P-ONLINE-RESULT-IMPORT-CRITIC": return build_online_result_import_critic_model_input(canonical_envelope)
+    if prompt_id=="P-SCHEME-EXTRACT": return build_scheme_extract_model_input(canonical_envelope)
+    if prompt_id=="P-SCHEME-CRITIC": return build_scheme_critic_model_input(canonical_envelope)
+    if prompt_id=="P-PROJECT-DEFINITION-EXTRACT": return build_project_definition_extract_model_input(canonical_envelope)
+    if prompt_id=="P-PROJECT-DEFINITION-CRITIC": return build_project_definition_critic_model_input(canonical_envelope)
     raise KeyError(f"No semantic model input builder registered for {prompt_id}")
 
 
@@ -4308,7 +5880,9 @@ def _set_existing_pointer(document: Any, pointer: str, value: Any) -> None:
     if not tokens: raise JsonPointerError("cannot replace root")
     parent=resolve_pointer(document,format_pointer(tokens[:-1])) if tokens[:-1] else document; leaf=tokens[-1]
     if isinstance(parent,dict):
-        if leaf not in parent: raise JsonPointerError(f"object key does not exist: {leaf!r}")
+        # Adding a missing key on an existing object is a local repair (e.g. a
+        # required field the producer omitted). Downstream canonical schema
+        # validation still rejects field names the contract does not allow.
         parent[leaf]=copy.deepcopy(value); return
     if isinstance(parent,list):
         if not leaf.isdigit(): raise JsonPointerError(f"invalid array index token: {leaf!r}")
@@ -4397,16 +5971,32 @@ def targeted_repair_semantic_errors(
                 f"/changes/{i}/path: {path!r} overlaps protected content"
             )
             continue
+        missing_field = False
         try:
             before = resolve_pointer(original, path)
         except JsonPointerError:
-            errors.append(
-                f"/changes/{i}/path: structural insertion is not a local repair; {path!r} does not exist"
-            )
-            continue
+            tokens = parse_pointer(path)
+            try:
+                parent = (
+                    resolve_pointer(original, format_pointer(tokens[:-1]))
+                    if tokens[:-1]
+                    else original
+                )
+            except JsonPointerError:
+                parent = None
+            if not isinstance(parent, dict):
+                errors.append(
+                    f"/changes/{i}/path: structural insertion is not a local repair; {path!r} does not exist"
+                )
+                continue
+            # Adding a missing field on an existing object is local; the
+            # canonical schema check after expansion remains the backstop
+            # against inventing fields the contract does not define.
+            missing_field = True
+            before = None
 
         after = change.get("value")
-        if before == after:
+        if not missing_field and before == after:
             errors.append(
                 f"/changes/{i}/value: change at {path!r} is a no-op"
             )
@@ -4421,7 +6011,7 @@ def targeted_repair_semantic_errors(
                 )
             continue
 
-        if not _same_container_shape(before, after):
+        if not missing_field and not _same_container_shape(before, after):
             errors.append(
                 f"/changes/{i}/value: changing business-object structure is not a local repair and requires escalation"
             )
@@ -4459,6 +6049,8 @@ def semantic_model_reference_errors(
 ) -> list[str]:
     if prompt_id in _WF3_SEMANTIC_PROMPTS:
         return _wf3_semantic_reference_errors(prompt_id, canonical_envelope, semantic_output)
+    if prompt_id in _WF1_SEMANTIC_PROMPTS:
+        return _wf1_semantic_reference_errors(prompt_id, canonical_envelope, semantic_output)
     if prompt_id == "P-TARGETED-REPAIR":
         return targeted_repair_semantic_errors(canonical_envelope, semantic_output)
     if prompt_id not in {
@@ -7369,6 +8961,78 @@ def expand_targeted_repair_model_output(canonical_envelope,semantic_output):
             "findings":[],"unresolved_items":[],"user_questions":[],"source_refs":[],"warnings":[]}
 
 
+def _null_empty_strings(schema_node: Any, value: Any) -> Any:
+    """Convert ``""`` to ``None`` where the schema explicitly allows null.
+
+    Models routinely write an empty string for "no value"; when the contract
+    declares the field nullable, ``null`` is the faithful encoding. Fields
+    reached only through ``$ref`` are left untouched.
+    """
+    if not isinstance(schema_node, Mapping):
+        return value
+    schema_type = schema_node.get("type")
+    types = schema_type if isinstance(schema_type, list) else [schema_type]
+    if "null" in types and isinstance(value, str) and not value.strip():
+        return None
+    if isinstance(value, dict):
+        properties = schema_node.get("properties")
+        if not isinstance(properties, Mapping):
+            return value
+        return {
+            key: _null_empty_strings(properties.get(key), item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        items = schema_node.get("items")
+        if isinstance(items, Mapping):
+            return [_null_empty_strings(items, item) for item in value]
+    return value
+
+
+def apply_semantic_model_output_defaults(model_output_schema: Mapping[str, Any], semantic_output: Any) -> Any:
+    """Fill missing top-level required array fields with empty arrays.
+
+    Models legitimately omit fields like ``findings`` or ``user_questions``
+    when they have nothing to report; an omitted collection is unambiguous
+    "none", so code normalizes it instead of rejecting the response.
+    Only plain ``type: "array"`` properties are defaulted.
+    """
+    if not isinstance(semantic_output, dict):
+        return semantic_output
+    properties = model_output_schema.get("properties") or {}
+    if not isinstance(properties, Mapping):
+        return semantic_output
+    normalized = dict(semantic_output)
+    normalized = _null_empty_strings(model_output_schema, normalized)
+    for field in model_output_schema.get("required") or []:
+        if field in normalized:
+            continue
+        spec = properties.get(field)
+        if isinstance(spec, Mapping) and spec.get("type") == "array":
+            normalized[field] = []
+    questions = normalized.get("user_questions")
+    if isinstance(questions, list):
+        # An empty-string option carries no meaning; drop it instead of
+        # rejecting the whole response. CHOICE questions whose options become
+        # empty are still rejected by the choice-question reference check.
+        cleaned = []
+        for question in questions:
+            if not isinstance(question, dict) or "allowed_values" not in question:
+                cleaned.append(question)
+                continue
+            values = question.get("allowed_values")
+            if not isinstance(values, list):
+                cleaned.append(question)
+                continue
+            kept = [v for v in values if not (isinstance(v, str) and not v.strip())]
+            if len(kept) == len(values):
+                cleaned.append(question)
+                continue
+            cleaned.append({**question, "allowed_values": kept})
+        normalized["user_questions"] = cleaned
+    return normalized
+
+
 def expand_semantic_model_output(prompt_id: str, canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:
     if prompt_id=="P-ARGUMENT-ARCHITECTURE": return expand_argument_architecture_model_output(canonical_envelope,semantic_output)
     if prompt_id=="P-ARGUMENT-ARCHITECTURE-CRITIC": return expand_argument_architecture_critic_model_output(canonical_envelope,semantic_output)
@@ -7380,4 +9044,8 @@ def expand_semantic_model_output(prompt_id: str, canonical_envelope: dict[str, A
     if prompt_id=="P-PUBLIC-RESEARCH-SYNTHESIS": return expand_public_research_synthesis_model_output(canonical_envelope,semantic_output)
     if prompt_id=="P-PUBLIC-RESEARCH-CRITIC": return expand_public_research_critic_model_output(canonical_envelope,semantic_output)
     if prompt_id=="P-ONLINE-RESULT-IMPORT-CRITIC": return expand_online_result_import_critic_model_output(canonical_envelope,semantic_output)
+    if prompt_id=="P-SCHEME-EXTRACT": return expand_scheme_extract_model_output(canonical_envelope,semantic_output)
+    if prompt_id=="P-SCHEME-CRITIC": return expand_scheme_critic_model_output(canonical_envelope,semantic_output)
+    if prompt_id=="P-PROJECT-DEFINITION-EXTRACT": return expand_project_definition_extract_model_output(canonical_envelope,semantic_output)
+    if prompt_id=="P-PROJECT-DEFINITION-CRITIC": return expand_project_definition_critic_model_output(canonical_envelope,semantic_output)
     raise KeyError(f"No semantic model output expander registered for {prompt_id}")

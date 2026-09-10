@@ -67,7 +67,7 @@ class RetryPolicy:
     def from_options(cls, options: dict[str, Any] | None) -> "RetryPolicy":
         values = options or {}
         max_retries = cls._bounded_int(
-            values.get("provider_retry_limit", 2), minimum=0, maximum=5, default=2
+            values.get("provider_retry_limit", 3), minimum=0, maximum=5, default=3
         )
         base_delay = cls._bounded_float(
             values.get("provider_retry_base_delay_seconds", 1.0),

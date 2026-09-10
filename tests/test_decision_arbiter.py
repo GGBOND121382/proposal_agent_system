@@ -276,3 +276,76 @@ def test_effective_result_uses_arbiter_decision_without_mutating_raw_output() ->
     assert derived["status"] == "REVISE"
     assert derived["findings"][0]["code"] == "QG_BLUEPRINT_SELF_EVIDENCE"
     assert "rule_id" not in derived["findings"][0]
+
+
+def test_human_gate_wins_over_model_repairable_guard_findings() -> None:
+    from app.decision_arbiter import DecisionArbiter
+
+    repairable = {
+        "rule_id": "SC-EVIDENCE-SELF-REFERENCE",
+        "responsibility": "DETERMINISTIC_GUARD",
+        "source": "DETERMINISTIC_GUARD",
+        "code": "QG_PROJECT_RELATION_DIRECTION_INVALID",
+        "blocking": True,
+        "suggested_route": "PROJECT_DEFINITION_AGENT",
+        "description": "relation direction invalid",
+    }
+    critic = {
+        "status": "NEED_USER_INPUT",
+        "findings": [],
+        "user_questions": [
+            {"question_id": "UQ-1", "blocking": True, "question": "confirm scope"}
+        ],
+    }
+    record = DecisionArbiter().arbitrate(
+        critic,
+        _guard_report(repairable),
+        prompt_id="P-PROJECT-DEFINITION-EXTRACT",
+    )
+
+    assert record.decision == "WAITING_HUMAN_INPUT"
+
+
+def test_human_gate_loses_to_non_repairable_or_user_routed_guard_findings() -> None:
+    from app.decision_arbiter import DecisionArbiter
+
+    critic = {
+        "status": "NEED_USER_INPUT",
+        "findings": [],
+        "user_questions": [
+            {"question_id": "UQ-1", "blocking": True, "question": "confirm scope"}
+        ],
+    }
+    non_repairable = {
+        "rule_id": "SC-EVIDENCE-SELF-REFERENCE",
+        "responsibility": "DETERMINISTIC_GUARD",
+        "source": "DETERMINISTIC_GUARD",
+        "code": "QG_BLUEPRINT_SELF_EVIDENCE",
+        "blocking": True,
+        "suggested_route": "WRITING_AGENT",
+        "description": "not in the model-repairable set",
+    }
+    record = DecisionArbiter().arbitrate(
+        critic,
+        _guard_report(non_repairable),
+        prompt_id="P-PROJECT-DEFINITION-EXTRACT",
+    )
+    assert record.decision == "REVISE"
+
+    # A USER-routed guard finding is itself a request for the human, so the
+    # gate stays actionable (pre-existing semantics, unchanged by this fix).
+    user_routed = {
+        "rule_id": "SC-EVIDENCE-SELF-REFERENCE",
+        "responsibility": "DETERMINISTIC_GUARD",
+        "source": "DETERMINISTIC_GUARD",
+        "code": "QG_SOME_USER_DECISION",
+        "blocking": True,
+        "suggested_route": "USER",
+        "description": "guard itself escalates to the user",
+    }
+    record = DecisionArbiter().arbitrate(
+        critic,
+        _guard_report(user_routed),
+        prompt_id="P-PROJECT-DEFINITION-EXTRACT",
+    )
+    assert record.decision == "WAITING_HUMAN_INPUT"

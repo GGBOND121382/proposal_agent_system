@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scheme_extract_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "REVISE",
+        "NEED_USER_INPUT",
+        "BLOCK"
+      ]
+    },
+    "document_kind": {
+      "type": "string",
+      "enum": [
+        "APPLICATION_GUIDE",
+        "TASK_BOOK",
+        "NOTICE",
+        "TEMPLATE",
+        "TECHNICAL_REPORT",
+        "SURVEY_REPORT",
+        "ANALYSIS_REPORT",
+        "OTHER",
+        "UNKNOWN"
+      ]
+    },
+    "scheme_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scheme_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "guide_direction_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "research_attribute": {
+      "type": ["string", "null"]
+    },
+    "funding_organization": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "application_year": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 2000,
+          "maximum": 2100
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "duration_months": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "local_id": {
+            "type": "string",
+            "pattern": "^R[0-9]+$"
+          },
+          "rule_type": {
+            "type": "string",
+            "enum": [
+              "MANDATORY_SCOPE",
+              "MANDATORY_METRIC",
+              "EXCLUDED_SCOPE",
+              "DOCUMENT_STRUCTURE",
+              "PAGE_OR_WORD_LIMIT",
+              "BUDGET",
+              "DURATION",
+              "REVIEW_FOCUS",
+              "COMPLIANCE",
+              "AI_USAGE"
+            ]
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mandatory": {
+            "type": "boolean"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^S[0-9]+$"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "local_id",
+          "rule_type",
+          "statement",
+          "mandatory",
+          "evidence_ids"
+        ]
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "P0",
+              "P1",
+              "P2",
+              "P3"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_local_id": {
+            "type": ["string", "null"],
+            "pattern": "^R[0-9]+$"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^S[0-9]+$"
+            },
+            "uniqueItems": true
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "route": {
+            "type": "string",
+            "enum": [
+              "ORIGINAL_PRODUCER",
+              "PROJECT_KNOWLEDGE_AGENT",
+              "USER",
+              "BLOCK"
+            ]
+          },
+          "repair_instruction": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "description",
+          "target_local_id",
+          "evidence_ids",
+          "blocking",
+          "route",
+          "repair_instruction"
+        ]
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "MISSING",
+              "CONFLICT",
+              "UNCERTAIN",
+              "UNSUPPORTED",
+              "OUT_OF_SCOPE"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required_action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "description",
+          "required_action",
+          "blocking"
+        ]
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "question_type": {
+            "type": "string",
+            "enum": [
+              "CONFIRMATION",
+              "MISSING_INFORMATION",
+              "CONFLICT_RESOLUTION",
+              "CHOICE"
+            ]
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "answer_shape": {
+            "type": "string",
+            "enum": [
+              "STRING",
+              "NUMBER",
+              "BOOLEAN"
+            ]
+          },
+          "allowed_values": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "P0",
+              "P1",
+              "P2",
+              "P3"
+            ]
+          }
+        },
+        "required": [
+          "question_type",
+          "question",
+          "reason",
+          "answer_shape",
+          "allowed_values",
+          "blocking",
+          "priority"
+        ]
+      }
+    }
+  },
+  "required": [
+    "status",
+    "document_kind",
+    "scheme_name",
+    "scheme_type",
+    "guide_direction_name",
+    "research_attribute",
+    "funding_organization",
+    "application_year",
+    "duration_months",
+    "rules",
+    "findings",
+    "unresolved_items",
+    "user_questions"
+  ]
+}

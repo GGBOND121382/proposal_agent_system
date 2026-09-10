@@ -3237,6 +3237,9 @@ def test_semantic_producer_blocking_deficiency_regenerates_without_gate(
         "run_id": "run-exact-stage0-baseline",
         "status": "REVISE",
     }
+    # Pin the regeneration budget so this test exercises the EXHAUSTED path
+    # deterministically regardless of the default limit.
+    state.setdefault("options", {})["semantic_producer_regeneration_limit"] = 1
     engine._update(workflow, state=state)
 
     revise_output = {

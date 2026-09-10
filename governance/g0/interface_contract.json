@@ -15,8 +15,8 @@
       "executor_role",
       "next_human_gate"
     ],
-    "entries_sha256": "9ff328da370b0bef425636f1ce7634c7c099408754b130a8515ed788955e079f",
-    "registry_git_blob_sha": "8eb483b6d68ccaad2ab38093e171dcba8e5e1184"
+    "entries_sha256": "dbb5ab066dc5616b885d42b42bdea731c35898d75710e8ba2882ace1e6bf7f77",
+    "registry_git_blob_sha": "6c4d9a7977c6573a222ab12980367f9473d34aa3"
   },
   "workflow_state_machine": {
     "workflows": {

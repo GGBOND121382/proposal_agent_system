@@ -396,8 +396,8 @@ class WorkflowRepairMixin:
             del state["contract_repair_escalations"][:-50]; self._update(wf,state=state); return result
 
         options=state.get("options") or {}
-        try: contract_retry_limit=int(options.get("targeted_repair_contract_retry_limit",options.get("provider_retry_limit",2)))
-        except (TypeError,ValueError): contract_retry_limit=2
+        try: contract_retry_limit=int(options.get("targeted_repair_contract_retry_limit",options.get("provider_retry_limit",3)))
+        except (TypeError,ValueError): contract_retry_limit=3
         contract_retry_limit=max(0,min(contract_retry_limit,5)); feedback=[]
         for semantic_attempt in range(1,contract_retry_limit+2):
             attempt_overrides=dict(base_overrides)
@@ -1899,11 +1899,11 @@ class WorkflowRepairMixin:
             contract_retry_limit = int(
                 options.get(
                     "targeted_repair_contract_retry_limit",
-                    options.get("provider_retry_limit", 2),
+                    options.get("provider_retry_limit", 3),
                 )
             )
         except (TypeError, ValueError):
-            contract_retry_limit = 2
+            contract_retry_limit = 3
         contract_retry_limit = max(0, min(contract_retry_limit, 5))
         contract_retry_key = f"{attempt_key}:repair:{repair_id}:contract"
         repaired: dict[str, Any]

@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proposal-agent.local/schemas/model/project_definition_critic_model_output.schema.json",
+  "title": "P-PROJECT-DEFINITION-CRITIC 模型输出契约",
+  "description": "模型只返回审查结论与局部编号（K../L..）；真实 item_id/relation_id 由系统映射。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "checked_item_keys",
+    "checked_relation_keys",
+    "invalid_relation_keys",
+    "status_upgrade_item_keys",
+    "argument_checks",
+    "findings",
+    "unresolved_items",
+    "user_questions"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["ACCEPT", "REVISE", "BLOCK"]
+    },
+    "checked_item_keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^K[0-9]+$"
+      }
+    },
+    "checked_relation_keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^L[0-9]+$"
+      }
+    },
+    "invalid_relation_keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^L[0-9]+$"
+      }
+    },
+    "status_upgrade_item_keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^K[0-9]+$"
+      }
+    },
+    "argument_checks": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dimension", "passed", "evidence", "blocking_item_keys"],
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "DOCUMENT_CONTRACT",
+              "CENTRAL_PROPOSITION",
+              "RESEARCH_GAP",
+              "RESEARCH_QUESTIONS",
+              "CLOSEST_PRIOR_WORK",
+              "OBJECTIVE_TASK_ALIGNMENT",
+              "METHOD_AND_EVALUATION",
+              "FOUNDATION_EVIDENCE"
+            ]
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking_item_keys": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^K[0-9]+$"
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "severity",
+          "description",
+          "target_local_id",
+          "evidence_ids",
+          "blocking",
+          "route",
+          "repair_instruction"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2", "P3"]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_local_id": {
+            "type": ["string", "null"],
+            "pattern": "^(K|L)[0-9]+$"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^S[0-9]+$"
+            }
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "route": {
+            "type": "string",
+            "enum": ["ORIGINAL_PRODUCER", "PROJECT_KNOWLEDGE_AGENT", "USER", "BLOCK"]
+          },
+          "repair_instruction": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "description", "required_action", "blocking"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["MISSING", "CONFLICT", "UNCERTAIN", "UNSUPPORTED", "OUT_OF_SCOPE"]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required_action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question_type", "question", "reason", "answer_shape", "allowed_values", "blocking", "priority"],
+        "properties": {
+          "question_type": {
+            "type": "string",
+            "enum": ["CONFIRMATION", "MISSING_INFORMATION", "CONFLICT_RESOLUTION", "CHOICE"]
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "answer_shape": {
+            "type": "string",
+            "enum": ["STRING", "NUMBER", "BOOLEAN"]
+          },
+          "allowed_values": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2", "P3"]
+          }
+        }
+      }
+    }
+  }
+}

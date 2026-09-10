@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scheme_critic_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scheme_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scheme_name": {
+          "type": "string"
+        },
+        "scheme_type": {
+          "type": "string"
+        },
+        "guide_direction_name": {
+          "type": "string"
+        },
+        "funding_organization": {
+          "type": ["string", "null"]
+        },
+        "application_year": {
+          "type": ["integer", "null"]
+        },
+        "duration_months": {
+          "type": ["integer", "null"]
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "local_id": {
+                "type": "string",
+                "pattern": "^R[0-9]+$"
+              },
+              "rule_type": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mandatory": {
+                "type": "boolean"
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^S[0-9]+$"
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "local_id",
+              "rule_type",
+              "statement",
+              "mandatory",
+              "evidence_ids"
+            ]
+          }
+        }
+      },
+      "required": [
+        "scheme_name",
+        "scheme_type",
+        "guide_direction_name",
+        "funding_organization",
+        "application_year",
+        "duration_months",
+        "rules"
+      ]
+    },
+    "deterministic_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "code",
+          "description"
+        ]
+      }
+    },
+    "human_resolutions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "answer_text": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "question",
+          "answer_text",
+          "target"
+        ]
+      }
+    },
+    "evidence_cards": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "pattern": "^S[0-9]+$"
+          },
+          "document_title": {
+            "type": "string"
+          },
+          "locator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "excerpt": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "evidence_id",
+          "document_title",
+          "locator",
+          "excerpt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "scheme_candidate",
+    "deterministic_findings",
+    "human_resolutions",
+    "evidence_cards"
+  ]
+}

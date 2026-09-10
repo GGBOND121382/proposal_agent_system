@@ -220,6 +220,64 @@ def _item_types(project_definition: dict[str, Any]) -> collections.Counter[str]:
     )
 
 
+_RESEARCH_REPORT_MARKERS = ("调研", "情报", "分析报告", "PROJECT_BRIEF", "RESEARCH_REPORT")
+_APPLICATION_MARKERS = ("申报", "指南", "任务书", "APPLICATION_GUIDE", "TASK_BOOK")
+_NEGATION_PREFIXES = ("非", "无", "不")
+
+
+def _contains_application_marker(combined: str) -> bool:
+    """Match application markers, ignoring negated mentions like "非指南类"."""
+    for marker in _APPLICATION_MARKERS:
+        token = marker.upper()
+        start = 0
+        while True:
+            idx = combined.find(token, start)
+            if idx < 0:
+                break
+            previous = combined[idx - 1] if idx > 0 else ""
+            if previous not in _NEGATION_PREFIXES:
+                return True
+            start = idx + 1
+    return False
+
+
+def _document_kind_hint(payload: dict[str, Any]) -> str:
+    """Heuristic document-kind hint for quality-gate scope selection.
+
+    The persisted scheme profile schema is frozen (additionalProperties:
+    false), so the semantic document_kind cannot be stored there.  The hint
+    combines the confirmed scheme profile text with human resolutions; absent
+    any signal the gate keeps the strict APPLICATION behavior.
+    """
+    scheme = payload.get("scheme_profile")
+    if not isinstance(scheme, dict):
+        scheme = payload.get("scheme_candidate")
+    texts: list[str] = []
+    if isinstance(scheme, dict):
+        for key in ("scheme_type", "research_attribute", "scheme_name"):
+            value = str(scheme.get(key) or "").strip()
+            if value:
+                texts.append(value)
+    for item in payload.get("human_resolutions") or []:
+        if not isinstance(item, dict):
+            continue
+        target = str(item.get("target") or "")
+        if "research_attribute" not in target and "scheme_type" not in target:
+            continue
+        answer = item.get("answer")
+        answer_text = answer if isinstance(answer, str) else ""
+        if answer_text.strip():
+            texts.append(answer_text.strip())
+    combined = " ".join(texts).upper()
+    if not combined:
+        return "APPLICATION"
+    if _contains_application_marker(combined):
+        return "APPLICATION"
+    if any(marker.upper() in combined for marker in _RESEARCH_REPORT_MARKERS):
+        return "RESEARCH_REPORT"
+    return "APPLICATION"
+
+
 def _has_real_source(item: dict[str, Any]) -> bool:
     refs = item.get("source_refs") or []
     if not refs:
@@ -287,6 +345,12 @@ class ProposalQualityGuard:
         "METRIC_JUSTIFICATION", "SECTION_UNIQUENESS", "STYLE_AND_DENSITY",
     }
 
+    # Document kinds where the submitter's own EXPERIMENT/INNOVATION items are
+    # legitimately absent (e.g. a research brief investigating an external
+    # system).  Detection is heuristic because the persisted scheme profile
+    # schema is frozen; see _document_kind_hint.
+    RESEARCH_REPORT_EXEMPT_TYPES = {"EXPERIMENT", "INNOVATION"}
+
     def observe(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
         payload = envelope.get("payload") or {}
         findings: list[QualityFinding] = []
@@ -298,7 +362,9 @@ class ProposalQualityGuard:
                 if prompt_id == "P-PROJECT-DEFINITION-EXTRACT"
                 else payload.get("project_definition_candidate")
             ) or {}
-            findings.extend(self._audit_project_definition(pd))
+            findings.extend(
+                self._audit_project_definition(pd, document_kind=_document_kind_hint(payload))
+            )
 
         elif prompt_id in {"P-FACT-EXTRACT", "P-FACT-CRITIC"}:
             fact_package = (
@@ -399,16 +465,28 @@ class ProposalQualityGuard:
 
         return copy.deepcopy(output)
 
-    def _audit_project_definition(self, pd: dict[str, Any]) -> list[QualityFinding]:
+    def _audit_project_definition(
+        self, pd: dict[str, Any], *, document_kind: str = "APPLICATION"
+    ) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
         types = _item_types(pd)
-        missing = sorted(self.CRITICAL_RESEARCH_TYPES - set(types))
+        required_types = self.CRITICAL_RESEARCH_TYPES
+        # A research report investigating an external system legitimately has
+        # no submitter-side EXPERIMENT/INNOVATION items, and graph completeness
+        # is not an entry defect: the producer's own NEED_USER_INPUT gate and
+        # the semantic critic own completeness there.  Keep the findings as
+        # advisory observations instead of hard-blocking the intake.
+        research_report = document_kind == "RESEARCH_REPORT"
+        if research_report:
+            required_types = required_types - self.RESEARCH_REPORT_EXEMPT_TYPES
+        missing = sorted(required_types - set(types))
         if missing:
             findings.append(QualityFinding(
                 "QG_PROJECT_GRAPH_INCOMPLETE", "P1", "PROJECT_DEFINITION", "PROJECT_DEFINITION",
                 "items", f"研究项目知识图谱缺少关键对象类型：{', '.join(missing)}。只有目标或系统功能不能构成可写的科研项目定义。",
                 "从材料中分别抽取研究差距、研究问题、目标、任务、方法、实验、创新、成果、指标和研究基础；缺失项保持UNKNOWN并阻断写作。",
                 "PROJECT_KNOWLEDGE_AGENT",
+                blocking=not research_report,
             ))
         if sum(types.values()) < 10:
             findings.append(QualityFinding(
@@ -416,6 +494,7 @@ class ProposalQualityGuard:
                 "items", f"项目定义仅含{sum(types.values())}个对象，无法支撑完整研究论证。",
                 "扩展为具有多类型节点和真实关系的项目论证图，而不是用一个OBJECTIVE代表整个项目。",
                 "PROJECT_KNOWLEDGE_AGENT",
+                blocking=not research_report,
             ))
         confirmed_without_source = [
             str(item.get("item_id")) for item in pd.get("items", [])

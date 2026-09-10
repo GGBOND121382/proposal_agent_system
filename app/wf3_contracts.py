@@ -226,6 +226,16 @@ WF3_PROVIDER_REQUEST_CHAR_BUDGETS: dict[str, int] = {
     "P-PUBLIC-RESEARCH-SYNTHESIS": 95_000,
     "P-PUBLIC-RESEARCH-CRITIC": 105_000,
     "P-ONLINE-RESULT-IMPORT-CRITIC": 105_000,
+    # WF-1 semantic contracts.  The semantic projection removes the protocol
+    # bloat (a 2.3K-char DASH brief now yields a ~6.4K request instead of
+    # ~240K), so what remains scales with real source-document content.
+    # Simulated fixtures with large briefs measure ~100K provider-visible
+    # chars; budgets keep ~2x headroom above that while still catching
+    # runaway protocol overhead.
+    "P-SCHEME-EXTRACT": 120_000,
+    "P-SCHEME-CRITIC": 120_000,
+    "P-PROJECT-DEFINITION-EXTRACT": 200_000,
+    "P-PROJECT-DEFINITION-CRITIC": 200_000,
 }
 
 

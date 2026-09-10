@@ -10,6 +10,7 @@ from .llm import LLMError, ModelGateway, ProviderError
 from .background_research import WF3B_RUNTIME_OWNED_SOURCE_REFS_PROMPTS
 from .model_semantic_contracts import (
     SEMANTIC_MODEL_CONTRACT_VERSION,
+    apply_semantic_model_output_defaults,
     build_semantic_model_input,
     expand_semantic_model_output,
     semantic_model_reference_errors,
@@ -34,6 +35,7 @@ from .output_integrity import (
     drop_finding_self_reference_evidence,
     normalize_reference_id_aliases,
     rebuild_scheme_extraction_coverage,
+    scrub_code_owned_fields_for_repair_diff,
     validate_reference_ids,
 )
 from .proposal_quality import ProposalQualityGuard, SECTION_FUNCTION_ROLE_ALIASES
@@ -1795,8 +1797,15 @@ class PromptExecutor:
                 else {"content": repaired_object}
             )
             original_document = {"content": original_content}
+            # Compare both sides on the model-owned semantic projection: the
+            # candidate passed the full normalization chain (trusted source
+            # binding, protocol canonicalization, hash recomputation) while
+            # the frozen baseline did not.  Scrubbing code-owned fields from
+            # both sides keeps the closure diff symmetric, so runtime-completed
+            # metadata is never reported as a model-made change.
             actual_paths = PromptExecutor._targeted_repair_diff_paths(
-                original_document, repaired_document
+                scrub_code_owned_fields_for_repair_diff(original_document),
+                scrub_code_owned_fields_for_repair_diff(repaired_document),
             )
             allowed_paths = [str(item) for item in payload.get("allowed_paths") or []]
             protected_paths = [
@@ -1997,6 +2006,9 @@ class PromptExecutor:
             try:
                 provider_output = result.output
                 if semantic_model_contract:
+                    provider_output = apply_semantic_model_output_defaults(
+                        self.pack.model_schema(prompt_id, "output"), provider_output
+                    )
                     semantic_output_errors = self.pack.validate_model(prompt_id, "output", provider_output)
                     semantic_output_errors.extend(semantic_model_reference_errors(prompt_id, model_envelope, provider_output))
                     if semantic_output_errors:

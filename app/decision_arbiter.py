@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .contracts import get_semantic_contract
+from .quality_guard import MODEL_REPAIRABLE_QUALITY_CODES
 from .util import new_id, sha256_json, utc_now
 
 
@@ -217,16 +218,19 @@ class DecisionArbiter:
         ]
 
         conflict = bool(protocol_errors)
-        guard_user_routed = [
+        gate_blocking = [
             item
             for item in guard_blocking
-            if str(item.get("suggested_route") or "").upper() == "USER"
+            if str(item.get("suggested_route") or "").upper() != "USER"
+            # Model-repairable guard defects do not disqualify a concrete
+            # blocking human gate: answers add information first, and the
+            # bounded producer-regeneration loop re-checks the defects on the
+            # post-gate run.
+            and str(item.get("code") or "") not in MODEL_REPAIRABLE_QUALITY_CODES
         ]
         actionable_human_gate = (
             critic_status == "NEED_USER_INPUT" or bool(blocking_questions)
-        ) and (
-            not guard_blocking or len(guard_user_routed) == len(guard_blocking)
-        )
+        ) and not gate_blocking
         if conflict:
             decision = "CONTRACT_CONFLICT"
         elif prompt_id == "P-ARGUMENT-ARCHITECTURE-CRITIC":

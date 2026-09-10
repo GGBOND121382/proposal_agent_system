@@ -190,47 +190,59 @@
     },
     {
       "prompt_id": "P-SCHEME-EXTRACT",
-      "prompt_version": "2.0.0",
+      "prompt_version": "2.1.0",
       "prompt_file": "prompts/scheme/scheme_extract.md",
       "input_schema": "schemas/prompts/scheme_extract_input.schema.json",
       "output_schema": "schemas/prompts/scheme_extract_output.schema.json",
       "model_profile": "extraction",
       "required_environment": "OFFLINE_LOCAL",
       "executor_role": "Project Knowledge Agent",
-      "next_human_gate": null
+      "next_human_gate": null,
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/scheme_extract_model_input.schema.json",
+      "model_output_schema": "schemas/model/scheme_extract_model_output.schema.json"
     },
     {
       "prompt_id": "P-SCHEME-CRITIC",
-      "prompt_version": "2.0.0",
+      "prompt_version": "2.1.0",
       "prompt_file": "prompts/scheme/scheme_critic.md",
       "input_schema": "schemas/prompts/scheme_critic_input.schema.json",
       "output_schema": "schemas/prompts/scheme_critic_output.schema.json",
       "model_profile": "critic",
       "required_environment": "OFFLINE_LOCAL",
       "executor_role": "Critic Agent",
-      "next_human_gate": "SCHEME_CONFIRMATION"
+      "next_human_gate": "SCHEME_CONFIRMATION",
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/scheme_critic_model_input.schema.json",
+      "model_output_schema": "schemas/model/scheme_critic_model_output.schema.json"
     },
     {
       "prompt_id": "P-PROJECT-DEFINITION-EXTRACT",
-      "prompt_version": "3.0.0",
+      "prompt_version": "3.1.1",
       "prompt_file": "prompts/project_definition/project_definition_extract.md",
       "input_schema": "schemas/prompts/project_definition_extract_input.schema.json",
       "output_schema": "schemas/prompts/project_definition_extract_output.schema.json",
       "model_profile": "extraction",
       "required_environment": "OFFLINE_LOCAL",
       "executor_role": "Project Knowledge Agent",
-      "next_human_gate": null
+      "next_human_gate": null,
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/project_definition_extract_model_input.schema.json",
+      "model_output_schema": "schemas/model/project_definition_extract_model_output.schema.json"
     },
     {
       "prompt_id": "P-PROJECT-DEFINITION-CRITIC",
-      "prompt_version": "3.0.0",
+      "prompt_version": "3.1.0",
       "prompt_file": "prompts/project_definition/project_definition_critic.md",
       "input_schema": "schemas/prompts/project_definition_critic_input.schema.json",
       "output_schema": "schemas/prompts/project_definition_critic_output.schema.json",
       "model_profile": "critic",
       "required_environment": "OFFLINE_LOCAL",
       "executor_role": "Critic Agent",
-      "next_human_gate": "PROJECT_DEFINITION_CONFIRMATION"
+      "next_human_gate": "PROJECT_DEFINITION_CONFIRMATION",
+      "model_contract_mode": "SEMANTIC",
+      "model_input_schema": "schemas/model/project_definition_critic_model_input.schema.json",
+      "model_output_schema": "schemas/model/project_definition_critic_model_output.schema.json"
     },
     {
       "prompt_id": "P-PROJECT-READINESS-CRITIC",
