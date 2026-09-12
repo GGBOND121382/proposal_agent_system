@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 from app.main import db, exporter, workflows
 from app.util import new_id, utc_now
+from app.workflow_status import should_pause_automatic_advancement
 
 
 async def main() -> None:
@@ -46,7 +47,15 @@ async def main() -> None:
                 action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
                 workflows.decide_gate(gate["id"], action=action, decided_by="demo-user", decided_role=gate["required_role"])
                 continue
-            break
+            if should_pause_automatic_advancement(workflow["status"]):
+                break
+        else:
+            raise RuntimeError(f"{workflow_type} exceeded the 30-step demo limit")
+        if workflow["status"] != "COMPLETED":
+            raise RuntimeError(
+                f"{workflow_type} paused at {workflow['status']}: "
+                f"{workflow.get('state', {}).get('last_error')}"
+            )
         print(workflow_type, workflow["status"])
 
     package = exporter.export_package(project_id)

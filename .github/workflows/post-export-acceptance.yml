@@ -63,9 +63,10 @@ jobs:
 
       - name: Validate contracts and syntax
         run: |
-          python -m compileall -q app scripts tests
+          python -m compileall -q app scripts tests stage1_tools stage2_tools stage3_tools stage4_tools stage4a_tools stage5_tools stage6a_tools stage6b_tools stage6c_tools stage6d_tools stage7_tools
           python scripts/validate_g0.py
           python prompt_pack/tools/validate_pack.py
+          python scripts/validate_contract_registry.py
 
       - name: Run full repository regression
         shell: bash

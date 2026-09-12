@@ -1,0 +1,146 @@
+{
+  "schema_version": "1.0",
+  "prompt_id": "P-STAGE6C-WRITE-SECTION",
+  "prompt_version": "1.0.0",
+  "actual_model_id": "gpt-5.6-thinking",
+  "endpoint_id": "chatgpt-conversation-file-bridge",
+  "status": "PASS",
+  "section_id": "SEC-11",
+  "candidate": {
+    "candidate_id": "stage6c-sec-11-candidate-001",
+    "section_name": "研究基础与条件",
+    "markdown": "# 研究基础与条件\n\n## 相关研究与项目经历\n\nFOUND-1目前由SRC-UA-01和SRC-UA-02两项用户陈述部分支撑：申请人具有分布式在线优化、增量计算、隐私计算和复杂物流方案筹划经历，可为RQ-1的状态与依赖建模、RQ-2的滚动优化和约束求解以及RQ-3的复杂方案交互提供方法迁移基础。该证据只能说明具备相关经历和启动能力，不能证明本项目方法已经完成，也不能替代论文首页、检索证明、项目任务书、代码、原型和测试报告等正式材料。\n\n## 智能体与工具集成基础\n\nFOUND-2由SRC-TRACE-01和SRC-TRACE-02两项内部Trace支撑。现有记录能够证明结构化模型接口、Schema校验、独立审查、人工确认、候选哈希、定向修复、状态恢复和完整回归等工程能力，也验证了BOUND-4所要求的模型端点可替换合同，以及BOUND-5所要求的授权人员最终确认边界。内部Trace不能证明目标决策原型已经实现，更不能证明跨场景方案质量、人工负担或采纳率已经改善。\n\n## 条件缺口与补充计划\n\nFOUND-3仍为拟开展能力：真实参与者的人机交互、方案采纳和跨场景对照消融尚无实测证据。项目启动前需补充满足BOUND-3的业务参与者与确认流程，建立可结构化的场景任务、资源、规则和结果数据以满足BOUND-1，并配置至少一种规则工具或优化求解器以满足BOUND-2。当前OPEN-009团队名单和OPEN-012研究基础证据材料尚未解决，还需补充成员分工、正式成果清单、场景数据授权、实验环境、参与者组织安排和统计分析条件。\n\n补充计划按“材料核验—能力映射—试验准备”推进：先由项目负责人提供团队名单、论文项目证明和可复用资产，逐项绑定研究内容；再对四类验证场景完成数据字段、规则、基线流程和访问权限确认；最后准备参与者说明、任务平衡设计、运行日志和统计脚本。经费金额、项目周期和设备清单尚未提供，本章不作虚构。正式材料到位后应重新审查FOUND-1至FOUND-3的证明范围，并更新本章而非沿用当前限定性表述。\n\n> **TAB-06：研究基础证据等级、能力映射、证明边界与待补条件表**\n",
+    "subsections": [
+      {
+        "subsection_id": "SEC-11-01",
+        "title": "相关研究与项目经历",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-11-01",
+            "role": "限定说明状态建模、优化和复杂方案经历",
+            "text": "FOUND-1目前由SRC-UA-01和SRC-UA-02两项用户陈述部分支撑：申请人具有分布式在线优化、增量计算、隐私计算和复杂物流方案筹划经历，可为RQ-1的状态与依赖建模、RQ-2的滚动优化和约束求解以及RQ-3的复杂方案交互提供方法迁移基础。该证据只能说明具备相关经历和启动能力，不能证明本项目方法已经完成，也不能替代论文首页、检索证明、项目任务书、代码、原型和测试报告等正式材料。",
+            "node_ids": [
+              "FOUND-1",
+              "BOUND-1",
+              "BOUND-2"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [
+              "SRC-UA-01",
+              "SRC-UA-02"
+            ],
+            "claim_status": "QUALIFIED_USER_ASSERTED",
+            "novel_content_key": "sec11_user_asserted_research_project_basis"
+          }
+        ]
+      },
+      {
+        "subsection_id": "SEC-11-02",
+        "title": "智能体与工具集成基础",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-11-02",
+            "role": "说明阶段Trace证明的工程能力和边界",
+            "text": "FOUND-2由SRC-TRACE-01和SRC-TRACE-02两项内部Trace支撑。现有记录能够证明结构化模型接口、Schema校验、独立审查、人工确认、候选哈希、定向修复、状态恢复和完整回归等工程能力，也验证了BOUND-4所要求的模型端点可替换合同，以及BOUND-5所要求的授权人员最终确认边界。内部Trace不能证明目标决策原型已经实现，更不能证明跨场景方案质量、人工负担或采纳率已经改善。",
+            "node_ids": [
+              "FOUND-2",
+              "BOUND-4",
+              "BOUND-5"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [
+              "SRC-TRACE-01",
+              "SRC-TRACE-02"
+            ],
+            "claim_status": "BOUNDARY_STATEMENT",
+            "novel_content_key": "sec11_internal_trace_engineering_scope"
+          }
+        ]
+      },
+      {
+        "subsection_id": "SEC-11-03",
+        "title": "条件缺口与补充计划",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-11-03",
+            "role": "列出团队证明、场景数据和实验条件缺口",
+            "text": "FOUND-3仍为拟开展能力：真实参与者的人机交互、方案采纳和跨场景对照消融尚无实测证据。项目启动前需补充满足BOUND-3的业务参与者与确认流程，建立可结构化的场景任务、资源、规则和结果数据以满足BOUND-1，并配置至少一种规则工具或优化求解器以满足BOUND-2。当前OPEN-009团队名单和OPEN-012研究基础证据材料尚未解决，还需补充成员分工、正式成果清单、场景数据授权、实验环境、参与者组织安排和统计分析条件。",
+            "node_ids": [
+              "FOUND-3",
+              "BOUND-1",
+              "BOUND-2",
+              "BOUND-3"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "sec11_foundation_gaps_and_conditions"
+          },
+          {
+            "paragraph_id": "P-SEC-11-04",
+            "role": "列出团队证明、场景数据和实验条件缺口",
+            "text": "补充计划按“材料核验—能力映射—试验准备”推进：先由项目负责人提供团队名单、论文项目证明和可复用资产，逐项绑定研究内容；再对四类验证场景完成数据字段、规则、基线流程和访问权限确认；最后准备参与者说明、任务平衡设计、运行日志和统计脚本。经费金额、项目周期和设备清单尚未提供，本章不作虚构。正式材料到位后应重新审查FOUND-1至FOUND-3的证明范围，并更新本章而非沿用当前限定性表述。",
+            "node_ids": [
+              "FOUND-1",
+              "FOUND-2",
+              "FOUND-3",
+              "BOUND-3",
+              "BOUND-4",
+              "BOUND-5"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "sec11_evidence_and_condition_completion_plan"
+          }
+        ]
+      }
+    ],
+    "visual_placeholders": [
+      {
+        "visual_id": "TAB-06",
+        "caption": "研究基础证据等级、能力映射、证明边界与待补条件表",
+        "placement_after_paragraph_id": "P-SEC-11-04"
+      }
+    ],
+    "unresolved_open_item_ids": [
+      "OPEN-009",
+      "OPEN-010",
+      "OPEN-011",
+      "OPEN-012"
+    ],
+    "key_terms": [
+      {
+        "term": "用户陈述",
+        "canonical_form": "尚需正式材料核验的申请人背景信息"
+      },
+      {
+        "term": "内部Trace",
+        "canonical_form": "可验证智能体工程流程但不代表科研效果的运行记录"
+      },
+      {
+        "term": "证明边界",
+        "canonical_form": "证据能够支持与不能支持的声称范围"
+      }
+    ],
+    "section_contribution": "按用户陈述、内部运行记录和拟开展能力三级说明项目启动基础，明确其证明边界及团队、材料、数据和实验条件缺口。"
+  },
+  "findings": [],
+  "warnings": []
+}

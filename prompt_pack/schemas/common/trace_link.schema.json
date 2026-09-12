@@ -14,6 +14,7 @@
     },
     "source_kind": {
       "type": "string",
+      "description": "Origin object/container category, never the source object's claim_type, item_type, knowledge_status, or temporal status. Map payload.confirmed_facts to FACT (including facts whose claim_type is PLAN, EXPECTED_RESULT, REQUIREMENT, or MODEL_INFERENCE); payload.project_subgraph.items to PROJECT_ITEM; payload.project_subgraph.relations to PROJECT_RELATION; payload.argument_graph nodes to ARGUMENT_NODE; payload.section_contract to SECTION_CONTRACT; source text/spans to SOURCE_TEXT; and public claims to PUBLIC_CLAIM.",
       "enum": [
         "FACT",
         "PROJECT_ITEM",
@@ -30,6 +31,7 @@
     },
     "source_id": {
       "type": "string",
+      "description": "Exact identifier of the referenced source object inside the container designated by source_kind.",
       "minLength": 1,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
     },

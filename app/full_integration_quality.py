@@ -9,8 +9,20 @@ from .proposal_quality import QualityFinding
 class FullIntegrationQualityMixin:
     """Deterministic whole-proposal checks layered over the existing quality guard."""
 
-    def _audit_document(self, payload: dict[str, Any], output: dict[str, Any]) -> list[QualityFinding]:
-        findings = list(super()._audit_document(payload, output))
+    def _audit_document(
+        self,
+        payload: dict[str, Any],
+        output: dict[str, Any],
+        *,
+        observations: dict[str, Any] | None = None,
+    ) -> list[QualityFinding]:
+        findings = list(
+            super()._audit_document(
+                payload,
+                output,
+                observations=observations,
+            )
+        )
         sections = payload.get("candidate_sections") or []
         section_map = payload.get("document_section_map") or []
         # Three-section and legacy integration tests retain their established
@@ -132,13 +144,18 @@ class FullIntegrationQualityMixin:
                 if value
             }
 
+        question_ids = {
+            str(item.get("node_id"))
+            for item in graph.get("research_questions") or []
+            if isinstance(item, dict) and item.get("node_id")
+        }
         conclusion_sections = [
             section_id for section_id, contract in contracts.items()
             if contract.get("profile_id") == "CONCLUSION"
         ]
         for section_id in conclusion_sections:
             candidate = candidate_objects.get(section_id) or {}
-            required = ({central_id} if central_id else set()) | innovation_ids
+            required = ({central_id} if central_id else set()) | question_ids | innovation_ids
             missing = sorted(required - (advanced_ids(candidate) | evidence_ids(candidate)))
             if missing:
                 findings.append(QualityFinding(
@@ -154,7 +171,11 @@ class FullIntegrationQualityMixin:
             if contract.get("profile_id") == "INNOVATION"
         ]
         for section_id in innovation_sections:
-            used = evidence_ids(candidate_objects.get(section_id) or {}) | advanced_ids(candidate_objects.get(section_id) or {})
+            candidate = candidate_objects.get(section_id) or {}
+            contract = contracts.get(section_id) or {}
+            evidence_bound = evidence_ids(candidate)
+            claim_bound = advanced_ids(candidate)
+            required_prior_ids = set(contract.get("must_use_evidence_ids") or []) & prior_ids
             if not prior_ids or not innovation_ids:
                 findings.append(QualityFinding(
                     "QG_INNOVATION_GRAPH_EVIDENCE_INCOMPLETE", "P1", "ARGUMENT", "ARGUMENT_GRAPH",
@@ -164,7 +185,12 @@ class FullIntegrationQualityMixin:
                     "ARGUMENT_ARCHITECTURE_AGENT",
                 ))
                 break
-            if not (used & prior_ids) or not (used & innovation_ids):
+            # A closest-prior-work baseline must be traceably cited as evidence;
+            # merely listing it as an "advanced claim" cannot establish a
+            # comparison baseline. The new mechanism may be either cited or
+            # explicitly advanced by the innovation section.
+            baseline_bound = (required_prior_ids <= evidence_bound) if required_prior_ids else bool(evidence_bound & prior_ids)
+            if not baseline_bound or not ((evidence_bound | claim_bound) & innovation_ids):
                 findings.append(QualityFinding(
                     "QG_INNOVATION_SECTION_LACKS_BASELINE_BINDING", "P1", "CONTENT", "SECTION_CANDIDATE",
                     f"candidate_sections.{section_id}.paragraphs.evidence_ids",
@@ -178,6 +204,8 @@ class FullIntegrationQualityMixin:
             if contract.get("profile_id") == "RESEARCH_FOUNDATION"
         ]
         for section_id in foundation_sections:
+            contract = contracts.get(section_id) or {}
+            required_foundation_ids = set(contract.get("must_use_evidence_ids") or []) & foundation_ids
             if not foundation_ids:
                 findings.append(QualityFinding(
                     "QG_FOUNDATION_GRAPH_EVIDENCE_MISSING", "P1", "ARGUMENT", "ARGUMENT_GRAPH",
@@ -187,7 +215,9 @@ class FullIntegrationQualityMixin:
                     "PROJECT_KNOWLEDGE_AGENT",
                 ))
                 break
-            if not (evidence_ids(candidate_objects.get(section_id) or {}) & foundation_ids):
+            bound_foundation = evidence_ids(candidate_objects.get(section_id) or {})
+            foundation_ok = (required_foundation_ids <= bound_foundation) if required_foundation_ids else bool(bound_foundation & foundation_ids)
+            if not foundation_ok:
                 findings.append(QualityFinding(
                     "QG_FOUNDATION_SECTION_NOT_BOUND_TO_EVIDENCE", "P1", "CONTENT", "SECTION_CANDIDATE",
                     f"candidate_sections.{section_id}.paragraphs.evidence_ids",
@@ -201,7 +231,11 @@ class FullIntegrationQualityMixin:
             if contract.get("profile_id") == "OUTPUTS_AND_METRICS"
         ]
         for section_id in metric_sections:
-            if metric_ids and not (evidence_ids(candidate_objects.get(section_id) or {}) & metric_ids):
+            contract = contracts.get(section_id) or {}
+            required_metric_ids = set(contract.get("must_use_evidence_ids") or []) & metric_ids
+            bound_metric = evidence_ids(candidate_objects.get(section_id) or {})
+            metric_ok = (required_metric_ids <= bound_metric) if required_metric_ids else bool(bound_metric & metric_ids)
+            if metric_ids and not metric_ok:
                 findings.append(QualityFinding(
                     "QG_METRIC_SECTION_LACKS_BASELINE_EVIDENCE", "P1", "CONTENT", "SECTION_CANDIDATE",
                     f"candidate_sections.{section_id}.paragraphs.evidence_ids",
@@ -210,44 +244,6 @@ class FullIntegrationQualityMixin:
                     "WRITING_AGENT",
                 ))
         return findings
-
-    @staticmethod
-    def _merge_findings(output: dict[str, Any], findings: list[QualityFinding]) -> None:
-        BaseProposalQualityGuard._merge_findings(output, findings)
-        result = output.get("result")
-        if not isinstance(result, dict) or not isinstance(result.get("routing_actions"), list):
-            return
-        allowed_routes = {
-            "PROJECT_KNOWLEDGE_AGENT", "SECURITY_REVIEW_AGENT", "PLANNING_AGENT",
-            "WRITING_AGENT", "USER", "BLOCK", "ARGUMENT_ARCHITECTURE_AGENT",
-            "EXPRESSION_EDITOR_AGENT", "INTEGRATION_AGENT",
-        }
-        actions = result["routing_actions"]
-        action_codes = {
-            str(item.get("finding_code")) for item in actions if isinstance(item, dict)
-        }
-        for item in output.get("findings") or []:
-            if not isinstance(item, dict) or not item.get("blocking", True):
-                continue
-            code = str(item.get("code") or "")
-            if not code or code in action_codes:
-                continue
-            route = str(item.get("suggested_route") or "BLOCK")
-            if route == "ORIGINAL_PRODUCER":
-                route = "WRITING_AGENT"
-            if route not in allowed_routes:
-                route = "BLOCK"
-            actions.append({
-                "finding_code": code,
-                "route": route,
-                "reason": str(
-                    item.get("repair_instruction")
-                    or item.get("description")
-                    or "阻断问题必须返回责任阶段处理。"
-                ),
-            })
-            action_codes.add(code)
-
 
 class FullProposalQualityGuard(FullIntegrationQualityMixin, BaseProposalQualityGuard):
     """Baseline proposal checks plus complete-document integration checks."""

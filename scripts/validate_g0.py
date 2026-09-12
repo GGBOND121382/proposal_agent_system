@@ -53,8 +53,29 @@ def parse_fastapi_version(path: Path) -> str | None:
         if not (isinstance(func, ast.Name) and func.id == "FastAPI"):
             continue
         for keyword in node.value.keywords:
-            if keyword.arg == "version" and isinstance(keyword.value, ast.Constant):
+            if keyword.arg != "version":
+                continue
+            if isinstance(keyword.value, ast.Constant):
                 return str(keyword.value.value)
+            if isinstance(keyword.value, ast.Name) and keyword.value.id == "__version__":
+                version_file = path.parent / "version.py"
+                if not version_file.exists():
+                    return None
+                version_tree = ast.parse(version_file.read_text(encoding="utf-8"), filename=str(version_file))
+                for version_node in ast.walk(version_tree):
+                    if not isinstance(version_node, ast.Assign):
+                        continue
+                    if not any(isinstance(target, ast.Name) and target.id == "__version__" for target in version_node.targets):
+                        continue
+                    if isinstance(version_node.value, ast.Constant):
+                        return str(version_node.value.value)
+                    if (
+                        isinstance(version_node.value, ast.Call)
+                        and isinstance(version_node.value.func, ast.Name)
+                        and version_node.value.func.id == "project_version"
+                    ):
+                        project = tomllib.loads((path.parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+                        return str(project["project"]["version"])
     return None
 
 
@@ -69,6 +90,10 @@ def canonical_sha256(value: Any) -> str:
 
 def file_git_blob_sha(path: Path) -> str:
     data = path.read_bytes()
+    # Git's text filter stores JSON with LF in the blob even when a Windows
+    # checkout materializes CRLF. Validate the Git blob identity, not the
+    # platform-specific working-tree newline representation.
+    data = data.replace(b"\r\n", b"\n")
     header = f"blob {len(data)}\0".encode("ascii")
     return hashlib.sha1(header + data).hexdigest()
 
@@ -97,6 +122,29 @@ def current_blob_sha(root: Path, relative_path: str) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+def _git_changed_paths(root: Path, pathspecs: list[str]) -> set[str]:
+    """Return committed, staged, unstaged and untracked changes in frozen paths.
+
+    G0 is frequently validated before a change-control commit is created.  The
+    previous implementation inspected only ``baseline..HEAD`` and therefore
+    treated correctly registered approvals as stale until after commit, while
+    ignoring unapproved working-tree edits.  The contract now evaluates the
+    complete repository state without weakening the frozen-path check.
+    """
+    changed: set[str] = set()
+    commands = (
+        ("diff", "--name-only", "HEAD", "--", *pathspecs),
+        ("diff", "--cached", "--name-only", "HEAD", "--", *pathspecs),
+        ("ls-files", "--others", "--exclude-standard", "--", *pathspecs),
+    )
+    for command in commands:
+        result = run_git(root, *command, check=False)
+        if result.returncode != 0:
+            continue
+        changed.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+    return changed
+
+
 def validate_frozen_paths(
     root: Path,
     *,
@@ -112,7 +160,9 @@ def validate_frozen_paths(
         return [f"{label}: baseline commit is not an ancestor of HEAD: {baseline_commit}"]
 
     result = run_git(root, "diff", "--name-only", baseline_commit, "HEAD", "--", *pathspecs)
-    changed = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    committed = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    pending = _git_changed_paths(root, pathspecs)
+    changed = committed | pending
     approved_by_path = {str(item.get("path")): item for item in approved_changes}
 
     undeclared = sorted(changed - set(approved_by_path))

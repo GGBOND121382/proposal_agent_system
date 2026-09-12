@@ -98,6 +98,85 @@ class QualityLifecycleManager:
         if blockers:
             raise QualityGateBlocked(blockers)
 
+    def open_delivery_blockers(self, project_id: str) -> list[dict[str, Any]]:
+        """Return blockers belonging to the active proposal workflow lineage.
+
+        Quality artifacts are append-only, so abandoned/replaced workflow runs
+        remain queryable forever.  They must not, however, block delivery of a
+        later completed intake/template/authoring lineage.  Acceptance runs may
+        also carry explicitly confirmed test-only input gaps forward; those
+        findings remain OPEN in the ledger and are excluded only from the draft
+        delivery decision.  Deterministic ``QG_`` findings are never eligible.
+        """
+        rows = self.db.fetchall(
+            """SELECT id,workflow_type,status,state_json,updated_at
+               FROM workflows WHERE project_id=?
+               ORDER BY updated_at DESC,id DESC""",
+            (project_id,),
+        )
+        selected: dict[str, dict[str, Any]] = {}
+        fallback: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            workflow_type = str(row.get("workflow_type") or "")
+            if workflow_type not in {
+                "WF-1_PROJECT_INTAKE",
+                "WF-2_TEMPLATE_EXTRACTION",
+                "WF-3_HYBRID_ONLINE_ASSIST",
+                "WF-4_PROPOSAL_AUTHORING",
+                "WF-5_SECURITY_REVIEW_AND_EXPORT",
+            }:
+                continue
+            state = json.loads(row.get("state_json") or "{}")
+            if workflow_type == "WF-4_PROPOSAL_AUTHORING" and state.get("parent_workflow_id"):
+                continue
+            decoded = {**row, "state": state}
+            fallback.setdefault(workflow_type, decoded)
+            if workflow_type == "WF-5_SECURITY_REVIEW_AND_EXPORT":
+                selected.setdefault(workflow_type, decoded)
+            elif row.get("status") == "COMPLETED":
+                selected.setdefault(workflow_type, decoded)
+        for workflow_type, row in fallback.items():
+            selected.setdefault(workflow_type, row)
+
+        selected_ids = {str(row["id"]) for row in selected.values()}
+        latest_wf5 = selected.get("WF-5_SECURITY_REVIEW_AND_EXPORT")
+        acceptance_run = bool(
+            ((latest_wf5 or {}).get("state") or {}).get("options", {}).get("acceptance_run")
+        )
+        accepted_run_ids: set[str] = set()
+        if acceptance_run:
+            for row in selected.values():
+                for item in (
+                    (row.get("state") or {}).get("accepted_step_results") or {}
+                ).values():
+                    if isinstance(item, dict) and item.get("run_id"):
+                        accepted_run_ids.add(str(item["run_id"]))
+
+        blockers: list[dict[str, Any]] = []
+        for record in self.open_blockers(project_id):
+            workflow_id = str(record.get("workflow_id") or "")
+            responsibility = record.get("responsibility") or {}
+            if (
+                workflow_id
+                and workflow_id not in selected_ids
+                and responsibility.get("owner") != "EXPORT_ENGINEERING"
+            ):
+                continue
+            finding = record.get("finding") or {}
+            opened_run_id = str(
+                (record.get("lifecycle") or {}).get("opened_by", {}).get("run_id") or ""
+            )
+            code = str(finding.get("code") or "")
+            if acceptance_run and opened_run_id in accepted_run_ids and not code.startswith("QG_"):
+                continue
+            blockers.append(record)
+        return blockers
+
+    def assert_no_delivery_blockers(self, project_id: str) -> None:
+        blockers = self.open_delivery_blockers(project_id)
+        if blockers:
+            raise QualityGateBlocked(blockers)
+
     def quality_matrix(self, project_id: str, *, workflow_id: str | None = None) -> dict[str, Any]:
         findings = self.list_findings(project_id, workflow_id=workflow_id)
         by_state: dict[str, int] = {}
@@ -137,11 +216,17 @@ class QualityLifecycleManager:
         state = workflow_state or {}
         scope_key = self._scope_key(prompt_id, state)
         findings = [item for item in output.get("findings", []) if isinstance(item, dict)]
-        current_codes = {str(item.get("code")) for item in findings if item.get("code")}
+        current_identities = {
+            self._identity(item, scope_key)
+            for item in findings
+            if item.get("code")
+        }
 
-        # A successful producer/repair run may supply repair evidence, but never closes
-        # the finding by itself.
-        if status == "PASS":
+        # A later producer/repair candidate may supply code-specific repair
+        # evidence even when unrelated findings keep the overall run in REVISE
+        # or NEED_USER_INPUT. It never closes the finding by itself; an
+        # independent critic must still verify that the original code is absent.
+        if status in {"PASS", "REVISE", "NEED_USER_INPUT"}:
             self._record_matching_repair_runs(
                 project_id=project_id,
                 workflow_id=workflow_id,
@@ -159,7 +244,7 @@ class QualityLifecycleManager:
             reviewer_prompt_id=prompt_id,
             review_run_id=run_id,
             scope_key=scope_key,
-            current_codes=current_codes,
+            current_identities=current_identities,
         )
 
         records: list[dict[str, Any]] = []
@@ -184,13 +269,27 @@ class QualityLifecycleManager:
         workflow_id: str | None,
         repair_run_id: str,
         finding_codes: Iterable[str],
+        finding_instances: Iterable[dict[str, Any]] | None = None,
+        critic_prompt_id: str | None = None,
         workflow_state: dict[str, Any] | None = None,
     ) -> None:
         codes = {str(code) for code in finding_codes if code}
-        if not codes:
+        state = workflow_state or {}
+        exact_identities: set[str] = set()
+        if finding_instances is not None and critic_prompt_id:
+            scope_key = self._scope_key(critic_prompt_id, state)
+            exact_identities = {
+                self._identity(item, scope_key)
+                for item in finding_instances
+                if isinstance(item, dict) and item.get("code")
+            }
+        if not exact_identities and not codes:
             return
         for record in self.open_blockers(project_id, workflow_id=workflow_id):
-            if record.get("finding", {}).get("code") not in codes:
+            if exact_identities:
+                if str(record.get("identity_hash") or "") not in exact_identities:
+                    continue
+            elif record.get("finding", {}).get("code") not in codes:
                 continue
             self._append_repair(record, prompt_id="P-TARGETED-REPAIR", run_id=repair_run_id)
 
@@ -373,13 +472,13 @@ class QualityLifecycleManager:
         reviewer_prompt_id: str,
         review_run_id: str,
         scope_key: str,
-        current_codes: set[str],
+        current_identities: set[str],
     ) -> None:
         for record in self.open_blockers(project_id, workflow_id=workflow_id):
             route = record.get("responsibility") or {}
             if route.get("reviewer_prompt_id") != reviewer_prompt_id:
                 continue
-            if record.get("finding", {}).get("code") in current_codes:
+            if str(record.get("identity_hash") or "") in current_identities:
                 continue
             if not self._scope_matches(str(record.get("scope_key") or "document"), scope_key):
                 continue
@@ -522,7 +621,11 @@ class QualityLifecycleManager:
             return f"section:{section_id}"
         if prompt_id == "P-INTEGRATION-CRITIC":
             return "document"
-        return f"stage:{prompt_id.replace('-CRITIC', '')}"
+        # Critic prompt names are not always the producer name plus ``-CRITIC``.
+        # For example P-FACT-CRITIC reviews P-FACT-EXTRACT.  Use the canonical
+        # workflow mapping so repair and review evidence land in the same scope.
+        producer_prompt_id = CRITIC_PRODUCER.get(prompt_id, prompt_id)
+        return f"stage:{producer_prompt_id}"
 
     @staticmethod
     def _delivery_scope(finding: dict[str, Any]) -> str:

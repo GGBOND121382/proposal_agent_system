@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "prompt_input_envelope.schema.json",
-  "title": "统一Prompt输入Envelope；具体payload由30个Prompt Schema严格约束",
+  "title": "统一Prompt输入Envelope；具体payload由35个Prompt Schema严格约束",
   "oneOf": [
     {
       "$ref": "../prompts/security_classify_input.schema.json"
@@ -25,10 +25,25 @@
       "$ref": "../prompts/public_research_plan_input.schema.json"
     },
     {
+      "$ref": "../prompts/public_research_plan_scope_critic_input.schema.json"
+    },
+    {
       "$ref": "../prompts/public_research_synthesis_input.schema.json"
     },
     {
       "$ref": "../prompts/public_research_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/background_research_plan_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/background_research_plan_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/background_research_synthesis_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/background_research_critic_input.schema.json"
     },
     {
       "$ref": "../prompts/scheme_extract_input.schema.json"
@@ -92,6 +107,27 @@
     },
     {
       "$ref": "../prompts/expression_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_outline_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_outline_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_section_write_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_content_critic_input.schema.json"
     }
-  ]
+  ],
+  "properties": {
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
+    }
+  }
 }

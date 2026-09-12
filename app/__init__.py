@@ -1,7 +1,5 @@
-"""Proposal multi-agent runtime."""
+"""Proposal multi-agent system package.
 
-from .runtime_bootstrap import install_runtime_extensions
-
-install_runtime_extensions()
-
-del install_runtime_extensions
+Runtime implementations are assembled explicitly by :mod:`app.runtime_factory`.
+Importing :mod:`app` no longer mutates classes in sibling modules.
+"""

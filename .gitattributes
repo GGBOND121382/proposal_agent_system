@@ -1,0 +1,36 @@
+# Keep repository text stable across Windows and Linux without rewriting
+# existing files as part of this change.
+* text=auto
+
+*.py      text eol=lf
+*.md      text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.json    text eol=lf
+*.sh      text eol=lf
+*.toml    text eol=lf
+*.ini     text eol=lf
+*.cfg     text eol=lf
+*.txt     text eol=lf
+
+# Native Windows command scripts retain CRLF in working trees.
+*.ps1     text eol=crlf
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# Binary and archive formats must never receive newline conversion.
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.webp    binary
+*.pdf     binary
+*.zip     binary
+*.gz      binary
+*.tar     binary
+*.docx    binary
+*.pptx    binary
+*.xlsx    binary
+*.sqlite  binary
+*.sqlite3 binary
+*.db      binary

@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stage1DesignInput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "stage", "project_title", "document_contract",
+    "concept_definition", "project_positioning", "application_scenarios",
+    "research_questions", "objectives", "work_packages", "method_system",
+    "human_ai_collaboration", "evaluation_design", "deliverables",
+    "constraints", "assumptions", "unresolved_items", "page_budget",
+    "source_refs"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "stage": {"const": "STAGE_1_DESIGN_INPUT"},
+    "project_title": {"type": "string", "minLength": 4},
+    "document_contract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["language", "document_type", "body_page_limit", "target_body_pages", "references_outside_body_limit", "writing_status"],
+      "properties": {
+        "language": {"const": "zh-CN"},
+        "document_type": {"const": "科研项目申请书"},
+        "body_page_limit": {"type": "number", "maximum": 20, "minimum": 1},
+        "target_body_pages": {
+          "type": "object", "additionalProperties": false,
+          "required": ["min", "max"],
+          "properties": {"min": {"type": "number", "minimum": 1}, "max": {"type": "number", "maximum": 20}}
+        },
+        "references_outside_body_limit": {"type": "boolean"},
+        "writing_status": {"const": "DESIGN_INPUT_ONLY"}
+      }
+    },
+    "concept_definition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["term", "working_definition", "essential_mechanisms", "boundaries", "non_goals"],
+      "properties": {
+        "term": {"const": "人机协同决策优势冲刺"},
+        "working_definition": {"type": "string", "minLength": 40},
+        "essential_mechanisms": {"type": "array", "minItems": 4, "items": {"type": "string", "minLength": 4}},
+        "boundaries": {"type": "array", "minItems": 3, "items": {"type": "string", "minLength": 4}},
+        "non_goals": {"type": "array", "minItems": 3, "items": {"type": "string", "minLength": 4}}
+      }
+    },
+    "project_positioning": {
+      "type": "object", "additionalProperties": false,
+      "required": ["problem_statement", "current_gap", "central_proposition", "target_users", "maturity_target", "research_attribute"],
+      "properties": {
+        "problem_statement": {"type": "string", "minLength": 50},
+        "current_gap": {"type": "string", "minLength": 50},
+        "central_proposition": {"type": "string", "minLength": 50},
+        "target_users": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+        "maturity_target": {"type": "string", "minLength": 8},
+        "research_attribute": {"type": "string", "minLength": 4}
+      }
+    },
+    "application_scenarios": {
+      "type": "array", "minItems": 3, "maxItems": 5,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["scenario_id", "name", "decision_window", "decision_objects", "human_roles", "machine_roles", "validation_value"],
+        "properties": {
+          "scenario_id": {"type": "string", "pattern": "^SC-[0-9]{2}$"},
+          "name": {"type": "string"}, "decision_window": {"type": "string"},
+          "decision_objects": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+          "human_roles": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "machine_roles": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+          "validation_value": {"type": "string", "minLength": 12}
+        }
+      }
+    },
+    "research_questions": {
+      "type": "array", "minItems": 3, "maxItems": 4,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["rq_id", "question", "difficulty", "verification_evidence"],
+        "properties": {
+          "rq_id": {"type": "string", "pattern": "^RQ-[0-9]+$"},
+          "question": {"type": "string", "minLength": 20},
+          "difficulty": {"type": "string", "minLength": 20},
+          "verification_evidence": {"type": "array", "minItems": 2, "items": {"type": "string"}}
+        }
+      }
+    },
+    "objectives": {
+      "type": "array", "minItems": 3, "maxItems": 6,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["objective_id", "statement", "addresses_rq_ids", "success_evidence"],
+        "properties": {
+          "objective_id": {"type": "string", "pattern": "^OBJ-[0-9]+$"},
+          "statement": {"type": "string", "minLength": 20},
+          "addresses_rq_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "success_evidence": {"type": "array", "minItems": 2, "items": {"type": "string"}}
+        }
+      }
+    },
+    "work_packages": {
+      "type": "array", "minItems": 4, "maxItems": 6,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["wp_id", "name", "purpose", "tasks", "objective_ids", "method_ids", "deliverable_ids", "metric_ids"],
+        "properties": {
+          "wp_id": {"type": "string", "pattern": "^WP-[0-9]+$"}, "name": {"type": "string"},
+          "purpose": {"type": "string", "minLength": 20},
+          "tasks": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+          "objective_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "method_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "deliverable_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "metric_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        }
+      }
+    },
+    "method_system": {
+      "type": "array", "minItems": 5, "maxItems": 9,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["method_id", "name", "mechanism", "inputs", "outputs", "applicable_rq_ids", "limitations"],
+        "properties": {
+          "method_id": {"type": "string", "pattern": "^M-[0-9]+$"}, "name": {"type": "string"},
+          "mechanism": {"type": "string", "minLength": 30},
+          "inputs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "outputs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "applicable_rq_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "limitations": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        }
+      }
+    },
+    "human_ai_collaboration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["human_authority", "agent_roles", "interaction_loop", "handoff_rules", "stopping_rules", "fallback_rules"],
+      "properties": {
+        "human_authority": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "agent_roles": {"type": "array", "minItems": 4, "items": {"type": "string"}},
+        "interaction_loop": {"type": "array", "minItems": 5, "items": {"type": "string"}},
+        "handoff_rules": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "stopping_rules": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "fallback_rules": {"type": "array", "minItems": 2, "items": {"type": "string"}}
+      }
+    },
+    "evaluation_design": {
+      "type": "object", "additionalProperties": false,
+      "required": ["baselines", "experiment_groups", "metrics", "evidence_plan"],
+      "properties": {
+        "baselines": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "experiment_groups": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+        "metrics": {
+          "type": "array", "minItems": 6,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["metric_id", "name", "measurement", "direction", "target", "target_status", "applicable_scenarios"],
+            "properties": {
+              "metric_id": {"type": "string", "pattern": "^MET-[0-9]+$"}, "name": {"type": "string"},
+              "measurement": {"type": "string", "minLength": 12},
+              "direction": {"enum": ["HIGHER_BETTER", "LOWER_BETTER", "ZERO_REQUIRED"]},
+              "target": {"type": ["string", "number"]},
+              "target_status": {"const": "PROVISIONAL_TARGET"},
+              "applicable_scenarios": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+            }
+          }
+        },
+        "evidence_plan": {"type": "array", "minItems": 4, "items": {"type": "string"}}
+      }
+    },
+    "deliverables": {
+      "type": "array", "minItems": 4,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["deliverable_id", "name", "type", "acceptance_evidence"],
+        "properties": {
+          "deliverable_id": {"type": "string", "pattern": "^DEL-[0-9]+$"}, "name": {"type": "string"},
+          "type": {"type": "string"}, "acceptance_evidence": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+        }
+      }
+    },
+    "constraints": {"type": "array", "minItems": 6, "items": {"type": "string"}},
+    "assumptions": {
+      "type": "array", "minItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["assumption_id", "statement", "status", "impact_if_false"],
+        "properties": {
+          "assumption_id": {"type": "string", "pattern": "^ASM-[0-9]+$"}, "statement": {"type": "string"},
+          "status": {"const": "WORKING_ASSUMPTION"}, "impact_if_false": {"type": "string"}
+        }
+      }
+    },
+    "unresolved_items": {
+      "type": "array", "minItems": 4,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["item_id", "field", "status", "required_before_stage"],
+        "properties": {
+          "item_id": {"type": "string", "pattern": "^OPEN-[0-9]+$"}, "field": {"type": "string"},
+          "status": {"const": "UNRESOLVED"}, "required_before_stage": {"type": "string"}
+        }
+      }
+    },
+    "page_budget": {
+      "type": "array", "minItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["section_id", "section_name", "target_pages", "max_pages"],
+        "properties": {
+          "section_id": {"type": "string", "pattern": "^SEC-[0-9]+$"}, "section_name": {"type": "string"},
+          "target_pages": {"type": "number", "minimum": 0.1}, "max_pages": {"type": "number", "minimum": 0.1}
+        }
+      }
+    },
+    "source_refs": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source_id", "source_type", "statement"],
+        "properties": {"source_id": {"type": "string"}, "source_type": {"type": "string"}, "statement": {"type": "string"}}
+      }
+    }
+  }
+}

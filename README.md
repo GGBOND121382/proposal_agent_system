@@ -1,5 +1,17 @@
 # 项目申请书智能体系统
 
+
+<!-- BEGIN GENERATED BUILD STATS -->
+## 当前构建统计
+
+- 产品版本：`0.6.0`；
+- Prompt 注册项：30；
+- Prompt Pack Schema：91；Stage Schema：34；
+- Replay 用例：150；
+- pytest 收集用例：883。
+
+以上统计由 `scripts/sync_project_metadata.py` 从代码与测试自动生成；历史版本章节中的旧数字仅描述当时版本。
+<!-- END GENERATED BUILD STATS -->
 本项目把附件 `proposal_prompt_pack_v2` 从静态 Prompt 交接包落成一个可运行的多智能体系统。运行时动态读取 30 个 Prompt、60 个Prompt专用输入/输出 Schema、模型路由与安全策略，不在业务代码中复制 Prompt 正文。
 
 ## 已实现
@@ -7,7 +19,7 @@
 - 30 个 Prompt 的动态注册、输入/输出 Schema 严格校验和完整 Schema 内联；
 - OpenAI-compatible 离线/在线模型网关，离线失败不会自动切换在线；
 - `REPLAY`、`MOCK`、`SIMULATED`、`LIVE` 四种运行模式；
-- 五条核心工作流状态机与十三类人工 Gate；
+- 六条核心工作流状态机与十三类人工 Gate；
 - 一次定向修复额度与 Critic/Producer 分离；
 - DOCX、PDF、Markdown、TXT、JSON、CSV 材料解析；
 - 上传存储元数据与 Prompt `document_context` 严格隔离，确保真实材料替换 Replay 种子；
@@ -98,7 +110,7 @@ python scripts/run_logistics_agent_complex_e2e.py \
 - 所有 `ONLINE_PUBLIC` Prompt 在调用模型前再次扫描，发现个人信息或项目专有实体即阻断执行；
 - 新增姓名、组织、地址、地点、电话和邮箱测试夹具，验证内部申请书可保留虚构值、在线任务包必须使用占位符；
 - 修复多章节导出中的列表连续编号、中文表格缺字和重复段落问题；
-- 模拟模型端到端覆盖五条工作流、全部人工 Gate、12 个正式章节、3 次在线 Prompt 调用和最终 DOCX/审计包导出。
+- 模拟模型端到端覆盖当时定义的五条工作流（WF-3B_TOPIC_BACKGROUND_RESEARCH 为后续新增的第六条）、全部人工 Gate、12 个正式章节、3 次在线 Prompt 调用和最终 DOCX/审计包导出。
 
 运行命令：
 
@@ -107,7 +119,7 @@ python scripts/run_outdoor_thermos_simulated_e2e.py \
   --output-dir data/outdoor_thermos_simulated_e2e
 ```
 
-该脚本以 REPLAY 模型边界运行五条工作流和十二章逐章编制，用于验证编排、门禁、候选聚合和导出。隐私替换与在线调用阻断由自动化测试覆盖；本脚本不等同于真实大模型语义能力测评。
+该脚本是 v0.3 的历史 12 章节回归夹具，当前使用上下文感知的 `SIMULATED` 模型边界；它用于暴露旧夹具在当前合同与质量门禁下的兼容问题，不再作为 v0.6 的“必须全程通过”基线。当前完整五工作流、14 章节质量与 DOCX 导出的全通过基线请运行 `python scripts/run_v06_quality_e2e.py`。两类脚本均不等同于真实大模型语义能力测评。
 
 ## v0.2.0 完整申请书编制修复
 
@@ -156,6 +168,37 @@ cp .env.example .env
 docker compose up --build
 ```
 
+### 重启本机服务
+
+uvicorn 无热重载：`app/` 代码、`.env`、`prompt_pack/`（含 schema）改动后必须重启进程才生效。以下命令自动找到当前监听 8080 的进程、停掉并以原参数重启。
+
+Git Bash（启动走 PowerShell `Start-Process`，服务独立于终端存活；不要用 `nohup ... &`，Git Bash 窗口关闭后进程会被一并杀掉）：
+
+```bash
+PID=$(netstat -ano | grep ":8080" | grep LISTEN | awk '{print $NF}' | head -1) \
+  && powershell -NoProfile -Command "Stop-Process -Id $PID -Force"
+sleep 2
+powershell -NoProfile -Command "Start-Process py -ArgumentList '-3','-m','uvicorn','app.main:app','--env-file','.env','--host','127.0.0.1','--port','8080' -WorkingDirectory '$PWD' -RedirectStandardOutput 'data\logs\uvicorn-8080.out.log' -RedirectStandardError 'data\logs\uvicorn-8080.err.log' -WindowStyle Hidden"
+sleep 6 && curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/
+```
+
+Windows PowerShell：
+
+```powershell
+$c = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($c) { Stop-Process -Id $c.OwningProcess -Force }
+Start-Sleep 2
+Start-Process py -ArgumentList '-3','-m','uvicorn','app.main:app','--env-file','.env','--host','127.0.0.1','--port','8080' `
+  -RedirectStandardOutput data/logs/uvicorn-8080.out.log -RedirectStandardError data/logs/uvicorn-8080.err.log
+Start-Sleep 6; (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/).StatusCode
+```
+
+输出 `200` 即重启完成。
+
+## 运行依赖预检
+
+模型、公开搜索、证据目录、Mermaid、LibreOffice、字体及 Stage 输入由统一预检器检查。缺失依赖时工作流进入 `WAITING_CONFIGURATION`，修正配置并重启后从原步骤继续。详见 `docs/RUNTIME_DEPENDENCY_PREFLIGHT_20260730.md`。
+
 ## 运行模式
 
 ### REPLAY
@@ -191,6 +234,12 @@ OFFLINE_GENERAL_MODEL=...
 OFFLINE_CRITIC_MODEL=...
 ```
 
+启动命令：
+cd D:\VSCodeWorkspace\proposal_agent_system
+$env:MODEL_RUNTIME_MODE="LIVE"
+$env:PUBLIC_SEARCH_PROVIDER="academic"
+py -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8080
+
 离线端点应部署在不联网的受控环境。系统不会把离线失败自动回退到在线模型。
 
 ## 在线公共研究
@@ -208,13 +257,14 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 
 工作流 `WF-3_HYBRID_ONLINE_ASSIST` 的顺序是：离线生成 Safe Online Package → 离线 Critic → 人工外发审批 → 在线公开研究 → 离线导入 Critic → 人工导入审批。在线模型只接收 `PUBLIC` 上下文。
 
-## 五条工作流
+## 六条工作流
 
 | 工作流 | 功能 |
 |---|---|
 | `WF-1_PROJECT_INTAKE` | 材料、安全分类、申报规则、项目定义、事实和准备度 |
 | `WF-2_TEMPLATE_EXTRACTION` | 参考申请书结构/风格提取与污染检查 |
 | `WF-3_HYBRID_ONLINE_ASSIST` | 经审批的公共研究与结果隔离导入 |
+| `WF-3B_TOPIC_BACKGROUND_RESEARCH` | topic 应用背景调研（依赖 WF-1 完成），产出 `TOPIC_BACKGROUND_RESULT` |
 | `WF-4_PROPOSAL_AUTHORING` | 修改计划、逐章蓝图与正文、逐章 Critic 和跨章节一致性 |
 | `WF-5_SECURITY_REVIEW_AND_EXPORT` | 正文保密审查、内容审批和最终导出审批 |
 
@@ -248,17 +298,17 @@ PUBLIC_SEARCH_BASE_URL=http://your-searxng:8080
 bash scripts/validate.sh
 ```
 
-当前自动测试共19项，覆盖：
+当前 pytest 收集用例共883项，覆盖：
 
-- 26 个 Prompt 的正常 Replay 输入/输出；
+- 30 个已注册 Prompt 的正常 Replay 输入/输出；
 - 材料解析与 Context Builder；
 - 未审批在线调用阻断；
 - 在线任务包确定性脱敏与调用前个人信息阻断；
 - 工作流门禁暂停；
-- 五条工作流完整运行；
+- 六条工作流完整运行；
 - 多章节逐章生成、真实候选聚合和终审输入；
-- 十二章模拟模型端到端申请书生成；
-- 41章复杂申请书、26/26 Prompt覆盖和定向修复闭环；
+- 模板定义章节的模拟模型端到端申请书生成；
+- 复杂申请书、全部已注册 Prompt 覆盖和定向修复闭环；
 - 全量System Prompt、输入、输出Schema、原始响应和路由Trace；
 - 公开证据进入写作上下文、参考文献与图形工件导出；
 - Research Agent 原始查询覆盖、39个公开来源快照和哈希复核；
@@ -275,7 +325,7 @@ app/
   llm.py           # OpenAI-compatible 模型网关
   security.py      # 安全模型路由
   privacy.py       # 在线出站实体替换、电话邮箱净化和阻断
-  workflows.py     # 五条工作流和人工 Gate
+  workflows.py     # 六条工作流和人工 Gate
   skills/          # Mermaid 与公开研究 Skill、执行日志和注册表
   documents.py     # 材料解析
   exporter.py      # DOCX/审计包导出

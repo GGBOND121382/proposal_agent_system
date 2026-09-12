@@ -10,7 +10,7 @@
       "const": "P-WRITE-BLUEPRINT-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.2.0"
     },
     "task": {
       "type": "object",
@@ -523,8 +523,7 @@
                     "minLength": 1,
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                   },
-                  "minItems": 2,
-                  "maxItems": 5
+                  "minItems": 1
                 },
                 "main_body_page_budget": {
                   "type": "integer",
@@ -708,7 +707,8 @@
         },
         "narrative_architecture": {
           "type": "object",
-          "minProperties": 5
+          "minProperties": 5,
+          "additionalProperties": true
         },
         "section_contract": {
           "$ref": "../common/section_contract.schema.json"
@@ -722,6 +722,12 @@
             "$ref": "../common/prior_section_digest.schema.json"
           },
           "description": "已完成章节的结构化语义推进摘要，用于跨章节唯一性检查。"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,
@@ -743,7 +749,15 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/write_blueprint_critic_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
     }
   },
   "additionalProperties": false,

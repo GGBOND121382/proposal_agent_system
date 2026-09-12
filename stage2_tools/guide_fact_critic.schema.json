@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stage2GuideFactCritic",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "verdict", "approved_candidate_hash", "findings", "checked_dimensions", "summary"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "verdict": {"enum": ["ACCEPT", "REVISE", "REJECT"]},
+    "approved_candidate_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["finding_id", "severity", "dimension", "message", "suggested_route"],
+        "properties": {
+          "finding_id": {"type": "string"},
+          "severity": {"enum": ["BLOCKING", "MAJOR", "MINOR", "INFO"]},
+          "dimension": {"type": "string"},
+          "message": {"type": "string"},
+          "suggested_route": {"enum": ["STAGE2_GENERATOR", "HUMAN_GATE", "NEXT_STAGE", "NONE"]}
+        }
+      }
+    },
+    "checked_dimensions": {"type": "array", "minItems": 8, "items": {"type": "string"}},
+    "summary": {"type": "string", "minLength": 30}
+  }
+}

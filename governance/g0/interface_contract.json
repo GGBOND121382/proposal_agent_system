@@ -1,9 +1,9 @@
 {
-  "contract_version": "1.0.0",
+  "contract_version": "1.3.1",
   "baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
   "prompt_registry": {
     "version": "2.0",
-    "entry_count": 30,
+    "entry_count": 39,
     "required_fields": [
       "prompt_id",
       "prompt_version",
@@ -15,52 +15,155 @@
       "executor_role",
       "next_human_gate"
     ],
-    "entries_sha256": "a9104d35ed0ddae781368c1855374604c3c32b0a8b3444ad94f8ba2fcc9a04be",
-    "registry_git_blob_sha": "d187c9882fda6b5e3be00bf5d50a88de63a4c5e7"
+    "entries_sha256": "0655018f4ca6e0106d3987b2ed3fc72bd2ea7f5fecac4d9fb4a04f85645a445f",
+    "registry_git_blob_sha": "063a018eca50f97b7702d196f00c29cb81938b46"
   },
   "workflow_state_machine": {
     "workflows": {
       "WF-1_PROJECT_INTAKE": [
-        {"prompt_id": "P-SECURITY-CLASSIFY"},
-        {"prompt_id": "P-SECURITY-CLASSIFY-CRITIC"},
-        {"prompt_id": "P-SCHEME-EXTRACT"},
-        {"prompt_id": "P-SCHEME-CRITIC"},
-        {"prompt_id": "P-PROJECT-DEFINITION-EXTRACT"},
-        {"prompt_id": "P-PROJECT-DEFINITION-CRITIC"},
-        {"prompt_id": "P-FACT-EXTRACT"},
-        {"prompt_id": "P-FACT-CRITIC"},
-        {"prompt_id": "P-PROJECT-READINESS-CRITIC"}
+        {
+          "prompt_id": "P-SECURITY-CLASSIFY"
+        },
+        {
+          "prompt_id": "P-SECURITY-CLASSIFY-CRITIC"
+        },
+        {
+          "prompt_id": "P-SCHEME-EXTRACT"
+        },
+        {
+          "prompt_id": "P-SCHEME-CRITIC"
+        },
+        {
+          "prompt_id": "P-PROJECT-DEFINITION-EXTRACT"
+        },
+        {
+          "prompt_id": "P-PROJECT-DEFINITION-CRITIC"
+        },
+        {
+          "prompt_id": "P-FACT-EXTRACT"
+        },
+        {
+          "prompt_id": "P-FACT-CRITIC"
+        },
+        {
+          "prompt_id": "P-PROJECT-READINESS-CRITIC"
+        }
       ],
       "WF-2_TEMPLATE_EXTRACTION": [
-        {"prompt_id": "P-TEMPLATE-EXTRACT"},
-        {"prompt_id": "P-TEMPLATE-CRITIC"}
+        {
+          "prompt_id": "P-TEMPLATE-EXTRACT"
+        },
+        {
+          "prompt_id": "P-TEMPLATE-CRITIC"
+        }
       ],
       "WF-3_HYBRID_ONLINE_ASSIST": [
-        {"prompt_id": "P-SAFE-ONLINE-PACKAGE"},
-        {"prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC"},
-        {"prompt_id": "P-PUBLIC-RESEARCH-PLAN"},
-        {"type": "PUBLIC_SEARCH"},
-        {"prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS"},
-        {"prompt_id": "P-PUBLIC-RESEARCH-CRITIC"},
-        {"prompt_id": "P-ONLINE-RESULT-IMPORT-CRITIC"}
+        {
+          "prompt_id": "P-SAFE-ONLINE-PACKAGE"
+        },
+        {
+          "prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC"
+        },
+        {
+          "prompt_id": "P-PUBLIC-RESEARCH-PLAN"
+        },
+        {
+          "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC"
+        },
+        {
+          "type": "PUBLIC_SEARCH"
+        },
+        {
+          "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS"
+        },
+        {
+          "prompt_id": "P-PUBLIC-RESEARCH-CRITIC"
+        },
+        {
+          "prompt_id": "P-ONLINE-RESULT-IMPORT-CRITIC"
+        }
+      ],
+      "WF-3B_TOPIC_BACKGROUND_RESEARCH": [
+        {
+          "prompt_id": "P-SAFE-ONLINE-PACKAGE"
+        },
+        {
+          "prompt_id": "P-SAFE-ONLINE-PACKAGE-CRITIC"
+        },
+        {
+          "prompt_id": "P-BACKGROUND-RESEARCH-PLAN"
+        },
+        {
+          "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC"
+        },
+        {
+          "type": "PUBLIC_SEARCH"
+        },
+        {
+          "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS"
+        },
+        {
+          "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC"
+        },
+        {
+          "prompt_id": "P-ONLINE-RESULT-IMPORT-CRITIC"
+        }
       ],
       "WF-4_PROPOSAL_AUTHORING": [
-        {"prompt_id": "P-ARGUMENT-ARCHITECTURE"},
-        {"prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC"},
-        {"prompt_id": "P-PROJECT-READINESS-CRITIC"},
-        {"prompt_id": "P-REVISION-PLAN"},
-        {"prompt_id": "P-REVISION-PLAN-CRITIC"},
-        {"type": "WRITE_SECTIONS"},
-        {"prompt_id": "P-INTEGRATION-CRITIC"}
+        {
+          "prompt_id": "P-ARGUMENT-ARCHITECTURE"
+        },
+        {
+          "prompt_id": "P-ARGUMENT-ARCHITECTURE-CRITIC"
+        },
+        {
+          "prompt_id": "P-PROJECT-READINESS-CRITIC"
+        },
+        {
+          "prompt_id": "P-REVISION-PLAN"
+        },
+        {
+          "prompt_id": "P-REVISION-PLAN-CRITIC"
+        },
+        {
+          "type": "WRITE_SECTIONS"
+        },
+        {
+          "prompt_id": "P-INTEGRATION-CRITIC"
+        }
       ],
       "WF-5_SECURITY_REVIEW_AND_EXPORT": [
-        {"prompt_id": "P-FINAL-CONFIDENTIALITY-REVIEW"},
-        {"type": "GATE", "gate_type": "FINAL_EXPORT_APPROVAL"}
+        {
+          "prompt_id": "P-FINAL-CONFIDENTIALITY-REVIEW"
+        },
+        {
+          "type": "GATE",
+          "gate_type": "FINAL_EXPORT_APPROVAL"
+        }
       ]
     },
-    "workflow_statuses": ["RUNNING", "WAITING_GATE", "BLOCKED", "COMPLETED", "CANCELLED"],
-    "gate_statuses": ["OPEN", "APPROVED", "REJECTED", "CANCELLED"],
-    "prompt_result_statuses": ["PASS", "REVISE", "NEED_USER_INPUT", "BLOCK", "ERROR"],
+    "workflow_statuses": [
+      "RUNNING",
+      "WAITING_GATE",
+      "WAITING_PREREQUISITE",
+      "WAITING_CONFIGURATION",
+      "BLOCKED",
+      "COMPLETED",
+      "CANCELLED"
+    ],
+    "gate_statuses": [
+      "OPEN",
+      "APPROVED",
+      "REJECTED",
+      "CANCELLED"
+    ],
+    "prompt_result_statuses": [
+      "PASS",
+      "REVISE",
+      "NEED_USER_INPUT",
+      "BLOCK",
+      "ERROR"
+    ],
     "gate_roles": {
       "SCHEME_CONFIRMATION": "PROJECT_OWNER",
       "PROJECT_DEFINITION_CONFIRMATION": "PROJECT_OWNER",
@@ -73,20 +176,73 @@
       "PLAN_CONFIRMATION": "PROJECT_OWNER",
       "CANDIDATE_REVIEW": "CONTENT_OPERATOR",
       "OUTBOUND_SECURITY_APPROVAL": "SECURITY_REVIEWER",
+      "PUBLIC_RESEARCH_NEED_INPUT": "PROJECT_OWNER",
+      "PROJECT_MATERIAL_INPUT": "PROJECT_OWNER",
+      "APPLICATION_GUIDE_INPUT": "PROJECT_OWNER",
+      "REFERENCE_TEMPLATE_INPUT": "CONTENT_OPERATOR",
+      "CURRENT_PROPOSAL_INPUT": "CONTENT_OPERATOR",
       "ONLINE_RESULT_IMPORT_APPROVAL": "SECURITY_REVIEWER",
       "FINAL_CONTENT_SECURITY_APPROVAL": "SECURITY_REVIEWER",
       "FINAL_EXPORT_APPROVAL": "EXPORT_APPROVER"
     },
     "gate_action_overrides": {
-      "OUTBOUND_SECURITY_APPROVAL": ["APPROVE", "RETURN", "REJECT", "CANCEL"],
-      "ONLINE_RESULT_IMPORT_APPROVAL": ["APPROVE", "RETURN", "REJECT", "CANCEL"],
-      "FINAL_CONTENT_SECURITY_APPROVAL": ["APPROVE", "RETURN", "REJECT", "CANCEL"],
-      "FINAL_EXPORT_APPROVAL": ["APPROVE", "RETURN", "REJECT", "CANCEL"]
+      "OUTBOUND_SECURITY_APPROVAL": [
+        "APPROVE",
+        "RETURN",
+        "REJECT",
+        "CANCEL"
+      ],
+      "PUBLIC_RESEARCH_NEED_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
+        "CANCEL"
+      ],
+      "PROJECT_MATERIAL_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
+        "CANCEL"
+      ],
+      "APPLICATION_GUIDE_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
+        "CANCEL"
+      ],
+      "REFERENCE_TEMPLATE_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
+        "CANCEL"
+      ],
+      "CURRENT_PROPOSAL_INPUT": [
+        "PROVIDE_INFORMATION",
+        "RETURN",
+        "CANCEL"
+      ],
+      "ONLINE_RESULT_IMPORT_APPROVAL": [
+        "APPROVE",
+        "RETURN",
+        "REJECT",
+        "CANCEL"
+      ],
+      "FINAL_CONTENT_SECURITY_APPROVAL": [
+        "APPROVE",
+        "RETURN",
+        "REJECT",
+        "CANCEL"
+      ],
+      "FINAL_EXPORT_APPROVAL": [
+        "APPROVE",
+        "RETURN",
+        "REJECT",
+        "CANCEL"
+      ]
     },
     "critic_producer": {
       "P-SECURITY-CLASSIFY-CRITIC": "P-SECURITY-CLASSIFY",
       "P-SAFE-ONLINE-PACKAGE-CRITIC": "P-SAFE-ONLINE-PACKAGE",
+      "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC": "P-PUBLIC-RESEARCH-PLAN",
       "P-PUBLIC-RESEARCH-CRITIC": "P-PUBLIC-RESEARCH-SYNTHESIS",
+      "P-BACKGROUND-RESEARCH-PLAN-CRITIC": "P-BACKGROUND-RESEARCH-PLAN",
+      "P-BACKGROUND-RESEARCH-CRITIC": "P-BACKGROUND-RESEARCH-SYNTHESIS",
       "P-SCHEME-CRITIC": "P-SCHEME-EXTRACT",
       "P-PROJECT-DEFINITION-CRITIC": "P-PROJECT-DEFINITION-EXTRACT",
       "P-FACT-CRITIC": "P-FACT-EXTRACT",
@@ -100,17 +256,129 @@
   },
   "artifact_interface": {
     "sqlite_tables": {
-      "projects": ["id", "name", "description", "security_level", "config_json", "created_at", "updated_at"],
-      "documents": ["id", "project_id", "filename", "role", "security_level", "document_hash", "file_path", "parsed_json", "created_at"],
-      "artifacts": ["id", "project_id", "workflow_id", "artifact_type", "prompt_id", "version", "status", "security_level", "context_hash", "content_json", "created_at"],
-      "prompt_runs": ["id", "project_id", "workflow_id", "prompt_id", "status", "model_id", "endpoint_id", "input_hash", "output_hash", "input_json", "output_json", "error", "duration_ms", "created_at"],
-      "skill_runs": ["id", "project_id", "workflow_id", "skill_id", "skill_version", "status", "input_hash", "output_hash", "input_json", "output_json", "error", "duration_ms", "created_at"],
-      "workflows": ["id", "project_id", "workflow_type", "status", "current_step", "state_json", "created_at", "updated_at"],
-      "gates": ["id", "project_id", "workflow_id", "gate_type", "target_id", "target_version", "context_hash", "question_version", "required_role", "allowed_actions_json", "questions_json", "security_level", "status", "decision_json", "created_at", "updated_at"],
-      "audit_events": ["id", "project_id", "event_type", "object_id", "metadata_json", "created_at"]
+      "projects": [
+        "id",
+        "name",
+        "description",
+        "security_level",
+        "config_json",
+        "created_at",
+        "updated_at"
+      ],
+      "documents": [
+        "id",
+        "project_id",
+        "filename",
+        "role",
+        "security_level",
+        "document_hash",
+        "file_path",
+        "parsed_json",
+        "created_at"
+      ],
+      "artifacts": [
+        "id",
+        "project_id",
+        "workflow_id",
+        "artifact_type",
+        "prompt_id",
+        "version",
+        "status",
+        "security_level",
+        "context_hash",
+        "content_json",
+        "created_at"
+      ],
+      "prompt_runs": [
+        "id",
+        "project_id",
+        "workflow_id",
+        "prompt_id",
+        "status",
+        "model_id",
+        "endpoint_id",
+        "input_hash",
+        "output_hash",
+        "input_json",
+        "output_json",
+        "error",
+        "duration_ms",
+        "created_at"
+      ],
+      "skill_runs": [
+        "id",
+        "project_id",
+        "workflow_id",
+        "skill_id",
+        "skill_version",
+        "status",
+        "input_hash",
+        "output_hash",
+        "input_json",
+        "output_json",
+        "error",
+        "duration_ms",
+        "created_at"
+      ],
+      "workflows": [
+        "id",
+        "project_id",
+        "workflow_type",
+        "status",
+        "current_step",
+        "state_json",
+        "created_at",
+        "updated_at"
+      ],
+      "gates": [
+        "id",
+        "project_id",
+        "workflow_id",
+        "gate_type",
+        "target_id",
+        "target_version",
+        "context_hash",
+        "question_version",
+        "required_role",
+        "allowed_actions_json",
+        "questions_json",
+        "security_level",
+        "status",
+        "decision_json",
+        "created_at",
+        "updated_at"
+      ],
+      "audit_events": [
+        "id",
+        "project_id",
+        "event_type",
+        "object_id",
+        "metadata_json",
+        "created_at"
+      ]
     },
-    "required_artifact_types": ["PROMPT_OUTPUT", "PROMPT_TRACE"],
-    "trace_payload_required_fields": ["prompt_id", "version", "status", "duration_ms", "environment", "model_id", "endpoint_id", "system_prompt", "input_envelope", "quality_context_envelope", "quality_context_hash", "input_compaction", "output_schema", "output", "raw_response_text", "error"]
+    "required_artifact_types": [
+      "PROMPT_OUTPUT",
+      "PROMPT_TRACE"
+    ],
+    "trace_payload_required_fields": [
+      "prompt_id",
+      "version",
+      "status",
+      "duration_ms",
+      "environment",
+      "model_id",
+      "endpoint_id",
+      "system_prompt",
+      "input_envelope",
+      "quality_context_envelope",
+      "quality_context_hash",
+      "input_compaction",
+      "output_schema",
+      "output",
+      "raw_response_text",
+      "error"
+    ]
   },
   "frozen_pathspecs": [
     "prompt_pack/prompts",
@@ -123,11 +391,641 @@
   ],
   "approved_changes": [
     {
+      "path": "prompt_pack/prompts/integration/integration_critic.md",
+      "blob_sha": "0f7c42d732f4b20ec6ca015698dd934ff610c15b",
+      "owner": "Proposal Agent Audit Maintainers",
+      "reason": "Approved audited patch contract hardening for integration review status and repair boundaries.",
+      "approval_reference": "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+    },
+    {
+      "path": "prompt_pack/prompts/shared/output_protocol.md",
+      "blob_sha": "53946ec84ab140f946169b7aaf58e077c1f56fd6",
+      "owner": "Proposal Agent Audit Maintainers",
+      "reason": "Approved audited patch update to the shared output protocol.",
+      "approval_reference": "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+    },
+    {
+      "path": "app/api_models.py",
+      "blob_sha": "dcd3d70a52e87cd1cd1ad901fe28984d75fbdd01",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "app/db.py",
+      "blob_sha": "80d3d30f700c1e481b5b8434bf5e11da4a7db982",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "app/executor.py",
+      "blob_sha": "bf6142c263cfdcddbdfe1f6320485c06b3da35f2",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "app/workflow_defs.py",
+      "blob_sha": "f1ce26031f47672b476cee271e8faa97dcd5cf9e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/config/prompt_registry.json",
+      "blob_sha": "848b607ed8a59da0a83e0197c5ab49131a2e50f8",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/fact/fact_extract.md",
+      "blob_sha": "da39a8aa319ea837e7492341ac8a3891039f9b38",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/project_definition/project_definition_critic.md",
+      "blob_sha": "87cee04e3898c67b98d220e5e5505aa21cb8387e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/project_definition/project_definition_extract.md",
+      "blob_sha": "ca7294e8a43a332699b39ccb990603a19521d377",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/public_research/research_plan.md",
+      "blob_sha": "be86dc7f85cae4d768d888380effad020e8c223c",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/repair/targeted_repair.md",
+      "blob_sha": "60b74d9a67dec82797b2243485557a741f150d30",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/shared/knowledge_status_rules.md",
+      "blob_sha": "ac26fd662e0c38fa97a6ec600b1afaf4b61bf533",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/shared/semantic_contract.md",
+      "blob_sha": "83e1a2f8ee0c85e2dcec9da564d05aed89e8bcb3",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/template/template_extract.md",
+      "blob_sha": "7e6e6980fdada9d988ae28d8bada446d98afb212",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/writing/write_blueprint.md",
+      "blob_sha": "29abb17f4e1e46fea96a61a3daece36fa4cc7e3e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/writing/write_blueprint_critic.md",
+      "blob_sha": "93582530b844a67cf870eeae55eaac57a4919b1e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/writing/write_content.md",
+      "blob_sha": "220a9e227d2376dfbe1a6574bda41be1744707c5",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: trace source kinds are owned by provenance containers rather than copied from claim semantics.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/finding.schema.json",
+      "blob_sha": "342acecd0fda52f12d8d59baab74f35a8a708d3c",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/human_resolution.schema.json",
+      "blob_sha": "434c6eaeb6ea3b00944b84836225a731f5fb65a5",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/prompt_input_envelope.schema.json",
+      "blob_sha": "3311da4e213eea175d980636823adf86e9f81b3e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/trace_link.schema.json",
+      "blob_sha": "3c210e9b8c1d582e3fe75b11f14429f13eaeeff8",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: trace source kinds are owned by provenance containers rather than copied from claim semantics.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/trusted_source_catalog_entry.schema.json",
+      "blob_sha": "2082225df245f2990502bdebed616bb81b85241b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/inputs/application_scheme_profile.schema.json",
+      "blob_sha": "4d45e385c87f7285ac9d468066e2ac60ca1391f5",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/argument_architecture_critic_input.schema.json",
+      "blob_sha": "a7873ddb58adcdde54010f9018da5b2ec05a26de",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/argument_architecture_input.schema.json",
+      "blob_sha": "483d3578205109d8ef7e43772d604624d00682bb",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/expression_critic_input.schema.json",
+      "blob_sha": "4b04c91707b3287a8689a4fba79b9eb89a86834d",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause repair: Expression Critic 3.2 uses a compact role-specific output contract while deterministic Guard retains structure and Trace ownership.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/prompts/writing/expression_critic.md",
+      "blob_sha": "bf29228ac80675676937fc4ec7f4b9a57f60c13d",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause repair: Expression Critic 3.2 emits one compact qualitative assessment instead of redundant general-quality and deterministic-integrity copies.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/expression_critic_output.schema.json",
+      "blob_sha": "003af35c49a4d8279552f73d96880a70c6827a3d",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause repair: the required result is limited to verdict, complete paragraph coverage, and exactly eight unique expression dimensions; legacy fields remain optional for replay compatibility.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/expression_polish_input.schema.json",
+      "blob_sha": "e33d288440a61ed8026967821f0bd36ed886f39e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/fact_critic_input.schema.json",
+      "blob_sha": "ad8c240ad4913ecd3a6ab1214e6ea9dfbb82c8f0",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/fact_extract_input.schema.json",
+      "blob_sha": "ccf916abacbd6b4244b27aa213e76cbfa66d8136",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/final_confidentiality_review_input.schema.json",
+      "blob_sha": "c5e4c75e0039c24a1cdc3566ee08d392becf1019",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/integration_critic_input.schema.json",
+      "blob_sha": "daa9f49e24b6365a52129255d8f1ce9386fed068",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
       "path": "prompt_pack/schemas/prompts/integration_critic_output.schema.json",
       "blob_sha": "83a155f1e9c0c544aae30b9d6a3c35b2304fa2fe",
-      "owner": "Track E",
-      "reason": "Extend the whole-proposal critic routing enum to the explicit upstream and downstream responsibility agents used by deterministic findings.",
-      "approval_reference": "docs/FULL_INTEGRATION_CRITIC_ACCEPTANCE.md"
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+      "blob_sha": "e3b799b80b38686a357f3cf19536777a727fabf4",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/project_definition_critic_input.schema.json",
+      "blob_sha": "d07ed9ec51a2f62053ba8b56a3289ba6e742925b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/project_definition_extract_input.schema.json",
+      "blob_sha": "e3c592af40e8f257f658f46dc440ab8ebf098f01",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/project_readiness_critic_input.schema.json",
+      "blob_sha": "fd80ce462cbad248fac73fa521eb060b78984602",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/public_research_critic_input.schema.json",
+      "blob_sha": "4b5009099d366198d49ad731a073f4938ba6f53e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/public_research_plan_input.schema.json",
+      "blob_sha": "2dbcb2ee9c10bc10221141ad5f98799015861056",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/public_research_plan_output.schema.json",
+      "blob_sha": "2d3eb1c107de11572ecb5eaf7503282e0b9ff644",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/public_research_synthesis_input.schema.json",
+      "blob_sha": "72cedfcfa519feb9583abd8bf5c3200744e0f69a",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/revision_plan_critic_input.schema.json",
+      "blob_sha": "57b54251a2d700ccfe3a03d752d009d688d79d13",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/revision_plan_input.schema.json",
+      "blob_sha": "092f2d1395fab0f4ae2ccb9675fa6dae57b66312",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+      "blob_sha": "2511780ea4110dc32bed2163748e9ab44d489bb7",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+      "blob_sha": "b1e886fcf205c5b1bd7974e50c676d57a6aecac6",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/scheme_critic_input.schema.json",
+      "blob_sha": "c2af8f7247947e0aa6bd133ed2a3c7279d316229",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/scheme_extract_input.schema.json",
+      "blob_sha": "4ee6b984f0d098f664e97c07fc09356fa09ee16b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/security_classify_critic_input.schema.json",
+      "blob_sha": "40cd3a9337d40cfc5bf0e22a527fb971cd45e4aa",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/security_classify_input.schema.json",
+      "blob_sha": "2db417ba4fefe4c6f7c4b72a81a99ef9ab83b0b4",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/targeted_repair_input.schema.json",
+      "blob_sha": "8a73390d97cf31d8b00468b37c5e86884f2dc062",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/targeted_repair_output.schema.json",
+      "blob_sha": "eb07da5cd1ef88ffe2eea3f0a0a975b1bd6b0155",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/template_critic_input.schema.json",
+      "blob_sha": "451264d2670cdcc7d5bfc0cfb049a6022da46302",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/template_extract_input.schema.json",
+      "blob_sha": "4b4304135fb33c3577c69101376c5b409d5f9ae4",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/template_extract_output.schema.json",
+      "blob_sha": "cc465ea4b74b78e6e6ae7ed3473e04ba602380bd",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_blueprint_critic_input.schema.json",
+      "blob_sha": "49adc6bd1c46ad18a12ad645bd1403076652e7e1",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_blueprint_critic_output.schema.json",
+      "blob_sha": "e886a9e2ef711fad569ff71b383c3dce8aaeee87",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_blueprint_input.schema.json",
+      "blob_sha": "b25ddcf5e30be51050551106794eb16271b40cbd",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_blueprint_output.schema.json",
+      "blob_sha": "5de24cf9bd9cfe78f0f7004e00b80cfdd1972214",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: blueprint prompt/schema versions and information-key hierarchy instructions are unified at 3.1.0.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_content_input.schema.json",
+      "blob_sha": "e93d6059724002f47980c5532c3d80f30e529457",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_content_output.schema.json",
+      "blob_sha": "56b467ec682506f3b0c501f6fa5cc6078472ba9b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: write-content input, output, registry, prompt, replay, and build-source versions are unified at 3.1.0.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/write_critic_input.schema.json",
+      "blob_sha": "781a18e3a8184ce43595cc82fde6df447892e8f1",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved root-cause workflow contract repair: strict prompt/schema ownership, explicit workflow scope, stable finding identity, exact repair partitioning, and transaction-safe recovery.",
+      "approval_reference": "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+    },
+    {
+      "path": "app/workflow_defs.py",
+      "blob_sha": "8b09a970065df300fc6114d5dda4eff731b0ccbf",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B_TOPIC_BACKGROUND_RESEARCH workflow steps and background critic-producer mappings added to the frozen state machine.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/config/prompt_registry.json",
+      "blob_sha": "8eb483b6d68ccaad2ab38093e171dcba8e5e1184",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: four background research prompts registered for WF-3B; the plan critic uses the offline security_review profile matching its OFFLINE_LOCAL scope-review role.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/prompt_input_envelope.schema.json",
+      "blob_sha": "72d6893ccce1abb4d930e32b8c8712bbff951e75",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: background research input schemas added to the common input envelope oneOf.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/prompt_output_envelope.schema.json",
+      "blob_sha": "d4d2009b1935fea179c464f56f865ce5125b5e60",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: background research output schemas added to the common output envelope oneOf.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/common/background_evidence_card.schema.json",
+      "blob_sha": "a1346ff36abeb122e4b444ad82cfcc10ee0cf488",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: deterministic background evidence card contract for WF-3B.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/prompts/background_research/research_plan.md",
+      "blob_sha": "865af3b5a094198d268b0863e4a1d775e3e4ce41",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan prompt.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/prompts/background_research/research_plan_critic.md",
+      "blob_sha": "04007eb5b7e4329df3d61560c4f6b42278ff022b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic prompt.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/prompts/background_research/research_synthesis.md",
+      "blob_sha": "effefde67e0c08617e700f6c57f76a7428a8cd76",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis prompt.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/prompts/background_research/research_critic.md",
+      "blob_sha": "dbf0fe081c8a8c7414b97d4478e6dd4d3822dabe",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic prompt.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_plan_model_input.schema.json",
+      "blob_sha": "78e5fbc3fb7719029d887be1b1406df8e3c9cf9f",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan model input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_plan_model_output.schema.json",
+      "blob_sha": "58abb8aa0edb4d03c8bdcd07dc644224d83ad692",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan model output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_plan_critic_model_input.schema.json",
+      "blob_sha": "58e965d6422945dad8d11ef17833c0b4f048f0e9",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic model input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_plan_critic_model_output.schema.json",
+      "blob_sha": "ce476584fb3d30edc25f5246f467d6422b887584",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic model output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_synthesis_model_input.schema.json",
+      "blob_sha": "f96edf6a521c29c20d8ccbb4e5e55599285a9761",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis model input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_synthesis_model_output.schema.json",
+      "blob_sha": "afec6eff7c17fc8dcab9f97ce33c40a83d170abc",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis model output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_critic_model_input.schema.json",
+      "blob_sha": "b5f78469fd51ddb22ca918f191fc01b651be753b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic model input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/model/background_research_critic_model_output.schema.json",
+      "blob_sha": "36db35d0e99d03aef85abcde01b080997279b52e",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic model output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_plan_input.schema.json",
+      "blob_sha": "1e7a48a53e3e85269b6cc4952138f1c22f90c838",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_plan_output.schema.json",
+      "blob_sha": "72f9b78778574e8618b52eee529c2f6cb9cd3cb2",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_plan_critic_input.schema.json",
+      "blob_sha": "df3ff9716853edafadabd5ca9292a4f08fa4992f",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_plan_critic_output.schema.json",
+      "blob_sha": "4215b6e8d04caad507136f0722eef9c682b0ff63",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research plan critic output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_synthesis_input.schema.json",
+      "blob_sha": "78b6c7f20c44b8f0f4868911ae67bb964051a74b",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_synthesis_output.schema.json",
+      "blob_sha": "0bf5f0e07b87b901f5ec7665eddac527009feceb",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research synthesis output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_critic_input.schema.json",
+      "blob_sha": "e45b5d6212767345606bf9061bb1b06f174ceeb1",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic input schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/background_research_critic_output.schema.json",
+      "blob_sha": "25ce4362ec9bc9a19d6f7a740c79eb3be46aea11",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: WF-3B background research critic output schema.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+      "blob_sha": "157c759a644ce8b0d8e640ee9b3dcffe2d64049f",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+      "blob_sha": "06fa28dabaf62d6cb7f529d0201034e2bdf7ee69",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+    },
+    {
+      "path": "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+      "blob_sha": "99cd5316c55bd3d257895933122b6d613e808c81",
+      "owner": "Runtime and Contract Maintainers",
+      "reason": "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope.",
+      "approval_reference": "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
     }
   ]
 }

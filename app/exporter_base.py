@@ -5,6 +5,14 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from .candidate_integrity import (
+    candidate_text_divergence,
+    canonical_paragraph_texts,
+    paragraph_identity_error,
+    visible_candidate_snapshot,
+    visible_document_snapshot,
+)
+from .paragraph_order import ordered_paragraphs, paragraph_sequence_error
 from .delivery_validator import DeliveryValidationError
 from .post_export_validator import PostExportDeliveryValidator as DeliveryValidator
 from .figure_protocol import FigureProtocolError
@@ -63,6 +71,7 @@ class ExportBaseMixin:
             raise ExportDenied(
                 "No section has a P-EXPRESSION-POLISH candidate approved by a later P-EXPRESSION-CRITIC run"
             )
+        self._assert_reviewed_candidate_snapshot(project_id, candidates, gates)
         template_row = self.db.fetchone(
             "SELECT file_path,filename,parsed_json FROM documents WHERE project_id=? AND role='CURRENT_PROPOSAL' AND filename LIKE '%.docx' ORDER BY created_at DESC LIMIT 1",
             (project_id,),
@@ -93,7 +102,8 @@ class ExportBaseMixin:
                 "expression_critic_run_ids": [c["expression_critic_run_id"] for c in candidates],
                 "delivery_repair": delivery_repair,
                 "engineering_repair_id": engineering_repair_id,
-                "candidate_set_hash": self.candidate_snapshot(project_id)["candidate_set_hash"],
+                "candidate_set_hash": manifest["candidate_snapshot"]["candidate_set_hash"],
+                "visible_candidate_set_hash": manifest["candidate_snapshot"]["visible_candidate_set_hash"],
             },
         )
         return path
@@ -127,6 +137,8 @@ class ExportBaseMixin:
         validation_run_id: str | None = None,
     ) -> dict[str, Any]:
         candidates = self._candidate_runs(project_id)
+        gates = self._approved_gate_ids(project_id)
+        self._assert_reviewed_candidate_snapshot(project_id, candidates, gates)
         expected_sections = [
             str(item.get("section_title") or "").strip()
             for item in candidates
@@ -249,7 +261,7 @@ class ExportBaseMixin:
         if not project:
             raise KeyError(project_id)
         try:
-            self.quality_manager.assert_no_open_blockers(project_id)
+            self.quality_manager.assert_no_delivery_blockers(project_id)
         except QualityGateBlocked as exc:
             raise ExportDenied(
                 str(exc) + "。导出必须等待修复证据与独立复审完成，不能通过批准Gate或手工改库绕过。"
@@ -257,8 +269,9 @@ class ExportBaseMixin:
         return project, self._approved_gate_ids(project_id)
 
     def candidate_snapshot(self, project_id: str) -> dict[str, Any]:
+        candidates = self._candidate_runs(project_id)
         records = []
-        for candidate in self._candidate_runs(project_id):
+        for candidate in candidates:
             paragraphs = [str(item) for item in candidate.get("paragraphs") or []]
             records.append({
                 "section_id": str(candidate.get("section_id") or ""),
@@ -270,7 +283,12 @@ class ExportBaseMixin:
                 "candidate_visible_hash": sha256_json(paragraphs),
             })
         core = {"section_count": len(records), "sections": records}
-        return {**core, "candidate_set_hash": sha256_json(core)}
+        visible = visible_candidate_snapshot(candidates)
+        return {
+            **core,
+            "candidate_set_hash": sha256_json(core),
+            "visible_candidate_set_hash": visible["visible_candidate_set_hash"],
+        }
 
     def _authorized_delivery_repair(
         self,
@@ -300,16 +318,81 @@ class ExportBaseMixin:
         return project, self._approved_gate_ids(project_id)
 
     def _approved_gate_ids(self, project_id: str) -> dict[str, str]:
-        gates: dict[str, str] = {}
-        for gate_type in ["FINAL_CONTENT_SECURITY_APPROVAL", "FINAL_EXPORT_APPROVAL"]:
-            gate = self.db.fetchone(
-                "SELECT id,status FROM gates WHERE project_id=? AND gate_type=? ORDER BY created_at DESC LIMIT 1",
-                (project_id, gate_type),
+        export_gate = self.db.fetchone(
+            "SELECT id,workflow_id,target_id,status FROM gates "
+            "WHERE project_id=? AND gate_type='FINAL_EXPORT_APPROVAL' AND status='APPROVED' "
+            "ORDER BY updated_at DESC,id DESC LIMIT 1",
+            (project_id,),
+        )
+        if not export_gate:
+            raise ExportDenied("FINAL_EXPORT_APPROVAL gate has not been approved")
+        workflow_id = str(export_gate.get("workflow_id") or "")
+        content_gate = self.db.fetchone(
+            "SELECT id,workflow_id,target_id,status FROM gates "
+            "WHERE project_id=? AND workflow_id=? "
+            "AND gate_type='FINAL_CONTENT_SECURITY_APPROVAL' AND status='APPROVED' "
+            "ORDER BY updated_at DESC,id DESC LIMIT 1",
+            (project_id, workflow_id),
+        )
+        if not content_gate:
+            raise ExportDenied(
+                "FINAL_CONTENT_SECURITY_APPROVAL was not approved in the same WF-5 workflow as FINAL_EXPORT_APPROVAL"
             )
-            if not gate or gate["status"] != "APPROVED":
-                raise ExportDenied(f"{gate_type} gate has not been approved")
-            gates[gate_type] = gate["id"]
-        return gates
+        workflow = self.db.fetchone(
+            "SELECT workflow_type,status,state_json FROM workflows WHERE id=? AND project_id=?",
+            (workflow_id, project_id),
+        )
+        if not workflow or workflow.get("workflow_type") != "WF-5_SECURITY_REVIEW_AND_EXPORT":
+            raise ExportDenied("Approved export Gate is not attached to a WF-5 workflow")
+        if workflow.get("status") != "COMPLETED":
+            raise ExportDenied("WF-5 workflow must be completed before export")
+        if str(export_gate.get("target_id") or "") != workflow_id:
+            raise ExportDenied("FINAL_EXPORT_APPROVAL does not target its owning WF-5 workflow")
+        state = json.loads(workflow.get("state_json") or "{}")
+        if str(state.get("final_review_run_id") or "") != str(content_gate.get("target_id") or ""):
+            raise ExportDenied("Content-security approval does not target the frozen final review Run")
+        return {
+            "FINAL_CONTENT_SECURITY_APPROVAL": str(content_gate["id"]),
+            "FINAL_EXPORT_APPROVAL": str(export_gate["id"]),
+        }
+
+    def _assert_reviewed_candidate_snapshot(
+        self,
+        project_id: str,
+        candidates: list[dict[str, Any]],
+        gates: dict[str, str],
+    ) -> None:
+        export_gate_id = str(gates.get("FINAL_EXPORT_APPROVAL") or "")
+        export_gate = self.db.fetchone(
+            "SELECT workflow_id FROM gates WHERE id=? AND project_id=?",
+            (export_gate_id, project_id),
+        )
+        if not export_gate:
+            raise ExportDenied("Approved export Gate disappeared before candidate verification")
+        workflow = self.db.fetchone(
+            "SELECT state_json FROM workflows WHERE id=? AND project_id=?",
+            (str(export_gate.get("workflow_id") or ""), project_id),
+        )
+        state = json.loads((workflow or {}).get("state_json") or "{}")
+        expected = state.get("final_review_candidate_snapshot") or {}
+        expected_hash = str(expected.get("reviewed_document_hash") or "")
+        expected_set = state.get("final_review_candidate_set_snapshot") or {}
+        expected_set_hash = str(expected_set.get("visible_candidate_set_hash") or "")
+        if not expected_hash or not expected_set_hash:
+            raise ExportDenied("WF-5 has no frozen final-review candidate identity")
+        actual = visible_document_snapshot(candidates)
+        actual_set = visible_candidate_snapshot(candidates)
+        if (
+            actual.get("reviewed_document_hash") != expected_hash
+            or actual_set.get("visible_candidate_set_hash") != expected_set_hash
+        ):
+            raise ExportDenied(
+                "Candidate set changed after final confidentiality review; rerun WF-5 before export. "
+                f"expected_document={expected_hash}, actual_document={actual.get('reviewed_document_hash')}, "
+                f"expected_candidates={expected_set_hash}, "
+                f"actual_candidates={actual_set.get('visible_candidate_set_hash')}"
+            )
+
 
     def _candidate_runs(self, project_id: str) -> list[dict[str, Any]]:
         rows = self.db.fetchall(
@@ -332,11 +415,20 @@ class ExportBaseMixin:
                 section_id = str(source_section.get("section_id") or "")
                 if not candidate_id or not section_id:
                     continue
-                paragraphs = [
-                    paragraph.get("text", "")
-                    for paragraph in sorted(result.get("paragraphs", []), key=lambda item: item.get("sequence", 0))
-                    if isinstance(paragraph, dict)
-                ] or [result.get("candidate_text", "")]
+                errors = [
+                    paragraph_sequence_error(result.get("paragraphs")),
+                    paragraph_identity_error(result.get("paragraphs")),
+                    candidate_text_divergence(result),
+                ]
+                errors = [error for error in errors if error]
+                if errors:
+                    raise ExportDenied(
+                        f"Candidate {candidate_id} violates the canonical paragraph contract: "
+                        + "; ".join(errors)
+                    )
+                ordered = ordered_paragraphs(result.get("paragraphs"))
+                paragraphs = canonical_paragraph_texts(result)
+                paragraph_ids = [str(item.get("paragraph_id") or "").strip() for item in ordered]
                 marker_prefixes = ("[[TABLE]]", "[[FIGURE]]", "[[FORMULA]]")
                 polished[(workflow_id, candidate_id)] = {
                     "run_id": row["id"],
@@ -350,6 +442,7 @@ class ExportBaseMixin:
                         for key in ["contains_table", "contains_formula", "contains_image", "contains_comment", "contains_revision"]
                     ) or any(str(paragraph).strip().startswith(marker_prefixes) for paragraph in paragraphs),
                     "paragraphs": paragraphs,
+                    "paragraph_ids": paragraph_ids,
                     "candidate_id": candidate_id,
                 }
             elif row["prompt_id"] == "P-EXPRESSION-CRITIC" and row["status"] == "PASS":

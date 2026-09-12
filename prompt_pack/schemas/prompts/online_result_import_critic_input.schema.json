@@ -26,6 +26,7 @@
             "PROJECT_INTAKE",
             "TEMPLATE_EXTRACTION",
             "HYBRID_ONLINE_ASSIST",
+            "TOPIC_BACKGROUND_RESEARCH",
             "PROPOSAL_AUTHORING",
             "SECURITY_REVIEW_AND_EXPORT"
           ]
@@ -221,6 +222,88 @@
         },
         "security_policy": {
           "$ref": "../inputs/security_handling_profile.schema.json"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
+        },
+        "approved_safe_package_content": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "task_description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "queries": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "allowed_context": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "prohibited_inferences": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "prohibited_outputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "task_description",
+            "queries",
+            "allowed_context",
+            "prohibited_inferences",
+            "prohibited_outputs"
+          ]
+        },
+        "public_source_passages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "passage_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "source_ref": {
+                "$ref": "../common/source_ref.schema.json"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "relevance": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "passage_id",
+              "source_ref",
+              "text",
+              "relevance"
+            ]
+          }
         }
       },
       "additionalProperties": false,
@@ -234,7 +317,15 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/online_result_import_critic_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
     }
   },
   "additionalProperties": false,

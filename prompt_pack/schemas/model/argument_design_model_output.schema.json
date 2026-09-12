@@ -1,0 +1,635 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "argument_design_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "work_packages": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "work_package_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "thread_index",
+          "work_package_index",
+          "statement",
+          "evidence_ids"
+        ]
+      }
+    },
+    "methods": {
+      "type": "array",
+      "maxItems": 48,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "work_package_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "method_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "method_type": {
+            "type": "string",
+            "enum": [
+              "FORMAL_MODEL",
+              "ALGORITHM",
+              "ANALYTICAL_METHOD",
+              "ENGINEERING_METHOD"
+            ]
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "thread_index",
+          "work_package_index",
+          "method_index",
+          "statement",
+          "evidence_ids",
+          "method_type",
+          "assumptions"
+        ]
+      }
+    },
+    "theoretical_properties": {
+      "type": "array",
+      "maxItems": 96,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "work_package_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "method_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "property_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "thread_index",
+          "work_package_index",
+          "method_index",
+          "property_index",
+          "statement",
+          "evidence_ids"
+        ]
+      }
+    },
+    "evaluations": {
+      "type": "array",
+      "maxItems": 96,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "work_package_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "method_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "evaluation_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "success_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "thread_index",
+          "work_package_index",
+          "method_index",
+          "evaluation_index",
+          "statement",
+          "evidence_ids",
+          "success_criteria"
+        ]
+      }
+    },
+    "baselines": {
+      "type": "array",
+      "maxItems": 192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "work_package_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "method_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "evaluation_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "baseline_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "thread_index",
+          "work_package_index",
+          "method_index",
+          "evaluation_index",
+          "baseline_index",
+          "statement",
+          "evidence_ids"
+        ]
+      }
+    },
+    "ablations": {
+      "type": "array",
+      "maxItems": 192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "work_package_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "method_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "evaluation_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ablation_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "thread_index",
+          "work_package_index",
+          "method_index",
+          "evaluation_index",
+          "ablation_index",
+          "statement"
+        ]
+      }
+    },
+    "innovations": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "innovation_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "contribution": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "thread_index",
+          "innovation_index",
+          "statement",
+          "evidence_ids",
+          "contribution"
+        ]
+      }
+    },
+    "innovation_prior_work": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "innovation_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "prior_work_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "thread_index",
+          "innovation_index",
+          "prior_work_index",
+          "statement",
+          "evidence_ids"
+        ]
+      }
+    },
+    "innovation_evaluation_refs": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "innovation_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "work_package_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "method_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "evaluation_index": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "thread_index",
+          "innovation_index",
+          "work_package_index",
+          "method_index",
+          "evaluation_index"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "foundation": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "foundation_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "thread_index",
+          "foundation_index",
+          "statement",
+          "evidence_ids"
+        ]
+      }
+    },
+    "foundation_supports": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "foundation_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "work_package_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "method_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "required": [
+          "thread_index",
+          "foundation_index",
+          "work_package_index",
+          "method_index"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "evidence_gaps": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "CLOSEST_PRIOR_WORK",
+              "FOUNDATION",
+              "METRIC_JUSTIFICATION",
+              "OTHER"
+            ]
+          },
+          "thread_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "suggested_question": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "thread_index",
+          "reason",
+          "blocking",
+          "suggested_question"
+        ]
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target_area": {
+            "type": "string",
+            "enum": [
+              "FOUNDATION_EVIDENCE",
+              "PRIOR_WORK",
+              "METRIC_JUSTIFICATION",
+              "RESEARCH_DESIGN",
+              "OTHER"
+            ]
+          },
+          "question_type": {
+            "type": "string",
+            "enum": [
+              "CONFIRMATION",
+              "MISSING_INFORMATION",
+              "CONFLICT_RESOLUTION",
+              "CHOICE"
+            ]
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "answer_shape": {
+            "type": "string",
+            "enum": [
+              "STRING",
+              "NUMBER",
+              "BOOLEAN",
+              "OBJECT",
+              "ARRAY"
+            ]
+          },
+          "allowed_values": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "P0",
+              "P1",
+              "P2",
+              "P3"
+            ]
+          }
+        },
+        "required": [
+          "target_area",
+          "question_type",
+          "question",
+          "reason",
+          "answer_shape",
+          "allowed_values",
+          "blocking",
+          "priority"
+        ]
+      }
+    },
+    "cannot_proceed_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "work_packages",
+    "methods",
+    "theoretical_properties",
+    "evaluations",
+    "baselines",
+    "ablations",
+    "innovations",
+    "innovation_prior_work",
+    "innovation_evaluation_refs",
+    "foundation",
+    "foundation_supports",
+    "evidence_gaps",
+    "user_questions",
+    "cannot_proceed_reason"
+  ]
+}

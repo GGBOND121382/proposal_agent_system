@@ -1,0 +1,106 @@
+{
+  "case_id": "public-research-plan-scope-critic-normal",
+  "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+  "case_type": "normal",
+  "description": "Final executable public-research queries remain within the workflow-approved public boundary.",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "HYBRID_ONLINE_ASSIST",
+      "current_step": "PUBLIC_RESEARCH_PLAN_SCOPE_CRITIC",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "approved_boundary": {
+        "task_description": "研究公开的人机协同决策方法与评价机制。",
+        "allowed_topics": [
+          "人机协同决策",
+          "多智能体协作",
+          "公开评价方法"
+        ],
+        "allowed_context": [
+          "公开学术资料"
+        ],
+        "prohibited_inferences": [
+          "不得推断内部项目身份"
+        ],
+        "prohibited_outputs": [
+          "不得输出内部参数"
+        ]
+      },
+      "research_questions": [
+        "公开的人机协同决策评价方法有哪些？"
+      ],
+      "executable_queries": [
+        {
+          "query_id": "query-001",
+          "query": "human AI collaborative decision evaluation methods",
+          "linked_question_indexes": [
+            0
+          ]
+        }
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/public_research_plan_scope_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "PASS",
+    "result": {
+      "verdict": "ACCEPT",
+      "approved_query_indexes": [
+        0
+      ],
+      "rejected_query_indexes": []
+    },
+    "findings": [],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "PASS"
+  }
+}

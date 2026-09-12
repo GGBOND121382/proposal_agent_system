@@ -1,0 +1,165 @@
+{
+  "case_id": "report_outline_critic-need_user_input",
+  "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+  "case_type": "need_user_input",
+  "description": "提纲候选存在缺口伪装与未知卡引用，且任务简报缺必答问题清单，需用户确认覆盖判据",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "REPORT_OUTLINE_CRITIC",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "document_type": "SURVEY_REPORT",
+      "outline_candidate": {
+        "report_title": "DASH 系统公开调研报告",
+        "overall_gaps": [],
+        "report_sections": [
+          {
+            "section_key": "object-evolution",
+            "title": "背景调研：对象与演进",
+            "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+            "must_answer_questions": [
+              "DASH 是什么、由谁主导、演进脉络如何？"
+            ],
+            "evidence_card_ids": [
+              "card-001"
+            ],
+            "known_gaps": []
+          },
+          {
+            "section_key": "effect-evidence",
+            "title": "背景调研：效果证据",
+            "goal": "回答 DASH 效果如何",
+            "must_answer_questions": [
+              "DASH 效果如何？"
+            ],
+            "evidence_card_ids": [
+              "card-999"
+            ],
+            "known_gaps": []
+          }
+        ]
+      },
+      "background_cards": [
+        {
+          "card_id": "card-001",
+          "dimension": "OBJECT_AND_EVOLUTION",
+          "claim_text": "DASH 是美国空军部公开披露的人机协同决策支持系统。",
+          "source_ids": [
+            "src-001"
+          ],
+          "evidence_mode": "FULLTEXT",
+          "scope_qualifiers": [],
+          "limitations": []
+        }
+      ],
+      "survey_research_brief": {
+        "evidence_requirements": [
+          "事实性陈述必须绑定公开来源证据卡"
+        ]
+      }
+    },
+    "expected_output_schema": "schemas/prompts/report_outline_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "verdict": "REVISE"
+    },
+    "findings": [
+      {
+        "code": "RO_CARD_ID_UNKNOWN",
+        "severity": "P1",
+        "description": "章节 effect-evidence 引用的证据卡 card-999 在输入 background_cards 中不存在",
+        "section_key": "effect-evidence"
+      },
+      {
+        "code": "RO_GAP_HIDDEN",
+        "severity": "P1",
+        "description": "章节 effect-evidence 无有效证据支撑却未在 known_gaps 中说明，且 overall_gaps 为空",
+        "section_key": "effect-evidence"
+      }
+    ],
+    "unresolved_items": [
+      {
+        "item_id": "unres-002",
+        "type": "UNCERTAIN",
+        "description": "任务简报缺少必答问题清单，无法核对必答问题覆盖",
+        "target_paths": [
+          "payload/survey_research_brief"
+        ],
+        "required_action": "用户确认",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-002",
+        "question_type": "CONFIRMATION",
+        "question": "任务简报未提供 must_answer_questions，是否以 evidence_requirements 作为必答问题覆盖的核对依据？",
+        "reason": "缺少必答问题清单时无法判定 RO_QUESTION_UNASSIGNED",
+        "target_paths": [
+          "payload/survey_research_brief"
+        ],
+        "answer_schema": {
+          "type": "BOOLEAN",
+          "allowed_values": [
+            true,
+            false
+          ]
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

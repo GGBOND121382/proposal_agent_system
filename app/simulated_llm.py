@@ -9,6 +9,17 @@ from pathlib import Path
 from typing import Any
 
 from .util import new_id, sha256_text
+from .contracts.semantic_checks import check_blueprint_semantics
+from .contracts.semantic_contract import get_semantic_contract
+from .json_pointer import join_pointer
+from .model_semantic_contracts import (
+    _critic_chain_checks,
+    _critic_design_matrix_checks,
+    _critic_evidence_checks,
+    build_argument_architecture_critic_model_input,
+    expand_argument_architecture_critic_model_output,
+    project_argument_authoritative_state,
+)
 from .logistics_application_content import SECTION_TITLES as LOGISTICS_SECTION_TITLES, REF_CATALOG as LOGISTICS_REF_CATALOG, blocks_for as logistics_blocks_for
 from .transport_optimization_application_content import SECTION_TITLES as TRANSPORT_SECTION_TITLES, REF_CATALOG as TRANSPORT_REF_CATALOG, blocks_for as transport_blocks_for
 
@@ -27,9 +38,197 @@ class SimulatedLLM:
     def invoke(self, prompt_id: str, envelope: dict[str, Any]) -> dict[str, Any]:
         base = self.pack.replay_output(prompt_id, "normal")
         handler = getattr(self, f"_handle_{prompt_id.removeprefix('P-').lower().replace('-', '_')}", None)
-        if handler is None:
-            return base
-        return handler(copy.deepcopy(base), envelope)
+        output = copy.deepcopy(base) if handler is None else handler(copy.deepcopy(base), envelope)
+        return self._bind_replay_source_refs(output, envelope)
+
+    @staticmethod
+    def _input_documents(envelope: dict[str, Any]) -> list[dict[str, Any]]:
+        """Collect typed document objects from all prompt payload document slots."""
+
+        documents: list[dict[str, Any]] = []
+
+        def visit(node: Any) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    visit(item)
+                return
+            if not isinstance(node, dict):
+                return
+            if isinstance(node.get("sections"), list) and (
+                node.get("document_id") or node.get("document_version_id") or node.get("version_id")
+            ):
+                documents.append(node)
+                return
+            for value in node.values():
+                visit(value)
+
+        visit(envelope.get("payload") or {})
+        return documents
+
+    @staticmethod
+    def _trusted_input_ids(envelope: dict[str, Any]) -> set[str]:
+        trusted: set[str] = set()
+
+        def visit(node: Any) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    visit(item)
+                return
+            if not isinstance(node, dict):
+                return
+            for key, value in node.items():
+                if key.endswith("_id") and isinstance(value, (str, int)) and str(value).strip():
+                    trusted.add(str(value))
+                elif key.endswith("_ids") and isinstance(value, list):
+                    trusted.update(str(item) for item in value if isinstance(item, (str, int)) and str(item).strip())
+                visit(value)
+
+        visit(envelope)
+        return trusted
+
+    def _document_source_ref(
+        self,
+        envelope: dict[str, Any],
+        *,
+        preferred_roles: set[str] | None = None,
+    ) -> dict[str, Any] | None:
+        role_map = {
+            "APPLICATION_GUIDE": "APPLICATION_GUIDE",
+            "PROJECT_BRIEF": "TASK_BOOK",
+            "CURRENT_PROPOSAL": "CURRENT_PROPOSAL",
+            "TECHNICAL_DESIGN": "TECHNICAL_MATERIAL",
+            "EVIDENCE_MATERIAL": "EVIDENCE_MATERIAL",
+            "REFERENCE_PROPOSAL": "REFERENCE_PROPOSAL",
+        }
+        for doc in self._input_documents(envelope):
+            document_role = str(doc.get("document_role") or "")
+            if preferred_roles is not None and document_role not in preferred_roles:
+                continue
+            for sec in doc.get("sections") or []:
+                if not isinstance(sec, dict):
+                    continue
+                text = str(sec.get("text") or "").strip()
+                if not text:
+                    continue
+                source_id = str(sec.get("section_id") or doc.get("document_id") or "").strip()
+                if not source_id:
+                    continue
+                quoted_text = text[:300]
+                return {
+                    "source_id": source_id,
+                    "source_type": role_map.get(document_role, "HISTORICAL_DOCUMENT"),
+                    "document_version_id": str(
+                        doc.get("document_version_id")
+                        or doc.get("version_id")
+                        or doc.get("document_id")
+                    ),
+                    "section_id": str(sec.get("section_id") or "") or None,
+                    "span_start": 0,
+                    "span_end": len(quoted_text),
+                    "quoted_text": quoted_text,
+                    "source_hash": (
+                        str(sec.get("text_hash"))
+                        if str(sec.get("text_hash") or "") not in {"a" * 64, "0" * 64}
+                        else sha256_text(text)
+                    ),
+                    "authority_rank": int(doc.get("authority_rank") or 80),
+                    "security_level": str(doc.get("security_level") or "INTERNAL"),
+                }
+        return None
+
+
+    @staticmethod
+    def _trusted_source_ref(
+        envelope: dict[str, Any],
+        *,
+        source_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return an existing source-ref object from the trusted input envelope.
+
+        Semantic Argument inputs often carry evidence through typed fact cards rather
+        than raw document slots.  SIMULATED replay placeholders must bind to that
+        existing provenance instead of inventing or retaining replay-only IDs.
+        """
+        matches: list[dict[str, Any]] = []
+
+        def visit(node: Any) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    visit(item)
+                return
+            if not isinstance(node, dict):
+                return
+            sid = str(node.get("source_id") or "").strip()
+            stype = str(node.get("source_type") or "").strip()
+            if sid and stype and (source_type is None or stype == source_type):
+                matches.append(copy.deepcopy(node))
+            for value in node.values():
+                visit(value)
+
+        visit(envelope.get("payload") or {})
+        return matches[0] if matches else None
+
+    def _bind_replay_source_refs(
+        self,
+        output: dict[str, Any],
+        envelope: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Replace Replay-only provenance placeholders with trusted input refs.
+
+        This is a simulated-provider responsibility, not output normalization:
+        strict provenance validation remains unchanged and still rejects any
+        untrusted source emitted after this boundary.
+        """
+
+        trusted_ids = self._trusted_input_ids(envelope)
+        source_type_roles = {
+            "APPLICATION_GUIDE": {"APPLICATION_GUIDE"},
+            "TASK_BOOK": {"PROJECT_BRIEF"},
+            "CURRENT_PROPOSAL": {"CURRENT_PROPOSAL"},
+            "TECHNICAL_MATERIAL": {"TECHNICAL_DESIGN"},
+            "EVIDENCE_MATERIAL": {"EVIDENCE_MATERIAL"},
+            "REFERENCE_PROPOSAL": {"REFERENCE_PROPOSAL"},
+        }
+
+        def visit(node: Any) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    visit(item)
+                return
+            if not isinstance(node, dict):
+                return
+            source_id = str(node.get("source_id") or "").strip()
+            if source_id and "source_type" in node and source_id not in trusted_ids:
+                source_type = str(node.get("source_type") or "")
+                preferred = source_type_roles.get(source_type)
+                if source_type == "USER_CONFIRMATION":
+                    # Replay confirmation placeholders must bind to a source
+                    # that the real input envelope exposes as reference-visible.
+                    # Prefer the first actual input document; never invent a
+                    # synthetic project-level source ID at this boundary.
+                    replacement = self._document_source_ref(envelope)
+                else:
+                    # Only document-backed source types have a deterministic
+                    # binding to a prompt input document. Public/search sources
+                    # and unknown types remain subject to strict validation.
+                    replacement = self._trusted_source_ref(
+                        envelope, source_type=source_type
+                    )
+                    if replacement is None:
+                        replacement = (
+                            self._document_source_ref(envelope, preferred_roles=preferred)
+                            if preferred is not None
+                            else None
+                        )
+                if replacement is not None:
+                    for key in list(node):
+                        if key in replacement:
+                            node[key] = copy.deepcopy(replacement[key])
+            for value in node.values():
+                visit(value)
+
+        visit(output)
+        return output
 
     @staticmethod
     def _project_name(envelope: dict[str, Any]) -> str:
@@ -106,35 +305,12 @@ class SimulatedLLM:
         return str(item.get("content_text") or item.get("excerpt") or item.get("note") or item.get("title") or "公开来源")
 
     def _project_source_ref(self, envelope: dict[str, Any], *, preferred_roles: set[str] | None = None) -> dict[str, Any]:
-        payload = envelope.get("payload", {})
-        docs = payload.get("source_documents") or []
-        role_map = {
-            "APPLICATION_GUIDE": "APPLICATION_GUIDE",
-            "PROJECT_BRIEF": "TASK_BOOK",
-            "CURRENT_PROPOSAL": "CURRENT_PROPOSAL",
-            "TECHNICAL_DESIGN": "TECHNICAL_MATERIAL",
-            "EVIDENCE_MATERIAL": "EVIDENCE_MATERIAL",
-            "REFERENCE_PROPOSAL": "REFERENCE_PROPOSAL",
-        }
-        for doc in docs:
-            document_role = str(doc.get("document_role") or "")
-            if preferred_roles is not None and document_role not in preferred_roles:
-                continue
-            for sec in doc.get("sections", []):
-                text = str(sec.get("text") or "").strip()
-                if text:
-                    return {
-                        "source_id": str(sec.get("section_id") or "source-section-001"),
-                        "source_type": role_map.get(document_role, "HISTORICAL_DOCUMENT"),
-                        "document_version_id": str(doc.get("version_id") or doc.get("document_id") or "document-version-001"),
-                        "section_id": str(sec.get("section_id") or "source-section-001"),
-                        "span_start": 0,
-                        "span_end": min(len(text), 300),
-                        "quoted_text": text[:300],
-                        "source_hash": (str(sec.get("text_hash")) if str(sec.get("text_hash") or "") not in {"a" * 64, "0" * 64} else sha256_text(text)),
-                        "authority_rank": 80,
-                        "security_level": str(doc.get("security_level") or "INTERNAL"),
-                    }
+        document_ref = self._document_source_ref(
+            envelope,
+            preferred_roles=preferred_roles,
+        )
+        if document_ref is not None:
+            return document_ref
         project_name = self._project_name(envelope)
         return {
             "source_id": "user-confirmation-project-scope",
@@ -166,6 +342,25 @@ class SimulatedLLM:
         } for dimension in dimensions]
 
     @staticmethod
+    def _argument_quality_dimensions(passed: bool = True) -> list[dict[str, Any]]:
+        dimensions = [
+            "CENTRAL_THESIS",
+            "ARGUMENT_CHAIN",
+            "EVIDENCE_SUPPORT",
+            "METHOD_SUBSTANCE",
+            "INNOVATION_BASELINE",
+            "FEASIBILITY_FOUNDATION",
+            "METRIC_JUSTIFICATION",
+        ]
+        return [{
+            "dimension": dimension,
+            "score": 4.0 if passed else 2.0,
+            "passed": passed,
+            "evidence": ["已按论证语义逐项检查。"],
+            "required_action": None if passed else "补充缺失论证并重新审查。",
+        } for dimension in dimensions]
+
+    @staticmethod
     def _dimension_checks(dimensions: list[str], passed: bool = True) -> list[dict[str, Any]]:
         return [{
             "dimension": dimension,
@@ -189,6 +384,12 @@ class SimulatedLLM:
             ("objective-001", "OBJECTIVE", "OBJECTIVES", {"statement": "建立动态运输方案的影响范围识别与低扰动增量优化方法。", "baseline_state": "现有方法主要采用全量重算或固定滚动窗口。", "target_state": "形成影响子图、稳定性代价和增量求解联合方法。", "success_definition": "在统一场景和基线下比较质量、时延和扰动指标。", "out_of_scope": ["把部署和运维细节作为核心研究内容"]}),
             ("wp-001", "WORK_PACKAGE", "RESEARCH_CONTENT", {"name": "业务语义到优化约束的可验证映射", "research_object": "不完备任务描述与运输约束", "inputs": ["任务语义", "资源台账", "业务规则"], "main_activities": ["约束本体建模", "歧义检测", "可行性校验"], "methods": ["method-knowledge-graph", "method-constraint-compiler", "method-consistency-check"], "outputs": ["约束模型", "校验规则"], "responsible_organization": None, "acceptance_refs": ["experiment-001"]}),
             ("wp-002", "WORK_PACKAGE", "RESEARCH_CONTENT", {"name": "动态事件下低扰动增量重规划", "research_object": "事件影响范围与计划稳定性", "inputs": ["当前方案", "动态事件", "约束模型"], "main_activities": ["影响子图识别", "局部模型更新", "稳定性代价优化"], "methods": ["method-incremental-optimization", "method-decomposition", "method-multiobjective"], "outputs": ["增量算法", "重规划策略"], "responsible_organization": None, "acceptance_refs": ["experiment-001"]}),
+            ("method-knowledge-graph", "METHOD", "TECHNICAL_ROUTE", {"name": "业务约束知识图谱", "method_type": "MODEL", "purpose": "统一表达任务、资源与业务规则", "principle": "以类型化实体和关系保存业务语义及其约束来源。", "inputs": ["任务语义", "资源台账", "业务规则"], "outputs": ["约束知识图谱"], "constraints": ["实体和关系可追溯"], "selection_reason": "为约束编译和一致性检查提供统一语义基础。", "maturity": "PROPOSED"}),
+            ("method-constraint-compiler", "METHOD", "TECHNICAL_ROUTE", {"name": "语义约束编译", "method_type": "ALGORITHM", "purpose": "将业务语义转换为可执行优化约束", "principle": "依据类型、作用域和来源规则生成确定性约束表达。", "inputs": ["约束知识图谱"], "outputs": ["优化约束模型"], "constraints": ["保持业务含义和来源映射"], "selection_reason": "连接业务输入与求解模型，避免人工二次解释。", "maturity": "PROPOSED"}),
+            ("method-consistency-check", "METHOD", "TECHNICAL_ROUTE", {"name": "约束一致性检查", "method_type": "ANALYTICAL_METHOD", "purpose": "识别冲突、缺失与不可满足约束", "principle": "组合使用类型规则、依赖关系和可满足性检查定位问题。", "inputs": ["优化约束模型"], "outputs": ["一致性报告", "修复建议"], "constraints": ["不得隐藏修改业务规则"], "selection_reason": "在求解前暴露输入和模型矛盾。", "maturity": "PROPOSED"}),
+            ("method-incremental-optimization", "METHOD", "TECHNICAL_ROUTE", {"name": "增量优化", "method_type": "ALGORITHM", "purpose": "只更新受事件影响的决策变量和约束", "principle": "复用原可行解并局部重建受影响模型。", "inputs": ["当前方案", "动态事件"], "outputs": ["增量模型", "新方案"], "constraints": ["保持全局硬约束"], "selection_reason": "降低动态重规划的重复计算。", "maturity": "PROPOSED"}),
+            ("method-decomposition", "METHOD", "TECHNICAL_ROUTE", {"name": "影响子图分解", "method_type": "ALGORITHM", "purpose": "界定动态事件的局部传播范围", "principle": "沿任务、资源和时序依赖构造最小影响子图。", "inputs": ["约束图", "动态事件"], "outputs": ["影响子图"], "constraints": ["不得遗漏跨子图硬约束"], "selection_reason": "为局部重规划提供可解释边界。", "maturity": "PROPOSED"}),
+            ("method-multiobjective", "METHOD", "TECHNICAL_ROUTE", {"name": "质量—时延—扰动多目标优化", "method_type": "MODEL", "purpose": "联合控制方案质量、响应时间和计划稳定性", "principle": "在硬约束下对目标质量、求解时延和变化代价进行分层或多目标权衡。", "inputs": ["影响子图", "当前方案"], "outputs": ["低扰动重规划方案"], "constraints": ["目标优先级可审计"], "selection_reason": "直接对应项目中心科学问题。", "maturity": "PROPOSED"}),
             ("method-001", "METHOD", "TECHNICAL_ROUTE", {"name": "影响子图约束下的低扰动增量优化", "method_type": "ALGORITHM", "purpose": "降低动态事件重规划时延并避免无关任务变化", "principle": "先识别事件影响子图，再在保持全局硬约束的条件下最小化局部调整代价。", "inputs": ["原方案", "事件", "约束图"], "outputs": ["新方案", "变化集合", "可行性证明"], "constraints": ["硬约束满足", "有限计算时间"], "selection_reason": "直接对应中心命题并可与全量重算比较。", "maturity": "PROPOSED"}),
             ("experiment-001", "EXPERIMENT", "TECHNICAL_ROUTE", {"name": "动态运输方案对照与消融实验", "purpose": "检验中心命题和各算法组件的作用", "test_object": "低扰动增量优化算法", "dataset_or_scenario": "公开VRP实例与可复现实验场景", "conditions": ["相同硬件", "相同时间预算", "多种事件强度"], "procedure": ["与全量重算和滚动优化比较", "移除影响子图组件", "移除稳定性代价组件"], "expected_evidence": ["目标差距", "响应时间", "方案扰动率", "硬约束满足率"]}),
             ("innovation-001", "INNOVATION", "INNOVATION", {"innovation_type": "METHOD", "existing_baseline": "全量重算与固定窗口滚动优化", "existing_limitation": "未显式联合建模事件影响范围和方案稳定性", "proposed_change": "引入影响子图与稳定性代价联合机制", "novel_mechanism": "按事件传播关系动态限定可调整变量并保持全局约束", "expected_advantage": "在相近方案质量下减少求解时间和非必要变更", "applicable_conditions": ["动态事件局部影响", "已有可行方案"], "confidence": "PROPOSED"}),
@@ -264,15 +465,15 @@ class SimulatedLLM:
             ],
             "scope_boundaries": {"in_scope": ["约束映射", "动态方案优化", "实验验证"], "out_of_scope": ["把部署运维作为主文研究问题"]},
             "nodes": [
-                {"node_id": "gap-001", "node_type": "RESEARCH_GAP", "statement": contents[0][3]["description"], "status": "SUPPORTED", "source_refs": [copy.deepcopy(source)]},
+                {"node_id": "gap-001", "node_type": "RESEARCH_GAP", "statement": by_id["gap-001"]["content"]["description"], "status": "SUPPORTED", "source_refs": [copy.deepcopy(source)]},
                 {"node_id": "prior-001", "node_type": "CLOSEST_PRIOR_WORK", "statement": "全量重算与固定窗口滚动优化是最接近的基线。", "status": "SUPPORTED", "source_refs": [copy.deepcopy(source)]},
-                {"node_id": "objective-001", "node_type": "OBJECTIVE", "statement": contents[2][3]["statement"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
-                {"node_id": "wp-001", "node_type": "WORK_PACKAGE", "statement": contents[3][3]["name"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
-                {"node_id": "wp-002", "node_type": "WORK_PACKAGE", "statement": contents[4][3]["name"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
-                {"node_id": "method-001", "node_type": "FORMAL_MODEL", "statement": contents[5][3]["principle"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
-                {"node_id": "experiment-001", "node_type": "EXPERIMENT_DESIGN", "statement": contents[6][3]["purpose"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
-                {"node_id": "innovation-001", "node_type": "NOVEL_MECHANISM", "statement": contents[7][3]["novel_mechanism"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
-                {"node_id": "foundation-001", "node_type": "TEAM_EVIDENCE", "statement": contents[10][3]["title"], "status": "SUPPORTED" if has_foundation_evidence else "UNKNOWN", "source_refs": [copy.deepcopy(foundation_source)] if has_foundation_evidence else []},
+                {"node_id": "objective-001", "node_type": "OBJECTIVE", "statement": by_id["objective-001"]["content"]["statement"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
+                {"node_id": "wp-001", "node_type": "WORK_PACKAGE", "statement": by_id["wp-001"]["content"]["name"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
+                {"node_id": "wp-002", "node_type": "WORK_PACKAGE", "statement": by_id["wp-002"]["content"]["name"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
+                {"node_id": "method-001", "node_type": "FORMAL_MODEL", "statement": by_id["method-001"]["content"]["principle"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
+                {"node_id": "experiment-001", "node_type": "EXPERIMENT_DESIGN", "statement": by_id["experiment-001"]["content"]["purpose"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
+                {"node_id": "innovation-001", "node_type": "NOVEL_MECHANISM", "statement": by_id["innovation-001"]["content"]["novel_mechanism"], "status": "PLANNED", "source_refs": [copy.deepcopy(source)]},
+                {"node_id": "foundation-001", "node_type": "TEAM_EVIDENCE", "statement": by_id["achievement-001"]["content"]["title"], "status": "SUPPORTED" if has_foundation_evidence else "UNKNOWN", "source_refs": [copy.deepcopy(foundation_source)] if has_foundation_evidence else []},
             ],
             "edges": [
                 {"edge_id": "arg-edge-001", "source_id": "gap-001", "relation": "MOTIVATES", "target_id": "rq-001", "rationale": "差距产生约束映射问题"},
@@ -287,6 +488,49 @@ class SimulatedLLM:
     def _narrative_architecture(self, envelope: dict[str, Any]) -> dict[str, Any]:
         payload = envelope.get("payload", {})
         graph = payload.get("argument_graph") or payload.get("argument_graph_candidate") or self._research_definition(envelope)[2]
+        proposition_id = str((graph.get("central_proposition") or {}).get("node_id") or "").strip()
+        question_ids = [
+            str(item.get("node_id"))
+            for item in graph.get("research_questions") or []
+            if isinstance(item, dict) and item.get("node_id")
+        ]
+        node_ids_by_type: dict[str, list[str]] = {}
+        for node in graph.get("nodes") or []:
+            if not isinstance(node, dict) or not node.get("node_id"):
+                continue
+            node_ids_by_type.setdefault(str(node.get("node_type") or ""), []).append(
+                str(node["node_id"])
+            )
+        all_graph_ids = [
+            candidate
+            for candidate in [
+                proposition_id,
+                *question_ids,
+                *(str(node.get("node_id")) for node in graph.get("nodes") or [] if isinstance(node, dict) and node.get("node_id")),
+            ]
+            if candidate
+        ]
+        if not proposition_id:
+            proposition_id = all_graph_ids[0] if all_graph_ids else ""
+
+        def ids_for(*node_types: str, limit: int | None = None) -> list[str]:
+            values: list[str] = []
+            for node_type in node_types:
+                values.extend(node_ids_by_type.get(node_type, []))
+            values = list(dict.fromkeys(values))
+            if limit is not None:
+                values = values[:limit]
+            return values or ([proposition_id] if proposition_id else [])
+
+        gap_ids = ids_for("RESEARCH_GAP", limit=1)
+        prior_ids = ids_for("CLOSEST_PRIOR_WORK", "BASELINE", limit=1)
+        objective_ids = ids_for("OBJECTIVE", limit=1)
+        work_package_ids = ids_for("WORK_PACKAGE", "RESEARCH_CONTENT", limit=2)
+        method_ids = ids_for("FORMAL_MODEL", "MECHANISM", limit=1)
+        experiment_ids = ids_for("EXPERIMENT_DESIGN", limit=1)
+        innovation_ids = ids_for("NOVEL_MECHANISM", limit=1)
+        foundation_ids = ids_for("TEAM_EVIDENCE", limit=1)
+        question_refs = question_ids[:2] or ([proposition_id] if proposition_id else [])
         sections = []
         proposal_sections = [s for s in payload.get("linked_sections", []) if isinstance(s, dict)]
         current = payload.get("source_section")
@@ -312,26 +556,33 @@ class SimulatedLLM:
             else:
                 placement = "OMIT"
             profile_bindings = {
-                "ABSTRACT": (["prop-001"], ["gap-001", "method-001", "experiment-001", "innovation-001"]),
-                "PROJECT_OVERVIEW": (["prop-001", "objective-001"], ["gap-001", "wp-001", "wp-002"]),
-                "BACKGROUND_AND_SIGNIFICANCE": (["rq-001", "rq-002"], ["prior-001", "gap-001"]),
-                "LITERATURE_REVIEW": (["gap-001"], ["prior-001", "gap-001"]),
-                "NEED_ANALYSIS": (["rq-001"], ["gap-001", "objective-001"]),
-                "KEY_ISSUE": (["rq-001", "rq-002"], ["gap-001", "prior-001"]),
-                "RESEARCH_OBJECTIVE": (["objective-001"], ["rq-001", "rq-002", "prop-001"]),
-                "RESEARCH_CONTENT": (["wp-001", "wp-002"], ["objective-001", "rq-001", "rq-002"]),
-                "METHOD_AND_ALGORITHM": (["method-001"], ["wp-002", "rq-002", "gap-001"]),
-                "TECHNICAL_ROUTE": (["method-001"], ["wp-001", "wp-002", "experiment-001"]),
-                "EVALUATION": (["experiment-001"], ["method-001", "prior-001", "innovation-001"]),
-                "INNOVATION": (["innovation-001"], ["prior-001", "gap-001", "method-001"]),
-                "OUTPUTS_AND_METRICS": (["objective-001", "innovation-001"], ["experiment-001", "method-001"]),
-                "RESEARCH_FOUNDATION": (["foundation-001"], ["foundation-001", "wp-001", "wp-002"]),
-                "PROGRESS_BUDGET_RISK": (["wp-001", "wp-002"], ["objective-001", "experiment-001"]),
-                "REFERENCES": (["gap-001"], ["prior-001"]),
-                "APPENDIX": (["wp-001", "wp-002"], ["method-001", "experiment-001"]),
-                "SECTION_GENERAL": (["prop-001"], ["gap-001", "objective-001"]),
+                "ABSTRACT": ([proposition_id], gap_ids + method_ids + experiment_ids + innovation_ids),
+                "PROJECT_OVERVIEW": ([proposition_id] + objective_ids, gap_ids + work_package_ids),
+                "BACKGROUND_AND_SIGNIFICANCE": (question_refs, prior_ids + gap_ids),
+                "LITERATURE_REVIEW": (gap_ids, prior_ids + gap_ids),
+                "NEED_ANALYSIS": (question_refs[:1], gap_ids + objective_ids),
+                "KEY_ISSUE": (question_refs, gap_ids + prior_ids),
+                "RESEARCH_OBJECTIVE": (objective_ids, question_refs + [proposition_id]),
+                "RESEARCH_CONTENT": (work_package_ids, objective_ids + question_refs),
+                "METHOD_AND_ALGORITHM": (method_ids, work_package_ids[-1:] + question_refs[-1:] + gap_ids),
+                "TECHNICAL_ROUTE": (method_ids, work_package_ids + experiment_ids),
+                "EVALUATION": (experiment_ids, method_ids + prior_ids + innovation_ids),
+                "INNOVATION": (innovation_ids, prior_ids + gap_ids + method_ids),
+                "OUTPUTS_AND_METRICS": (objective_ids + innovation_ids, experiment_ids + method_ids),
+                "RESEARCH_FOUNDATION": (work_package_ids or [proposition_id], foundation_ids),
+                "PROGRESS_BUDGET_RISK": (work_package_ids, objective_ids + experiment_ids),
+                "REFERENCES": (gap_ids, prior_ids),
+                "APPENDIX": (work_package_ids, method_ids + experiment_ids),
+                "SECTION_GENERAL": ([proposition_id], gap_ids + objective_ids),
             }
-            claim_ids, evidence_ids = profile_bindings.get(profile_id, (["prop-001"], ["gap-001", "objective-001"]))
+            claim_ids, evidence_ids = profile_bindings.get(
+                profile_id,
+                ([proposition_id], gap_ids + objective_ids),
+            )
+            claim_ids = [item for item in dict.fromkeys(claim_ids) if item]
+            evidence_ids = [item for item in dict.fromkeys(evidence_ids) if item and item not in claim_ids]
+            if not claim_ids and proposition_id:
+                claim_ids = [proposition_id]
             sections.append({
                 "section_contract_id": f"section-contract-{index+1:03d}",
                 "section_id": str(section.get("section_id") or f"section-{index+1:03d}"),
@@ -367,7 +618,7 @@ class SimulatedLLM:
                 }.get(profile_id, ["PROBLEM", "EVIDENCE", "METHOD", "EVALUATION"])],
                 "prerequisite_section_ids": [str(s.get("section_id")) for s in proposal_sections[:index] if s.get("section_id")][-2:],
                 "must_not_repeat_section_ids": [str(s.get("section_id")) for s in proposal_sections[:index] if s.get("section_id")][-3:],
-                "allowed_shared_context_ids": ["prop-001"],
+                "allowed_shared_context_ids": [proposition_id] if proposition_id else [],
                 "forbidden_topics": ["部署步骤", "Prompt执行日志", "无基线指标"] if placement == "MAIN_BODY" else ["将附件内容包装为核心创新"],
                 "max_overlap_ratio": 0.12 if placement == "MAIN_BODY" else 0.2,
                 "word_budget": 600 if placement == "MAIN_BODY" else 350,
@@ -376,9 +627,9 @@ class SimulatedLLM:
             })
         return {
             "architecture_id": "narrative-architecture-001", "document_type": "RESEARCH_PROPOSAL",
-            "central_proposition_id": "prop-001", "central_proposition": graph["central_proposition"]["statement"],
-            "research_question_ids": [q["node_id"] for q in graph.get("research_questions", [])][:3],
-            "closest_prior_work_ids": ["prior-001"], "work_package_ids": ["wp-001", "wp-002"],
+            "central_proposition_id": proposition_id, "central_proposition": graph["central_proposition"]["statement"],
+            "research_question_ids": question_ids[:3],
+            "closest_prior_work_ids": prior_ids, "work_package_ids": work_package_ids,
             "main_body_page_budget": 35, "main_body_word_budget": 25000,
             "section_contracts": sections,
             "attachments": [{"attachment_id": "attachment-001", "title": "系统实现与部署附件", "purpose": "隔离不属于主文科学论证的工程细节", "content_types": ["部署脚本", "接口", "审计日志", "Prompt与Trace"]}],
@@ -386,6 +637,12 @@ class SimulatedLLM:
 
     def _handle_security_classify(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         result = base["result"]
+        object_context = (envelope.get("payload") or {}).get("object_context") or {}
+        object_id = str(object_context.get("object_id") or "").strip()
+        if object_id:
+            # Replay outputs contain a stable sample ID.  In simulated LIVE-style
+            # workflows the classification must target the object from this request.
+            result["object_id"] = object_id
         result["recommended_level"] = "INTERNAL"
         result["sensitive_fields"] = ["人员姓名", "组织名称"]
         result["allowed_environments"] = ["OFFLINE_LOCAL", "ONLINE_PUBLIC"]
@@ -404,6 +661,22 @@ class SimulatedLLM:
         r["application_year"] = 2026
         r["guide_direction_name"] = "物流运输优化与智能体系统" if self._is_transport_project(envelope) else "智能体系统与复杂服务保障"
         r["duration_months"] = 36
+
+        # Replay fixtures use stable sample IDs, but a simulated provider is
+        # expected to consume the current request rather than leak those sample
+        # identifiers into its response.  Coverage has no hash/section metadata
+        # with which the provenance binder could safely recover a stale alias, so
+        # derive it here when the current guide source is unambiguous.
+        guide_documents = [
+            item
+            for item in (envelope.get("payload") or {}).get("guide_documents") or []
+            if isinstance(item, dict) and str(item.get("document_id") or "").strip()
+        ]
+        if len(guide_documents) == 1:
+            document_id = str(guide_documents[0]["document_id"]).strip()
+            for coverage in (base.get("result") or {}).get("extraction_coverage") or []:
+                if isinstance(coverage, dict):
+                    coverage["source_id"] = document_id
         return base
 
     def _handle_scheme_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -463,8 +736,42 @@ class SimulatedLLM:
                 "security_level": "INTERNAL",
             },
         ]
+        source_spans = [
+            item for item in (envelope.get("payload") or {}).get("source_spans") or []
+            if isinstance(item, dict) and isinstance(item.get("source_ref"), dict)
+        ]
+        evidence_ref = next((
+            copy.deepcopy(item["source_ref"]) for item in source_spans
+            if str((item.get("source_ref") or {}).get("source_type") or "")
+            in {"EVIDENCE_MATERIAL", "TECHNICAL_MATERIAL"}
+        ), None)
+        general_ref = next((copy.deepcopy(item["source_ref"]) for item in source_spans), None)
+        if general_ref is not None:
+            facts[0]["source_refs"] = [general_ref]
+        if evidence_ref is not None:
+            facts[1]["source_refs"] = [evidence_ref]
+        elif general_ref is not None:
+            facts[1]["source_refs"] = [copy.deepcopy(general_ref)]
+
         base["result"]["fact_candidates"] = facts
-        base["result"]["coverage"] = [{"span_id": f"span-{i:03d}", "claim_ids": [fact["claim_id"]]} for i, fact in enumerate(facts, 1)]
+
+        # Coverage IDs are references to the current input spans, not entities
+        # created by the extractor.  Never reuse the stable replay span IDs when
+        # a simulated workflow supplies different source spans.
+        source_span_ids = [
+            str(item.get("span_id")).strip()
+            for item in (envelope.get("payload") or {}).get("source_spans") or []
+            if isinstance(item, dict) and str(item.get("span_id") or "").strip()
+        ]
+        if source_span_ids:
+            grouped_claim_ids: dict[str, list[str]] = {}
+            for index, fact in enumerate(facts):
+                span_id = source_span_ids[min(index, len(source_span_ids) - 1)]
+                grouped_claim_ids.setdefault(span_id, []).append(fact["claim_id"])
+            base["result"]["coverage"] = [
+                {"span_id": span_id, "claim_ids": claim_ids}
+                for span_id, claim_ids in grouped_claim_ids.items()
+            ]
         base["result"]["conflict_candidates"] = []
         return base
 
@@ -478,7 +785,15 @@ class SimulatedLLM:
         base["result"]["blocked_section_profiles"] = []
         base["result"]["chapter_readiness"] = [{"profile_id": pid, "readiness": "READY", "missing_item_ids": [], "blocking_conflict_ids": []} for pid in core]
         dimensions = ["DOCUMENT_CONTRACT", "CENTRAL_PROPOSITION", "RESEARCH_GAP", "RESEARCH_QUESTIONS", "CLOSEST_PRIOR_WORK", "METHOD_SUBSTANCE", "EVALUATION_DESIGN", "INNOVATION_BASELINE", "RESEARCH_FOUNDATION", "METRIC_JUSTIFICATION", "SCOPE_AND_PAGE_BUDGET"]
-        base["result"]["critical_readiness_checks"] = [{"check_id": f"readiness-{i:03d}", "dimension": d, "passed": True, "reason": "输入图谱存在对应节点和来源。", "missing_node_types": [], "evidence_ids": ["prop-001"]} for i,d in enumerate(dimensions,1)]
+        payload = envelope.get("payload") or {}
+        graph = payload.get("argument_graph") or payload.get("argument_graph_candidate") or {}
+        evidence_id = str(((graph.get("central_proposition") or {}).get("node_id")) or "").strip()
+        if not evidence_id:
+            evidence_id = next((
+                str(node.get("node_id")) for node in graph.get("nodes") or []
+                if isinstance(node, dict) and str(node.get("node_id") or "").strip()
+            ), "")
+        base["result"]["critical_readiness_checks"] = [{"check_id": f"readiness-{i:03d}", "dimension": d, "passed": True, "reason": "输入图谱存在对应节点和来源。", "missing_node_types": [], "evidence_ids": [evidence_id] if evidence_id else []} for i,d in enumerate(dimensions,1)]
         stage = str(envelope.get("payload", {}).get("readiness_stage") or "READY_FOR_ARGUMENT_ARCHITECTURE")
         base["result"]["assessed_stage"] = stage
         base["result"]["ready_for_argument_architecture"] = True
@@ -517,11 +832,32 @@ class SimulatedLLM:
             {"component_id":"component-innovation","section_role":"创新点","input_requirements":["最近工作","局限","新增机制"],"output_function":"形成可比较创新主张","paragraph_patterns":["基线—局限—机制—优势"],"forbidden_project_facts":["泛化形容词"]},
             {"component_id":"component-foundation","section_role":"研究基础","input_requirements":["成果证据","预实验","团队能力"],"output_function":"证明可行性并暴露剩余风险","paragraph_patterns":["证据—支撑关系—边界"],"forbidden_project_facts":["抽象能力声明"]},
         ]
+        reference_document = (envelope.get("payload") or {}).get("reference_document") or {}
+        sections = reference_document.get("sections") or []
+        section_id = next(
+            (
+                str(section.get("section_id"))
+                for section in sections
+                if isinstance(section, dict) and section.get("section_id")
+            ),
+            "reference-template",
+        )
+        base["result"]["coverage"] = [{
+            "section_id": section_id,
+            "component_ids": [component["component_id"] for component in template["components"]],
+        }]
         base["status"] = "PASS"; base["findings"] = []
         return base
 
     def _handle_template_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        candidate = (envelope.get("payload") or {}).get("template_candidate") or {}
         base["result"]["verdict"] = "ACCEPT"
+        base["result"]["checked_component_ids"] = [
+            str(component.get("component_id"))
+            for component in candidate.get("components") or []
+            if isinstance(component, dict) and component.get("component_id")
+        ]
+        base["result"]["contaminated_component_ids"] = []
         base["result"]["logic_pattern_checks"] = self._dimension_checks(["ARGUMENT_SEQUENCE", "SECTION_FUNCTION", "EXPRESSION_PATTERN", "ANTI_PATTERN_COVERAGE", "FACT_CONTAMINATION"])
         base["status"] = "PASS"; base["findings"] = []
         return base
@@ -559,10 +895,45 @@ class SimulatedLLM:
                 "组合优化、车辆路径、排程和动态重规划可采用哪些代表性方法？",
                 "Agent评测、安全治理、人机协同和工程可观测性有哪些公开依据？",
             ]
-        result["queries"] = self._research_queries(envelope)
+        raw_queries = self._research_queries(envelope)
+        question_count = max(1, len(result["research_questions"]))
+        query_count = max(1, len(raw_queries))
+        result["binding_contract_version"] = "1.0"
+        result["queries"] = [
+            {
+                "query_id": f"query-{index + 1:03d}",
+                "query": query,
+                # Spread the deterministic simulated queries across the ordered
+                # research questions.  Real LIVE outputs must provide the same
+                # explicit structural binding instead of relying on word overlap.
+                "linked_question_indexes": [min(question_count - 1, (index * question_count) // query_count)],
+            }
+            for index, query in enumerate(raw_queries)
+        ]
         result["source_priorities"] = ["国际标准与官方规范", "政府/标准机构页面", "协议设计文档", "同行评议论文", "官方开源项目文档"]
         result["evidence_requirements"] = ["覆盖不少于30个可核验公开来源", "保存来源URL、获取时间、摘录与SHA-256", "正文引用与参考文献编号一一对应", "只使用归档来源形成PUBLIC_CLAIM"]
         result["prohibited_inferences"] = ["不得从公开资料反推内部组织、人员或部署信息", "不得将外部性能数字直接作为本项目实测结果"]
+        # Mirror the LIVE semantic expansion: the runtime-owned retrieval execution
+        # contract comes from the approved task payload, never from model output.
+        contract = envelope.get("payload", {}).get("retrieval_contract")
+        if isinstance(contract, dict) and contract:
+            if contract.get("required_channels") is not None:
+                result["required_channels"] = [
+                    str(item).strip().upper() for item in contract.get("required_channels") or [] if str(item).strip()
+                ]
+            if contract.get("required_providers") is not None:
+                result["provider_execution_requirements"] = {
+                    "required_providers": [
+                        str(item).strip().lower() for item in contract.get("required_providers") or [] if str(item).strip()
+                    ],
+                    "execute_all_approved_queries": True,
+                }
+            if contract.get("minimum_fulltext_sources_per_query") is not None:
+                result["minimum_fulltext_sources_per_query"] = max(0, int(contract.get("minimum_fulltext_sources_per_query")))
+            if contract.get("allow_snippet_only") is not None:
+                result["allow_snippet_only"] = bool(contract.get("allow_snippet_only"))
+            if contract.get("require_web_discovery") is not None:
+                result["require_web_discovery"] = bool(contract.get("require_web_discovery"))
         return base
 
     def _handle_public_research_synthesis(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -616,10 +987,398 @@ class SimulatedLLM:
     def _handle_public_research_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         return base
 
+    def _handle_background_research_plan(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        topic = str(payload.get("topic") or "").strip() or "当前课题"
+        dimensions = [
+            str(item).strip().upper()
+            for item in payload.get("required_dimensions") or []
+            if str(item).strip()
+        ]
+        if dimensions:
+            result["required_dimensions"] = dimensions
+        else:
+            dimensions = [str(item) for item in result.get("required_dimensions") or []]
+        topic_id = str(payload.get("topic_id") or "").strip()
+        if topic_id:
+            result["topic_id"] = topic_id
+        purpose_by_dimension = {
+            "APPLICATION_SCENARIO": "识别 topic 在真实业务中的应用场景",
+            "STAKEHOLDER_AND_PAIN": "识别利益相关方面临的具体问题",
+            "INDUSTRY_SCALE_AND_TREND": "获取行业规模、增长与成本趋势的公开统计",
+            "POLICY_STANDARD_AND_PROGRAM": "检索相关政策、标准、规划与正式项目",
+            "REPRESENTATIVE_CASE": "检索公开案例、试点或部署",
+            "CURRENT_ADOPTION": "评估现有应用成熟度与主要路线",
+            "OPERATIONAL_CONSTRAINT": "识别数据、实时性、资源、组织或合规约束",
+            "RESEARCH_SIGNIFICANCE": "由上述事实导出研究价值",
+            "OBJECT_AND_EVOLUTION": "核实调研对象的定义、组织归属与各轮演进",
+            "FUNCTION_AND_ARCHITECTURE": "核实可证实的功能模块、输入输出与架构",
+            "WORKFLOW_AND_INTERACTION": "核实运行流程、人机协同与实验迭代过程",
+            "TECHNOLOGY_AND_IMPLEMENTATION": "核实关键技术解决的问题、作用方式与实现证据",
+            "EVALUATION_AND_EFFECT": "核实实验场景、指标与公开效果",
+            "LIMITATIONS_AND_GAPS": "核实披露边界、冲突与成熟度局限",
+        }
+        literature_intent = bool(payload.get("literature_review_intent"))
+        if literature_intent:
+            purpose_by_dimension = {
+                key: "围绕该维度检索学术科技文献与正式技术报告"
+                for key in purpose_by_dimension
+            }
+        result["queries"] = [
+            {
+                "query_id": f"query-{index:03d}",
+                "query": (
+                    f"{topic} {dimension.lower().replace('_', ' ')} 学术论文 文献综述"
+                    if literature_intent
+                    else f"{topic} {dimension.lower().replace('_', ' ')} 公开统计 政策 案例"
+                ),
+                "dimension": dimension,
+                "purpose": purpose_by_dimension.get(dimension, "覆盖该背景维度的公开证据"),
+            }
+            for index, dimension in enumerate(dimensions, 1)
+        ]
+        contract = payload.get("retrieval_contract")
+        if isinstance(contract, dict) and contract:
+            if contract.get("required_channels") is not None:
+                result["required_channels"] = [
+                    str(item).strip().upper() for item in contract.get("required_channels") or [] if str(item).strip()
+                ]
+            if contract.get("required_providers") is not None:
+                result["provider_execution_requirements"] = {
+                    "required_providers": [
+                        str(item).strip().lower() for item in contract.get("required_providers") or [] if str(item).strip()
+                    ],
+                    "execute_all_approved_queries": True,
+                }
+            if contract.get("minimum_fulltext_sources_per_query") is not None:
+                result["minimum_fulltext_sources_per_query"] = max(0, int(contract.get("minimum_fulltext_sources_per_query")))
+            if contract.get("allow_snippet_only") is not None:
+                result["allow_snippet_only"] = bool(contract.get("allow_snippet_only"))
+            if contract.get("require_web_discovery") is not None:
+                result["require_web_discovery"] = bool(contract.get("require_web_discovery"))
+        return base
+
+    def _handle_background_research_plan_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        return base
+
+    _REPORT_DIMENSION_LABELS = {
+        "OBJECT_AND_EVOLUTION": "对象与演进",
+        "FUNCTION_AND_ARCHITECTURE": "功能与架构",
+        "WORKFLOW_AND_INTERACTION": "流程与交互",
+        "TECHNOLOGY_AND_IMPLEMENTATION": "技术与实现",
+        "EVALUATION_AND_EFFECT": "评估与效果",
+        "LIMITATIONS_AND_GAPS": "局限与缺口",
+        "APPLICATION_SCENARIO": "应用场景",
+        "STAKEHOLDER_AND_PAIN": "利益方与痛点",
+        "INDUSTRY_SCALE_AND_TREND": "规模与趋势",
+        "POLICY_STANDARD_AND_PROGRAM": "政策标准与规划",
+        "REPRESENTATIVE_CASE": "代表性案例",
+        "CURRENT_ADOPTION": "现有应用成熟度",
+        "OPERATIONAL_CONSTRAINT": "运行约束",
+        "RESEARCH_SIGNIFICANCE": "研究意义",
+    }
+
+    def _handle_report_outline(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        topic = payload.get("topic") if isinstance(payload.get("topic"), dict) else {}
+        topic_description = str(topic.get("topic_description") or "").strip() or "当前调研对象"
+        title_hint = str(payload.get("report_title_hint") or "").strip()
+        result["report_title"] = title_hint or f"{topic_description}调研报告"
+        cards = [item for item in payload.get("background_cards") or [] if isinstance(item, dict)]
+        gaps = [item for item in payload.get("background_gaps") or [] if isinstance(item, dict)]
+        card_ids_by_dimension: dict[str, list[str]] = {}
+        for card in cards:
+            dimension = str(card.get("dimension") or "").strip().upper()
+            card_id = str(card.get("card_id") or "").strip()
+            if dimension and card_id:
+                card_ids_by_dimension.setdefault(dimension, []).append(card_id)
+        brief = payload.get("survey_research_brief") if isinstance(payload.get("survey_research_brief"), dict) else {}
+        must_answer = [str(item).strip() for item in brief.get("must_answer_questions") or [] if str(item).strip()]
+        gap_texts_by_dimension: dict[str, list[str]] = {}
+        overall_gap_texts: list[str] = []
+        for gap in gaps:
+            description = str(gap.get("description") or "").strip()
+            if not description:
+                continue
+            dimension = str(gap.get("dimension") or "").strip().upper()
+            if dimension:
+                gap_texts_by_dimension.setdefault(dimension, []).append(description)
+            else:
+                overall_gap_texts.append(description)
+
+        covered_dimensions = [
+            dimension
+            for dimension in self._REPORT_DIMENSION_LABELS
+            if dimension in card_ids_by_dimension
+        ] + [
+            dimension
+            for dimension in card_ids_by_dimension
+            if dimension not in self._REPORT_DIMENSION_LABELS
+        ]
+        all_card_ids = [
+            card_id
+            for dimension in covered_dimensions
+            for card_id in card_ids_by_dimension[dimension]
+        ]
+        per_dimension_share = 60 // max(1, len(covered_dimensions))
+        sections: list[dict[str, Any]] = [{
+            "section_key": "summary",
+            "title": "摘要与主要发现",
+            "goal": f"概括{topic_description}的核心事实与主要发现",
+            "must_answer_questions": must_answer[:1] or [f"{topic_description}的核心事实是什么"],
+            "evidence_card_ids": all_card_ids[:4],
+            "known_gaps": [],
+            "estimated_share_percent": 10,
+        }]
+        question_index = 1 if must_answer else 0
+        for dimension in covered_dimensions:
+            label = self._REPORT_DIMENSION_LABELS.get(dimension, dimension)
+            questions: list[str] = []
+            if question_index < len(must_answer):
+                questions.append(must_answer[question_index])
+                question_index += 1
+            sections.append({
+                "section_key": f"background-{dimension.lower().replace('_', '-')}",
+                "title": f"背景调研：{label}",
+                "goal": f"基于证据卡陈述{topic_description}在{label}方面的公开事实",
+                "must_answer_questions": questions or [f"{topic_description}的{label}有哪些公开证据"],
+                "evidence_card_ids": list(card_ids_by_dimension[dimension]),
+                "known_gaps": gap_texts_by_dimension.get(dimension, []),
+                "estimated_share_percent": per_dimension_share,
+            })
+        sections.append({
+            "section_key": "analysis",
+            "title": "综合分析",
+            "goal": "在证据卡支持的事实之上做横向关联与矛盾分析",
+            "must_answer_questions": must_answer[question_index:] or ["各维度事实之间存在什么关联与矛盾"],
+            "evidence_card_ids": all_card_ids,
+            "known_gaps": [],
+            "estimated_share_percent": 15,
+        })
+        sections.append({
+            "section_key": "conclusion",
+            "title": "结论",
+            "goal": "总结可证实结论并如实列出仍未知事项",
+            "must_answer_questions": ["哪些结论有公开证据支撑，哪些仍属未知"],
+            "evidence_card_ids": [],
+            "known_gaps": overall_gap_texts[:5],
+            "estimated_share_percent": 10,
+        })
+        sections.append({
+            "section_key": "references",
+            "title": "参考资料与证据对照表",
+            "goal": "列出全部引用来源与证据卡的对照关系",
+            "must_answer_questions": ["每条结论对应哪些证据卡与来源"],
+            "evidence_card_ids": [],
+            "planned_exhibits": [{
+                "kind": "TABLE",
+                "caption": "证据卡与来源对照表",
+                "evidence_card_ids": all_card_ids,
+            }],
+            "known_gaps": [],
+            "estimated_share_percent": 5,
+        })
+        result["report_sections"] = sections
+        result["overall_gaps"] = overall_gap_texts
+        return base
+
+    def _handle_report_outline_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        known_card_ids = {
+            str(card.get("card_id") or "")
+            for card in payload.get("background_cards") or []
+            if isinstance(card, dict) and str(card.get("card_id") or "").strip()
+        }
+        candidate = payload.get("outline_candidate") if isinstance(payload.get("outline_candidate"), dict) else {}
+        unknown_by_section: dict[str, list[str]] = {}
+        for section in candidate.get("report_sections") or []:
+            if not isinstance(section, dict):
+                continue
+            section_key = str(section.get("section_key") or "")
+            unknown = [
+                str(card_id)
+                for card_id in section.get("evidence_card_ids") or []
+                if str(card_id) not in known_card_ids
+            ]
+            for exhibit in section.get("planned_exhibits") or []:
+                if not isinstance(exhibit, dict):
+                    continue
+                unknown.extend(
+                    str(card_id)
+                    for card_id in exhibit.get("evidence_card_ids") or []
+                    if str(card_id) not in known_card_ids
+                )
+            if unknown:
+                unknown_by_section[section_key] = unknown
+        if not unknown_by_section:
+            return base
+        base["status"] = "REVISE"
+        base["result"]["verdict"] = "REVISE"
+        base["findings"] = [
+            {
+                "code": "RO_CARD_ID_UNKNOWN",
+                "severity": "P1",
+                "description": "提纲引用了输入证据卡之外的 card_id：" + "、".join(card_ids[:5]),
+                **({"section_key": section_key} if section_key else {}),
+            }
+            for section_key, card_ids in unknown_by_section.items()
+        ]
+        return base
+
+    def _handle_report_section_write(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        section = payload.get("section") if isinstance(payload.get("section"), dict) else {}
+        section_key = str(section.get("section_key") or "").strip()
+        cards = [item for item in payload.get("background_cards") or [] if isinstance(item, dict)]
+        card_by_id = {str(card.get("card_id") or ""): card for card in cards}
+        cited_ids = [
+            str(card_id)
+            for card_id in section.get("evidence_card_ids") or []
+            if str(card_id) in card_by_id
+        ] or [str(card.get("card_id")) for card in cards if str(card.get("card_id") or "")]
+        paragraphs: list[str] = []
+        questions = [str(q).strip() for q in section.get("must_answer_questions") or [] if str(q).strip()]
+        if questions:
+            paragraphs.append("本章需回答的问题：" + "；".join(questions) + "。")
+        for card_id in cited_ids:
+            card = card_by_id[card_id]
+            claim = str(card.get("claim_text") or "").strip()
+            if claim:
+                paragraphs.append(f"{claim} [{card_id}]")
+        gaps = [str(gap).strip() for gap in section.get("known_gaps") or [] if str(gap).strip()]
+        if gaps:
+            paragraphs.append("已知缺口：" + "；".join(gaps) + "。")
+        guidance = [str(g).strip() for g in payload.get("revision_guidance") or [] if str(g).strip()]
+        if guidance:
+            paragraphs.append("本章按内容检查意见修订：" + "；".join(guidance) + "。")
+        if not paragraphs:
+            paragraphs.append("本章暂无可用证据卡内容。")
+        result["section_key"] = section_key
+        result["markdown_body"] = "\n\n".join(paragraphs)
+        result["cited_card_ids"] = cited_ids
+        result["unresolved_questions"] = []
+        return base
+
+    def _handle_report_content_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        outline_sections = [
+            item for item in payload.get("outline_sections") or [] if isinstance(item, dict)
+        ]
+        drafts = [item for item in payload.get("section_drafts") or [] if isinstance(item, dict)]
+        draft_keys = {str(item.get("section_key") or "") for item in drafts}
+        findings: list[dict[str, Any]] = []
+        for section in outline_sections:
+            section_key = str(section.get("section_key") or "").strip()
+            title = str(section.get("title") or "")
+            key_lower = section_key.lower()
+            if "reference" in key_lower or "参考资料" in title or "证据对照" in title:
+                continue
+            if section_key and section_key not in draft_keys:
+                findings.append({
+                    "code": "RC_MUST_ANSWER_MISSING",
+                    "severity": "P1",
+                    "section_key": section_key,
+                    "description": f"提纲章节“{title or section_key}”没有对应正文。",
+                })
+        for draft in drafts:
+            body = str(draft.get("markdown_body") or "")
+            if not body.strip():
+                findings.append({
+                    "code": "RC_MUST_ANSWER_MISSING",
+                    "severity": "P1",
+                    "section_key": str(draft.get("section_key") or ""),
+                    "description": "章节正文为空。",
+                })
+        if findings:
+            base["status"] = "REVISE"
+            result["verdict"] = "REVISE"
+            base["findings"] = findings
+        else:
+            result["verdict"] = "ACCEPT"
+        return base
+
+
+    def _handle_background_research_synthesis(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        retrieved = [item for item in payload.get("retrieved_sources", []) if isinstance(item, dict)]
+        passages = [item for item in payload.get("extracted_passages", []) if isinstance(item, dict)]
+        passage_by_source = {str(p.get("source_ref", {}).get("source_id")): p for p in passages}
+        catalog = self._catalog(envelope)
+        catalog_by_source = {str(item.get("source_id") or f"public-src-{self._item_number(item, i):03d}"): item for i, item in enumerate(catalog, 1)}
+        if not retrieved:
+            retrieved = [self._source_ref(self._item_number(item, i), item) for i, item in enumerate(catalog, 1)]
+        elif len(retrieved) < 2:
+            existing = {str(item.get("source_id")) for item in retrieved}
+            for i, item in enumerate(catalog, 1):
+                candidate = self._source_ref(self._item_number(item, i), item)
+                if str(candidate.get("source_id")) not in existing:
+                    retrieved.append(candidate)
+                    break
+        plan = payload.get("research_plan") if isinstance(payload.get("research_plan"), dict) else {}
+        dimensions = [
+            str(item).strip().upper()
+            for item in plan.get("required_dimensions") or []
+            if str(item).strip()
+        ]
+        # The model semantics layer emits standard PUBLIC_CLAIM objects; the
+        # deterministic runtime turns validated claims into background evidence
+        # cards (build_background_cards), so no card_id is ever simulated here.
+        claims = []
+        covered: set[str] = set()
+        for idx, source_ref in enumerate(retrieved, 1):
+            source_id = str(source_ref.get("source_id") or "").strip()
+            if not source_id:
+                continue
+            item = catalog_by_source.get(source_id, {})
+            passage = passage_by_source.get(source_id, {})
+            claim_text = str(passage.get("text") or self._item_summary(item) or source_ref.get("quoted_text") or "").strip()[:6000]
+            if not claim_text:
+                continue
+            dimension = dimensions[(idx - 1) % len(dimensions)] if dimensions else "APPLICATION_SCENARIO"
+            covered.add(dimension)
+            claims.append({
+                "claim_id": f"bg-claim-{idx:03d}",
+                "claim_text": claim_text,
+                "claim_type": "PUBLIC_CLAIM",
+                "subject_id": None,
+                "temporal_status": "TIME_INDEPENDENT",
+                "qualifiers": [str(item.get("publisher") or item.get("category") or "PUBLIC_SOURCE")],
+                "numeric_values": [],
+                "source_refs": [source_ref],
+                "knowledge_status": "DOCUMENT_EXTRACTED",
+                "security_level": "PUBLIC",
+                "dimension": dimension,
+                "target_section_profiles": ["BACKGROUND_AND_SIGNIFICANCE"],
+                "conflicts": [],
+                "limitations": ["模拟回放输出仅绑定输入信封中的已归档来源，真实性由归档记录与人工复核保证。"],
+            })
+        gaps = [
+            {"dimension": dimension, "reason": "检索结果未覆盖该背景维度，禁止使用模型记忆补齐。"}
+            for dimension in dimensions
+            if dimension not in covered
+        ]
+        result["claims"] = claims
+        result["background_gaps"] = gaps
+        result["coverage_summary"] = (
+            f"综合{len(claims)}条背景 PUBLIC_CLAIM，覆盖{len(covered)}个必需维度，声明缺口{len(gaps)}个；"
+            "证据卡由运行时按通过来源绑定校验的 claim 确定性构建，证据来自 public_research.archive 技能的归档来源而非模型记忆。"
+        )
+        base["source_refs"] = retrieved
+        return base
+
+    def _handle_background_research_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        return base
+
     def _handle_online_result_import_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         claims = envelope.get("payload", {}).get("result_package", {}).get("claims", [])
         base["result"]["import_recommendation"] = "IMPORT_REFERENCE_ONLY"
         base["result"]["accepted_claim_ids"] = [str(item.get("claim_id")) for item in claims if item.get("claim_id")]
+        base["result"]["reference_only_claim_ids"] = []
         base["result"]["rejected_claim_ids"] = []
         return base
 
@@ -628,12 +1387,12 @@ class SimulatedLLM:
         plan = base["result"]["revision_plan"]
         architecture = self._narrative_architecture(envelope)
         contracts = architecture["section_contracts"]
-        plan["issues"] = [{"issue_id": "issue-argument-chain", "description": "需要按中心命题和研究问题组织主文，而不是按功能模块扩写。", "evidence_refs": ["prop-001"], "severity": "P1"}]
+        plan["issues"] = [{"issue_id": "issue-argument-chain", "description": "需要按中心命题和研究问题组织主文，而不是按功能模块扩写。", "evidence_refs": [architecture["central_proposition_id"]], "severity": "P1"}]
         if os.getenv("SIMULATED_INJECT_PLAN_REPAIR", "false").lower() in {"1", "true", "yes"}:
             plan["issues"].append({
                 "issue_id": "issue-simulated-repair",
                 "description": "[SIM_REPAIR] 用于验证一次定向修复链路。",
-                "evidence_refs": ["prop-001"],
+                "evidence_refs": [architecture["central_proposition_id"]],
                 "severity": "P1",
             })
         plan["target_section_ids"] = [c["section_id"] for c in contracts if c["placement"] != "OMIT"]
@@ -653,9 +1412,19 @@ class SimulatedLLM:
         needs_repair = any("[SIM_REPAIR]" in str(item.get("description", "")) for item in plan.get("issues", []))
         passed = not needs_repair
         base["result"]["verdict"] = "ACCEPT" if passed else "REVISE"
+        base["result"]["checked_issue_ids"] = [
+            str(item.get("issue_id"))
+            for item in plan.get("issues") or []
+            if isinstance(item, dict) and item.get("issue_id")
+        ]
+        base["result"]["checked_task_ids"] = [
+            str(item.get("revision_task_id"))
+            for item in plan.get("tasks") or []
+            if isinstance(item, dict) and item.get("revision_task_id")
+        ]
         base["result"]["architecture_checks"] = self._dimension_checks(["CENTRAL_PROPOSITION", "QUESTION_COUNT", "WORK_PACKAGE_COUNT", "SECTION_PROFILE_MAPPING", "PAGE_BUDGET", "MAIN_BODY_ATTACHMENT_BOUNDARY", "CLAIM_COVERAGE", "REDUNDANCY_PREVENTION"], passed)
         base["status"] = "PASS" if passed else "REVISE"
-        base["findings"] = [] if passed else [{"code": "PLAN_SIMULATED_REPAIR", "severity": "P1", "category": "CONTENT", "target_type": "REVISION_PLAN", "target_path_or_span": "issues", "description": "计划中包含模拟缺陷标记。", "evidence_refs": [], "repairable": True, "repair_instruction": "删除标记并保持叙事架构不变。", "suggested_route": "ORIGINAL_PRODUCER", "blocking": True}]
+        base["findings"] = [] if passed else [{"code": "PLAN_TASK_UNCHECKED", "severity": "P1", "category": "CONTENT", "target_type": "REVISION_PLAN", "target_path_or_span": "issues", "description": "计划中包含模拟缺陷标记。", "evidence_refs": [], "repairable": True, "repair_instruction": "删除标记并保持叙事架构不变。", "suggested_route": "ORIGINAL_PRODUCER", "blocking": True}]
         return base
 
     def _handle_targeted_repair(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -665,10 +1434,14 @@ class SimulatedLLM:
                 if isinstance(issue, dict) and "[SIM_REPAIR]" in str(issue.get("description", "")):
                     issue["description"] = str(issue["description"]).replace("[SIM_REPAIR]", "").strip()
         base["result"]["repaired_object"] = original
-        base["result"]["changed_paths"] = ["content.issues[1].description"]
+        base["result"]["changed_paths"] = [join_pointer("content", "issues", 1, "description")]
         base["result"]["unchanged_protected_hashes"] = []
-        base["result"]["resolved_finding_codes"] = ["PLAN_SIMULATED_REPAIR"]
-        base["result"]["unresolved_finding_codes"] = []
+        base["result"]["resolved_finding_ids"] = [
+            str(item.get("finding_instance_id"))
+            for item in envelope.get("payload", {}).get("findings_to_repair") or []
+            if isinstance(item, dict) and item.get("finding_instance_id")
+        ]
+        base["result"]["unresolved_finding_ids"] = []
         return base
 
     def _handle_write_blueprint(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -702,18 +1475,41 @@ class SimulatedLLM:
             "REFERENCES": [("EVIDENCE", "列出正文实际使用且可核验的来源")],
             "APPENDIX": [("CONTEXT", "说明附件与主文的边界"), ("METHOD", "记录实现、接口或部署细节")],
         }
-        role_specs = roles_by_profile.get(profile.get("profile_id"), [("PROBLEM", "本章节要解决的具体问题"), ("EVIDENCE", "支撑问题与命题的证据"), ("METHOD", "本项目方法或任务"), ("EVALUATION", "验证方式")])
+        contract_roles = [str(role) for role in contract.get("required_argument_roles") or [] if str(role)]
+        role_specs = roles_by_profile.get(profile.get("profile_id"))
+        if role_specs is None and contract_roles:
+            role_specs = [(role, f"完成章节合同要求的{role}论证功能") for role in contract_roles]
+        if role_specs is None:
+            role_specs = [("PROBLEM", "本章节要解决的具体问题"), ("EVIDENCE", "支撑问题与命题的证据"), ("METHOD", "本项目方法或任务"), ("EVALUATION", "验证方式")]
 
         contract_claims = list(contract.get("must_advance_claim_ids") or [proposition_id])
+        contract_claim_set = {str(value) for value in contract_claims if value}
         contract_evidence = list(contract.get("must_use_evidence_ids") or [])
         profile_id = str(profile.get("profile_id") or "SECTION_GENERAL")
+        semantic_contract = get_semantic_contract()
 
         # Claim/evidence binding is section-profile-specific.  The previous
         # implementation selected one global RESEARCH_QUESTION, PRIOR_WORK and
         # EXPERIMENT for every section, which produced identical paragraphs even
         # though the narrative contracts were different.
         default_claims = contract_claims or [proposition_id]
-        default_evidence = contract_evidence or default_claims
+        fact_ids = [
+            str(item.get("claim_id"))
+            for item in payload.get("confirmed_facts", [])
+            if isinstance(item, dict) and item.get("claim_id")
+        ]
+        metric_ids = [
+            str(item.get("object_id") or item.get("item_id"))
+            for item in payload.get("metric_inputs", [])
+            if isinstance(item, dict) and (item.get("object_id") or item.get("item_id"))
+        ]
+        graph_evidence = (
+            type_ids.get("RESEARCH_GAP", [])
+            + type_ids.get("CLOSEST_PRIOR_WORK", [])
+            + type_ids.get("EXPERIMENT_DESIGN", [])
+            + type_ids.get("TEAM_EVIDENCE", [])
+        )
+        default_evidence = list(dict.fromkeys([*contract_evidence, *fact_ids, *graph_evidence]))
 
         def first_of(*groups: list[str]) -> list[str]:
             for group in groups:
@@ -852,49 +1648,92 @@ class SimulatedLLM:
             # Keeping support nodes as primary claims made a handful of generic
             # nodes appear to be advanced by most chapters and caused false
             # full-document coherence.
-            claim_id = str(default_claims[(i - 1) % len(default_claims)])
-            supporting_claims = [
-                str(x) for x in role_claims.get(role, [])
-                if x and str(x) != claim_id
-            ]
+            claim_candidates = [
+                str(value)
+                for value in role_claims.get(role, [])
+                if value and str(value) in contract_claim_set
+            ] or default_claims
+            claim_id = str(claim_candidates[(i - 1) % len(claim_candidates)])
+            supporting_claims = [str(x) for x in claim_candidates if str(x) != claim_id]
             explicit_evidence = [str(x) for x in role_evidence.get(role, []) if x]
-            evidence = list(dict.fromkeys([
-                *explicit_evidence,
-                *supporting_claims,
-                *([str(default_evidence[(i - 1) % len(default_evidence)])] if default_evidence else []),
-            ]))
-            if not evidence:
-                evidence = [claim_id]
+            fallback_evidence = (
+                [str(default_evidence[(i - 1) % len(default_evidence)])]
+                if default_evidence
+                else []
+            )
+            evidence = [
+                value
+                for value in dict.fromkeys([*explicit_evidence, *fallback_evidence])
+                if value and value != claim_id
+            ]
             paragraphs.append({
                 "paragraph_id": f"bp-{sha256_text(title + str(i))[:12]}",
                 "sequence": i,
                 "function": function,
                 "must_answer": [function],
-                "fact_slots": [],
-                "project_item_slots": evidence,
-                "technical_slots": type_ids.get("FORMAL_MODEL", [])[:1] if role in {"METHOD", "WARRANT"} else [],
-                "metric_slots": ["metric-001"] if role == "EVALUATION" else [],
+                "fact_slots": [value for value in fact_ids[:1] if value != claim_id],
+                "project_item_slots": supporting_claims,
+                "technical_slots": [
+                    str(value)
+                    for value in type_ids.get("FORMAL_MODEL", [])[:1]
+                    if role in {"METHOD", "WARRANT"}
+                    and str(value) in contract_claim_set
+                    and str(value) != claim_id
+                ],
+                "metric_slots": [value for value in metric_ids[:1] if value != claim_id] if role == "EVALUATION" else [],
                 "source_strategy": "MERGE",
                 "forbidden_content": ["无来源结论", "通用六段式套话", "部署和日志说明"] if contract.get("placement") == "MAIN_BODY" else ["将附件内容包装为核心创新"],
                 "transition_requirement": None,
                 "argument_role": role,
                 "primary_claim_id": claim_id,
                 "required_evidence_ids": evidence,
-                "novel_content_key": (contract.get("unique_information_keys") or [f"{section.get('section_id', 'section')}-{profile.get('profile_id')}-unique"])[(i - 1) % len(contract.get("unique_information_keys") or [1])] + f"-{role.lower()}-{i}",
+                "novel_content_key": (contract.get("unique_information_keys") or [f"{section.get('section_id', 'section')}-{profile.get('profile_id')}-unique"])[(i - 1) % len(contract.get("unique_information_keys") or [1])] + f":{role.lower()}:{i}",
                 "word_budget": max(100, int(contract.get("word_budget", 600) / max(1, len(role_specs)))),
             })
-        # The deterministic simulator must exercise the same contract as a live
-        # model: every required claim is explicitly assigned to at least one
-        # paragraph.  This is not literary optimization; it prevents the test
-        # provider from hiding a contract violation behind otherwise valid text.
+        # Required-claim coverage is a union over the registered claim-bearing
+        # fields.  Preserve each paragraph's singular thesis and place any
+        # remaining required claim in a claim slot; never turn it into evidence.
         for claim_index, required_claim_id in enumerate(contract_claims):
-            if not any(p["primary_claim_id"] == required_claim_id for p in paragraphs):
+            covered = {
+                value
+                for paragraph in paragraphs
+                for field in ("primary_claim_id", "project_item_slots", "technical_slots")
+                for value in (
+                    [paragraph.get(field)]
+                    if field == "primary_claim_id"
+                    else paragraph.get(field, [])
+                )
+                if value
+            }
+            if required_claim_id not in covered:
                 target = paragraphs[min(claim_index, len(paragraphs) - 1)]
-                target["primary_claim_id"] = required_claim_id
-                if required_claim_id not in target["required_evidence_ids"]:
-                    target["required_evidence_ids"].append(required_claim_id)
                 if required_claim_id not in target["project_item_slots"]:
                     target["project_item_slots"].append(required_claim_id)
+
+        # Section-contract evidence is a document-level obligation, not a best-effort
+        # paragraph hint.  Distribute every required evidence ID across eligible
+        # paragraphs while preserving the prohibition on self-evidence.
+        role_priority = {"EVIDENCE": 0, "WARRANT": 1, "EVALUATION": 2, "BOUNDARY": 3}
+        for evidence_index, required_evidence_id in enumerate(contract_evidence):
+            covered_evidence = semantic_contract.covered_evidence_ids(paragraphs)
+            if required_evidence_id in covered_evidence:
+                continue
+            eligible = [
+                paragraph
+                for paragraph in paragraphs
+                if str(paragraph.get("primary_claim_id") or "") != str(required_evidence_id)
+            ]
+            if not eligible:
+                continue
+            eligible.sort(
+                key=lambda paragraph: (
+                    role_priority.get(str(paragraph.get("argument_role") or ""), 4),
+                    len(paragraph.get("required_evidence_ids") or []),
+                    int(paragraph.get("sequence") or 0),
+                )
+            )
+            target = eligible[evidence_index % len(eligible)]
+            target["required_evidence_ids"].append(str(required_evidence_id))
 
         bp = base["result"]["blueprint"]
         bp.update({"blueprint_id": new_id("blueprint"), "section_objective": contract.get("argument_function", f"推进《{title}》的独有论证"), "paragraphs": paragraphs, "unresolved_slot_ids": [], "section_profile_id": profile.get("profile_id"), "section_contract_id": contract.get("section_contract_id")})
@@ -905,6 +1744,33 @@ class SimulatedLLM:
         base["result"]["plan_task_coverage"] = [{"revision_task_id": task_id, "paragraph_ids": [p["paragraph_id"] for p in paragraphs]}]
         used_ids = sorted({eid for p in paragraphs for eid in p["required_evidence_ids"]})
         base["result"]["input_usage_summary"] = [{"source_id": sid, "used_in_paragraph_ids": [p["paragraph_id"] for p in paragraphs if sid in p["required_evidence_ids"]]} for sid in used_ids]
+        violations = check_blueprint_semantics(bp, payload)
+        if violations:
+            finding_code_map = {
+                "QG_BLUEPRINT_DUPLICATE_INFORMATION_KEYS": "NOVEL_CONTENT_KEY_DUPLICATE",
+                "QG_BLUEPRINT_REUSES_PRIOR_INFORMATION": "NOVEL_CONTENT_KEY_DUPLICATE",
+                "QG_BLUEPRINT_REQUIRED_EVIDENCE_MISSING": "EVIDENCE_SLOT_EMPTY",
+                "QG_BLUEPRINT_SELF_EVIDENCE": "EVIDENCE_SLOT_EMPTY",
+                "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING": "CLAIM_ID_UNKNOWN",
+                "QG_BLUEPRINT_REQUIRED_ROLES_MISSING": "SECTION_PROFILE_MISMATCH",
+                "QG_BLUEPRINT_INFORMATION_KEY_OUTSIDE_CONTRACT": "SECTION_PROFILE_MISMATCH",
+                "QG_BLUEPRINT_MISSING_INFORMATION_IDENTITY": "SECTION_PROFILE_MISMATCH",
+            }
+            base["status"] = "REVISE"
+            base["findings"] = [{
+                "code": finding_code_map.get(violation.code, "SECTION_PROFILE_MISMATCH"),
+                "severity": "P1",
+                "category": violation.category,
+                "target_type": "BLUEPRINT",
+                "target_path_or_span": violation.target_path,
+                "description": violation.description,
+                "evidence_refs": [],
+                "repairable": True,
+                "repair_instruction": violation.repair_instruction,
+                "suggested_route": "ORIGINAL_PRODUCER",
+                "blocking": violation.blocking,
+            } for violation in violations]
+            return base
         base["status"] = "PASS"; base["findings"] = []
         return base
 
@@ -916,7 +1782,7 @@ class SimulatedLLM:
         base["result"]["uncovered_revision_task_ids"] = []
         base["result"]["invalid_slot_refs"] = []
         base["result"]["critical_unresolved_slot_ids"] = []
-        base["result"]["argument_checks"] = self._dimension_checks(["SECTION_FUNCTION", "CLAIM_ADVANCEMENT", "EVIDENCE_BINDING", "PARAGRAPH_ROLE_DIVERSITY", "NOVEL_CONTENT_KEYS", "WORD_BUDGET", "NO_GENERIC_SIX_PART_TEMPLATE"])
+        base["result"]["argument_checks"] = self._dimension_checks(["SECTION_FUNCTION", "CLAIM_ADVANCEMENT_QUALITY", "EVIDENCE_SUFFICIENCY", "PARAGRAPH_RELATIONSHIP", "NO_GENERIC_SIX_PART_TEMPLATE"])
         base["status"] = "PASS"; base["findings"] = []
         return base
 
@@ -1054,30 +1920,61 @@ class SimulatedLLM:
             return f"{prefix}推进独有论点“{claim}”，并以{evidence or '已批准的章节证据'}支撑。该段只完成章节合同规定的功能，不复述其他章节。"
 
 
+        semantic_contract = get_semantic_contract()
+        blueprint_paragraphs = [
+            item for item in blueprint.get("paragraphs", []) if isinstance(item, dict)
+        ]
+        blueprint_primary_claim_ids = {
+            str(item.get("primary_claim_id"))
+            for item in blueprint_paragraphs
+            if item.get("primary_claim_id")
+        }
+        blueprint_covered_claim_ids: set[str] = set()
+        rendered_supporting_claim_ids: set[str] = set()
         paragraphs: list[dict[str, Any]] = []
         traces: list[dict[str, Any]] = []
-        for i, bp in enumerate(blueprint.get("paragraphs", []), 1):
+        for i, bp in enumerate(blueprint_paragraphs, 1):
             claim_id = str(bp.get("primary_claim_id") or proposition.get("node_id") or "prop-001")
             role = str(bp.get("argument_role") or "EVIDENCE")
             evidence_ids = [str(x) for x in (bp.get("required_evidence_ids") or [])]
+            paragraph_claim_ids = semantic_contract.claim_coverage_ids(bp)
+            paragraph_claim_ids.add(claim_id)
+            blueprint_covered_claim_ids.update(paragraph_claim_ids)
             claim_text = statement(claim_id)
             evidence_texts = [statement(eid) for eid in evidence_ids]
             text = compose(role, claim_text, evidence_texts, i)
+            supporting_claim_ids = sorted(
+                paragraph_claim_ids
+                - {claim_id}
+                - blueprint_primary_claim_ids
+                - rendered_supporting_claim_ids
+            )
+            if supporting_claim_ids:
+                supporting_claims = "；".join(
+                    dict.fromkeys(statement(source_id) for source_id in supporting_claim_ids)
+                )
+                text = f"{text} 本段同时推进合同命题：{supporting_claims}。"
+                rendered_supporting_claim_ids.update(supporting_claim_ids)
             pid = f"paragraph-{sha256_text(title + str(i))[:12]}"
             trace_ids: list[str] = []
-            for eid in evidence_ids:
-                tid = f"trace-{sha256_text(pid + eid)[:12]}"
+            # Provenance and evidence are different contracts.  Every paragraph
+            # must trace its primary claim even when the blueprint intentionally
+            # contains no additional evidence; this does not add the claim to
+            # ``required_evidence_ids`` or weaken the self-evidence prohibition.
+            trace_source_ids = list(dict.fromkeys([claim_id, *evidence_ids]))
+            for source_id in trace_source_ids:
+                tid = f"trace-{sha256_text(pid + source_id)[:12]}"
                 trace_ids.append(tid)
-                source_obj = node_map.get(eid) or facts.get(eid) or {}
+                source_obj = node_map.get(source_id) or facts.get(source_id) or {}
                 source_refs = source_obj.get("source_refs") or []
                 source_hash = (source_refs[0].get("source_hash") if source_refs else None) or sha256_text(json.dumps(source_obj, ensure_ascii=False, sort_keys=True))
-                if eid in facts:
+                if source_id in facts:
                     source_kind = "FACT"
-                elif eid in node_map:
+                elif source_id in node_map:
                     source_kind = "ARGUMENT_NODE"
                 else:
                     source_kind = "SOURCE_TEXT"
-                traces.append({"trace_id": tid, "target_path": f"paragraphs[{i-1}]", "source_kind": source_kind, "source_id": eid, "source_path_or_span": None, "support_type": "DIRECT", "source_hash": source_hash})
+                traces.append({"trace_id": tid, "target_path": f"paragraphs[{i-1}]", "source_kind": source_kind, "source_id": source_id, "source_path_or_span": None, "support_type": "DIRECT", "source_hash": source_hash})
             novel_key = str(bp.get("novel_content_key") or f"{section.get('section_id', 'section')}-{role}-{i}")
             if novel_key in prior_information_keys:
                 novel_key = f"{novel_key}-{sha256_text(title + str(i))[:8]}"
@@ -1098,10 +1995,10 @@ class SimulatedLLM:
         base["result"]["source_preservation_summary"] = [{"source_span": title, "action": "REPHRASED", "paragraph_id": p["paragraph_id"]} for p in paragraphs]
         base["result"]["claim_advancement"] = {
             "section_contract_id": str(contract.get("section_contract_id") or blueprint.get("section_contract_id") or "section-contract-unknown"),
-            # Only contract-owned propositions are counted as advanced.  Prior
-            # work, gaps and experiment nodes remain evidence even when they are
-            # discussed in the paragraph.
-            "advanced_claim_ids": sorted({p["primary_claim_id"] for p in paragraphs}),
+            # Claim advancement is derived from the same registered claim-bearing
+            # blueprint fields used by the deterministic semantic contract.  Evidence
+            # references are deliberately excluded from this namespace.
+            "advanced_claim_ids": sorted(blueprint_covered_claim_ids),
             "new_information_keys": [p["novel_content_key"] for p in paragraphs],
             "distinguished_from_section_ids": [str(x) for x in contract.get("must_not_repeat_section_ids", []) if x],
             "section_contribution": str(contract.get("argument_function") or f"《{title}》推进其章节专属论证。"),
@@ -1132,35 +2029,238 @@ class SimulatedLLM:
         base["status"]="PASS";base["findings"]=[]
         return base
 
+    @staticmethod
+    def _integration_argument_index(payload: dict[str, Any]) -> dict[str, list[str]]:
+        """Index the approved argument graph without inventing stable IDs.
+
+        Integration checks are observations over the graph carried by the
+        prompt.  Replay identifiers are never valid substitutes because a
+        live workflow may use migrated or user-approved node IDs.
+        """
+
+        graph = payload.get("argument_graph") or {}
+        architecture = payload.get("narrative_architecture") or {}
+        indexed: dict[str, list[str]] = {}
+
+        def add(kind: str, values: Any) -> None:
+            if not isinstance(values, list):
+                values = [values]
+            clean = [
+                str(value).strip()
+                for value in values
+                if isinstance(value, (str, int)) and str(value).strip()
+            ]
+            if clean:
+                indexed[kind] = list(dict.fromkeys([*indexed.get(kind, []), *clean]))
+
+        central = (graph.get("central_proposition") or {}).get("node_id")
+        add("CENTRAL_PROPOSITION", central or architecture.get("central_proposition_id"))
+        add(
+            "RESEARCH_QUESTION",
+            [
+                item.get("node_id")
+                for item in graph.get("research_questions") or []
+                if isinstance(item, dict)
+            ]
+            or architecture.get("research_question_ids")
+            or [],
+        )
+        for node in graph.get("nodes") or []:
+            if isinstance(node, dict):
+                add(str(node.get("node_type") or ""), node.get("node_id"))
+        add("CLOSEST_PRIOR_WORK", architecture.get("closest_prior_work_ids") or [])
+        add("WORK_PACKAGE", architecture.get("work_package_ids") or [])
+        return indexed
+
+    @classmethod
+    def _integration_argument_chains(
+        cls,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        indexed = cls._integration_argument_index(payload)
+
+        def ids(*kinds: str) -> list[str]:
+            return list(dict.fromkeys(
+                value
+                for kind in kinds
+                for value in indexed.get(kind, [])
+            ))
+
+        chain_specs = [
+            ("GAP_TO_QUESTION", ids("RESEARCH_GAP"), ids("RESEARCH_QUESTION")),
+            ("QUESTION_TO_OBJECTIVE", ids("RESEARCH_QUESTION"), ids("OBJECTIVE")),
+            ("OBJECTIVE_TO_WORK_PACKAGE", ids("OBJECTIVE"), ids("WORK_PACKAGE", "RESEARCH_CONTENT")),
+            ("WORK_PACKAGE_TO_METHOD", ids("WORK_PACKAGE", "RESEARCH_CONTENT"), ids("FORMAL_MODEL", "MECHANISM")),
+            ("METHOD_TO_EVALUATION", ids("FORMAL_MODEL", "MECHANISM"), ids("EXPERIMENT_DESIGN")),
+            ("RESULT_TO_CONTRIBUTION", ids("EXPERIMENT_DESIGN"), ids("NOVEL_MECHANISM")),
+        ]
+        return [
+            {
+                "chain_type": chain_type,
+                "source_ids": source_ids,
+                "target_ids": target_ids,
+                "complete": True,
+                "evidence": "论证图谱与章节合同包含该相邻论证关系。",
+            }
+            for chain_type, source_ids, target_ids in chain_specs
+            if source_ids and target_ids
+        ]
+
+    @staticmethod
+    def _integration_mapping_checks(project_definition: dict[str, Any]) -> list[dict[str, Any]]:
+        relation_to_mapping = {
+            "DECOMPOSES_TO": "OBJECTIVE_TO_WORK_PACKAGE",
+            "IMPLEMENTED_BY": "WORK_PACKAGE_TO_METHOD",
+            "PRODUCES": "WORK_PACKAGE_TO_DELIVERABLE",
+            "MEASURED_BY": "DELIVERABLE_TO_METRIC",
+        }
+        grouped: dict[tuple[str, str], list[str]] = {}
+        for relation in project_definition.get("relations") or []:
+            if not isinstance(relation, dict):
+                continue
+            mapping_type = relation_to_mapping.get(str(relation.get("relation_type") or ""))
+            source_id = str(relation.get("source_item_id") or "").strip()
+            target_id = str(relation.get("target_item_id") or "").strip()
+            if not mapping_type or not source_id or not target_id:
+                continue
+            grouped.setdefault((mapping_type, source_id), []).append(target_id)
+        return [
+            {
+                "mapping_type": mapping_type,
+                "source_id": source_id,
+                "target_ids": list(dict.fromkeys(target_ids)),
+                "complete": True,
+            }
+            for (mapping_type, source_id), target_ids in grouped.items()
+        ]
+
     def _handle_integration_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
-        payload=envelope.get("payload",{}); sections=payload.get("candidate_sections",[]); pd=payload.get("project_definition") or {}
-        item_ids={i.get("item_id") for i in pd.get("items",[]) if i.get("item_id")}
-        base["result"]["verdict"]="ACCEPT"
-        base["result"]["terminology_checks"]=[{"term":"低扰动增量优化","consistent":True,"sections":[s.get("section_id") for s in sections if s.get("section_id")]}]
-        base["result"]["numeric_checks"]=[]
-        mappings=[]
-        for mtype,sid,tids in [
-            ("OBJECTIVE_TO_WORK_PACKAGE","objective-001",["wp-001","wp-002"]),
-            ("WORK_PACKAGE_TO_METHOD","wp-002",["method-001"]),
-            ("WORK_PACKAGE_TO_DELIVERABLE","wp-002",["deliverable-001"]),
-            ("DELIVERABLE_TO_METRIC","deliverable-001",["metric-001"]),
-        ]:
-            if sid in item_ids and all(t in item_ids for t in tids): mappings.append({"mapping_type":mtype,"source_id":sid,"target_ids":tids,"complete":True})
-        base["result"]["mapping_checks"]=mappings
-        base["result"]["routing_actions"]=[]
-        base["result"]["quality_dimensions"]=self._quality_dimensions(True)
-        base["result"]["central_proposition_coverage"]={"central_proposition_id":"prop-001","covered":True,"supporting_section_ids":[s.get("section_id") for s in sections if s.get("section_id")],"missing_links":[]}
-        base["result"]["document_type_drift"]={"detected":False,"main_body_term_hits":0,"affected_section_ids":[],"terms":[]}
-        base["result"]["redundancy_report"]={"exact_duplicate_groups":0,"semantic_template_groups":0,"duplicate_information_key_groups":0,"claim_overconcentration_groups":0,"template_skeleton_groups":0,"affected_section_ids":[],"representative_signatures":[]}
-        arch=payload.get("narrative_architecture") or {}
-        base["result"]["page_budget_check"]={"main_body_page_budget":int(arch.get("main_body_page_budget",35)),"estimated_main_body_pages":max(1,len(sections)*2),"within_budget":len(sections)*2<=int(arch.get("main_body_page_budget",35)),"overflow_section_ids":[]}
-        chains=[("GAP_TO_QUESTION",["gap-001"],["rq-001","rq-002"]),("QUESTION_TO_OBJECTIVE",["rq-001","rq-002"],["objective-001"]),("OBJECTIVE_TO_WORK_PACKAGE",["objective-001"],["wp-001","wp-002"]),("WORK_PACKAGE_TO_METHOD",["wp-002"],["method-001"]),("METHOD_TO_EVALUATION",["method-001"],["experiment-001"]),("RESULT_TO_CONTRIBUTION",["experiment-001"],["innovation-001"])]
-        base["result"]["argument_chain_checks"]=[{"chain_type":t,"source_ids":a,"target_ids":b,"complete":True,"evidence":"论证图谱和章节正文存在对应链路。"} for t,a,b in chains]
-        base["status"]="PASS";base["findings"]=[]
+        payload = envelope.get("payload", {})
+        sections = [item for item in payload.get("candidate_sections") or [] if isinstance(item, dict)]
+        project_definition = payload.get("project_definition") or {}
+        architecture = payload.get("narrative_architecture") or {}
+        argument_index = self._integration_argument_index(payload)
+        central_ids = argument_index.get("CENTRAL_PROPOSITION", [])
+        central_id = central_ids[0] if central_ids else ""
+
+        supporting_section_ids: list[str] = []
+        for section in sections:
+            section_id = str(section.get("section_id") or "").strip()
+            candidate = section.get("candidate") if isinstance(section.get("candidate"), dict) else section
+            advancement = candidate.get("claim_advancement") or {}
+            paragraph_claims = [
+                str(paragraph.get("primary_claim_id") or "").strip()
+                for paragraph in candidate.get("paragraphs") or []
+                if isinstance(paragraph, dict)
+            ]
+            advanced_claims = [
+                str(value).strip()
+                for value in advancement.get("advanced_claim_ids") or []
+                if str(value).strip()
+            ]
+            if section_id and central_id and central_id in {*paragraph_claims, *advanced_claims}:
+                supporting_section_ids.append(section_id)
+
+        section_ids = [
+            str(section.get("section_id"))
+            for section in sections
+            if section.get("section_id")
+        ]
+        page_budget = int(architecture.get("main_body_page_budget") or 35)
+        estimated_pages = max(1, len(sections) * 2)
+        argument_chains = self._integration_argument_chains(payload)
+
+        base["result"].update({
+            "verdict": "ACCEPT",
+            "terminology_checks": [{
+                "term": "低扰动增量优化",
+                "consistent": True,
+                "sections": section_ids,
+            }],
+            "numeric_checks": [],
+            "mapping_checks": self._integration_mapping_checks(project_definition),
+            "routing_actions": [],
+            "quality_dimensions": self._quality_dimensions(True),
+            "central_proposition_coverage": {
+                "central_proposition_id": central_id,
+                "covered": bool(supporting_section_ids),
+                "supporting_section_ids": supporting_section_ids,
+                "missing_links": [] if supporting_section_ids else ["中心命题尚未被章节显式推进"],
+            },
+            "document_type_drift": {
+                "detected": False,
+                "main_body_term_hits": 0,
+                "affected_section_ids": [],
+                "terms": [],
+            },
+            "redundancy_report": {
+                "exact_duplicate_groups": 0,
+                "semantic_template_groups": 0,
+                "duplicate_information_key_groups": 0,
+                "claim_overconcentration_groups": 0,
+                "template_skeleton_groups": 0,
+                "affected_section_ids": [],
+                "representative_signatures": [],
+            },
+            "page_budget_check": {
+                "main_body_page_budget": page_budget,
+                "estimated_main_body_pages": estimated_pages,
+                "within_budget": estimated_pages <= page_budget,
+                "overflow_section_ids": [] if estimated_pages <= page_budget else section_ids,
+            },
+            "argument_chain_checks": argument_chains,
+        })
+        base["status"] = "PASS"
+        base["findings"] = []
         return base
 
 
     def _handle_argument_architecture(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        # v8 SIMULATED mode follows the same ownership rule as production: start
+        # from model-authored semantic state and let the deterministic projector
+        # create every graph/matrix/status/source representation.
+        authored = copy.deepcopy(((base.get("result") or {}).get("authored_state")))
+        if isinstance(authored, dict):
+            facts = [
+                fact for fact in (envelope.get("payload") or {}).get("confirmed_facts") or []
+                if isinstance(fact, dict) and str(fact.get("claim_id") or "").strip()
+            ]
+            supported_ids = [
+                str(fact["claim_id"]) for fact in facts
+                if any(
+                    isinstance(ref, dict) and str(ref.get("source_id") or "").strip()
+                    for ref in fact.get("source_refs") or []
+                )
+            ]
+            foundation_ids = [
+                str(fact["claim_id"]) for fact in facts
+                if any(
+                    isinstance(ref, dict)
+                    and str(ref.get("source_type") or "") in {"EVIDENCE_MATERIAL", "TECHNICAL_MATERIAL"}
+                    and bool(str(ref.get("quoted_text") or "").strip())
+                    for ref in fact.get("source_refs") or []
+                )
+            ]
+            preferred_id = (foundation_ids or supported_ids or [None])[0]
+
+            def rebind(node: Any) -> None:
+                if isinstance(node, list):
+                    for item in node:
+                        rebind(item)
+                    return
+                if not isinstance(node, dict):
+                    return
+                if "evidence_ids" in node and isinstance(node.get("evidence_ids"), list):
+                    if node["evidence_ids"] and preferred_id:
+                        node["evidence_ids"] = [preferred_id]
+                    elif node["evidence_ids"] and not preferred_id:
+                        node["evidence_ids"] = []
+                for value in node.values():
+                    rebind(value)
+
+            rebind(authored)
+            return project_argument_authoritative_state(envelope, authored)
+
         _, _, generated = self._research_definition(envelope)
         payload = envelope.get("payload", {})
         seed = copy.deepcopy(payload.get("argument_graph_seed") or generated)
@@ -1228,7 +2328,13 @@ class SimulatedLLM:
         add_edge(method_ids[0], "VALIDATED_BY", eval_ids[0], "对照与消融实验验证方法")
         add_edge(prior_ids[0], "CONTRASTS_WITH", innovation_ids[0], "创新以最接近工作为比较基线")
         if foundation_ids:
-            add_edge(foundation_ids[0], "SUPPORTS", work_ids[-1], "前期证据支撑任务可行性")
+            for work_id in work_ids:
+                add_edge(
+                    foundation_ids[0],
+                    "SUPPORTS",
+                    work_id,
+                    "模拟生产者明确声明前期证据支撑该工作包可行性",
+                )
         add_edge(eval_ids[0], "EVIDENCES", innovation_ids[0], "实验结果验证新增机制")
 
         matrix = []
@@ -1268,13 +2374,29 @@ class SimulatedLLM:
                 "blocking_node_ids": [] if foundation_ids else ["foundation-001"],
                 "summary": "研究问题、方法、验证、创新和可行性证据已形成闭环。" if foundation_ids else "研究论证主线已形成，但研究基础缺少可定位证据，不能进入章节规划。",
             },
+            # SIMULATED mode authors canonical source refs directly and therefore
+            # has no model-visible Evidence Card IDs to preserve. Keep the
+            # provenance sidecar explicit but empty rather than reverse-guessing
+            # evidence identities from shared source IDs.
+            "authored_evidence_bindings": [],
         }
+        foundation_node_index = next(
+            (
+                index
+                for index, node in enumerate(graph.get("nodes") or [])
+                if str(node.get("node_id") or "") == "foundation-001"
+            ),
+            0,
+        )
+        foundation_source_pointer = (
+            f"/result/argument_architecture/nodes/{foundation_node_index}/source_refs"
+        )
         if foundation_ids:
             base["status"] = "PASS"; base["findings"] = []; base["unresolved_items"] = []; base["user_questions"] = []
         else:
             base["status"] = "NEED_USER_INPUT"
             base["findings"] = [{
-                "code": "ARGUMENT_FOUNDATION_EVIDENCE_MISSING", "severity": "P1", "category": "SOURCE",
+                "code": "FOUNDATION_EVIDENCE_MISSING", "severity": "P1", "category": "SOURCE",
                 "target_type": "ARGUMENT_GRAPH", "target_path_or_span": "argument_architecture.nodes[foundation-001]",
                 "description": "研究基础没有可定位的前期成果或技术材料。", "evidence_refs": [],
                 "repairable": False, "repair_instruction": "上传成果、原型、数据或预实验材料后重新构建论证架构。",
@@ -1283,64 +2405,101 @@ class SimulatedLLM:
             base["unresolved_items"] = [{
                 "item_id": "unresolved-foundation-001", "type": "MISSING",
                 "description": "缺少研究基础证据。",
-                "target_paths": ["argument_architecture.nodes[foundation-001].source_refs"],
+                "target_paths": [foundation_source_pointer],
                 "required_action": "上传并确认前期成果材料。", "blocking": True,
             }]
             base["user_questions"] = [{
                 "question_id": "question-foundation-001", "question_type": "MISSING_INFORMATION",
                 "question": "请提供与本课题直接相关的论文、项目、原型、代码、数据或预实验材料，并说明其支撑关系。",
                 "reason": "研究基础章节和可行性关系必须由可定位前期证据支撑。",
-                "target_paths": ["argument_architecture.nodes[foundation-001].source_refs"],
+                "target_paths": [foundation_source_pointer],
                 "answer_schema": {"type": "STRING"}, "blocking": True, "priority": "P1",
             }]
         return base
 
     def _handle_argument_architecture_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         candidate = envelope.get("payload", {}).get("architecture_candidate") or {}
+        if isinstance(candidate.get("authored_state"), dict):
+            canonical = project_argument_authoritative_state(
+                envelope, copy.deepcopy(candidate["authored_state"])
+            )["result"]
+            critic_envelope = copy.deepcopy(envelope)
+            critic_envelope.setdefault("payload", {})["architecture_candidate"] = canonical
+            model_input = build_argument_architecture_critic_model_input(critic_envelope)
+            reviewed_keys = [
+                str(item.get("unit_key"))
+                for item in (model_input.get("candidate") or {}).get("review_units") or []
+                if isinstance(item, dict) and str(item.get("unit_key") or "").strip()
+            ]
+            semantic = {
+                "quality_dimensions": self._argument_quality_dimensions(True),
+                "reviewed_unit_keys": reviewed_keys,
+                "issues": [],
+                "user_questions": [],
+            }
+            return expand_argument_architecture_critic_model_output(
+                critic_envelope, semantic
+            )
         graph = candidate.get("argument_architecture") or {}
         node_ids = [str(graph.get("central_proposition", {}).get("node_id") or "")]
         node_ids.extend(str(q.get("node_id")) for q in graph.get("research_questions", []))
         node_ids.extend(str(n.get("node_id")) for n in graph.get("nodes", []))
         node_ids = [x for x in dict.fromkeys(node_ids) if x]
-        type_map = {str(n.get("node_type")): str(n.get("node_id")) for n in graph.get("nodes", [])}
-        qids = [str(q.get("node_id")) for q in graph.get("research_questions", [])]
-        chains = [
-            ("GAP_TO_QUESTION", [type_map.get("RESEARCH_GAP", "gap-001")], qids),
-            ("QUESTION_TO_OBJECTIVE", qids, [type_map.get("OBJECTIVE", "objective-001")]),
-            ("OBJECTIVE_TO_WORK_PACKAGE", [type_map.get("OBJECTIVE", "objective-001")], [str(n.get("node_id")) for n in graph.get("nodes", []) if n.get("node_type") == "WORK_PACKAGE"]),
-            ("WORK_PACKAGE_TO_METHOD", [str(n.get("node_id")) for n in graph.get("nodes", []) if n.get("node_type") == "WORK_PACKAGE"], [type_map.get("FORMAL_MODEL", "method-001")]),
-            ("METHOD_TO_EVALUATION", [type_map.get("FORMAL_MODEL", "method-001")], [type_map.get("EXPERIMENT_DESIGN", "experiment-001")]),
-            ("PRIOR_WORK_TO_INNOVATION", [type_map.get("CLOSEST_PRIOR_WORK", "prior-001")], [type_map.get("NOVEL_MECHANISM", "innovation-001")]),
-            ("FOUNDATION_TO_FEASIBILITY", [type_map.get("TEAM_EVIDENCE", "foundation-001")], [str(n.get("node_id")) for n in graph.get("nodes", []) if n.get("node_type") == "WORK_PACKAGE"][-1:]),
-        ]
+        chain_checks = _critic_chain_checks(candidate)
+        design_matrix_checks = _critic_design_matrix_checks(candidate)
+        evidence_checks = _critic_evidence_checks(candidate)
         foundation_nodes = [n for n in graph.get("nodes", []) if n.get("node_type") == "TEAM_EVIDENCE"]
         foundation_supported = any(
             n.get("status") in {"SUPPORTED", "CONFIRMED"}
             and any(ref.get("source_type") in {"EVIDENCE_MATERIAL", "TECHNICAL_MATERIAL"} for ref in n.get("source_refs", []) if isinstance(ref, dict))
             for n in foundation_nodes
         )
-        candidate_ready = bool((candidate.get("readiness") or {}).get("ready")) and foundation_supported
+        candidate_ready = (
+            bool((candidate.get("readiness") or {}).get("ready"))
+            and foundation_supported
+            and all(item.get("complete") for item in chain_checks)
+            and all(item.get("complete") for item in design_matrix_checks)
+            and all(item.get("supported") for item in evidence_checks)
+        )
         base["result"] = {
             "verdict": "ACCEPT" if candidate_ready else "BLOCK",
             "checked_node_ids": node_ids,
-            "chain_checks": [{"chain_type": t, "source_ids": [x for x in a if x], "target_ids": [x for x in b if x], "complete": bool(a and b), "evidence": "图谱存在对应节点、边和来源。"} for t, a, b in chains],
-            "design_matrix_checks": [{"research_question_id": str(item.get("research_question_id")), "complete": True, "missing_dimensions": [], "evidence": "目标、任务、方法、验证、创新和比较规则齐全。"} for item in candidate.get("research_design_matrix", [])],
-            "evidence_checks": [{
-                "node_id": nid,
-                "supported": not (nid in {str(n.get("node_id")) for n in foundation_nodes} and not foundation_supported),
-                "source_ids": [str(ref.get("source_id")) for n in graph.get("nodes", []) if str(n.get("node_id")) == nid for ref in n.get("source_refs", []) if isinstance(ref, dict)],
-                "reason": "节点具有可定位来源。" if not (nid in {str(n.get("node_id")) for n in foundation_nodes} and not foundation_supported) else "研究基础节点缺少EVIDENCE_MATERIAL或TECHNICAL_MATERIAL。",
-            } for nid in node_ids],
-            "quality_dimensions": self._quality_dimensions(candidate_ready),
+            "chain_checks": chain_checks,
+            "design_matrix_checks": design_matrix_checks,
+            "evidence_checks": evidence_checks,
+            "quality_dimensions": self._argument_quality_dimensions(candidate_ready),
         }
         base["status"] = "PASS" if candidate_ready else "NEED_USER_INPUT"
         base["findings"] = [] if candidate_ready else [{
-            "code": "ARGUMENT_FOUNDATION_EVIDENCE_MISSING", "severity": "P1", "category": "SOURCE",
+            "code": "FALSE_ARGUMENT_READINESS", "severity": "P1", "category": "SOURCE",
             "target_type": "ARGUMENT_GRAPH", "target_path_or_span": "argument_architecture.nodes",
             "description": "研究基础节点缺少可定位前期证据。", "evidence_refs": [],
             "repairable": False, "repair_instruction": "补充前期成果材料后重新运行。",
             "suggested_route": "USER", "blocking": True,
         }]
+        if candidate_ready:
+            base["unresolved_items"] = []
+            base["user_questions"] = []
+        else:
+            base["result"]["verdict"] = "REVISE"
+            base["unresolved_items"] = [{
+                "item_id": "unresolved-foundation-critic-001",
+                "type": "MISSING",
+                "description": "研究基础节点缺少可定位前期证据。",
+                "target_paths": ["/payload/architecture_candidate/argument_architecture/nodes"],
+                "required_action": "补充并确认前期成果材料。",
+                "blocking": True,
+            }]
+            base["user_questions"] = [{
+                "question_id": "question-foundation-critic-001",
+                "question_type": "MISSING_INFORMATION",
+                "question": "请提供与本课题直接相关的前期成果材料，并说明其支撑关系。",
+                "reason": "最终论证架构的研究基础节点必须由可定位证据支撑。",
+                "target_paths": ["/payload/architecture_candidate/argument_architecture/nodes"],
+                "answer_schema": {"type": "STRING"},
+                "blocking": True,
+                "priority": "P1",
+            }]
         return base
 
     @staticmethod
@@ -1380,19 +2539,26 @@ class SimulatedLLM:
         polished = payload.get("polished_candidate") or {}
         paragraphs = polished.get("paragraphs") or []
         ids = [str(p.get("paragraph_id")) for p in paragraphs if p.get("paragraph_id")]
-        input_traces = [str(t.get("trace_id")) for t in raw.get("trace_links", []) if t.get("trace_id")]
-        output_traces = [str(t.get("trace_id")) for t in polished.get("trace_links", []) if t.get("trace_id")]
+        input_traces = {str(t.get("trace_id")) for t in raw.get("trace_links", []) if t.get("trace_id")}
+        output_traces = {str(t.get("trace_id")) for t in polished.get("trace_links", []) if t.get("trace_id")}
         dimensions = ["MEANING_PRESERVATION", "TRACE_PRESERVATION", "ACADEMIC_TONE", "SENTENCE_CLARITY", "TRANSITION_LOGIC", "REDUNDANCY", "TERMINOLOGY", "DOCUMENT_TYPE_FIT"]
         base["result"] = {
-            "verdict": "ACCEPT", "checked_paragraph_ids": ids, "unsupported_trace_ids": [],
-            "blueprint_deviation_paragraph_ids": [], "scope_violations": [],
-            "profile_acceptance_results": [{"rule": f"表达质量检查：{d}", "passed": True, "evidence": "逐段对比原始候选与润色候选。"} for d in dimensions],
-            "quality_dimensions": self._quality_dimensions(True), "duplicate_signatures": [], "document_type_drift_terms": [],
-            "paragraph_reviews": [{"paragraph_id": pid, "passed": True, "argument_role": str(next((p.get("paragraph_role") for p in paragraphs if p.get("paragraph_id") == pid), "EVIDENCE")), "claim_supported": True, "new_information_added": True, "issues": []} for pid in ids],
-            "expression_checks": [{"dimension": d, "passed": True, "paragraph_ids": ids, "evidence": "含义、来源和文种保持一致。"} for d in dimensions],
-            "trace_preservation": {"input_trace_ids": input_traces, "output_trace_ids": output_traces, "missing_trace_ids": sorted(set(input_traces) - set(output_traces)), "new_unapproved_trace_ids": sorted(set(output_traces) - set(input_traces)), "preserved": set(input_traces) == set(output_traces)},
+            "verdict": "ACCEPT" if input_traces == output_traces else "REVISE",
+            "checked_paragraph_ids": ids,
+            "expression_assessment": {
+                "checks": {
+                    dimension: input_traces == output_traces
+                    if dimension == "TRACE_PRESERVATION"
+                    else True
+                    for dimension in dimensions
+                },
+                "affected_paragraph_ids": []
+                if input_traces == output_traces
+                else ids,
+                "evidence_summary": "逐段对比含义与表达，并由确定性Guard独立核验结构和Trace保真。",
+            },
         }
-        base["status"] = "PASS" if set(input_traces) == set(output_traces) else "REVISE"; base["findings"] = []
+        base["status"] = "PASS" if input_traces == output_traces else "REVISE"; base["findings"] = []
         return base
 
     def _handle_final_confidentiality_review(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:

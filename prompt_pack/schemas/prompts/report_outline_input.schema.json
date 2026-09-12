@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "report_outline_input.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-REPORT-OUTLINE"
+    },
+    "prompt_version": {
+      "const": "1.0.0"
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "workflow_type": {
+          "type": "string",
+          "enum": [
+            "PROJECT_INTAKE",
+            "TEMPLATE_EXTRACTION",
+            "HYBRID_ONLINE_ASSIST",
+            "TOPIC_BACKGROUND_RESEARCH",
+            "PROPOSAL_AUTHORING",
+            "SECURITY_REVIEW_AND_EXPORT"
+          ]
+        },
+        "current_step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "writing_mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "COPY_EDIT_ONLY",
+                "SUBSTANTIVE_REVISION",
+                "DRAFT_FROM_PROJECT_DEFINITION"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "workflow_type",
+        "current_step",
+        "attempt",
+        "writing_mode"
+      ]
+    },
+    "security_context": {
+      "$ref": "../common/security_context.schema.json"
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "target_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "read_only_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "protected_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "target_object_ids",
+        "read_only_object_ids",
+        "protected_object_ids"
+      ]
+    },
+    "freshness": {
+      "$ref": "../common/freshness.schema.json"
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "task_type": {
+          "const": "REPORT_OUTLINE"
+        },
+        "document_type": {
+          "const": "SURVEY_REPORT"
+        },
+        "topic": {
+          "type": "object",
+          "properties": {
+            "topic_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "topic_description": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "topic_id",
+            "topic_description"
+          ]
+        },
+        "research_dimension_mode": {
+          "const": "SURVEY_TECHNICAL"
+        },
+        "survey_research_brief": {
+          "type": "object",
+          "properties": {
+            "must_answer_questions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "evidence_requirements": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "materials_cutoff": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_priorities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "scope_exclusions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "deliverable_notes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "background_cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "card_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dimension": {
+                "type": "string",
+                "minLength": 1
+              },
+              "claim_text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "evidence_mode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "scope_qualifiers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "card_id",
+              "dimension",
+              "claim_text"
+            ]
+          }
+        },
+        "background_gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "gap_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "scope": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dimension": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "description"
+            ]
+          }
+        },
+        "report_title_hint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_catalog": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "published_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "source_id"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task_type",
+        "document_type",
+        "topic",
+        "background_cards"
+      ]
+    },
+    "expected_output_schema": {
+      "type": "string",
+      "minLength": 1,
+      "const": "schemas/prompts/report_outline_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "task",
+    "security_context",
+    "scope",
+    "freshness",
+    "payload",
+    "expected_output_schema"
+  ]
+}

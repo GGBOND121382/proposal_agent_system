@@ -10,7 +10,7 @@
       "const": "P-REVISION-PLAN-CRITIC"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.1.0"
     },
     "task": {
       "type": "object",
@@ -334,8 +334,7 @@
                     "minLength": 1,
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
                   },
-                  "minItems": 2,
-                  "maxItems": 5
+                  "minItems": 1
                 },
                 "main_body_page_budget": {
                   "type": "integer",
@@ -519,6 +518,12 @@
         },
         "argument_graph": {
           "$ref": "../common/argument_graph.schema.json"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,
@@ -537,7 +542,15 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/revision_plan_critic_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
     }
   },
   "additionalProperties": false,

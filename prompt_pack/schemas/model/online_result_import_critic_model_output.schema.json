@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "online_result_import_critic_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "claim_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "IMPORT_PUBLIC_CLAIM",
+              "REFERENCE_ONLY",
+              "REJECT"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "claim_id",
+          "decision",
+          "reason"
+        ]
+      }
+    },
+    "security_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issue_type": {
+            "type": "string",
+            "enum": [
+              "PROMPT_INJECTION",
+              "SCOPE_VIOLATION",
+              "SENSITIVE_INFERENCE",
+              "UNSOURCED_CLAIM"
+            ]
+          },
+          "claim_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_excerpt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "instruction_target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "requested_behavior": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          }
+        },
+        "required": [
+          "issue_type",
+          "claim_id",
+          "description",
+          "evidence_excerpt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "claim_decisions",
+    "security_issues"
+  ]
+}

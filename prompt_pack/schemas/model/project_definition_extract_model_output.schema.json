@@ -1,0 +1,463 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proposal-agent.local/schemas/model/project_definition_extract_model_output.schema.json",
+  "title": "P-PROJECT-DEFINITION-EXTRACT 模型输出契约",
+  "description": "模型只返回条目/关系的语义内容与局部编号（I..）和证据引用（S..）；item_id/relation_id/hash/版本/来源元数据/覆盖统计由系统补齐。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "document_kind",
+    "project_name",
+    "items",
+    "relations",
+    "proposal_contract",
+    "argument_seed",
+    "findings",
+    "unresolved_items",
+    "user_questions"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["PASS", "REVISE", "NEED_USER_INPUT", "BLOCK"]
+    },
+    "document_kind": {
+      "type": "string",
+      "enum": [
+        "RESEARCH_PROPOSAL",
+        "ENGINEERING_PROPOSAL",
+        "TECHNICAL_REPORT",
+        "SURVEY_REPORT",
+        "ANALYSIS_REPORT",
+        "TASK_BOOK",
+        "UNKNOWN"
+      ]
+    },
+    "project_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["local_key", "item_type", "domain", "summary", "attributes", "evidence_ids"],
+        "properties": {
+          "local_key": {
+            "type": "string",
+            "pattern": "^I[0-9]+$"
+          },
+          "item_type": {
+            "type": "string",
+            "enum": [
+              "PROJECT_BASIC",
+              "STAKEHOLDER",
+              "DEMAND",
+              "SCENARIO",
+              "CURRENT_STATE",
+              "EXISTING_APPROACH",
+              "GAP",
+              "ROOT_CAUSE",
+              "PROBLEM",
+              "OBJECTIVE",
+              "WORK_PACKAGE",
+              "METHOD",
+              "DATA_RESOURCE",
+              "EXPERIMENT",
+              "INNOVATION",
+              "DELIVERABLE",
+              "METRIC",
+              "ACHIEVEMENT",
+              "CAPABILITY",
+              "TEAM_MEMBER",
+              "SCHEDULE_PHASE",
+              "RISK",
+              "RESOURCE_REQUIREMENT",
+              "BUDGET_ITEM",
+              "COMPLIANCE_ITEM"
+            ]
+          },
+          "domain": {
+            "type": "string",
+            "enum": [
+              "PROJECT_BASIC",
+              "BACKGROUND_AND_DEMAND",
+              "STATE_GAP_ROOT_CAUSE",
+              "CORE_PROBLEMS",
+              "OBJECTIVES",
+              "RESEARCH_CONTENT",
+              "TECHNICAL_ROUTE",
+              "INNOVATION",
+              "OUTPUTS_AND_METRICS",
+              "RESEARCH_FOUNDATION",
+              "TEAM_AND_IMPLEMENTATION",
+              "RESOURCES_BUDGET_RISK_COMPLIANCE"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attributes": {
+            "type": "object",
+            "description": "模型补充的关键属性（如指标值、时间、角色），系统按 item_type 映射进 content。",
+            "additionalProperties": {
+              "type": ["string", "number", "boolean", "array", "null"]
+            }
+          },
+          "evidence_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^S[0-9]+$"
+            }
+          }
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from_key", "to_key", "relation_type", "evidence_ids"],
+        "properties": {
+          "from_key": {
+            "type": "string",
+            "pattern": "^I[0-9]+$"
+          },
+          "to_key": {
+            "type": "string",
+            "pattern": "^I[0-9]+$"
+          },
+          "relation_type": {
+            "type": "string",
+            "enum": [
+              "ADDRESSED_BY",
+              "AFFECTS",
+              "BASELINE_FOR",
+              "CAUSED_BY",
+              "CONSTRAINS",
+              "DECOMPOSES_TO",
+              "EXECUTES",
+              "FAILS_TO_CLOSE",
+              "FORMS",
+              "FUNDS",
+              "HAS_CURRENT_STATE",
+              "HAS_GAP",
+              "IMPLEMENTED_BY",
+              "MEASURED_BY",
+              "MOTIVATES",
+              "OCCURS_IN",
+              "PRODUCES",
+              "REALIZED_BY",
+              "SCHEDULED_IN",
+              "SUPPORTS",
+              "USES",
+              "VALIDATED_BY"
+            ]
+          },
+          "evidence_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^S[0-9]+$"
+            }
+          }
+        }
+      }
+    },
+    "proposal_contract": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "primary_evaluation_logic",
+        "target_evaluators",
+        "max_main_pages",
+        "max_core_research_questions",
+        "mandatory_sections",
+        "appendix_only_topics",
+        "forbidden_main_body_topics"
+      ],
+      "properties": {
+        "primary_evaluation_logic": {
+          "type": "string",
+          "enum": [
+            "SCIENTIFIC_MERIT",
+            "TECHNICAL_INNOVATION",
+            "ENGINEERING_FEASIBILITY",
+            "MIXED",
+            "UNKNOWN"
+          ]
+        },
+        "target_evaluators": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "max_main_pages": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "max_core_research_questions": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 6
+        },
+        "mandatory_sections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "appendix_only_topics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "forbidden_main_body_topics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "argument_seed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["central_question", "research_questions", "in_scope", "out_of_scope"],
+      "properties": {
+        "central_question": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "statement",
+            "proposition_type",
+            "falsifiable_or_comparable",
+            "boundary_conditions",
+            "evidence_ids"
+          ],
+          "properties": {
+            "statement": {
+              "type": "string",
+              "minLength": 1
+            },
+            "proposition_type": {
+              "type": "string",
+              "enum": ["SCIENTIFIC_HYPOTHESIS", "TECHNICAL_PRINCIPLE", "DESIGN_PROPOSITION", "UNKNOWN"]
+            },
+            "falsifiable_or_comparable": {
+              "type": "boolean"
+            },
+            "boundary_conditions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "evidence_ids": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^S[0-9]+$"
+              }
+            }
+          }
+        },
+        "research_questions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["statement", "question_type", "gap_keys", "answerability", "success_evidence", "evidence_ids"],
+            "properties": {
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "question_type": {
+                "type": "string",
+                "enum": ["SCIENTIFIC", "TECHNICAL", "ENGINEERING"]
+              },
+              "gap_keys": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^I[0-9]+$"
+                }
+              },
+              "answerability": {
+                "type": "string",
+                "enum": ["TESTABLE", "COMPARABLE", "DESIGN_VERIFIABLE", "UNCLEAR"]
+              },
+              "success_evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "evidence_ids": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^S[0-9]+$"
+                }
+              }
+            }
+          }
+        },
+        "in_scope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "out_of_scope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "severity",
+          "description",
+          "target_local_id",
+          "evidence_ids",
+          "blocking",
+          "route",
+          "repair_instruction"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2", "P3"]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_local_id": {
+            "type": ["string", "null"],
+            "pattern": "^I[0-9]+$"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^S[0-9]+$"
+            }
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "route": {
+            "type": "string",
+            "enum": ["ORIGINAL_PRODUCER", "PROJECT_KNOWLEDGE_AGENT", "USER", "BLOCK"]
+          },
+          "repair_instruction": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "description", "required_action", "blocking"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["MISSING", "CONFLICT", "UNCERTAIN", "UNSUPPORTED", "OUT_OF_SCOPE"]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required_action": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question_type", "question", "reason", "answer_shape", "allowed_values", "blocking", "priority"],
+        "properties": {
+          "question_type": {
+            "type": "string",
+            "enum": ["CONFIRMATION", "MISSING_INFORMATION", "CONFLICT_RESOLUTION", "CHOICE"]
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "answer_shape": {
+            "type": "string",
+            "enum": ["STRING", "NUMBER", "BOOLEAN"]
+          },
+          "allowed_values": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2", "P3"]
+          }
+        }
+      }
+    }
+  }
+}

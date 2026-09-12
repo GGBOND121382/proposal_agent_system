@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "argument_architecture_critic_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "quality_dimensions": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dimension": {
+            "type": "string",
+            "enum": ["CENTRAL_THESIS", "ARGUMENT_CHAIN", "EVIDENCE_SUPPORT", "METHOD_SUBSTANCE", "INNOVATION_BASELINE", "FEASIBILITY_FOUNDATION", "METRIC_JUSTIFICATION"]
+          },
+          "score": {"type": "number", "minimum": 0, "maximum": 4},
+          "evidence": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+        },
+        "required": ["dimension", "score", "evidence"]
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": ["ARGUMENT_PROPOSITION_UNTESTABLE", "GAP_QUESTION_CHAIN_BROKEN", "RESEARCH_DESIGN_INCOMPLETE", "INNOVATION_BASELINE_MISSING", "FOUNDATION_EVIDENCE_MISSING", "ARGUMENT_SCOPE_VIOLATION", "ARGUMENT_EVIDENCE_UNSUPPORTED", "ARGUMENT_METRIC_JUSTIFICATION_MISSING", "ARGUMENT_METHOD_SUBSTANCE_WEAK"]
+          },
+          "review_ref": {"type": "string", "pattern": "^RU-[0-9]{3}$"},
+          "description": {"type": "string", "minLength": 1},
+          "evidence_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^EV-[0-9]{3}$"}},
+          "repair_instruction": {"type": "string", "minLength": 1},
+          "needs_user_input": {"type": "boolean"},
+          "requires_structure_change": {"type": "boolean"}
+        },
+        "required": ["code", "review_ref", "description", "evidence_refs", "repair_instruction", "needs_user_input", "requires_structure_change"]
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target_area": {"type": "string", "enum": ["PROJECT_SCOPE", "FOUNDATION_EVIDENCE", "PRIOR_WORK", "METRIC_JUSTIFICATION", "RESEARCH_DESIGN", "OTHER"]},
+          "question_type": {"type": "string", "enum": ["CONFIRMATION", "MISSING_INFORMATION", "CONFLICT_RESOLUTION", "CHOICE"]},
+          "question": {"type": "string", "minLength": 1},
+          "reason": {"type": "string", "minLength": 1},
+          "answer_shape": {"type": "string", "enum": ["STRING", "NUMBER", "BOOLEAN", "OBJECT", "ARRAY"]},
+          "allowed_values": {"type": "array", "items": {"type": ["string", "number", "boolean"]}},
+          "blocking": {"type": "boolean"},
+          "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]}
+        },
+        "required": ["target_area", "question_type", "question", "reason", "answer_shape", "allowed_values", "blocking", "priority"]
+      }
+    }
+  },
+  "required": ["quality_dimensions", "issues", "user_questions"]
+}

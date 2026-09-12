@@ -18,8 +18,8 @@ async def run(database: Path) -> int:
     os.environ["PROMPT_PACK_DIR"] = str(ROOT / "prompt_pack")
     from app.config import Settings
     from app.db import Database
-    from app.executor import PromptExecutor
-    from app.llm import ModelGateway
+    from app.runtime_api import PromptExecutor
+    from app.runtime_api import ModelGateway
     from app.pack import PromptPack
     from app.security import SecurityRouter
     from app.util import utc_now

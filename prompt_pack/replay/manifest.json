@@ -900,6 +900,276 @@
       "case_type": "need_user_input",
       "status": "IMPLEMENTED",
       "fixture_path": "replay/cases/expression_critic/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/public_research_plan_scope_critic/normal.json"
+    },
+    {
+      "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/public_research_plan_scope_critic/missing_input.json"
+    },
+    {
+      "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/public_research_plan_scope_critic/schema_error.json"
+    },
+    {
+      "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/public_research_plan_scope_critic/high_risk.json"
+    },
+    {
+      "prompt_id": "P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/public_research_plan_scope_critic/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan/normal.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan/missing_input.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan/schema_error.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan/high_risk.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan_critic/normal.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan_critic/missing_input.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan_critic/schema_error.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan_critic/high_risk.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_plan_critic/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_synthesis/normal.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_synthesis/missing_input.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_synthesis/schema_error.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_synthesis/high_risk.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-SYNTHESIS",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_synthesis/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_critic/normal.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_critic/missing_input.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_critic/schema_error.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_critic/high_risk.json"
+    },
+    {
+      "prompt_id": "P-BACKGROUND-RESEARCH-CRITIC",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/background_research_critic/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/normal.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/missing_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/schema_error.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/high_risk.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/normal.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/missing_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/schema_error.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/high_risk.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/normal.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/missing_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/schema_error.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/high_risk.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/normal.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/missing_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/schema_error.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/high_risk.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/need_user_input.json"
     }
   ]
 }

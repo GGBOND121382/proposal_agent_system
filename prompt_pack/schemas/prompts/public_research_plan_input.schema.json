@@ -10,7 +10,7 @@
       "const": "P-PUBLIC-RESEARCH-PLAN"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "2.2.0"
     },
     "task": {
       "type": "object",
@@ -174,6 +174,41 @@
             "minLength": 1
           }
         },
+        "retrieval_contract": {
+          "type": "object",
+          "properties": {
+            "required_channels": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "ACADEMIC",
+                  "WEB_SEARCH"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "required_providers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "minimum_fulltext_sources_per_query": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "allow_snippet_only": {
+              "type": "boolean"
+            },
+            "require_web_discovery": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
         "safe_online_package_content": {
           "type": "object",
           "properties": {
@@ -237,6 +272,18 @@
             "prohibited_outputs",
             "security_level"
           ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
+        },
+        "revision_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/finding.schema.json"
+          }
         }
       },
       "additionalProperties": false,
@@ -250,7 +297,15 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/public_research_plan_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
     }
   },
   "additionalProperties": false,

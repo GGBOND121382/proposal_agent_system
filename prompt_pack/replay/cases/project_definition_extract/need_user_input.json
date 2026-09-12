@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-PROJECT-DEFINITION-EXTRACT",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.1.1",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -141,14 +141,15 @@
           "内部用户"
         ],
         "policy_version": "2.0"
-      }
+      },
+      "revision_findings": []
     },
     "expected_output_schema": "schemas/prompts/project_definition_extract_output.schema.json"
   },
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-PROJECT-DEFINITION-EXTRACT",
-    "prompt_version": "3.0.0",
+    "prompt_version": "3.1.1",
     "status": "NEED_USER_INPUT",
     "result": {
       "project_definition": {

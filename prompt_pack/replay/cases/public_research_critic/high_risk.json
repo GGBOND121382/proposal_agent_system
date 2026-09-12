@@ -110,7 +110,7 @@
     "prompt_version": "2.0.0",
     "status": "BLOCK",
     "result": {
-      "verdict": "ACCEPT_FOR_IMPORT_REVIEW",
+      "verdict": "BLOCK",
       "source_quality_summary": [],
       "unsupported_claim_ids": [],
       "missing_counterevidence_topics": []

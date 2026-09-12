@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${1:-$ROOT/dist/proposal-agent-docker-offline}"
 MODE="${2:-offline}"
-IMAGE="proposal-agent:0.5.0-offline"
+IMAGE="proposal-agent:0.6.0-offline"
 SEARXNG_IMAGE="${SEARXNG_IMAGE:-searxng/searxng:latest}"
 rm -rf "$OUT"
 mkdir -p "$OUT"

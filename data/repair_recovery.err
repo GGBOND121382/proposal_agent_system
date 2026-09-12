@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "D:\VSCodeWorkspace\proposal_agent_system\scripts\recover_targeted_repair.py", line 96, in <module>
+    asyncio.run(main())
+  File "D:\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "D:\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Programs\Python\Python312\Lib\asyncio\base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "D:\VSCodeWorkspace\proposal_agent_system\scripts\recover_targeted_repair.py", line 61, in main
+    raise RuntimeError("Targeted repair did not produce a PASS result")
+RuntimeError: Targeted repair did not produce a PASS result

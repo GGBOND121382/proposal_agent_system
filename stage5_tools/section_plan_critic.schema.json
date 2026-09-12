@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "verdict", "approved_candidate_hash", "checked_section_ids", "checked_visual_ids", "checked_batch_ids", "quality_dimensions", "findings", "next_stage_decision", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "verdict": {"enum": ["ACCEPT", "REVISE"]},
+    "approved_candidate_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "checked_section_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "checked_visual_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "checked_batch_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "quality_dimensions": {
+      "type": "array", "minItems": 7,
+      "items": {
+        "type": "object", "required": ["dimension", "result", "comment"], "additionalProperties": false,
+        "properties": {
+          "dimension": {"enum": ["PAGE_BUDGET", "ARGUMENT_COVERAGE", "SECTION_RESPONSIBILITY", "SOURCE_AND_EVIDENCE_BOUNDARY", "VISUAL_PLAN", "BATCH_DEPENDENCIES", "REVERSIBILITY_AND_REVALIDATION"]},
+          "result": {"enum": ["PASS", "FAIL"]},
+          "comment": {"type": "string", "minLength": 10}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["code", "severity", "message"], "additionalProperties": false,
+        "properties": {
+          "code": {"type": "string"},
+          "severity": {"enum": ["INFO", "MINOR", "MAJOR", "BLOCKING"]},
+          "message": {"type": "string"}
+        }
+      }
+    },
+    "next_stage_decision": {"enum": ["ALLOW_STAGE_6A_PROVISIONAL_DRAFTING", "HOLD_DRAFTING"]},
+    "summary": {"type": "string", "minLength": 20}
+  }
+}

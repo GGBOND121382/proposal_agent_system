@@ -1,0 +1,2349 @@
+{
+  "argument_chains": [
+    {
+      "chain_id": "CHAIN-1",
+      "closed": true,
+      "closure_statement": "逻辑链已从统一表示差距闭合到状态一致性实验与指标，但最近工作节点仍为未知，因此只能冻结研究设计，不能形成正式创新结论。",
+      "ordered_node_ids": [
+        "GAP-1",
+        "RQ-1",
+        "OBJ-1",
+        "RC-1",
+        "M-1",
+        "FM-1",
+        "MECH-1",
+        "EXP-1",
+        "MET-8",
+        "PRIOR-1",
+        "INNO-H1"
+      ],
+      "rq_id": "RQ-1"
+    },
+    {
+      "chain_id": "CHAIN-2",
+      "closed": true,
+      "closure_statement": "逻辑链已从资源调度差距闭合到固定轮次基线、调度消融和质量时间指标，但最近工作和指标阈值仍需补充依据。",
+      "ordered_node_ids": [
+        "GAP-2",
+        "RQ-2",
+        "OBJ-2",
+        "RC-3",
+        "M-6",
+        "FM-2",
+        "MECH-3",
+        "BL-3",
+        "EXP-3",
+        "MET-2",
+        "PRIOR-2",
+        "INNO-H2"
+      ],
+      "rq_id": "RQ-2"
+    },
+    {
+      "chain_id": "CHAIN-3",
+      "closed": true,
+      "closure_statement": "逻辑链已从权限与证据差距闭合到人机对照、人工负担和可追溯指标，但团队基础与最近工作证据仍未补齐。",
+      "ordered_node_ids": [
+        "GAP-3",
+        "RQ-3",
+        "OBJ-3",
+        "RC-4",
+        "M-5",
+        "FM-3",
+        "MECH-4",
+        "BL-1",
+        "EXP-4",
+        "MET-5",
+        "PRIOR-3",
+        "INNO-H3"
+      ],
+      "rq_id": "RQ-3"
+    }
+  ],
+  "central_proposition": {
+    "baseline_node_ids": [
+      "BL-1",
+      "BL-2",
+      "BL-3",
+      "BL-4"
+    ],
+    "boundary_node_ids": [
+      "BOUND-1",
+      "BOUND-2",
+      "BOUND-3",
+      "BOUND-4",
+      "BOUND-5"
+    ],
+    "falsifiable_or_comparable": true,
+    "metric_node_ids": [
+      "MET-1",
+      "MET-2",
+      "MET-3",
+      "MET-4",
+      "MET-5",
+      "MET-6",
+      "MET-7",
+      "MET-8"
+    ],
+    "node_id": "CP-1",
+    "source_fact_ids": [
+      "FACT-080",
+      "FACT-005",
+      "FACT-006",
+      "FACT-008",
+      "FACT-009",
+      "FACT-026",
+      "FACT-027",
+      "FACT-028",
+      "FACT-029",
+      "FACT-030",
+      "FACT-031",
+      "FACT-032"
+    ],
+    "statement": "若建立统一的任务—资源—约束—偏好—不确定性态势模型，以角色分离的生成、校验、批判和修复智能体形成候选竞争，并允许人类在关键分歧点注入偏好、裁定风险和调整优先级，再由优势冲刺调度器依据边际增益、剩余时间和证据完整性动态分配推理与求解资源，则可以在保持人工控制和可追溯性的前提下，提高有限决策窗口内获得可行方案的速度、最终方案质量及扰动条件下的稳健性。"
+  },
+  "document_contract": {
+    "body_page_limit": 20,
+    "contract_status": "PARTIAL_CONFIRMED",
+    "document_type": "科研项目申请书",
+    "language": "zh-CN",
+    "official_template_status": "UNKNOWN",
+    "references_outside_body_limit": true,
+    "target_body_pages": {
+      "max": 18,
+      "min": 16
+    }
+  },
+  "evidence_gap_report": [
+    {
+      "affected_node_ids": [
+        "CP-1",
+        "RQ-1",
+        "RQ-2",
+        "RQ-3"
+      ],
+      "blocking_for_section_planning": true,
+      "gap_id": "EVID-GAP-01",
+      "open_item_ids": [
+        "OPEN-001",
+        "OPEN-008"
+      ],
+      "reason": "正式申报指南和资助机构要求尚未提供，当前文种规则仅来自阶段设计合同。",
+      "required_node_type": "OFFICIAL_GUIDE_AND_RULES",
+      "resolution": "提供正式指南和资助机构要求，重新解析硬约束并核对论证架构是否需要调整。"
+    },
+    {
+      "affected_node_ids": [
+        "CP-1",
+        "OBJ-1",
+        "OBJ-2",
+        "OBJ-3",
+        "OBJ-4"
+      ],
+      "blocking_for_section_planning": true,
+      "gap_id": "EVID-GAP-02",
+      "open_item_ids": [
+        "OPEN-002",
+        "OPEN-005"
+      ],
+      "reason": "正式模板、必填结构、评审指标和权重未知，无法冻结章节职责和篇幅分配。",
+      "required_node_type": "OFFICIAL_TEMPLATE_AND_REVIEW_WEIGHTS",
+      "resolution": "提供模板和评审规则，建立章节合同并重新检查目标与证据的呈现优先级。"
+    },
+    {
+      "affected_node_ids": [
+        "PRIOR-1",
+        "PRIOR-2",
+        "PRIOR-3",
+        "INNO-H1",
+        "INNO-H2",
+        "INNO-H3"
+      ],
+      "blocking_for_section_planning": true,
+      "gap_id": "EVID-GAP-03",
+      "open_item_ids": [
+        "OPEN-013"
+      ],
+      "reason": "尚未开展正式公开资料调研，无法确认最接近已有工作、局限机制和最终创新表述。",
+      "required_node_type": "CLOSEST_PRIOR_WORK",
+      "resolution": "按三个研究问题分别完成公开资料调研，冻结可核验文献、比较维度和创新边界。"
+    },
+    {
+      "affected_node_ids": [
+        "FOUND-1",
+        "FOUND-2",
+        "FOUND-3",
+        "CP-1"
+      ],
+      "blocking_for_section_planning": true,
+      "gap_id": "EVID-GAP-04",
+      "open_item_ids": [
+        "OPEN-009",
+        "OPEN-012"
+      ],
+      "reason": "团队名单和研究基础证据材料未提供，当前不能把一般能力描述写成已证实可行性。",
+      "required_node_type": "TEAM_EVIDENCE",
+      "resolution": "提供团队角色以及论文、项目、代码、数据、原型或预实验材料，并逐项绑定到研究内容和验证任务。"
+    },
+    {
+      "affected_node_ids": [
+        "MET-1",
+        "MET-2",
+        "MET-3",
+        "MET-4",
+        "MET-5",
+        "MET-6",
+        "MET-7",
+        "MET-8"
+      ],
+      "blocking_for_section_planning": true,
+      "gap_id": "EVID-GAP-05",
+      "open_item_ids": [
+        "OPEN-005"
+      ],
+      "reason": "评价指标定义已形成，但数值阈值和综合权重均为暂定目标，尚无场景基线或评审依据。",
+      "required_node_type": "METRIC_JUSTIFICATION",
+      "resolution": "在获得场景数据和评审规则后执行基线测量，由项目负责人确认阈值、权重和统计口径。"
+    }
+  ],
+  "nodes": [
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "label": "GAP-1",
+      "node_id": "GAP-1",
+      "node_type": "RESEARCH_GAP",
+      "source_fact_ids": [
+        "FACT-075",
+        "FACT-076",
+        "FACT-077"
+      ],
+      "source_stage3_ids": [
+        "GAP-1"
+      ],
+      "statement": "项目设计认为，动态任务、资源、规则、偏好和候选依据尚缺少可供人类与多个智能体共同使用的统一表达、版本控制和增量失效传播机制。",
+      "status": "TO_BE_VALIDATED"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "label": "GAP-2",
+      "node_id": "GAP-2",
+      "node_type": "RESEARCH_GAP",
+      "source_fact_ids": [
+        "FACT-074",
+        "FACT-078"
+      ],
+      "source_stage3_ids": [
+        "GAP-2"
+      ],
+      "statement": "项目设计认为，候选生成、批判、优化求解和人工注意力尚缺少面向剩余时间、预期边际增益、方案风险和证据状态的统一资源调度与停止机制。",
+      "status": "TO_BE_VALIDATED"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "label": "GAP-3",
+      "node_id": "GAP-3",
+      "node_type": "RESEARCH_GAP",
+      "source_fact_ids": [
+        "FACT-006",
+        "FACT-009",
+        "FACT-075",
+        "FACT-079"
+      ],
+      "source_stage3_ids": [
+        "GAP-3"
+      ],
+      "statement": "项目设计认为，人类经验、权限边界和责任判断尚未与智能体候选演化形成统一的高价值交互、证据留痕和协同收益验证框架。",
+      "status": "TO_BE_VALIDATED"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "OBJ-1",
+      "node_id": "OBJ-1",
+      "node_type": "OBJECTIVE",
+      "source_fact_ids": [
+        "FACT-013"
+      ],
+      "source_stage3_ids": [
+        "OBJ-1"
+      ],
+      "statement": "构建统一的人机协同决策态势模型，支持任务、资源、约束、偏好、不确定性、候选方案和版本依据的联合表达与增量更新。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "OBJ-2",
+      "node_id": "OBJ-2",
+      "node_type": "OBJECTIVE",
+      "source_fact_ids": [
+        "FACT-014"
+      ],
+      "source_stage3_ids": [
+        "OBJ-2"
+      ],
+      "statement": "研究生成、校验、批判、修复和优化求解相结合的多智能体候选竞争机制，形成面向有限窗口的持续可行化与质量提升方法。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "OBJ-3",
+      "node_id": "OBJ-3",
+      "node_type": "OBJECTIVE",
+      "source_fact_ids": [
+        "FACT-015"
+      ],
+      "source_stage3_ids": [
+        "OBJ-3"
+      ],
+      "statement": "研究人类偏好注入、分歧裁定、权限交接和停止判断机制，使人工注意力集中于高价值判断并保持最终控制权。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "OBJ-4",
+      "node_id": "OBJ-4",
+      "node_type": "OBJECTIVE",
+      "source_fact_ids": [
+        "FACT-016"
+      ],
+      "source_stage3_ids": [
+        "OBJ-4"
+      ],
+      "statement": "形成可配置的原型系统和跨场景评价体系，验证人机协同优势冲刺在效率、质量、稳健性、负担和可追溯性方面的适用条件。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "共享决策态势与增量一致性机制",
+      "node_id": "RC-1",
+      "node_type": "RESEARCH_CONTENT",
+      "source_fact_ids": [
+        "FACT-021",
+        "FACT-026",
+        "FACT-027"
+      ],
+      "source_stage3_ids": [
+        "RC-1"
+      ],
+      "statement": "研究任务、资源、约束、偏好、不确定性、事件、候选和依据的统一对象关系模型，建立版本、来源与依赖索引，并研究状态变化对受影响子图、失效假设和候选结论的增量传播。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "多智能体候选竞争与确定性可行化机制",
+      "node_id": "RC-2",
+      "node_type": "RESEARCH_CONTENT",
+      "source_fact_ids": [
+        "FACT-022",
+        "FACT-028",
+        "FACT-029"
+      ],
+      "source_stage3_ids": [
+        "RC-2"
+      ],
+      "statement": "研究生成、约束校验、方案批判、局部修复和优化求解的角色分离协议，建立结构化候选集、Finding和责任模块之间的交接关系，使多样搜索与硬约束可行性在同一候选演化链中闭合。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "人工关键干预与优势冲刺调度机制",
+      "node_id": "RC-3",
+      "node_type": "RESEARCH_CONTENT",
+      "source_fact_ids": [
+        "FACT-023",
+        "FACT-024",
+        "FACT-030",
+        "FACT-031"
+      ],
+      "source_stage3_ids": [
+        "RC-3"
+      ],
+      "statement": "研究基于候选差异、不确定性和潜在收益的主动提问与偏好注入方法，并以剩余时间、动作成本、方案风险、证据完整性和边际增益联合调度智能体、求解器与人工注意力，形成继续、停止、降级和回滚规则。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "基于Trace的跨场景收益归因与适用边界验证",
+      "node_id": "RC-4",
+      "node_type": "RESEARCH_CONTENT",
+      "source_fact_ids": [
+        "FACT-025",
+        "FACT-032",
+        "FACT-017",
+        "FACT-018",
+        "FACT-019",
+        "FACT-020"
+      ],
+      "source_stage3_ids": [
+        "RC-4"
+      ],
+      "statement": "构建统一任务集、资源预算、扰动注入和评价脚本，对纯人工、纯自动、固定轮次协同与优势冲刺协同开展对照和消融试验，记录每轮输入、候选、工具结果、人工决定、耗时和失败模式。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "共享决策态势与增量知识建模",
+      "node_id": "WP-1",
+      "node_type": "WORK_PACKAGE",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "OBJ-1",
+        "OBJ-2"
+      ],
+      "statement": "为人类和各智能体提供同源、可校验且能随事件增量更新的决策上下文。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "多智能体候选生成与交叉批判",
+      "node_id": "WP-2",
+      "node_type": "WORK_PACKAGE",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "OBJ-2"
+      ],
+      "statement": "通过角色分离和工具调用形成多样候选，并在写入候选集前完成约束与证据校验。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "人工偏好注入与权限交接",
+      "node_id": "WP-3",
+      "node_type": "WORK_PACKAGE",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "OBJ-3"
+      ],
+      "statement": "把人类经验和责任判断放在高价值分歧点，并确保每次干预均可解释、可撤销和可复盘。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "优势冲刺资源调度与停止决策",
+      "node_id": "WP-4",
+      "node_type": "WORK_PACKAGE",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "OBJ-2",
+        "OBJ-3"
+      ],
+      "statement": "依据剩余时间、方案差距、风险和边际增益，动态决定下一轮由谁处理什么问题以及何时结束冲刺。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "原型集成与跨场景验证",
+      "node_id": "WP-5",
+      "node_type": "WORK_PACKAGE",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "OBJ-4"
+      ],
+      "statement": "形成可配置原型并通过统一基线、对照、消融和扰动实验确认方法收益及适用边界。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "共享决策态势与依赖传播模型",
+      "node_id": "FM-1",
+      "node_type": "FORMAL_MODEL",
+      "source_fact_ids": [
+        "FACT-021",
+        "FACT-026",
+        "FACT-027"
+      ],
+      "source_stage3_ids": [
+        "RC-1",
+        "MH-1"
+      ],
+      "statement": "以任务、资源、约束、偏好、不确定性、事件、候选及依据为节点，以版本、来源和依赖为边，形式化描述多主体共享状态及事件触发的受影响子图。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "有限窗口优势冲刺调度模型",
+      "node_id": "FM-2",
+      "node_type": "FORMAL_MODEL",
+      "source_fact_ids": [
+        "FACT-022",
+        "FACT-023",
+        "FACT-024",
+        "FACT-028",
+        "FACT-029",
+        "FACT-030",
+        "FACT-031"
+      ],
+      "source_stage3_ids": [
+        "RC-2",
+        "RC-3",
+        "MH-3"
+      ],
+      "statement": "将智能体推理、确定性工具、优化求解与人工注意力视为具有成本、时延、风险和预期增益的动作资源，在剩余窗口内选择下一动作并决定继续、停止或降级。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "人机权限交接与证据归因模型",
+      "node_id": "FM-3",
+      "node_type": "FORMAL_MODEL",
+      "source_fact_ids": [
+        "FACT-023",
+        "FACT-024",
+        "FACT-025",
+        "FACT-030",
+        "FACT-031",
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "RC-3",
+        "RC-4",
+        "MH-4"
+      ],
+      "statement": "以角色权限、候选版本、人工决定适用范围、覆盖与回滚关系及全过程证据为核心，形式化表达人类最终控制和协同收益归因。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "版本依赖与增量失效传播",
+      "node_id": "MECH-1",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-026",
+        "FACT-027"
+      ],
+      "source_stage3_ids": [
+        "RC-1",
+        "MH-1"
+      ],
+      "statement": "显式维护状态版本、来源与候选依赖，事件到来时沿受影响子图标记失效对象并限制重算范围",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "角色分离候选竞争与确定性可行化",
+      "node_id": "MECH-2",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-028",
+        "FACT-029"
+      ],
+      "source_stage3_ids": [
+        "RC-2",
+        "MH-2"
+      ],
+      "statement": "将生成、批判、规则校验、求解与局部修复分配给独立角色，并以结构化Finding驱动责任模块修复",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "边际增益驱动的资源调度与停止",
+      "node_id": "MECH-3",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-030",
+        "FACT-031"
+      ],
+      "source_stage3_ids": [
+        "RC-3",
+        "MH-3"
+      ],
+      "statement": "依据预期质量增益、动作成本、剩余时间、风险和证据闭合程度选择下一动作并触发停止或降级",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "高价值分歧点人工干预",
+      "node_id": "MECH-4",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-030",
+        "FACT-031"
+      ],
+      "source_stage3_ids": [
+        "RC-3",
+        "MH-4"
+      ],
+      "statement": "根据候选差异和不确定性选择值得询问的问题，把人工裁定转化为带适用范围的偏好约束并保留撤销关系",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "全过程Trace收益归因",
+      "node_id": "MECH-5",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-025",
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "RC-4",
+        "MH-4"
+      ],
+      "statement": "统一记录输入、候选、Finding、工具结果、人工决定、耗时和失败模式，通过对照与消融区分各机制的贡献",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "纯人工流程",
+      "node_id": "BL-1",
+      "node_type": "BASELINE",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "CP-1",
+        "RC-4"
+      ],
+      "statement": "由业务人员独立完成信息整理、方案生成、校验、权衡与最终确认，不使用智能体协同。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "单一自动流程",
+      "node_id": "BL-2",
+      "node_type": "BASELINE",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "CP-1",
+        "RC-4"
+      ],
+      "statement": "采用单一自动优化或单Agent完成候选生成与评价，不设置独立批判、主动人工干预和自适应冲刺调度。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "固定轮次人机协同",
+      "node_id": "BL-3",
+      "node_type": "BASELINE",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "CP-1",
+        "RC-4"
+      ],
+      "statement": "按照预设角色顺序和固定轮次运行人机协同，不依据边际增益、风险和剩余时间调整动作。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "最佳非冲刺基线",
+      "node_id": "BL-4",
+      "node_type": "BASELINE",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "CP-1",
+        "RC-4"
+      ],
+      "statement": "在相同任务集和资源预算下，从非冲刺对照方法中选择表现最优者作为综合方案质量比较基线。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "共享状态一致性与增量传播试验",
+      "node_id": "EXP-1",
+      "node_type": "EXPERIMENT_DESIGN",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "RQ-1",
+        "MH-1"
+      ],
+      "statement": "比较无统一状态、全量同步和增量传播三种设置下的一致性错误、传播时延、重算范围与追溯覆盖。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "候选竞争与可行化消融试验",
+      "node_id": "EXP-2",
+      "node_type": "EXPERIMENT_DESIGN",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "RQ-1",
+        "RQ-2",
+        "MH-2"
+      ],
+      "statement": "比较单Agent、无独立Critic、无确定性工具和完整机制的候选多样性、首个可行解时间、违规数与修复成本。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "资源调度与停止规则试验",
+      "node_id": "EXP-3",
+      "node_type": "EXPERIMENT_DESIGN",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "RQ-2",
+        "MH-3"
+      ],
+      "statement": "在多种时间与算力预算下比较固定轮次、仅按风险、贪心改进和完整调度的质量时间曲线与按时完成率。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "人工干预与权限交接试验",
+      "node_id": "EXP-4",
+      "node_type": "EXPERIMENT_DESIGN",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "RQ-2",
+        "RQ-3",
+        "MH-4"
+      ],
+      "statement": "比较全程人工确认、仅最终审批、固定频率提问和主动高价值提问的人工投入、覆盖次数、质量与采纳表现。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "跨场景对照、扰动与收益归因试验",
+      "node_id": "EXP-5",
+      "node_type": "EXPERIMENT_DESIGN",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "RQ-1",
+        "RQ-2",
+        "RQ-3",
+        "RC-4"
+      ],
+      "statement": "在四类通用场景中采用相同任务集、资源预算和扰动条件，对完整方法、基线与消融组进行过程和结果比较。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-005"
+      ],
+      "label": "首个可行方案形成时间",
+      "node_id": "MET-1",
+      "node_type": "EVALUATION_METRIC",
+      "source_fact_ids": [
+        "FACT-033"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "从任务冻结到首个通过全部硬约束的候选出现所需时间，并与同场景基线比较；暂定目标为较对应基线缩短不少于30%，需在获得场景基线后由项目负责人重新标定。",
+      "status": "PROVISIONAL_TARGET"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-005"
+      ],
+      "label": "最终综合方案质量",
+      "node_id": "MET-2",
+      "node_type": "EVALUATION_METRIC",
+      "source_fact_ids": [
+        "FACT-034"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "按场景预先定义的归一化多目标函数计算最终确认方案相对基线的增益；暂定目标为较最佳非冲刺基线提高不少于10%，需在获得场景基线后由项目负责人重新标定。",
+      "status": "PROVISIONAL_TARGET"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-005"
+      ],
+      "label": "硬约束违规数",
+      "node_id": "MET-3",
+      "node_type": "EVALUATION_METRIC",
+      "source_fact_ids": [
+        "FACT-035"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "对最终提交方案执行独立规则与求解器校验，统计未满足的硬约束数量；暂定目标为0，需在获得场景基线后由项目负责人重新标定。",
+      "status": "PROVISIONAL_TARGET"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-005"
+      ],
+      "label": "扰动后质量保持率",
+      "node_id": "MET-4",
+      "node_type": "EVALUATION_METRIC",
+      "source_fact_ids": [
+        "FACT-036"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "注入资源变化、任务插入或状态偏差后，比较重规划方案与无扰动方案的归一化质量；暂定目标为典型扰动下质量保持率不低于90%，需在获得场景基线后由项目负责人重新标定。",
+      "status": "PROVISIONAL_TARGET"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-005"
+      ],
+      "label": "人工交互负担",
+      "node_id": "MET-5",
+      "node_type": "EVALUATION_METRIC",
+      "source_fact_ids": [
+        "FACT-037"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "统计完成一次决策所需人工问题数、操作数和有效投入时间，并与纯人工及固定协同基线比较；暂定目标为有效操作或投入时间减少不少于25%，需在获得场景基线后由项目负责人重新标定。",
+      "status": "PROVISIONAL_TARGET"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-005"
+      ],
+      "label": "方案采纳率",
+      "node_id": "MET-6",
+      "node_type": "EVALUATION_METRIC",
+      "source_fact_ids": [
+        "FACT-038"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "统计参与人员在不要求额外重做的情况下确认或小幅修改后确认的方案比例；暂定目标为在受控试验中达到80%以上，需在获得场景基线后由项目负责人重新标定。",
+      "status": "PROVISIONAL_TARGET"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-005"
+      ],
+      "label": "关键结论可追溯率",
+      "node_id": "MET-7",
+      "node_type": "EVALUATION_METRIC",
+      "source_fact_ids": [
+        "FACT-039"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "抽查最终方案中的关键选择，核对是否能定位到输入、规则、工具结果、模型建议和人工决定；暂定目标为关键选择追溯覆盖率100%，需在获得场景基线后由项目负责人重新标定。",
+      "status": "PROVISIONAL_TARGET"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-005"
+      ],
+      "label": "共享状态一致率",
+      "node_id": "MET-8",
+      "node_type": "EVALUATION_METRIC",
+      "source_fact_ids": [
+        "FACT-040"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "在并发Agent运行和事件更新后，对关键对象版本、约束和候选依赖执行一致性核对；暂定目标为关键状态一致率100%，需在获得场景基线后由项目负责人重新标定。",
+      "status": "PROVISIONAL_TARGET"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "label": "INNO-H1",
+      "node_id": "INNO-H1",
+      "node_type": "NOVEL_MECHANISM",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "INNO-H1"
+      ],
+      "statement": "将共享决策态势、版本依赖和事件驱动的增量失效传播组合为多智能体协同的统一状态基础，可能形成区别于仅共享对话上下文的机制。",
+      "status": "TO_BE_VALIDATED"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "label": "INNO-H2",
+      "node_id": "INNO-H2",
+      "node_type": "NOVEL_MECHANISM",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "INNO-H2"
+      ],
+      "statement": "将智能体推理、优化求解和人工注意力统一视为有限窗口内的可调度资源，并以边际增益、风险和证据完整性共同决定下一动作与停止时机，可能构成优势冲刺的核心方法差异。",
+      "status": "TO_BE_VALIDATED"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "label": "INNO-H3",
+      "node_id": "INNO-H3",
+      "node_type": "NOVEL_MECHANISM",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "INNO-H3"
+      ],
+      "statement": "通过结构化候选、Finding、工具结果和人工决定的全过程Trace，将协同机制的过程贡献、最终结果和责任边界纳入同一评价链，可能形成可验证的人机协同收益证据。",
+      "status": "TO_BE_VALIDATED"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "label": "RQ-1最接近已有工作待调研节点",
+      "node_id": "PRIOR-1",
+      "node_type": "CLOSEST_PRIOR_WORK",
+      "source_fact_ids": [],
+      "source_stage3_ids": [],
+      "statement": "待通过公开资料调研识别统一决策表示、多智能体共享状态、版本一致性和增量影响传播方面的最接近已有工作，并提取其机制边界。",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "label": "RQ-2最接近已有工作待调研节点",
+      "node_id": "PRIOR-2",
+      "node_type": "CLOSEST_PRIOR_WORK",
+      "source_fact_ids": [],
+      "source_stage3_ids": [],
+      "statement": "待通过公开资料调研识别anytime优化、智能体资源编排、自适应计算预算与停止规则方面的最接近已有工作，并形成可比较基线。",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-013"
+      ],
+      "label": "RQ-3最接近已有工作待调研节点",
+      "node_id": "PRIOR-3",
+      "node_type": "CLOSEST_PRIOR_WORK",
+      "source_fact_ids": [],
+      "source_stage3_ids": [],
+      "statement": "待通过公开资料调研识别人机混合决策、主动偏好获取、权限交接和可解释责任追踪方面的最接近已有工作。",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-009",
+        "OPEN-012"
+      ],
+      "label": "共享状态与优化方法研究基础待补证据",
+      "node_id": "FOUND-1",
+      "node_type": "TEAM_EVIDENCE",
+      "source_fact_ids": [],
+      "source_stage3_ids": [],
+      "statement": "需要提供可定位的论文、项目、代码、数据或预实验，证明团队具备状态建模、增量计算和优化求解能力。",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-009",
+        "OPEN-012"
+      ],
+      "label": "智能体编排与工具集成研究基础待补证据",
+      "node_id": "FOUND-2",
+      "node_type": "TEAM_EVIDENCE",
+      "source_fact_ids": [],
+      "source_stage3_ids": [],
+      "statement": "需要提供可定位的原型、代码、测试或项目材料，证明团队具备多智能体编排、结构化接口和确定性工具集成能力。",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocked_by_open_item_ids": [
+        "OPEN-009",
+        "OPEN-012"
+      ],
+      "label": "人机交互与跨场景评价研究基础待补证据",
+      "node_id": "FOUND-3",
+      "node_type": "TEAM_EVIDENCE",
+      "source_fact_ids": [],
+      "source_stage3_ids": [],
+      "statement": "需要提供可定位的实验、用户研究、场景数据或评测材料，证明团队具备人机交互和对照消融评价能力。",
+      "status": "UNKNOWN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "边界条件1",
+      "node_id": "BOUND-1",
+      "node_type": "BOUNDARY_CONDITION",
+      "source_fact_ids": [
+        "FACT-080",
+        "FACT-005",
+        "FACT-006",
+        "FACT-008",
+        "FACT-009",
+        "FACT-026",
+        "FACT-027",
+        "FACT-028",
+        "FACT-029",
+        "FACT-030",
+        "FACT-031",
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "目标场景能够提供结构化或可转换的任务、资源、规则和结果数据。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "边界条件2",
+      "node_id": "BOUND-2",
+      "node_type": "BOUNDARY_CONDITION",
+      "source_fact_ids": [
+        "FACT-080",
+        "FACT-005",
+        "FACT-006",
+        "FACT-008",
+        "FACT-009",
+        "FACT-026",
+        "FACT-027",
+        "FACT-028",
+        "FACT-029",
+        "FACT-030",
+        "FACT-031",
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "至少存在一种确定性规则工具或优化求解器用于校验硬约束和候选可行性。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "边界条件3",
+      "node_id": "BOUND-3",
+      "node_type": "BOUNDARY_CONDITION",
+      "source_fact_ids": [
+        "FACT-080",
+        "FACT-005",
+        "FACT-006",
+        "FACT-008",
+        "FACT-009",
+        "FACT-026",
+        "FACT-027",
+        "FACT-028",
+        "FACT-029",
+        "FACT-030",
+        "FACT-031",
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "业务人员能够在有限次数内提供偏好选择、分歧裁定和最终确认。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "边界条件4",
+      "node_id": "BOUND-4",
+      "node_type": "BOUNDARY_CONDITION",
+      "source_fact_ids": [
+        "FACT-080",
+        "FACT-005",
+        "FACT-006",
+        "FACT-008",
+        "FACT-009",
+        "FACT-026",
+        "FACT-027",
+        "FACT-028",
+        "FACT-029",
+        "FACT-030",
+        "FACT-031",
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "模型端点能够遵循统一JSON合同，且业务工作流不依赖特定模型名称。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "边界条件5",
+      "node_id": "BOUND-5",
+      "node_type": "BOUNDARY_CONDITION",
+      "source_fact_ids": [
+        "FACT-080",
+        "FACT-005",
+        "FACT-006",
+        "FACT-008",
+        "FACT-009",
+        "FACT-026",
+        "FACT-027",
+        "FACT-028",
+        "FACT-029",
+        "FACT-030",
+        "FACT-031",
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "授权人员保留最终方案确认权，语言模型输出不直接作为可执行决策。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "共享状态依赖不完整风险",
+      "node_id": "RISK-1",
+      "node_type": "RISK",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "依赖关系遗漏可能导致失效传播范围过小，需通过一致性校验和保守扩大重算范围降低风险。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "边际增益估计偏差风险",
+      "node_id": "RISK-2",
+      "node_type": "RISK",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "动作收益估计不准可能造成资源分配次优，需保留当前最好可行解并设置时间兜底和降级规则。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "人工反馈不一致风险",
+      "node_id": "RISK-3",
+      "node_type": "RISK",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "不同时间或角色的偏好可能冲突，需记录适用范围、优先级、版本和撤销关系。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "场景代表性不足风险",
+      "node_id": "RISK-4",
+      "node_type": "RISK",
+      "source_fact_ids": [],
+      "source_stage3_ids": [
+        "CP-1"
+      ],
+      "statement": "跨场景结论可能受任务分布和参与人员差异影响，需报告分布、失败案例与适用边界。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "统一决策对象与关系建模",
+      "node_id": "M-1",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-026"
+      ],
+      "source_stage3_ids": [
+        "RC-1"
+      ],
+      "statement": "以任务、资源、约束、偏好、事件、候选、依据和责任角色为核心对象，用Schema与关系图统一业务语义。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "增量状态同步与影响传播",
+      "node_id": "M-2",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-027"
+      ],
+      "source_stage3_ids": [
+        "RC-1"
+      ],
+      "statement": "为状态和候选建立版本、依赖和来源索引，事件发生后重算受影响子图并标记失效假设。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "角色分离的多智能体编排",
+      "node_id": "M-3",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-028"
+      ],
+      "source_stage3_ids": [
+        "RC-2"
+      ],
+      "statement": "将需求解析、候选生成、约束校验、方案批判、局部修复和解释交给独立角色。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "随时可用的混合优化与多目标评价",
+      "node_id": "M-4",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-029"
+      ],
+      "source_stage3_ids": [
+        "RC-2"
+      ],
+      "statement": "结合数学优化、约束规划、启发式搜索和智能体生成，持续保留并改进当前最好可行方案。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "偏好学习与主动人机交互",
+      "node_id": "M-5",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-030"
+      ],
+      "source_stage3_ids": [
+        "RC-3"
+      ],
+      "statement": "根据候选差异、不确定性和潜在收益选择人工问题，并把回答转化为有范围的偏好约束。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "优势冲刺调度与停止规则",
+      "node_id": "M-6",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-031"
+      ],
+      "source_stage3_ids": [
+        "RC-3"
+      ],
+      "statement": "估计智能体、工具和人工动作的增益、耗时与风险，动态安排下一动作并决定停止或降级。",
+      "status": "CONFIRMED_DESIGN"
+    },
+    {
+      "blocked_by_open_item_ids": [],
+      "label": "基于Trace的对照与消融评价",
+      "node_id": "M-7",
+      "node_type": "MECHANISM",
+      "source_fact_ids": [
+        "FACT-032"
+      ],
+      "source_stage3_ids": [
+        "RC-4"
+      ],
+      "statement": "采用相同任务集与扰动条件比较基线和消融组，记录全过程并定位各机制收益来源。",
+      "status": "CONFIRMED_DESIGN"
+    }
+  ],
+  "open_items_inherited": [
+    {
+      "blocking_now": false,
+      "field": "官方申报指南",
+      "item_id": "OPEN-001",
+      "required_before_stage": "指南与规则冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "申请书模板与必填结构",
+      "item_id": "OPEN-002",
+      "required_before_stage": "章节规划冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "申报资格与限制",
+      "item_id": "OPEN-003",
+      "required_before_stage": "正式申报可行性确认"
+    },
+    {
+      "blocking_now": false,
+      "field": "申报时间节点",
+      "item_id": "OPEN-004",
+      "required_before_stage": "研究计划冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "评审指标与权重",
+      "item_id": "OPEN-005",
+      "required_before_stage": "论证架构最终冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "附件与证明材料要求",
+      "item_id": "OPEN-006",
+      "required_before_stage": "最终文档导出"
+    },
+    {
+      "blocking_now": false,
+      "field": "申报单位",
+      "item_id": "OPEN-007",
+      "required_before_stage": "最终文档导出"
+    },
+    {
+      "blocking_now": false,
+      "field": "资助机构",
+      "item_id": "OPEN-008",
+      "required_before_stage": "指南与规则冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "团队名单",
+      "item_id": "OPEN-009",
+      "required_before_stage": "研究基础与任务分工写作"
+    },
+    {
+      "blocking_now": false,
+      "field": "经费金额",
+      "item_id": "OPEN-010",
+      "required_before_stage": "预算内容写作"
+    },
+    {
+      "blocking_now": false,
+      "field": "项目周期",
+      "item_id": "OPEN-011",
+      "required_before_stage": "研究计划冻结"
+    },
+    {
+      "blocking_now": false,
+      "field": "研究基础证据材料",
+      "item_id": "OPEN-012",
+      "required_before_stage": "研究基础章节写作"
+    },
+    {
+      "blocking_now": false,
+      "field": "正式参考文献范围",
+      "item_id": "OPEN-013",
+      "required_before_stage": "相关工作章节写作"
+    }
+  ],
+  "project_title": "人机协同决策优势冲刺关键技术研究",
+  "readiness": {
+    "architecture_complete": true,
+    "blocking_gap_ids": [
+      "EVID-GAP-01",
+      "EVID-GAP-02",
+      "EVID-GAP-03",
+      "EVID-GAP-04",
+      "EVID-GAP-05"
+    ],
+    "frozen_elements": [
+      "唯一中心命题CP-1及其适用边界",
+      "RQ-1至RQ-3的差距、目标、研究内容和反证关系",
+      "三个形式化模型与五项核心作用机制",
+      "纯人工、单一自动、固定轮次和最佳非冲刺四类基线",
+      "五组实验设计及八项暂定评价指标的对应关系",
+      "三条结构化论证链和证据缺口责任节点"
+    ],
+    "non_frozen_elements": [
+      "正式申报指南、模板与评审权重",
+      "三个研究问题的最接近已有工作和最终创新表述",
+      "团队名单、研究基础证据与任务分工",
+      "评价指标的正式阈值、权重和统计口径",
+      "项目周期、经费及正式研究计划"
+    ],
+    "rationale": "现有冻结工件足以形成结构完整、可证伪且能够逐节点审查的论证架构，三项研究问题均已绑定目标、研究内容、形式化模型、作用机制、基线、实验和指标。但最近工作、研究基础、正式指南、模板、评审权重和指标依据仍未补齐，因此阶段4工件可以确认，章节规划必须继续保持关闭。",
+    "ready_for_section_planning": false
+  },
+  "relations": [
+    {
+      "from_id": "GAP-1",
+      "rationale": "该项目设计差距直接触发对应研究问题。",
+      "relation": "MOTIVATES",
+      "relation_id": "REL4-001",
+      "to_id": "RQ-1"
+    },
+    {
+      "from_id": "GAP-2",
+      "rationale": "该项目设计差距直接触发对应研究问题。",
+      "relation": "MOTIVATES",
+      "relation_id": "REL4-002",
+      "to_id": "RQ-2"
+    },
+    {
+      "from_id": "GAP-3",
+      "rationale": "该项目设计差距直接触发对应研究问题。",
+      "relation": "MOTIVATES",
+      "relation_id": "REL4-003",
+      "to_id": "RQ-3"
+    },
+    {
+      "from_id": "RQ-1",
+      "rationale": "研究目标给出回答该研究问题所需的可验证结果。",
+      "relation": "ADDRESSES",
+      "relation_id": "REL4-004",
+      "to_id": "OBJ-1"
+    },
+    {
+      "from_id": "RQ-1",
+      "rationale": "研究目标给出回答该研究问题所需的可验证结果。",
+      "relation": "ADDRESSES",
+      "relation_id": "REL4-005",
+      "to_id": "OBJ-2"
+    },
+    {
+      "from_id": "RQ-2",
+      "rationale": "研究目标给出回答该研究问题所需的可验证结果。",
+      "relation": "ADDRESSES",
+      "relation_id": "REL4-006",
+      "to_id": "OBJ-2"
+    },
+    {
+      "from_id": "RQ-2",
+      "rationale": "研究目标给出回答该研究问题所需的可验证结果。",
+      "relation": "ADDRESSES",
+      "relation_id": "REL4-007",
+      "to_id": "OBJ-3"
+    },
+    {
+      "from_id": "RQ-3",
+      "rationale": "研究目标给出回答该研究问题所需的可验证结果。",
+      "relation": "ADDRESSES",
+      "relation_id": "REL4-008",
+      "to_id": "OBJ-3"
+    },
+    {
+      "from_id": "RQ-3",
+      "rationale": "研究目标给出回答该研究问题所需的可验证结果。",
+      "relation": "ADDRESSES",
+      "relation_id": "REL4-009",
+      "to_id": "OBJ-4"
+    },
+    {
+      "from_id": "OBJ-1",
+      "rationale": "研究内容承载目标对应的方法研究和验证任务。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-010",
+      "to_id": "RC-1"
+    },
+    {
+      "from_id": "OBJ-2",
+      "rationale": "研究内容承载目标对应的方法研究和验证任务。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-011",
+      "to_id": "RC-1"
+    },
+    {
+      "from_id": "OBJ-2",
+      "rationale": "研究内容承载目标对应的方法研究和验证任务。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-012",
+      "to_id": "RC-2"
+    },
+    {
+      "from_id": "OBJ-2",
+      "rationale": "研究内容承载目标对应的方法研究和验证任务。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-013",
+      "to_id": "RC-3"
+    },
+    {
+      "from_id": "OBJ-3",
+      "rationale": "研究内容承载目标对应的方法研究和验证任务。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-014",
+      "to_id": "RC-3"
+    },
+    {
+      "from_id": "OBJ-4",
+      "rationale": "研究内容承载目标对应的方法研究和验证任务。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-015",
+      "to_id": "RC-4"
+    },
+    {
+      "from_id": "RC-1",
+      "rationale": "工作包将研究内容落实为可审查的研究活动和交付证据。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-016",
+      "to_id": "WP-1"
+    },
+    {
+      "from_id": "RC-2",
+      "rationale": "工作包将研究内容落实为可审查的研究活动和交付证据。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-017",
+      "to_id": "WP-2"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "工作包将研究内容落实为可审查的研究活动和交付证据。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-018",
+      "to_id": "WP-3"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "工作包将研究内容落实为可审查的研究活动和交付证据。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-019",
+      "to_id": "WP-4"
+    },
+    {
+      "from_id": "RC-4",
+      "rationale": "工作包将研究内容落实为可审查的研究活动和交付证据。",
+      "relation": "REALIZED_BY",
+      "relation_id": "REL4-020",
+      "to_id": "WP-5"
+    },
+    {
+      "from_id": "RC-1",
+      "rationale": "形式化模型定义研究对象、状态、动作和评价关系。",
+      "relation": "FORMALIZED_BY",
+      "relation_id": "REL4-021",
+      "to_id": "FM-1"
+    },
+    {
+      "from_id": "RC-2",
+      "rationale": "形式化模型定义研究对象、状态、动作和评价关系。",
+      "relation": "FORMALIZED_BY",
+      "relation_id": "REL4-022",
+      "to_id": "FM-2"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "形式化模型定义研究对象、状态、动作和评价关系。",
+      "relation": "FORMALIZED_BY",
+      "relation_id": "REL4-023",
+      "to_id": "FM-2"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "形式化模型定义研究对象、状态、动作和评价关系。",
+      "relation": "FORMALIZED_BY",
+      "relation_id": "REL4-024",
+      "to_id": "FM-3"
+    },
+    {
+      "from_id": "RC-4",
+      "rationale": "形式化模型定义研究对象、状态、动作和评价关系。",
+      "relation": "FORMALIZED_BY",
+      "relation_id": "REL4-025",
+      "to_id": "FM-3"
+    },
+    {
+      "from_id": "FM-1",
+      "rationale": "该机制是形式化模型产生预期效果的关键作用路径。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-026",
+      "to_id": "MECH-1"
+    },
+    {
+      "from_id": "FM-1",
+      "rationale": "该机制是形式化模型产生预期效果的关键作用路径。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-027",
+      "to_id": "MECH-2"
+    },
+    {
+      "from_id": "FM-2",
+      "rationale": "该机制是形式化模型产生预期效果的关键作用路径。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-028",
+      "to_id": "MECH-2"
+    },
+    {
+      "from_id": "FM-2",
+      "rationale": "该机制是形式化模型产生预期效果的关键作用路径。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-029",
+      "to_id": "MECH-3"
+    },
+    {
+      "from_id": "FM-2",
+      "rationale": "该机制是形式化模型产生预期效果的关键作用路径。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-030",
+      "to_id": "MECH-4"
+    },
+    {
+      "from_id": "FM-3",
+      "rationale": "该机制是形式化模型产生预期效果的关键作用路径。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-031",
+      "to_id": "MECH-4"
+    },
+    {
+      "from_id": "FM-3",
+      "rationale": "该机制是形式化模型产生预期效果的关键作用路径。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-032",
+      "to_id": "MECH-5"
+    },
+    {
+      "from_id": "MECH-1",
+      "rationale": "该实验通过对照或消融检验机制是否产生预期作用。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-033",
+      "to_id": "EXP-1"
+    },
+    {
+      "from_id": "MECH-2",
+      "rationale": "该实验通过对照或消融检验机制是否产生预期作用。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-034",
+      "to_id": "EXP-2"
+    },
+    {
+      "from_id": "MECH-3",
+      "rationale": "该实验通过对照或消融检验机制是否产生预期作用。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-035",
+      "to_id": "EXP-3"
+    },
+    {
+      "from_id": "MECH-4",
+      "rationale": "该实验通过对照或消融检验机制是否产生预期作用。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-036",
+      "to_id": "EXP-4"
+    },
+    {
+      "from_id": "MECH-5",
+      "rationale": "该实验通过对照或消融检验机制是否产生预期作用。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-037",
+      "to_id": "EXP-5"
+    },
+    {
+      "from_id": "BL-1",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-038",
+      "to_id": "EXP-1"
+    },
+    {
+      "from_id": "BL-1",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-039",
+      "to_id": "EXP-2"
+    },
+    {
+      "from_id": "BL-1",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-040",
+      "to_id": "EXP-3"
+    },
+    {
+      "from_id": "BL-1",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-041",
+      "to_id": "EXP-4"
+    },
+    {
+      "from_id": "BL-1",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-042",
+      "to_id": "EXP-5"
+    },
+    {
+      "from_id": "BL-2",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-043",
+      "to_id": "EXP-1"
+    },
+    {
+      "from_id": "BL-2",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-044",
+      "to_id": "EXP-2"
+    },
+    {
+      "from_id": "BL-2",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-045",
+      "to_id": "EXP-3"
+    },
+    {
+      "from_id": "BL-2",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-046",
+      "to_id": "EXP-5"
+    },
+    {
+      "from_id": "BL-3",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-047",
+      "to_id": "EXP-2"
+    },
+    {
+      "from_id": "BL-3",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-048",
+      "to_id": "EXP-3"
+    },
+    {
+      "from_id": "BL-3",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-049",
+      "to_id": "EXP-4"
+    },
+    {
+      "from_id": "BL-3",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-050",
+      "to_id": "EXP-5"
+    },
+    {
+      "from_id": "BL-4",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-051",
+      "to_id": "EXP-3"
+    },
+    {
+      "from_id": "BL-4",
+      "rationale": "该基线与完整方法在相同任务集和资源预算下比较。",
+      "relation": "COMPARED_WITH",
+      "relation_id": "REL4-052",
+      "to_id": "EXP-5"
+    },
+    {
+      "from_id": "EXP-1",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-053",
+      "to_id": "MET-7"
+    },
+    {
+      "from_id": "EXP-1",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-054",
+      "to_id": "MET-8"
+    },
+    {
+      "from_id": "EXP-2",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-055",
+      "to_id": "MET-1"
+    },
+    {
+      "from_id": "EXP-2",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-056",
+      "to_id": "MET-2"
+    },
+    {
+      "from_id": "EXP-2",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-057",
+      "to_id": "MET-3"
+    },
+    {
+      "from_id": "EXP-3",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-058",
+      "to_id": "MET-1"
+    },
+    {
+      "from_id": "EXP-3",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-059",
+      "to_id": "MET-2"
+    },
+    {
+      "from_id": "EXP-3",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-060",
+      "to_id": "MET-4"
+    },
+    {
+      "from_id": "EXP-4",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-061",
+      "to_id": "MET-5"
+    },
+    {
+      "from_id": "EXP-4",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-062",
+      "to_id": "MET-6"
+    },
+    {
+      "from_id": "EXP-4",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-063",
+      "to_id": "MET-7"
+    },
+    {
+      "from_id": "EXP-5",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-064",
+      "to_id": "MET-1"
+    },
+    {
+      "from_id": "EXP-5",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-065",
+      "to_id": "MET-2"
+    },
+    {
+      "from_id": "EXP-5",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-066",
+      "to_id": "MET-3"
+    },
+    {
+      "from_id": "EXP-5",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-067",
+      "to_id": "MET-4"
+    },
+    {
+      "from_id": "EXP-5",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-068",
+      "to_id": "MET-5"
+    },
+    {
+      "from_id": "EXP-5",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-069",
+      "to_id": "MET-6"
+    },
+    {
+      "from_id": "EXP-5",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-070",
+      "to_id": "MET-7"
+    },
+    {
+      "from_id": "EXP-5",
+      "rationale": "该指标用于量化实验的过程或结果表现，阈值保持暂定。",
+      "relation": "MEASURED_BY",
+      "relation_id": "REL4-071",
+      "to_id": "MET-8"
+    },
+    {
+      "from_id": "PRIOR-1",
+      "rationale": "最近工作调研完成后用于判断新增机制是否具有可比较差异。",
+      "relation": "BASELINE_FOR",
+      "relation_id": "REL4-072",
+      "to_id": "INNO-H1"
+    },
+    {
+      "from_id": "PRIOR-2",
+      "rationale": "最近工作调研完成后用于判断新增机制是否具有可比较差异。",
+      "relation": "BASELINE_FOR",
+      "relation_id": "REL4-073",
+      "to_id": "INNO-H2"
+    },
+    {
+      "from_id": "PRIOR-3",
+      "rationale": "最近工作调研完成后用于判断新增机制是否具有可比较差异。",
+      "relation": "BASELINE_FOR",
+      "relation_id": "REL4-074",
+      "to_id": "INNO-H3"
+    },
+    {
+      "from_id": "INNO-H1",
+      "rationale": "待验证机制构成中心命题可能成立的差异化作用路径。",
+      "relation": "CONTRIBUTES_TO",
+      "relation_id": "REL4-075",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "INNO-H2",
+      "rationale": "待验证机制构成中心命题可能成立的差异化作用路径。",
+      "relation": "CONTRIBUTES_TO",
+      "relation_id": "REL4-076",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "INNO-H3",
+      "rationale": "待验证机制构成中心命题可能成立的差异化作用路径。",
+      "relation": "CONTRIBUTES_TO",
+      "relation_id": "REL4-077",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "FOUND-1",
+      "rationale": "研究基础材料补齐后用于支撑方法实施与验证的可行性。",
+      "relation": "SUPPORTS_FEASIBILITY",
+      "relation_id": "REL4-078",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "FOUND-2",
+      "rationale": "研究基础材料补齐后用于支撑方法实施与验证的可行性。",
+      "relation": "SUPPORTS_FEASIBILITY",
+      "relation_id": "REL4-079",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "FOUND-3",
+      "rationale": "研究基础材料补齐后用于支撑方法实施与验证的可行性。",
+      "relation": "SUPPORTS_FEASIBILITY",
+      "relation_id": "REL4-080",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "BOUND-1",
+      "rationale": "该边界条件限定中心命题适用范围，防止过度外推。",
+      "relation": "CONSTRAINS",
+      "relation_id": "REL4-081",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "BOUND-2",
+      "rationale": "该边界条件限定中心命题适用范围，防止过度外推。",
+      "relation": "CONSTRAINS",
+      "relation_id": "REL4-082",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "BOUND-3",
+      "rationale": "该边界条件限定中心命题适用范围，防止过度外推。",
+      "relation": "CONSTRAINS",
+      "relation_id": "REL4-083",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "BOUND-4",
+      "rationale": "该边界条件限定中心命题适用范围，防止过度外推。",
+      "relation": "CONSTRAINS",
+      "relation_id": "REL4-084",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "BOUND-5",
+      "rationale": "该边界条件限定中心命题适用范围，防止过度外推。",
+      "relation": "CONSTRAINS",
+      "relation_id": "REL4-085",
+      "to_id": "CP-1"
+    },
+    {
+      "from_id": "RISK-1",
+      "rationale": "对应机制包含处理该研究风险的控制或报告措施。",
+      "relation": "MITIGATES",
+      "relation_id": "REL4-086",
+      "to_id": "MECH-1"
+    },
+    {
+      "from_id": "RISK-2",
+      "rationale": "对应机制包含处理该研究风险的控制或报告措施。",
+      "relation": "MITIGATES",
+      "relation_id": "REL4-087",
+      "to_id": "MECH-3"
+    },
+    {
+      "from_id": "RISK-3",
+      "rationale": "对应机制包含处理该研究风险的控制或报告措施。",
+      "relation": "MITIGATES",
+      "relation_id": "REL4-088",
+      "to_id": "MECH-4"
+    },
+    {
+      "from_id": "RISK-4",
+      "rationale": "对应机制包含处理该研究风险的控制或报告措施。",
+      "relation": "MITIGATES",
+      "relation_id": "REL4-089",
+      "to_id": "MECH-5"
+    },
+    {
+      "from_id": "RC-1",
+      "rationale": "冻结研究内容通过阶段1方法节点落实为可执行的研究机制。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-090",
+      "to_id": "M-1"
+    },
+    {
+      "from_id": "RC-1",
+      "rationale": "冻结研究内容通过阶段1方法节点落实为可执行的研究机制。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-091",
+      "to_id": "M-2"
+    },
+    {
+      "from_id": "RC-2",
+      "rationale": "冻结研究内容通过阶段1方法节点落实为可执行的研究机制。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-092",
+      "to_id": "M-3"
+    },
+    {
+      "from_id": "RC-2",
+      "rationale": "冻结研究内容通过阶段1方法节点落实为可执行的研究机制。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-093",
+      "to_id": "M-4"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "冻结研究内容通过阶段1方法节点落实为可执行的研究机制。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-094",
+      "to_id": "M-5"
+    },
+    {
+      "from_id": "RC-3",
+      "rationale": "冻结研究内容通过阶段1方法节点落实为可执行的研究机制。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-095",
+      "to_id": "M-6"
+    },
+    {
+      "from_id": "RC-4",
+      "rationale": "冻结研究内容通过阶段1方法节点落实为可执行的研究机制。",
+      "relation": "USES_MECHANISM",
+      "relation_id": "REL4-096",
+      "to_id": "M-7"
+    },
+    {
+      "from_id": "M-1",
+      "rationale": "该方法通过对应对照或消融试验检验其作用与适用边界。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-097",
+      "to_id": "EXP-1"
+    },
+    {
+      "from_id": "M-2",
+      "rationale": "该方法通过对应对照或消融试验检验其作用与适用边界。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-098",
+      "to_id": "EXP-1"
+    },
+    {
+      "from_id": "M-3",
+      "rationale": "该方法通过对应对照或消融试验检验其作用与适用边界。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-099",
+      "to_id": "EXP-2"
+    },
+    {
+      "from_id": "M-4",
+      "rationale": "该方法通过对应对照或消融试验检验其作用与适用边界。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-100",
+      "to_id": "EXP-2"
+    },
+    {
+      "from_id": "M-4",
+      "rationale": "该方法通过对应对照或消融试验检验其作用与适用边界。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-101",
+      "to_id": "EXP-3"
+    },
+    {
+      "from_id": "M-5",
+      "rationale": "该方法通过对应对照或消融试验检验其作用与适用边界。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-102",
+      "to_id": "EXP-4"
+    },
+    {
+      "from_id": "M-6",
+      "rationale": "该方法通过对应对照或消融试验检验其作用与适用边界。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-103",
+      "to_id": "EXP-3"
+    },
+    {
+      "from_id": "M-7",
+      "rationale": "该方法通过对应对照或消融试验检验其作用与适用边界。",
+      "relation": "VERIFIED_BY",
+      "relation_id": "REL4-104",
+      "to_id": "EXP-5"
+    }
+  ],
+  "research_design_matrix": [
+    {
+      "baseline_node_ids": [
+        "BL-1",
+        "BL-2",
+        "BL-3"
+      ],
+      "closest_prior_work_node_ids": [
+        "PRIOR-1"
+      ],
+      "content_node_ids": [
+        "RC-1",
+        "RC-2"
+      ],
+      "experiment_node_ids": [
+        "EXP-1",
+        "EXP-2"
+      ],
+      "falsification_or_comparison_rule": "跨Agent运行时关键对象版本、约束或候选依赖不能保持一致，且增量传播不能优于全量重算或人工同步。",
+      "formal_model_node_ids": [
+        "FM-1"
+      ],
+      "foundation_node_ids": [
+        "FOUND-1",
+        "FOUND-2"
+      ],
+      "gap_node_ids": [
+        "GAP-1"
+      ],
+      "innovation_node_ids": [
+        "INNO-H1"
+      ],
+      "mechanism_node_ids": [
+        "M-1",
+        "M-2",
+        "M-3",
+        "MECH-1",
+        "MECH-2"
+      ],
+      "metric_node_ids": [
+        "MET-1",
+        "MET-3",
+        "MET-7",
+        "MET-8"
+      ],
+      "objective_node_ids": [
+        "OBJ-1",
+        "OBJ-2"
+      ],
+      "rq_id": "RQ-1",
+      "work_package_node_ids": [
+        "WP-1",
+        "WP-2"
+      ]
+    },
+    {
+      "baseline_node_ids": [
+        "BL-1",
+        "BL-2",
+        "BL-3",
+        "BL-4"
+      ],
+      "closest_prior_work_node_ids": [
+        "PRIOR-2"
+      ],
+      "content_node_ids": [
+        "RC-2",
+        "RC-3"
+      ],
+      "experiment_node_ids": [
+        "EXP-2",
+        "EXP-3",
+        "EXP-4"
+      ],
+      "falsification_or_comparison_rule": "在统一任务集、相同模型与求解资源预算下，自适应调度和停止规则不能优于固定轮次或固定顺序协同。",
+      "formal_model_node_ids": [
+        "FM-2"
+      ],
+      "foundation_node_ids": [
+        "FOUND-1",
+        "FOUND-2"
+      ],
+      "gap_node_ids": [
+        "GAP-2"
+      ],
+      "innovation_node_ids": [
+        "INNO-H2"
+      ],
+      "mechanism_node_ids": [
+        "M-2",
+        "M-3",
+        "M-4",
+        "M-5",
+        "M-6",
+        "MECH-2",
+        "MECH-3",
+        "MECH-4"
+      ],
+      "metric_node_ids": [
+        "MET-1",
+        "MET-2",
+        "MET-3",
+        "MET-4",
+        "MET-5"
+      ],
+      "objective_node_ids": [
+        "OBJ-2",
+        "OBJ-3"
+      ],
+      "rq_id": "RQ-2",
+      "work_package_node_ids": [
+        "WP-2",
+        "WP-3",
+        "WP-4"
+      ]
+    },
+    {
+      "baseline_node_ids": [
+        "BL-1",
+        "BL-2",
+        "BL-3"
+      ],
+      "closest_prior_work_node_ids": [
+        "PRIOR-3"
+      ],
+      "content_node_ids": [
+        "RC-3",
+        "RC-4"
+      ],
+      "experiment_node_ids": [
+        "EXP-4",
+        "EXP-5"
+      ],
+      "falsification_or_comparison_rule": "完整协同流程不能在保持最终人工控制和关键结论可追溯的同时降低人工负担或提高方案采纳表现。",
+      "formal_model_node_ids": [
+        "FM-3"
+      ],
+      "foundation_node_ids": [
+        "FOUND-2",
+        "FOUND-3"
+      ],
+      "gap_node_ids": [
+        "GAP-3"
+      ],
+      "innovation_node_ids": [
+        "INNO-H3"
+      ],
+      "mechanism_node_ids": [
+        "M-3",
+        "M-5",
+        "M-6",
+        "M-7",
+        "MECH-4",
+        "MECH-5"
+      ],
+      "metric_node_ids": [
+        "MET-4",
+        "MET-5",
+        "MET-6",
+        "MET-7"
+      ],
+      "objective_node_ids": [
+        "OBJ-3",
+        "OBJ-4"
+      ],
+      "rq_id": "RQ-3",
+      "work_package_node_ids": [
+        "WP-3",
+        "WP-4",
+        "WP-5"
+      ]
+    }
+  ],
+  "research_questions": [
+    {
+      "comparison_rule": "跨Agent运行时关键对象版本、约束或候选依赖不能保持一致，且增量传播不能优于全量重算或人工同步。",
+      "content_node_ids": [
+        "RC-1",
+        "RC-2"
+      ],
+      "gap_node_ids": [
+        "GAP-1"
+      ],
+      "node_id": "RQ-1",
+      "objective_node_ids": [
+        "OBJ-1",
+        "OBJ-2"
+      ],
+      "question": "如何将动态任务、资源、规则、偏好、不确定性及人机协作状态统一表达，并在多智能体并行处理中保持语义和版本一致？"
+    },
+    {
+      "comparison_rule": "在统一任务集、相同模型与求解资源预算下，自适应调度和停止规则不能优于固定轮次或固定顺序协同。",
+      "content_node_ids": [
+        "RC-2",
+        "RC-3"
+      ],
+      "gap_node_ids": [
+        "GAP-2"
+      ],
+      "node_id": "RQ-2",
+      "objective_node_ids": [
+        "OBJ-2",
+        "OBJ-3"
+      ],
+      "question": "如何在有限决策窗口内协调候选生成、批判、优化求解和人工干预，使有限计算与注意力获得更高的单位时间决策增益？"
+    },
+    {
+      "comparison_rule": "完整协同流程不能在保持最终人工控制和关键结论可追溯的同时降低人工负担或提高方案采纳表现。",
+      "content_node_ids": [
+        "RC-3",
+        "RC-4"
+      ],
+      "gap_node_ids": [
+        "GAP-3"
+      ],
+      "node_id": "RQ-3",
+      "objective_node_ids": [
+        "OBJ-3",
+        "OBJ-4"
+      ],
+      "question": "如何界定人类与智能体的权限、交接和责任边界，并以可解释证据证明协同结果优于纯人工或纯自动流程？"
+    }
+  ],
+  "schema_version": "1.0",
+  "scope_decision": {
+    "appendix_topics": [
+      "详细Schema与接口字段",
+      "Agent Prompt和运行配置",
+      "完整Trace字段与复现实验脚本",
+      "原型部署与操作步骤"
+    ],
+    "excluded_topics": [
+      "未经确认的团队与预算信息",
+      "未经调研确认的创新性结论",
+      "完全自动化替代授权决策者",
+      "任意开放世界问题的全局最优承诺"
+    ],
+    "main_body_focus": [
+      "中心命题及三项可证伪研究问题",
+      "共享决策态势与增量一致性机制",
+      "候选竞争、确定性可行化与优势冲刺调度",
+      "人工权限交接、过程证据和跨场景对照验证"
+    ]
+  },
+  "stage": "STAGE_4_ARGUMENT_ARCHITECTURE",
+  "upstream_artifacts": [
+    {
+      "accepted": true,
+      "artifact_name": "stage1_design_input.json",
+      "sha256": "11928d6ccfa2b98cf345d63699f6a5d197aa280f9f3cae3937a048ec9f064d2f",
+      "stage": "STAGE_1_DESIGN_INPUT"
+    },
+    {
+      "accepted": true,
+      "artifact_name": "stage2_guide_fact_base.json",
+      "sha256": "bd9657f65445b33817cd9867362269cfe9206822b4ca32029b6bbad11b4ee3a7",
+      "stage": "STAGE_2_GUIDE_AND_FACT_BASE"
+    },
+    {
+      "accepted": true,
+      "artifact_name": "stage3_project_definition.json",
+      "sha256": "9f2f913fd63353a2bc65b93baa23fc93459a4a3301d7ba50418aa0044f18ac90",
+      "stage": "STAGE_3_PROJECT_DEFINITION"
+    }
+  ]
+}

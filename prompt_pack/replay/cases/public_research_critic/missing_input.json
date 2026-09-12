@@ -108,7 +108,7 @@
     "prompt_version": "2.0.0",
     "status": "NEED_USER_INPUT",
     "result": {
-      "verdict": "ACCEPT_FOR_IMPORT_REVIEW",
+      "verdict": "REVISE",
       "source_quality_summary": [],
       "unsupported_claim_ids": [],
       "missing_counterevidence_topics": []
@@ -137,7 +137,8 @@
         ],
         "answer_schema": {
           "type": "OBJECT",
-          "allowed_values": []
+          "allowed_values": [],
+          "properties": {}
         },
         "blocking": true,
         "priority": "P1"

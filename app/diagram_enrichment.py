@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any
@@ -36,7 +37,8 @@ class DiagramEnrichmentService:
         # Mermaid rendering owns one persistent browser process.  A dedicated
         # thread keeps all pipe I/O and SkillExecutor database writes on a
         # stable thread instead of asyncio's rotating default thread pool.
-        self._render_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mermaid-render")
+        self._render_executor_lock = threading.Lock()
+        self._render_executor: ThreadPoolExecutor | None = None
 
     async def enrich(
         self,
@@ -169,7 +171,32 @@ class DiagramEnrichmentService:
             workflow_id=workflow_id,
             security_level=security_level,
         )
-        return await loop.run_in_executor(self._render_executor, call)
+        return await loop.run_in_executor(self._get_render_executor(), call)
+
+    def _get_render_executor(self) -> ThreadPoolExecutor:
+        """Return a live renderer executor, recreating it after an app restart.
+
+        FastAPI/TestClient lifecycles may stop and start more than once in the
+        same interpreter.  Keeping executor creation lazy makes shutdown
+        deterministic without making the service permanently unusable.
+        """
+        with self._render_executor_lock:
+            executor = self._render_executor
+            if executor is None:
+                executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="mermaid-render",
+                )
+                self._render_executor = executor
+            return executor
+
+    def close(self) -> None:
+        """Release the dedicated renderer thread pool deterministically."""
+        with self._render_executor_lock:
+            executor = self._render_executor
+            self._render_executor = None
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
 
     def _persist_enriched_output(
         self,

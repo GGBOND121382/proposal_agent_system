@@ -1,0 +1,136 @@
+{
+  "case_id": "report_section_write-missing_input",
+  "prompt_id": "P-REPORT-SECTION-WRITE",
+  "case_type": "missing_input",
+  "description": "结构合法但本章证据卡整体缺失，应要求用户补充",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-SECTION-WRITE",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "REPORT_SECTION_WRITE",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "task_type": "REPORT_SECTION_WRITE",
+      "document_type": "SURVEY_REPORT",
+      "report_title": "DASH 系统公开调研报告",
+      "section": {
+        "section_key": "object-evolution",
+        "title": "背景调研：对象与演进",
+        "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+        "must_answer_questions": [
+          "DASH 是什么、由谁主导、演进脉络如何？"
+        ],
+        "evidence_card_ids": [],
+        "known_gaps": []
+      },
+      "background_cards": []
+    },
+    "expected_output_schema": "schemas/prompts/report_section_write_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-SECTION-WRITE",
+    "prompt_version": "1.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "section_key": "object-evolution",
+      "markdown_body": "本章拟回答 DASH 的对象定义与演进脉络，但本次运行没有取得任何调研证据卡，目前无法确认任何事实性内容。",
+      "cited_card_ids": [],
+      "unresolved_questions": [
+        "DASH 的对象定义与演进脉络全部待证据补齐"
+      ]
+    },
+    "findings": [
+      {
+        "code": "SECTION_WRITE_EVIDENCE_BASE_MISSING",
+        "severity": "P0",
+        "category": "EVIDENCE",
+        "target_type": "INPUT",
+        "target_path_or_span": "payload/background_cards",
+        "description": "本章证据卡与正文摘录整体缺失，无法撰写有证据支撑的正文",
+        "evidence_refs": [
+          "background_cards"
+        ],
+        "repairable": true,
+        "repair_instruction": "补充本章可用的调研证据卡与正文摘录后重新撰写",
+        "suggested_route": "USER",
+        "blocking": true
+      }
+    ],
+    "unresolved_items": [
+      {
+        "item_id": "unres-001",
+        "type": "MISSING",
+        "description": "缺少本章可用的调研证据卡",
+        "target_paths": [
+          "payload/background_cards"
+        ],
+        "required_action": "补充调研证据卡",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-001",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请提供本章可用的 WF-3B 调研证据卡与正文摘录。",
+        "reason": "没有证据卡时正文无法给出任何可核验的事实陈述",
+        "target_paths": [
+          "payload/background_cards"
+        ],
+        "answer_schema": {
+          "type": "OBJECT",
+          "allowed_values": [],
+          "properties": {}
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

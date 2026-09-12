@@ -5,17 +5,18 @@ import json
 from pathlib import Path
 
 from app.config import Settings
-from app.context import ContextBuilder
+from app.runtime_api import ContextBuilder
 from app.db import Database
 from app.documents import parse_document
-from app.executor import PromptExecutor
-from app.llm import ModelGateway
+from app.runtime_api import PromptExecutor
+from app.runtime_api import ModelGateway
 from app.pack import PromptPack
 from app.research import PublicResearchService
 from app.security import SecurityRouter
 from app.simulated_llm import SimulatedLLM
 from app.util import new_id, utc_now
-from app.workflows import WorkflowEngine
+from app.runtime_api import WorkflowEngine
+from app.workflow_status import should_pause_automatic_advancement
 
 
 def _runtime(tmp_path: Path, monkeypatch):
@@ -85,7 +86,7 @@ async def _finish(engine: WorkflowEngine, project_id: str, workflow_type: str, *
             action = "APPROVE" if "APPROVE" in gate["allowed_actions"] else "CONFIRM"
             engine.decide_gate(gate["id"], action=action, decided_by="pytest", decided_role=gate["required_role"])
             continue
-        if wf["status"] in {"COMPLETED", "BLOCKED", "CANCELLED"}:
+        if should_pause_automatic_advancement(wf["status"]):
             break
     return wf
 
@@ -93,7 +94,7 @@ async def _finish(engine: WorkflowEngine, project_id: str, workflow_type: str, *
 def test_all_30_simulated_outputs_remain_schema_valid(tmp_path, monkeypatch):
     _, pack, *_ = _runtime(tmp_path, monkeypatch)
     simulator = SimulatedLLM(pack)
-    assert len(pack.prompt_ids()) == 30
+    assert len(pack.prompt_ids()) == 39
     for prompt_id in pack.prompt_ids():
         envelope = pack.replay_input(prompt_id)
         output = simulator.invoke(prompt_id, envelope)

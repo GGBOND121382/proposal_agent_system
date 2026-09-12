@@ -141,8 +141,41 @@
             "queries": {
               "type": "array",
               "items": {
-                "type": "string",
-                "minLength": 1
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "query_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "query": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "linked_question_indexes": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "minItems": 1,
+                        "uniqueItems": true
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "query_id",
+                      "query",
+                      "linked_question_indexes"
+                    ]
+                  }
+                ]
               },
               "minItems": 1
             },
@@ -177,6 +210,16 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "binding_contract_version": {
+              "anyOf": [
+                {
+                  "const": "1.0"
+                },
+                {
+                  "const": "LEGACY-2.0"
+                }
+              ]
             }
           },
           "additionalProperties": false,
@@ -276,6 +319,46 @@
         },
         "safe_online_package": {
           "$ref": "../common/object_ref.schema.json"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
+        },
+        "extracted_passages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "passage_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "source_ref": {
+                "$ref": "../common/source_ref.schema.json"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "relevance": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "passage_id",
+              "source_ref",
+              "text",
+              "relevance"
+            ]
+          }
+        },
+        "research_sufficiency": {
+          "$ref": "../common/research_sufficiency.schema.json"
         }
       },
       "additionalProperties": false,
@@ -288,7 +371,15 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/public_research_critic_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
     }
   },
   "additionalProperties": false,

@@ -1,0 +1,141 @@
+{
+  "case_id": "background-research-plan-critic-missing-input",
+  "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC",
+  "case_type": "missing_input",
+  "description": "结构合法但批准边界信息缺失，应要求用户补充",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "BACKGROUND_RESEARCH_PLAN_CRITIC",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "approved_boundary": {
+        "task_description": "调研城市内河水质多源感知与异常预警的公开应用背景。",
+        "topic_description": "城市内河水质多源感知与异常预警",
+        "allowed_topics": [
+          "城市内河水质监测",
+          "异常预警应用场景",
+          "行业规模与政策"
+        ],
+        "allowed_context": [
+          "公开网页",
+          "公开统计"
+        ],
+        "prohibited_inferences": [
+          "不得推断内部项目身份"
+        ],
+        "prohibited_outputs": [
+          "不得输出内部数据"
+        ]
+      },
+      "required_dimensions": [
+        "APPLICATION_SCENARIO",
+        "INDUSTRY_SCALE_AND_TREND",
+        "POLICY_STANDARD_AND_PROGRAM"
+      ],
+      "executable_queries": [
+        {
+          "query_id": "query-001",
+          "query": "城市内河水质在线监测 应用场景 生态环境部门",
+          "dimension": "APPLICATION_SCENARIO",
+          "purpose": "识别真实使用场景"
+        },
+        {
+          "query_id": "query-002",
+          "query": "水质监测 市场规模 官方统计 2024",
+          "dimension": "INDUSTRY_SCALE_AND_TREND",
+          "purpose": "获取可核验规模数据"
+        }
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/background_research_plan_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-BACKGROUND-RESEARCH-PLAN-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "verdict": "REVISE",
+      "approved_query_indexes": [],
+      "rejected_query_indexes": []
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-001",
+        "type": "MISSING",
+        "description": "缺少已批准的公开调研边界",
+        "target_paths": [
+          "payload/approved_boundary"
+        ],
+        "required_action": "补充批准边界",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-001",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请补充已批准的公开调研边界。",
+        "reason": "范围审查依赖批准边界",
+        "target_paths": [
+          "payload/approved_boundary"
+        ],
+        "answer_schema": {
+          "type": "OBJECT",
+          "allowed_values": [],
+          "properties": {}
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

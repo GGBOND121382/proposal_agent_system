@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "safe_online_package_critic_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "outbound_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task_description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "allowed_context": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "prohibited_inferences": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "prohibited_outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "task_description",
+        "queries",
+        "allowed_context",
+        "prohibited_inferences",
+        "prohibited_outputs"
+      ]
+    },
+    "approved_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed_topics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "forbidden_semantic_categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "allowed_topics",
+        "forbidden_semantic_categories"
+      ]
+    }
+  },
+  "required": [
+    "outbound_candidate",
+    "approved_boundary"
+  ]
+}

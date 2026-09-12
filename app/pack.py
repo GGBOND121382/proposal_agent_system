@@ -9,6 +9,7 @@ import yaml
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
+from .prompt_contracts import finding_code_errors, protocol_semantic_errors
 from .util import expand_env, read_json
 
 
@@ -22,20 +23,104 @@ class PromptPack:
         self.profiles = expand_env(yaml.safe_load((root / "config/prompt_model_profiles.yaml").read_text(encoding="utf-8")))
         self.routing = expand_env(yaml.safe_load((root / "policies/model_routing.yaml").read_text(encoding="utf-8")))
         self.section_profiles = yaml.safe_load((root / "knowledge/section_profiles.yaml").read_text(encoding="utf-8"))
+        self.relation_matrix = yaml.safe_load((root / "knowledge/relation_matrix.yaml").read_text(encoding="utf-8"))
         self.shared_prompt = self._load_shared_prompt()
         self._schema_registry = self._build_schema_registry()
+        self._structure_validator_cache: dict[tuple[str, str], Draft202012Validator] = {}
+        self._common_validator_cache: dict[str, Draft202012Validator] = {}
 
     def _load_shared_prompt(self) -> str:
+        """Load the full legacy shared prompt for compatibility and auditing."""
         parts = []
         for rel in [
             "prompts/shared/business_rules.md",
             "prompts/shared/security_rules.md",
             "prompts/shared/source_authority.md",
+            "prompts/shared/knowledge_status_rules.md",
             "prompts/shared/skill_rules.md",
             "prompts/shared/output_protocol.md",
         ]:
             parts.append((self.root / rel).read_text(encoding="utf-8"))
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _markdown_h2_sections(text: str) -> tuple[str, dict[str, str]]:
+        """Split one shared markdown module into intro and ``##`` sections."""
+        intro: list[str] = []
+        sections: dict[str, list[str]] = {}
+        current: str | None = None
+        for line in text.splitlines():
+            if line.startswith("## "):
+                current = line[3:].strip()
+                sections[current] = [line]
+                continue
+            if current is None:
+                intro.append(line)
+            else:
+                sections[current].append(line)
+        return (
+            "\n".join(intro).strip(),
+            {name: "\n".join(lines).strip() for name, lines in sections.items()},
+        )
+
+    def shared_prompt_for(self, prompt_id: str) -> str:
+        """Return only shared modules that can affect the current Prompt.
+
+        Deterministic validators continue to own Schema/reference/provenance
+        enforcement.  This selection only prevents unrelated operational skills
+        (for example Mermaid or public-research instructions) from being sent to
+        every model call.
+        """
+        entry = self.entry(prompt_id)
+        if str(entry.get("model_contract_mode") or "").upper() == "SEMANTIC":
+            return (
+                self.root / "prompts/shared/semantic_model_rules.md"
+            ).read_text(encoding="utf-8").strip()
+
+        parts = [
+            (self.root / "prompts/shared/business_rules.md").read_text(encoding="utf-8"),
+            (self.root / "prompts/shared/security_rules.md").read_text(encoding="utf-8"),
+            (self.root / "prompts/shared/source_authority.md").read_text(encoding="utf-8"),
+            (self.root / "prompts/shared/knowledge_status_rules.md").read_text(encoding="utf-8"),
+        ]
+
+        skill_text = (self.root / "prompts/shared/skill_rules.md").read_text(encoding="utf-8")
+        intro, skill_sections = self._markdown_h2_sections(skill_text)
+        selected_skill_sections: list[str] = []
+
+        # The generic weak-model boundary applies to every model call.
+        weak_model = skill_sections.get("弱模型任务边界")
+        if weak_model:
+            selected_skill_sections.append(weak_model)
+
+        model_profile = str(entry.get("model_profile") or "")
+        environment = str(entry.get("required_environment") or "")
+        executor_role = str(entry.get("executor_role") or "")
+
+        # Public-research mechanics are relevant only to public-research calls.
+        if model_profile == "public_research" or environment == "ONLINE_PUBLIC":
+            public_research = skill_sections.get("公共研究技能")
+            if public_research:
+                selected_skill_sections.insert(0, public_research)
+
+        # Mermaid source generation belongs to the actual writing producer, not
+        # planners, critics, expression editors, or unrelated prompts.
+        if model_profile == "formal_writing" and executor_role == "Writing Agent":
+            mermaid = skill_sections.get("Mermaid图形技能")
+            if mermaid:
+                selected_skill_sections.insert(0, mermaid)
+
+        if selected_skill_sections:
+            skill_parts = []
+            if intro:
+                skill_parts.append(intro)
+            skill_parts.extend(selected_skill_sections)
+            parts.append("\n\n".join(skill_parts))
+
+        parts.append(
+            (self.root / "prompts/shared/output_protocol.md").read_text(encoding="utf-8")
+        )
+        return "\n\n".join(part.strip() for part in parts if part.strip())
 
     def _build_schema_registry(self) -> Registry:
         registry = Registry()
@@ -65,6 +150,75 @@ class PromptPack:
     def schema(self, prompt_id: str, kind: str) -> dict[str, Any]:
         return read_json(self.schema_path(prompt_id, kind))
 
+    def has_model_contract(self, prompt_id: str) -> bool:
+        entry = self.entry(prompt_id)
+        return bool(entry.get("model_input_schema") and entry.get("model_output_schema"))
+
+    def model_schema_path(self, prompt_id: str, kind: str) -> Path:
+        entry = self.entry(prompt_id)
+        key = "model_input_schema" if kind == "input" else "model_output_schema"
+        path = entry.get(key)
+        if not path:
+            raise KeyError(f"{prompt_id} does not define {key}")
+        return (self.root / str(path)).resolve()
+
+    def model_schema(self, prompt_id: str, kind: str) -> dict[str, Any]:
+        return read_json(self.model_schema_path(prompt_id, kind))
+
+    def model_validator(self, prompt_id: str, kind: str) -> Draft202012Validator:
+        path = self.model_schema_path(prompt_id, kind)
+        schema = self.model_schema(prompt_id, kind)
+        schema["$id"] = path.as_uri()
+        return Draft202012Validator(schema, registry=self._schema_registry, format_checker=Draft202012Validator.FORMAT_CHECKER)
+
+    def validate_model(self, prompt_id: str, kind: str, value: Any) -> list[str]:
+        errors = sorted(self.model_validator(prompt_id, kind).iter_errors(value), key=lambda e: list(e.absolute_path))
+        result: list[str] = []
+        for err in errors:
+            path = "/" + "/".join(str(x) for x in err.absolute_path)
+            result.append(f"{path or '/'}: {err.message}")
+        return result
+
+    def common_validator(self, schema_name: str) -> Draft202012Validator:
+        """Return a validator for one named canonical common object schema."""
+
+        normalized = str(schema_name or "").strip()
+        if not normalized or Path(normalized).name != normalized:
+            raise ValueError(f"invalid common schema name: {schema_name!r}")
+        cached = self._common_validator_cache.get(normalized)
+        if cached is not None:
+            return cached
+        path = (self.root / "schemas" / "common" / normalized).resolve()
+        common_root = (self.root / "schemas" / "common").resolve()
+        if path.parent != common_root or not path.is_file():
+            raise KeyError(f"Unknown common schema: {normalized}")
+        schema = read_json(path)
+        schema["$id"] = path.as_uri()
+        validator = Draft202012Validator(
+            schema,
+            registry=self._schema_registry,
+            format_checker=Draft202012Validator.FORMAT_CHECKER,
+        )
+        self._common_validator_cache[normalized] = validator
+        return validator
+
+    def validate_common(self, schema_name: str, value: Any) -> list[str]:
+        errors = sorted(
+            self.common_validator(schema_name).iter_errors(value),
+            key=lambda error: list(error.absolute_path),
+        )
+        result: list[str] = []
+        for error in errors:
+            suffix = "/".join(str(token) for token in error.absolute_path)
+            result.append(
+                f"/{suffix}: {error.message}" if suffix else f"/: {error.message}"
+            )
+        return result
+
+    def inlined_model_schema(self, prompt_id: str, kind: str) -> dict[str, Any]:
+        path = self.model_schema_path(prompt_id, kind)
+        return self._inline_refs(read_json(path), path, set())
+
     def validator(self, prompt_id: str, kind: str) -> Draft202012Validator:
         path = self.schema_path(prompt_id, kind)
         schema = self.schema(prompt_id, kind)
@@ -74,6 +228,150 @@ class PromptPack:
     def validate(self, prompt_id: str, kind: str, value: Any) -> list[str]:
         errors = sorted(self.validator(prompt_id, kind).iter_errors(value), key=lambda e: list(e.absolute_path))
         result = []
+        for err in errors:
+            path = "/" + "/".join(str(x) for x in err.absolute_path)
+            result.append(f"{path or '/'}: {err.message}")
+        if isinstance(value, dict):
+            result.extend(self._protocol_semantic_errors(prompt_id, kind, value))
+            if kind == "output" and not (
+                str(self.entry(prompt_id).get("model_contract_mode") or "").upper()
+                == "SEMANTIC"
+            ):
+                result.extend(
+                    finding_code_errors(
+                        prompt_id=prompt_id,
+                        output=value,
+                        prompt_text=self.prompt_text(prompt_id),
+                    )
+                )
+        return result
+
+    def _protocol_semantic_errors(
+        self,
+        prompt_id: str,
+        kind: str,
+        value: dict[str, Any],
+    ) -> list[str]:
+        return protocol_semantic_errors(
+            prompt_id=prompt_id,
+            kind=kind,
+            value=value,
+            expected_output_schema=str(
+                self.entry(prompt_id).get("output_schema") or ""
+            ),
+        )
+
+    @staticmethod
+    def _structure_only_schema(node: Any, *, root: bool = False) -> Any:
+        """Return a schema that checks container/scalar shape only.
+
+        Model responses are normalized before the final strict JSON Schema
+        validation.  The normalizers intentionally repair enum aliases and a
+        small number of deterministic protocol fields, but they must never run
+        on a value whose container type is already incompatible with the
+        declared schema.  This projection preserves only type-bearing schema
+        keywords and converts ``oneOf`` to ``anyOf`` so structurally compatible
+        branches do not fail merely because semantic constraints were removed.
+
+        Missing required fields, enum drift, bounds, formats and additional
+        properties remain the responsibility of the normal strict validator.
+        """
+        if isinstance(node, bool):
+            return node
+        if isinstance(node, list):
+            return [PromptPack._structure_only_schema(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+
+        projected: dict[str, Any] = {}
+        if "type" in node:
+            declared = node["type"]
+            declared_types = (
+                [declared]
+                if isinstance(declared, str)
+                else [item for item in declared if isinstance(item, str)]
+                if isinstance(declared, list)
+                else []
+            )
+            # Preflight distinguishes containers from scalars, not one scalar
+            # primitive from another.  This keeps deterministic repairs such as
+            # integer -> trusted string/null reachable, while preventing a
+            # model-authored object/array from reaching code that calls int(),
+            # set membership, regex helpers, or string methods on a scalar.
+            container_types = [
+                item for item in declared_types if item in {"object", "array"}
+            ]
+            scalar_declared = any(
+                item in {"string", "integer", "number", "boolean", "null"}
+                for item in declared_types
+            )
+            scalar_shape = ["string", "integer", "number", "boolean", "null"]
+            if root and "object" in declared_types:
+                projected["type"] = "object"
+            elif container_types and scalar_declared:
+                projected["type"] = [*container_types, *scalar_shape]
+            elif container_types:
+                projected["type"] = [*container_types, "null"]
+            elif scalar_declared:
+                projected["type"] = scalar_shape
+        if isinstance(node.get("properties"), dict):
+            projected["properties"] = {
+                key: PromptPack._structure_only_schema(value)
+                for key, value in node["properties"].items()
+            }
+        if isinstance(node.get("patternProperties"), dict):
+            projected["patternProperties"] = {
+                key: PromptPack._structure_only_schema(value)
+                for key, value in node["patternProperties"].items()
+            }
+        if isinstance(node.get("items"), (dict, bool)):
+            projected["items"] = PromptPack._structure_only_schema(node["items"])
+        if isinstance(node.get("prefixItems"), list):
+            projected["prefixItems"] = [
+                PromptPack._structure_only_schema(item)
+                for item in node["prefixItems"]
+            ]
+        if isinstance(node.get("contains"), (dict, bool)):
+            projected["contains"] = PromptPack._structure_only_schema(node["contains"])
+        if isinstance(node.get("additionalProperties"), (dict, bool)):
+            # Keep only schema-valued additional properties.  A plain false is
+            # a semantic strictness rule rather than a container-shape rule.
+            if isinstance(node["additionalProperties"], dict):
+                projected["additionalProperties"] = PromptPack._structure_only_schema(
+                    node["additionalProperties"]
+                )
+        if isinstance(node.get("allOf"), list):
+            projected["allOf"] = [
+                PromptPack._structure_only_schema(item)
+                for item in node["allOf"]
+            ]
+        branches: list[Any] = []
+        for keyword in ("anyOf", "oneOf"):
+            if isinstance(node.get(keyword), list):
+                branches.extend(
+                    PromptPack._structure_only_schema(item)
+                    for item in node[keyword]
+                )
+        if branches:
+            projected["anyOf"] = branches
+        return projected
+
+    def structure_schema(self, prompt_id: str, kind: str) -> dict[str, Any]:
+        """Return an inlined schema projection used before normalization."""
+        return self._structure_only_schema(self.inlined_schema(prompt_id, kind), root=True)
+
+    def validate_structure(self, prompt_id: str, kind: str, value: Any) -> list[str]:
+        """Validate declared value/container types without semantic checks."""
+        cache_key = (prompt_id, kind)
+        validator = self._structure_validator_cache.get(cache_key)
+        if validator is None:
+            validator = Draft202012Validator(
+                self.structure_schema(prompt_id, kind),
+                format_checker=Draft202012Validator.FORMAT_CHECKER,
+            )
+            self._structure_validator_cache[cache_key] = validator
+        errors = sorted(validator.iter_errors(value), key=lambda e: list(e.absolute_path))
+        result: list[str] = []
         for err in errors:
             path = "/" + "/".join(str(x) for x in err.absolute_path)
             result.append(f"{path or '/'}: {err.message}")
@@ -176,3 +474,59 @@ class PromptPack:
     def model_profile(self, prompt_id: str) -> dict[str, Any]:
         profile_id = self.entry(prompt_id)["model_profile"]
         return self.profiles["profiles"][profile_id]
+
+    def model_capability(self, provider_model_name: str) -> dict[str, Any]:
+        """Return the provider-model token capability registered by exact model name.
+
+        ``.env`` chooses the provider model name; token limits deliberately do not
+        live in environment variables or endpoint slots.  Unknown provider models
+        fail closed in LIVE MiniMax routing instead of inheriting a stale ceiling
+        from whichever logical model slot happens to reference them.
+        """
+
+        name = str(provider_model_name or "").strip()
+        registry = self.models.get("provider_capabilities") or {}
+        capability = registry.get(name)
+        if capability is None and name:
+            folded = name.casefold()
+            for registered_name, registered in registry.items():
+                if str(registered_name).casefold() == folded:
+                    capability = registered
+                    break
+        if not isinstance(capability, dict):
+            raise KeyError(f"No provider capability registered for model {name!r}")
+
+        required = (
+            "context_window_tokens",
+            "recommended_output_tokens",
+            "hard_max_output_tokens",
+            "output_parameter",
+        )
+        missing = [key for key in required if key not in capability]
+        if missing:
+            raise ValueError(
+                f"Provider capability for {name!r} is missing: {', '.join(missing)}"
+            )
+
+        normalized = copy.deepcopy(capability)
+        for key in (
+            "context_window_tokens",
+            "recommended_output_tokens",
+            "hard_max_output_tokens",
+        ):
+            value = int(normalized[key])
+            if value <= 0:
+                raise ValueError(
+                    f"Provider capability {name!r}.{key} must be positive"
+                )
+            normalized[key] = value
+        if normalized["hard_max_output_tokens"] > normalized["context_window_tokens"]:
+            raise ValueError(
+                f"Provider capability {name!r} output hard max exceeds context window"
+            )
+        normalized["output_parameter"] = str(normalized["output_parameter"]).strip()
+        if not normalized["output_parameter"]:
+            raise ValueError(
+                f"Provider capability {name!r}.output_parameter must be non-empty"
+            )
+        return normalized

@@ -1,37 +1,100 @@
 from __future__ import annotations
 
 import csv
-import hashlib
-import ipaddress
 import json
-import mimetypes
-import socket
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from bs4 import BeautifulSoup
-from pypdf import PdfReader
 
 from .base import SkillContext, SkillResult
+from .content_extraction import ContentExtractor
+from .browser_worker import BrowserWorker
+from .fetch_gateway import (
+    FetchGatewayRetrievalError,
+    FetchGatewaySecurityError,
+    HttpFetchGateway,
+    validate_public_url,
+)
+from .search_gateway import SearchGateway, normalize_search_queries
+from .search_providers import (
+    ConnectorSearchProvider,
+    BrowserSearchProvider,
+    RecordedSearchProvider,
+    SearchProviderConfigurationError,
+    SearxngSearchProvider,
+)
 from ..util import new_id, safe_filename, sha256_bytes, sha256_text, utc_now, write_json
 
 
 class PublicResearchArchiveError(RuntimeError):
-    pass
+    """Base class for auditable public-research failures.
+
+    ``category`` is intentionally machine-readable so the workflow can distinguish
+    configuration dependencies from plan-contract, retrieval, security and archive
+    integrity failures without classifying every error raised inside PUBLIC_SEARCH as
+    ``WAITING_CONFIGURATION``.
+    """
+
+    category = "RUNTIME"
+    error_code = "PUBLIC_RESEARCH_RUNTIME_ERROR"
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = dict(details or {})
+
+
+class PublicResearchConfigurationError(PublicResearchArchiveError):
+    category = "CONFIGURATION"
+    error_code = "PUBLIC_RESEARCH_CONFIGURATION_ERROR"
+
+
+class PublicResearchPlanContractError(PublicResearchArchiveError):
+    category = "PLAN_CONTRACT"
+    error_code = "PUBLIC_RESEARCH_PLAN_CONTRACT_ERROR"
+
+
+class PublicResearchRetrievalError(PublicResearchArchiveError):
+    category = "RETRIEVAL"
+    error_code = "PUBLIC_RESEARCH_RETRIEVAL_ERROR"
+
+
+class PublicResearchSecurityError(PublicResearchArchiveError):
+    category = "SECURITY"
+    error_code = "PUBLIC_RESEARCH_SECURITY_ERROR"
+
+
+class PublicResearchIntegrityError(PublicResearchArchiveError):
+    category = "INTEGRITY"
+    error_code = "PUBLIC_RESEARCH_INTEGRITY_ERROR"
 
 
 class PublicResearchArchiveSkill:
     skill_id = "public_research.archive"
-    version = "1.1.0"
+    version = "1.3.0"
     description = "Search public sources, fetch and extract them, and preserve verifiable snapshots with hashes."
 
     def __init__(self, settings):
         self.settings = settings
+        self.content_extractor = ContentExtractor()
+        self.browser_worker = BrowserWorker(settings)
+        self.fetch_gateway = HttpFetchGateway(
+            settings,
+            client_factory=httpx.Client,
+            browser_worker=(
+                self.browser_worker
+                if bool(getattr(settings, "browser_fetch_fallback_enabled", False))
+                else None
+            ),
+        )
+        self._last_search_execution: dict[str, Any] | None = None
+
+    def close(self) -> None:
+        self.browser_worker.close()
 
     def run(self, payload: dict[str, Any], context: SkillContext) -> SkillResult:
+        self._last_search_execution = None
         provider = str(payload.get("provider") or self.settings.public_search_provider).lower()
         plan = payload.get("plan") or {}
         queries = self._queries(plan)
@@ -42,10 +105,13 @@ class PublicResearchArchiveSkill:
         text_dir = root / "text"
         meta_dir = root / "metadata"
         connector_dir = root / "connector"
-        for directory in [raw_dir, text_dir, meta_dir, connector_dir]:
+        search_page_dir = root / "search_pages"
+        for directory in [raw_dir, text_dir, meta_dir, connector_dir, search_page_dir]:
             directory.mkdir(parents=True, exist_ok=True)
 
         connector_manifest: dict[str, Any] | None = None
+        retrieval_warnings: list[str] = []
+        retrieval_failures: list[dict[str, Any]] = []
         if provider == "recorded":
             candidates = self._load_recorded(payload.get("record_file") or self.settings.public_research_record_file)
             retrieval_mode = "RECORDED_VERIFIED_SOURCE_SET"
@@ -54,15 +120,31 @@ class PublicResearchArchiveSkill:
             candidates, connector_manifest = self._load_connector(connector_path, queries)
             retrieval_mode = "LIVE_CONNECTOR_ARCHIVE"
         elif provider == "searxng":
-            candidates = self._search_searxng(queries, max_results)
+            candidates, retrieval_failures = self._search_searxng(queries, max_results)
+            retrieval_warnings = [
+                f"query={item['query']}: {item['message']}"
+                for item in retrieval_failures
+            ]
             retrieval_mode = "LIVE_SEARXNG"
+        elif provider in {"browser", "browser_search"}:
+            candidates, retrieval_failures = self._search_browser(
+                queries,
+                max_results,
+                evidence_dir=search_page_dir,
+            )
+            retrieval_warnings = [
+                f"query={item['query']}: {item['message']}"
+                for item in retrieval_failures
+            ]
+            retrieval_mode = "LIVE_BROWSER_SEARCH"
         else:
-            raise PublicResearchArchiveError(f"Unsupported PUBLIC_SEARCH_PROVIDER: {provider}")
+            raise PublicResearchConfigurationError(f"Unsupported PUBLIC_SEARCH_PROVIDER: {provider}")
 
         records: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         passages: list[dict[str, Any]] = []
-        warnings: list[str] = []
+        warnings: list[str] = list(retrieval_warnings)
+        candidate_failures: list[dict[str, Any]] = []
         seen_urls: set[str] = set()
         for candidate in candidates:
             if len(records) >= max_results:
@@ -73,10 +155,34 @@ class PublicResearchArchiveSkill:
             seen_urls.add(url)
             try:
                 record = self._archive_candidate(candidate, raw_dir, text_dir, meta_dir, provider)
+            except PublicResearchArchiveError as exc:
+                warning = f"{url}: {exc}"
+                warnings.append(warning)
+                candidate_failures.append({
+                    "url": url,
+                    "category": str(getattr(exc, "category", "RUNTIME") or "RUNTIME"),
+                    "error_code": str(getattr(exc, "error_code", "PUBLIC_RESEARCH_RUNTIME_ERROR") or "PUBLIC_RESEARCH_RUNTIME_ERROR"),
+                    "message": str(exc),
+                    "details": dict(getattr(exc, "details", {}) or {}),
+                })
+                continue
             except Exception as exc:
-                warnings.append(f"{url}: {exc}")
+                warning = f"{url}: {exc}"
+                warnings.append(warning)
+                candidate_failures.append({
+                    "url": url,
+                    "category": "RETRIEVAL",
+                    "error_code": "PUBLIC_RESEARCH_SOURCE_RETRIEVAL_ERROR",
+                    "message": str(exc),
+                    "details": {"exception_type": type(exc).__name__},
+                })
                 continue
             records.append(record)
+            if record.get("fetch_mode") == "SNIPPET_ONLY":
+                warnings.append(
+                    f"{record['url']}: browser fallback was blocked; search snippet was archived but not admitted as full-text evidence"
+                )
+                continue
             source_ref = {
                 "source_id": record["source_id"],
                 "source_type": "PUBLIC_SOURCE",
@@ -100,7 +206,30 @@ class PublicResearchArchiveSkill:
             )
 
         if not records:
-            raise PublicResearchArchiveError("No public source could be archived")
+            failure_categories = {
+                str(item.get("category") or "RUNTIME").upper()
+                for item in candidate_failures
+            }
+            details = {
+                "warnings": warnings,
+                "query_failures": retrieval_failures,
+                "candidate_failures": candidate_failures,
+                "candidate_count": len(candidates),
+            }
+            if failure_categories and failure_categories <= {"SECURITY"}:
+                raise PublicResearchSecurityError(
+                    "All candidate sources were rejected by the public-source security policy",
+                    details=details,
+                )
+            if failure_categories and failure_categories <= {"INTEGRITY"}:
+                raise PublicResearchIntegrityError(
+                    "All candidate sources failed archive integrity validation",
+                    details=details,
+                )
+            raise PublicResearchRetrievalError(
+                "No public source could be archived",
+                details=details,
+            )
 
         if connector_manifest is not None:
             write_json(connector_dir / "connector_response.json", connector_manifest)
@@ -117,6 +246,8 @@ class PublicResearchArchiveSkill:
             "source_count": len(records),
             "warning_count": len(warnings),
             "warnings": warnings,
+            "query_failures": retrieval_failures,
+            "provider_runs": list((self._last_search_execution or {}).get("provider_runs") or []),
             "records": records,
             "connector_response": str(connector_dir / "connector_response.json") if connector_manifest is not None else None,
         }
@@ -155,91 +286,114 @@ class PublicResearchArchiveSkill:
         return result[:12]
 
     def _load_recorded(self, record_file: str | Path) -> list[dict[str, Any]]:
-        path = Path(record_file)
-        if not path.exists():
-            raise PublicResearchArchiveError(f"Recorded research file not found: {path}")
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        sources = payload.get("sources") if isinstance(payload, dict) else payload
-        if not isinstance(sources, list):
-            raise PublicResearchArchiveError("Recorded research file must contain a sources array")
-        return [item for item in sources if isinstance(item, dict)]
+        try:
+            return RecordedSearchProvider(record_file).load_candidates()
+        except SearchProviderConfigurationError as exc:
+            raise PublicResearchConfigurationError(str(exc), details=exc.details) from exc
 
 
     def _load_connector(self, connector_file: str | Path, planned_queries: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        path = Path(connector_file)
-        if not path.exists():
-            raise PublicResearchArchiveError(f"Connector research file not found: {path}")
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise PublicResearchArchiveError("Connector research file must be a JSON object")
-        responses = payload.get("responses")
-        if not isinstance(responses, list):
-            raise PublicResearchArchiveError("Connector research file must contain a responses array")
-        connector_queries = []
-        candidates: list[dict[str, Any]] = []
-        for response in responses:
-            if not isinstance(response, dict):
-                continue
-            query = str(response.get("query") or "").strip()
-            if query:
-                connector_queries.append(query)
-            results = response.get("results") or []
-            if not isinstance(results, list):
-                continue
-            for item in results:
-                if not isinstance(item, dict):
-                    continue
-                candidate = dict(item)
-                candidate.setdefault("matched_query", query)
-                candidate.setdefault("retrieved_at", response.get("retrieved_at") or payload.get("created_at") or utc_now())
-                candidate.setdefault("connector", payload.get("connector") or "approved-search-connector")
-                candidate.setdefault("verification", {})
-                candidate["verification"] = {
-                    **candidate["verification"],
-                    "connector_run_id": payload.get("run_id"),
-                    "connector": payload.get("connector"),
-                    "query": query,
-                    "status": candidate["verification"].get("status") or "CONNECTOR_RETURNED",
-                }
-                candidates.append(candidate)
-        missing = [q for q in planned_queries if q not in connector_queries]
-        if missing:
-            raise PublicResearchArchiveError(f"Connector responses do not cover planned queries: {missing}")
-        if not candidates:
-            raise PublicResearchArchiveError("Connector research file contains no result records")
-        manifest = {
-            **payload,
-            "ingested_at": utc_now(),
-            "planned_queries": planned_queries,
-            "connector_queries": connector_queries,
-            "result_count": len(candidates),
-            "source_file": str(path),
-            "source_file_sha256": sha256_bytes(path.read_bytes()),
-        }
-        return candidates, manifest
+        try:
+            return ConnectorSearchProvider(connector_file).load_candidates(planned_queries)
+        except SearchProviderConfigurationError as exc:
+            raise PublicResearchConfigurationError(str(exc), details=exc.details) from exc
 
-    def _search_searxng(self, queries: list[str], max_results: int) -> list[dict[str, Any]]:
-        if not self.settings.public_search_base_url:
-            raise PublicResearchArchiveError("PUBLIC_SEARCH_BASE_URL is empty")
+    def _search_searxng_sequential(
+        self,
+        queries: list[str],
+        max_results: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        return self._search_searxng_with_provider(queries, max_results, max_workers=1)
+
+    def _search_searxng(
+        self,
+        queries: list[str],
+        max_results: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Run SearXNG through the provider-neutral search contract."""
+        return self._search_searxng_with_provider(queries, max_results, max_workers=4)
+
+    def _search_searxng_with_provider(
+        self,
+        queries: list[str],
+        max_results: int,
+        *,
+        max_workers: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if not queries:
+            return [], []
+        provider = SearxngSearchProvider(
+            self.settings,
+            # Resolve the module attribute at call time so existing test and
+            # deployment injection points remain compatible.
+            client_factory=httpx.Client,
+            max_workers=max_workers,
+        )
+        try:
+            batch = SearchGateway([provider]).search(
+                normalize_search_queries(queries),
+                per_query_limit=max_results,
+            )
+        except SearchProviderConfigurationError as exc:
+            raise PublicResearchConfigurationError(str(exc), details=exc.details) from exc
+        self._last_search_execution = {
+            "providers": list(batch.providers),
+            "provider_runs": [run.to_dict() for run in batch.runs],
+            "failures": list(batch.failures),
+        }
+        candidates = batch.candidates()
+        if not candidates and batch.failures:
+            endpoint = f"{str(self.settings.public_search_base_url or '').rstrip('/')}/search"
+            raise PublicResearchRetrievalError(
+                "All SearXNG queries failed",
+                details={"endpoint": endpoint, "query_failures": batch.failures},
+            )
+        return candidates, batch.failures
+
+    def _search_browser(
+        self,
+        queries: list[str],
+        max_results: int,
+        *,
+        evidence_dir: Path,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if not queries:
+            return [], []
+        provider = BrowserSearchProvider(
+            self.settings,
+            worker=self.browser_worker,
+            evidence_dir=evidence_dir,
+        )
+        try:
+            batch = SearchGateway([provider]).search(
+                normalize_search_queries(queries),
+                per_query_limit=max_results,
+            )
+        except SearchProviderConfigurationError as exc:
+            raise PublicResearchConfigurationError(str(exc), details=exc.details) from exc
+        self._last_search_execution = {
+            "providers": list(batch.providers),
+            "provider_runs": [run.to_dict() for run in batch.runs],
+            "failures": list(batch.failures),
+        }
+        candidates = batch.candidates()
+        if not candidates and batch.failures:
+            raise PublicResearchRetrievalError(
+                "All Browser Search queries failed or were blocked",
+                details={"query_failures": batch.failures},
+            )
+        return candidates, batch.failures
+
+    @staticmethod
+    def _round_robin(groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        """Interleave query results so max_results cannot starve later queries."""
+        if not groups:
+            return []
         candidates: list[dict[str, Any]] = []
-        with httpx.Client(timeout=self.settings.research_fetch_timeout_seconds, follow_redirects=True) as client:
-            for query in queries:
-                response = client.get(
-                    f"{self.settings.public_search_base_url}/search",
-                    params={"q": query, "format": "json", "language": "zh-CN", "safesearch": 1},
-                )
-                response.raise_for_status()
-                payload = response.json()
-                for item in payload.get("results", [])[: min(10, max_results)]:
-                    candidates.append(
-                        {
-                            "title": str(item.get("title") or "").strip(),
-                            "url": str(item.get("url") or "").strip(),
-                            "excerpt": str(item.get("content") or item.get("snippet") or "").strip(),
-                            "matched_query": query,
-                            "engine": item.get("engine"),
-                        }
-                    )
+        for index in range(max((len(group) for group in groups), default=0)):
+            for group in groups:
+                if index < len(group):
+                    candidates.append(group[index])
         return candidates
 
     def _archive_candidate(
@@ -251,7 +405,7 @@ class PublicResearchArchiveSkill:
         provider: str,
     ) -> dict[str, Any]:
         url = str(candidate.get("url") or "").strip()
-        self._validate_public_url(url, resolve_dns=provider == "searxng")
+        self._validate_public_url(url, resolve_dns=provider not in {"recorded", "connector"})
         source_id = str(candidate.get("source_id") or new_id("public-src"))
         title = str(candidate.get("title") or url).strip()
         retrieved_at = str(candidate.get("retrieved_at") or utc_now())
@@ -267,6 +421,10 @@ class PublicResearchArchiveSkill:
                 "authors": candidate.get("authors") or [],
                 "publisher": candidate.get("publisher"),
                 "doi": candidate.get("doi"),
+                "source_type": candidate.get("source_type"),
+                "publication_status": candidate.get("publication_status"),
+                "publication_kind": candidate.get("publication_kind"),
+                "venue": candidate.get("venue"),
                 "content_text": body_text,
                 "verification": candidate.get("verification") or {},
                 "connector": candidate.get("connector"),
@@ -277,12 +435,35 @@ class PublicResearchArchiveSkill:
             content_type = "application/json"
             final_url = url
             http_status = None
+            fetch_mode = "PROVIDER_PAYLOAD"
+            extractor = "PROVIDER_TEXT"
+            extraction_quality = "USABLE" if len(body_text) >= 200 else ("SHORT" if body_text else "EMPTY")
+            extraction_failure_reason = "NO_EXTRACTABLE_TEXT" if not body_text else None
         else:
-            raw_bytes, content_type, final_url, http_status = self._fetch_url(url)
-            body_text = self._extract_text(raw_bytes, content_type, final_url)
+            try:
+                fetched = self.fetch_gateway.fetch(url)
+            except FetchGatewaySecurityError as exc:
+                raise PublicResearchSecurityError(str(exc), details=exc.details) from exc
+            except FetchGatewayRetrievalError as exc:
+                raise PublicResearchRetrievalError(str(exc), details=exc.details) from exc
+            extracted = self.content_extractor.extract(fetched)
+            raw_bytes = fetched.raw_bytes
+            content_type = fetched.content_type
+            final_url = fetched.final_url
+            http_status = fetched.http_status
+            fetch_mode = fetched.fetch_mode
+            extractor = extracted.extractor
+            extraction_quality = extracted.quality
+            extraction_failure_reason = extracted.failure_reason
+            body_text = extracted.text
+            if fetch_mode == "SNIPPET_ONLY":
+                body_text = str(candidate.get("excerpt") or title)
+                extractor = "SEARCH_SNIPPET"
+                extraction_quality = "SNIPPET_ONLY"
+                extraction_failure_reason = fetched.blockage_type or fetched.browser_status
             if not body_text:
                 body_text = str(candidate.get("excerpt") or title)
-            suffix = self._suffix(content_type, final_url)
+            suffix = self.content_extractor.suffix(content_type, final_url)
 
         excerpt = self._compact_text(body_text)[:12000]
         if len(excerpt) < 20:
@@ -291,7 +472,10 @@ class PublicResearchArchiveSkill:
         text_path = text_dir / f"{safe_filename(source_id)}.txt"
         meta_path = meta_dir / f"{safe_filename(source_id)}.json"
         raw_path.write_bytes(raw_bytes)
-        text_path.write_text(body_text, encoding="utf-8")
+        # Write the exact bytes that were hashed.  Path.write_text() performs
+        # platform newline translation on Windows, which changes LF to CRLF
+        # and makes immediate archive verification fail.
+        text_path.write_bytes(body_text.encode("utf-8"))
         snapshot_hash = sha256_bytes(raw_bytes)
         text_hash = sha256_text(body_text)
         parsed = urlparse(final_url)
@@ -305,11 +489,31 @@ class PublicResearchArchiveSkill:
             "authors": candidate.get("authors") or [],
             "publisher": candidate.get("publisher"),
             "doi": candidate.get("doi"),
+            "source_type": candidate.get("source_type"),
+            "publication_status": candidate.get("publication_status"),
+            "publication_kind": candidate.get("publication_kind"),
+            "venue": candidate.get("venue"),
             "retrieved_at": retrieved_at,
             "matched_query": matched_query,
             "retrieval_provider": provider,
             "http_status": http_status,
             "content_type": content_type,
+            "fetch_mode": fetch_mode,
+            "fetch_fallback_reason": (
+                fetched.fallback_reason if provider not in {"recorded", "connector"} else None
+            ),
+            "browser_status": (
+                fetched.browser_status if provider not in {"recorded", "connector"} else None
+            ),
+            "browser_blockage_type": (
+                fetched.blockage_type if provider not in {"recorded", "connector"} else None
+            ),
+            "fetch_cache_hit": (
+                fetched.cache_hit if provider not in {"recorded", "connector"} else False
+            ),
+            "extractor": extractor,
+            "extraction_quality": extraction_quality,
+            "extraction_failure_reason": extraction_failure_reason,
             "raw_path": str(raw_path),
             "text_path": str(text_path),
             "metadata_path": str(meta_path),
@@ -325,75 +529,37 @@ class PublicResearchArchiveSkill:
         return record
 
     def _fetch_url(self, url: str) -> tuple[bytes, str, str, int]:
-        headers = {
-            "User-Agent": "ProposalAgentResearchArchiver/1.0 (+public-source-verification)",
-            "Accept": "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.1",
-        }
-        limit = int(self.settings.research_max_source_bytes)
-        with httpx.Client(timeout=self.settings.research_fetch_timeout_seconds, follow_redirects=True, headers=headers) as client:
-            with client.stream("GET", url) as response:
-                response.raise_for_status()
-                final_url = str(response.url)
-                self._validate_public_url(final_url, resolve_dns=True)
-                chunks: list[bytes] = []
-                total = 0
-                for chunk in response.iter_bytes():
-                    total += len(chunk)
-                    if total > limit:
-                        raise PublicResearchArchiveError(f"Source exceeds {limit} bytes")
-                    chunks.append(chunk)
-                content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0].lower()
-                return b"".join(chunks), content_type, final_url, response.status_code
+        try:
+            fetched = HttpFetchGateway(
+                self.settings,
+                client_factory=httpx.Client,
+            ).fetch(url)
+        except FetchGatewaySecurityError as exc:
+            raise PublicResearchSecurityError(str(exc), details=exc.details) from exc
+        except FetchGatewayRetrievalError as exc:
+            raise PublicResearchRetrievalError(str(exc), details=exc.details) from exc
+        return fetched.raw_bytes, fetched.content_type, fetched.final_url, fetched.http_status
 
     @staticmethod
     def _extract_text(raw: bytes, content_type: str, url: str) -> str:
-        if content_type == "application/pdf" or url.lower().endswith(".pdf"):
-            reader = PdfReader(BytesIO(raw))
-            return "\n\n".join((page.extract_text() or "") for page in reader.pages[:200])
-        if content_type.startswith("text/plain"):
-            return raw.decode("utf-8", errors="replace")
-        text = raw.decode("utf-8", errors="replace")
-        soup = BeautifulSoup(text, "html.parser")
-        for node in soup(["script", "style", "noscript", "svg", "nav", "footer", "header"]):
-            node.decompose()
-        main = soup.find("main") or soup.find("article") or soup.body or soup
-        return main.get_text("\n", strip=True)
+        return ContentExtractor.extract_text(raw, content_type, url)[0]
 
     @staticmethod
     def _compact_text(text: str) -> str:
-        return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+        return ContentExtractor.compact_text(text)
 
     @staticmethod
     def _suffix(content_type: str, url: str) -> str:
-        if content_type == "application/pdf" or url.lower().endswith(".pdf"):
-            return ".pdf"
-        if content_type.startswith("text/plain"):
-            return ".txt"
-        if "html" in content_type:
-            return ".html"
-        return mimetypes.guess_extension(content_type) or ".bin"
+        return ContentExtractor.suffix(content_type, url)
 
     @staticmethod
     def _validate_public_url(url: str, *, resolve_dns: bool) -> None:
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise PublicResearchArchiveError("Only public HTTP(S) URLs are allowed")
-        host = parsed.hostname.lower()
-        if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
-            raise PublicResearchArchiveError("Local addresses are prohibited")
         try:
-            ip = ipaddress.ip_address(host)
-            addresses = [ip]
-        except ValueError:
-            addresses = []
-            if resolve_dns:
-                try:
-                    addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)]
-                except socket.gaierror as exc:
-                    raise PublicResearchArchiveError(f"DNS resolution failed for {host}") from exc
-        for ip in addresses:
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                raise PublicResearchArchiveError(f"Private/reserved address is prohibited: {ip}")
+            validate_public_url(url, resolve_dns=resolve_dns)
+        except FetchGatewaySecurityError as exc:
+            raise PublicResearchSecurityError(str(exc), details=exc.details) from exc
+        except FetchGatewayRetrievalError as exc:
+            raise PublicResearchRetrievalError(str(exc), details=exc.details) from exc
 
     @staticmethod
     def _authority_rank(domain: str, candidate: dict[str, Any]) -> int:
@@ -413,6 +579,7 @@ class PublicResearchArchiveSkill:
         fields = [
             "source_id", "title", "url", "final_url", "domain", "published_at", "publisher",
             "doi", "retrieved_at", "retrieval_provider", "http_status", "content_type",
+            "fetch_mode", "extractor", "extraction_quality", "extraction_failure_reason",
             "snapshot_sha256", "text_sha256", "byte_size", "text_length", "authority_rank",
             "raw_path", "text_path", "metadata_path",
         ]

@@ -1,0 +1,684 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background_research_plan_input.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-BACKGROUND-RESEARCH-PLAN"
+    },
+    "prompt_version": {
+      "const": "1.0.0"
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "workflow_type": {
+          "type": "string",
+          "enum": [
+            "PROJECT_INTAKE",
+            "TEMPLATE_EXTRACTION",
+            "HYBRID_ONLINE_ASSIST",
+            "TOPIC_BACKGROUND_RESEARCH",
+            "PROPOSAL_AUTHORING",
+            "SECURITY_REVIEW_AND_EXPORT"
+          ]
+        },
+        "current_step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "writing_mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "COPY_EDIT_ONLY",
+                "SUBSTANTIVE_REVISION",
+                "DRAFT_FROM_PROJECT_DEFINITION"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "workflow_type",
+        "current_step",
+        "attempt",
+        "writing_mode"
+      ]
+    },
+    "security_context": {
+      "$ref": "../common/security_context.schema.json"
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "target_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "read_only_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        },
+        "protected_object_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "target_object_ids",
+        "read_only_object_ids",
+        "protected_object_ids"
+      ]
+    },
+    "freshness": {
+      "$ref": "../common/freshness.schema.json"
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "safe_online_package": {
+          "$ref": "../common/object_ref.schema.json"
+        },
+        "task_type": {
+          "const": "PUBLIC_BACKGROUND_RESEARCH"
+        },
+        "research_dimension_mode": {
+          "type": "string",
+          "enum": [
+            "APPLICATION_BACKGROUND",
+            "SURVEY_TECHNICAL"
+          ]
+        },
+        "literature_review_intent": {
+          "type": "boolean"
+        },
+        "survey_research_brief": {
+          "type": "object",
+          "properties": {
+            "must_answer_questions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "evidence_requirements": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "materials_cutoff": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_priorities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "scope_exclusions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "deliverable_notes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "topic": {
+          "type": "object",
+          "properties": {
+            "topic_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            },
+            "topic_description": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "topic_id",
+            "topic_description"
+          ]
+        },
+        "required_dimensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "OBJECT_AND_EVOLUTION",
+              "FUNCTION_AND_ARCHITECTURE",
+              "WORKFLOW_AND_INTERACTION",
+              "TECHNOLOGY_AND_IMPLEMENTATION",
+              "EVALUATION_AND_EFFECT",
+              "LIMITATIONS_AND_GAPS",
+              "APPLICATION_SCENARIO",
+              "STAKEHOLDER_AND_PAIN",
+              "INDUSTRY_SCALE_AND_TREND",
+              "POLICY_STANDARD_AND_PROGRAM",
+              "REPRESENTATIVE_CASE",
+              "CURRENT_ADOPTION",
+              "OPERATIONAL_CONSTRAINT",
+              "RESEARCH_SIGNIFICANCE"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "optional_dimensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "OBJECT_AND_EVOLUTION",
+              "FUNCTION_AND_ARCHITECTURE",
+              "WORKFLOW_AND_INTERACTION",
+              "TECHNOLOGY_AND_IMPLEMENTATION",
+              "EVALUATION_AND_EFFECT",
+              "LIMITATIONS_AND_GAPS",
+              "APPLICATION_SCENARIO",
+              "STAKEHOLDER_AND_PAIN",
+              "INDUSTRY_SCALE_AND_TREND",
+              "POLICY_STANDARD_AND_PROGRAM",
+              "REPRESENTATIVE_CASE",
+              "CURRENT_ADOPTION",
+              "OPERATIONAL_CONSTRAINT",
+              "RESEARCH_SIGNIFICANCE"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "known_public_sources": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/source_ref.schema.json"
+          }
+        },
+        "time_constraints": {
+          "type": "object",
+          "properties": {
+            "start_date": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end_date": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "freshness_required": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "start_date",
+            "end_date",
+            "freshness_required"
+          ]
+        },
+        "evidence_requirements": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "retrieval_contract": {
+          "type": "object",
+          "properties": {
+            "required_channels": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "ACADEMIC",
+                  "WEB_SEARCH"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "required_providers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "provider_execution_requirements": {
+              "type": "object",
+              "properties": {
+                "required_providers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "execute_all_approved_queries": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "required_providers",
+                "execute_all_approved_queries"
+              ]
+            },
+            "minimum_fulltext_sources_per_query": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "allow_snippet_only": {
+              "type": "boolean"
+            },
+            "require_web_discovery": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "safe_online_package_content": {
+          "type": "object",
+          "properties": {
+            "package_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "task_type": {
+              "const": "PUBLIC_BACKGROUND_RESEARCH"
+            },
+            "task_description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "queries": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "allowed_context": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "prohibited_inferences": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "prohibited_outputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "security_level": {
+              "const": "PUBLIC"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "package_id",
+            "task_type",
+            "task_description",
+            "queries",
+            "allowed_context",
+            "prohibited_inferences",
+            "prohibited_outputs",
+            "security_level"
+          ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
+        },
+        "revision_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/finding.schema.json"
+          }
+        },
+        "retrieval_feedback": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "round": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2
+            },
+            "previous_plan": {
+              "type": "object",
+              "properties": {
+                "plan_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "task_type": {
+                  "const": "PUBLIC_BACKGROUND_RESEARCH"
+                },
+                "topic_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "required_dimensions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "OBJECT_AND_EVOLUTION",
+                      "FUNCTION_AND_ARCHITECTURE",
+                      "WORKFLOW_AND_INTERACTION",
+                      "TECHNOLOGY_AND_IMPLEMENTATION",
+                      "EVALUATION_AND_EFFECT",
+                      "LIMITATIONS_AND_GAPS",
+                      "APPLICATION_SCENARIO",
+                      "STAKEHOLDER_AND_PAIN",
+                      "INDUSTRY_SCALE_AND_TREND",
+                      "POLICY_STANDARD_AND_PROGRAM",
+                      "REPRESENTATIVE_CASE",
+                      "CURRENT_ADOPTION",
+                      "OPERATIONAL_CONSTRAINT",
+                      "RESEARCH_SIGNIFICANCE"
+                    ]
+                  },
+                  "minItems": 1,
+                  "uniqueItems": true
+                },
+                "queries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "query_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                      },
+                      "query": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "dimension": {
+                        "type": "string",
+                        "enum": [
+                          "OBJECT_AND_EVOLUTION",
+                          "FUNCTION_AND_ARCHITECTURE",
+                          "WORKFLOW_AND_INTERACTION",
+                          "TECHNOLOGY_AND_IMPLEMENTATION",
+                          "EVALUATION_AND_EFFECT",
+                          "LIMITATIONS_AND_GAPS",
+                          "APPLICATION_SCENARIO",
+                          "STAKEHOLDER_AND_PAIN",
+                          "INDUSTRY_SCALE_AND_TREND",
+                          "POLICY_STANDARD_AND_PROGRAM",
+                          "REPRESENTATIVE_CASE",
+                          "CURRENT_ADOPTION",
+                          "OPERATIONAL_CONSTRAINT",
+                          "RESEARCH_SIGNIFICANCE"
+                        ]
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "entity_groups": {
+                        "type": "array",
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "minItems": 1,
+                          "uniqueItems": true
+                        },
+                        "maxItems": 8
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "query_id",
+                      "query",
+                      "dimension",
+                      "purpose"
+                    ]
+                  },
+                  "minItems": 1,
+                  "uniqueItems": true
+                },
+                "time_scope": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "evidence_requirements": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "prohibited_inferences": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "binding_contract_version": {
+                  "const": "1.0"
+                },
+                "required_channels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "ACADEMIC",
+                      "WEB_SEARCH"
+                    ]
+                  },
+                  "uniqueItems": true
+                },
+                "provider_execution_requirements": {
+                  "type": "object",
+                  "properties": {
+                    "required_providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "uniqueItems": true
+                    },
+                    "execute_all_approved_queries": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "required_providers",
+                    "execute_all_approved_queries"
+                  ]
+                },
+                "minimum_fulltext_sources_per_query": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "allow_snippet_only": {
+                  "type": "boolean"
+                },
+                "require_web_discovery": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "plan_id",
+                "task_type",
+                "topic_id",
+                "required_dimensions",
+                "queries",
+                "time_scope",
+                "evidence_requirements",
+                "prohibited_inferences",
+                "binding_contract_version",
+                "required_channels",
+                "provider_execution_requirements",
+                "minimum_fulltext_sources_per_query",
+                "allow_snippet_only",
+                "require_web_discovery"
+              ]
+            },
+            "source_summaries": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "gaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "max_additional_queries": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "round",
+            "previous_plan",
+            "source_summaries",
+            "gaps",
+            "max_additional_queries"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "safe_online_package",
+        "task_type",
+        "topic",
+        "required_dimensions",
+        "optional_dimensions",
+        "known_public_sources",
+        "time_constraints",
+        "evidence_requirements"
+      ]
+    },
+    "expected_output_schema": {
+      "type": "string",
+      "minLength": 1,
+      "const": "schemas/prompts/background_research_plan_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "task",
+    "security_context",
+    "scope",
+    "freshness",
+    "payload",
+    "expected_output_schema"
+  ]
+}

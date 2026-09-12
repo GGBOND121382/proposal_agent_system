@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-TEMPLATE-CRITIC",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -217,7 +217,7 @@
     "prompt_version": "3.0.0",
     "status": "NEED_USER_INPUT",
     "result": {
-      "verdict": "ACCEPT",
+      "verdict": "REVISE",
       "checked_component_ids": [
         "comp-001"
       ],
@@ -280,7 +280,8 @@
         ],
         "answer_schema": {
           "type": "OBJECT",
-          "allowed_values": []
+          "allowed_values": [],
+          "properties": {}
         },
         "blocking": true,
         "priority": "P1"

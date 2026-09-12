@@ -1,24 +1,43 @@
 from __future__ import annotations
-import json, sys, hashlib, zipfile
+import json, sys, hashlib, zipfile, re
 from pathlib import Path
 import yaml
-from jsonschema import Draft202012Validator, RefResolver
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 
 ROOT=Path(__file__).resolve().parents[1]
+REPO_ROOT=ROOT.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from app.prompt_contracts import (
+    documented_finding_codes,
+    protocol_semantic_errors,
+    replay_finding_code_errors,
+)
 errors=[]
 counts={}
+SCHEMA_REGISTRY=Registry()
 
 def load_json(p):
     try: return json.loads(p.read_text(encoding='utf-8'))
     except Exception as e: errors.append(f'JSON_PARSE {p.relative_to(ROOT)}: {e}'); return None
 
-def validate(instance, schema_path, label):
+def schema_validator(schema_path):
     schema=load_json(schema_path)
-    if schema is None: return False
+    if schema is None:
+        raise ValueError(f"schema unavailable: {schema_path}")
+    schema=dict(schema)
+    schema["$id"]=schema_path.resolve().as_uri()
+    return Draft202012Validator(
+        schema,
+        registry=SCHEMA_REGISTRY,
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
+    )
+
+def validate(instance, schema_path, label):
     try:
-        Draft202012Validator.check_schema(schema)
-        resolver=RefResolver(base_uri=schema_path.resolve().as_uri(), referrer=schema)
-        Draft202012Validator(schema, resolver=resolver).validate(instance)
+        schema_validator(schema_path).validate(instance)
         return True
     except Exception as e:
         errors.append(f'SCHEMA_VALIDATE {label}: {type(e).__name__}: {e}')
@@ -28,6 +47,14 @@ def validate(instance, schema_path, label):
 json_files=list(ROOT.rglob('*.json'))
 yaml_files=list(ROOT.rglob('*.yaml'))+list(ROOT.rglob('*.yml'))
 for p in json_files: load_json(p)
+for schema_path in ROOT.glob('schemas/**/*.json'):
+    schema=load_json(schema_path)
+    if schema is not None:
+        schema=dict(schema)
+        schema["$id"]=schema_path.resolve().as_uri()
+        SCHEMA_REGISTRY=SCHEMA_REGISTRY.with_resource(
+            schema_path.resolve().as_uri(), Resource.from_contents(schema)
+        )
 for p in yaml_files:
     try: yaml.safe_load(p.read_text(encoding='utf-8'))
     except Exception as e: errors.append(f'YAML_PARSE {p.relative_to(ROOT)}: {e}')
@@ -39,22 +66,55 @@ if reg:
     if len(ids)!=len(set(ids)): errors.append(f'PROMPT_COUNT duplicate IDs: {len(ids)}/{len(set(ids))}')
     profiles=yaml.safe_load((ROOT/'config/prompt_model_profiles.yaml').read_text(encoding='utf-8'))['profiles']
     for p in reg['prompts']:
-        for key in ['prompt_file','input_schema','output_schema']:
-            if not (ROOT/p[key]).exists(): errors.append(f'MISSING {p["prompt_id"]} {key}={p[key]}')
+        semantic_mode=str(p.get('model_contract_mode') or '').upper()=='SEMANTIC'
+        required_files=['prompt_file','input_schema','output_schema']
+        if semantic_mode:
+            required_files.extend(['model_input_schema','model_output_schema'])
+        for key in required_files:
+            if not p.get(key) or not (ROOT/p[key]).exists():
+                errors.append(f'MISSING {p["prompt_id"]} {key}={p.get(key)}')
         if p['model_profile'] not in profiles: errors.append(f'MODEL_PROFILE_MISSING {p["prompt_id"]}: {p["model_profile"]}')
         if not p.get('executor_role'): errors.append(f'EXECUTOR_ROLE_MISSING {p["prompt_id"]}')
         text=(ROOT/p['prompt_file']).read_text(encoding='utf-8')
-        if f'执行角色：`{p.get("executor_role")}`' not in text: errors.append(f'PROMPT_EXECUTOR_MISMATCH {p["prompt_id"]}')
-        if len(text)<2200: errors.append(f'PROMPT_TOO_SHORT {p["prompt_id"]}: {len(text)}')
-        for heading in ['## 角色与权限','## 必须读取的输入','## 执行步骤','## 状态判定','## Finding代码','## 强制自检','## 输出要求']:
-            if heading not in text: errors.append(f'PROMPT_HEADING_MISSING {p["prompt_id"]}: {heading}')
+        if not semantic_mode and f'执行角色：`{p.get("executor_role")}`' not in text:
+            errors.append(f'PROMPT_EXECUTOR_MISMATCH {p["prompt_id"]}')
+        min_prompt_chars=250 if semantic_mode else 600
+        if len(text)<min_prompt_chars:
+            errors.append(f'PROMPT_TOO_SHORT {p["prompt_id"]}: {len(text)}')
+        if len(text)>6000:
+            errors.append(f'PROMPT_TOO_LONG {p["prompt_id"]}: {len(text)}')
+        if not semantic_mode and '## Finding代码' not in text:
+            errors.append(f'PROMPT_HEADING_MISSING {p["prompt_id"]}: ## Finding代码')
         inp=load_json(ROOT/p['input_schema']); out=load_json(ROOT/p['output_schema'])
+        model_inp=load_json(ROOT/p['model_input_schema']) if semantic_mode else None
+        model_out=load_json(ROOT/p['model_output_schema']) if semantic_mode else None
         if inp:
             try: Draft202012Validator.check_schema(inp)
             except Exception as e: errors.append(f'INPUT_SCHEMA_INVALID {p["prompt_id"]}: {e}')
         if out:
             try: Draft202012Validator.check_schema(out)
             except Exception as e: errors.append(f'OUTPUT_SCHEMA_INVALID {p["prompt_id"]}: {e}')
+        if semantic_mode and model_inp:
+            try: Draft202012Validator.check_schema(model_inp)
+            except Exception as e: errors.append(f'MODEL_INPUT_SCHEMA_INVALID {p["prompt_id"]}: {e}')
+        if semantic_mode and model_out:
+            try: Draft202012Validator.check_schema(model_out)
+            except Exception as e: errors.append(f'MODEL_OUTPUT_SCHEMA_INVALID {p["prompt_id"]}: {e}')
+        expected_version=p.get('prompt_version')
+        input_version=((inp or {}).get('properties',{}).get('prompt_version',{}).get('const'))
+        output_version=((out or {}).get('properties',{}).get('prompt_version',{}).get('const'))
+        expected_output_schema=((inp or {}).get('properties',{}).get('expected_output_schema',{}).get('const'))
+        prompt_versions=re.findall(r'^- 版本：`([^`]+)`$', text, flags=re.MULTILINE)
+        if input_version!=expected_version:
+            errors.append(f'INPUT_PROMPT_VERSION_MISMATCH {p["prompt_id"]}: registry={expected_version} schema={input_version}')
+        if output_version!=expected_version:
+            errors.append(f'OUTPUT_PROMPT_VERSION_MISMATCH {p["prompt_id"]}: registry={expected_version} schema={output_version}')
+        if expected_output_schema!=p['output_schema']:
+            errors.append(f'INPUT_OUTPUT_SCHEMA_BINDING_MISMATCH {p["prompt_id"]}: registry={p["output_schema"]} schema={expected_output_schema}')
+        if not semantic_mode and not documented_finding_codes(text):
+            errors.append(f'PROMPT_FINDING_CODES_MISSING {p["prompt_id"]}')
+        if not prompt_versions or set(prompt_versions)!={expected_version}:
+            errors.append(f'PROMPT_TEXT_VERSION_MISMATCH {p["prompt_id"]}: registry={expected_version} text={prompt_versions}')
 
 # input schemas and common schemas self-check
 for p in ROOT.glob('schemas/**/*.json'):
@@ -77,12 +137,29 @@ if reg and manifest:
         case=load_json(path)
         if not case: continue
         p=by_id[entry['prompt_id']]
+        expected_version=p.get('prompt_version')
+        input_value=case.get('input') or {}
+        input_version=input_value.get('prompt_version')
+        output_value=case.get('expected_output')
+        replay_output_schema=input_value.get('expected_output_schema')
+        if replay_output_schema!=p['output_schema']:
+            errors.append(f'REPLAY_OUTPUT_SCHEMA_BINDING {entry["fixture_path"]}: registry={p["output_schema"]} replay={replay_output_schema}')
+        for semantic_error in protocol_semantic_errors(
+            prompt_id=entry['prompt_id'],
+            kind='input',
+            value=input_value,
+            expected_output_schema=p['output_schema'],
+        ):
+            errors.append(f'REPLAY_INPUT_PROTOCOL {entry["fixture_path"]}: {semantic_error}')
+        output_version=output_value.get('prompt_version') if isinstance(output_value,dict) else None
+        if input_version!=expected_version:
+            errors.append(f'REPLAY_INPUT_PROMPT_VERSION {entry["fixture_path"]}: registry={expected_version} replay={input_version}')
+        if isinstance(output_value,dict) and output_version!=expected_version:
+            errors.append(f'REPLAY_OUTPUT_PROMPT_VERSION {entry["fixture_path"]}: registry={expected_version} replay={output_version}')
         inp_schema=ROOT/p['input_schema']; out_schema=ROOT/p['output_schema']
         # validate without recording expected failure as error
-        schema=load_json(inp_schema)
         try:
-            resolver=RefResolver(base_uri=inp_schema.resolve().as_uri(), referrer=schema)
-            Draft202012Validator(schema, resolver=resolver).validate(case['input'])
+            schema_validator(inp_schema).validate(case['input'])
             actual_in=True
         except Exception:
             actual_in=False
@@ -90,21 +167,37 @@ if reg and manifest:
         if actual_in!=expected_in: errors.append(f'REPLAY_INPUT_EXPECTATION {entry["fixture_path"]}: expected {expected_in}, got {actual_in}')
         if actual_in:
             valid_in+=1
-            unified_schema=load_json(ROOT/'schemas/common/prompt_input_envelope.schema.json')
             try:
-                resolver=RefResolver(base_uri=(ROOT/'schemas/common/prompt_input_envelope.schema.json').resolve().as_uri(), referrer=unified_schema)
-                Draft202012Validator(unified_schema, resolver=resolver).validate(case['input'])
+                schema_validator(ROOT/'schemas/common/prompt_input_envelope.schema.json').validate(case['input'])
                 unified_in+=1
             except Exception as e:
                 errors.append(f'UNIFIED_INPUT {entry["fixture_path"]}: {e}')
         else: invalid_in+=1
         if case.get('expected_output') is not None:
             if validate(case['expected_output'],out_schema,f'{entry["fixture_path"]} output'):
-                valid_out+=1
-                unified_schema=load_json(ROOT/'schemas/common/prompt_output_envelope.schema.json')
+                semantic_errors=protocol_semantic_errors(
+                    prompt_id=entry['prompt_id'],
+                    kind='output',
+                    value=case['expected_output'],
+                    expected_output_schema=p['output_schema'],
+                )
+                finding_errors=(
+                    []
+                    if str(p.get('model_contract_mode') or '').upper()=='SEMANTIC'
+                    else replay_finding_code_errors(
+                        prompt_id=entry['prompt_id'],
+                        output=case['expected_output'],
+                        prompt_text=(ROOT/p['prompt_file']).read_text(encoding='utf-8'),
+                    )
+                )
+                for semantic_error in semantic_errors:
+                    errors.append(f'REPLAY_OUTPUT_PROTOCOL {entry["fixture_path"]}: {semantic_error}')
+                for finding_error in finding_errors:
+                    errors.append(f'REPLAY_FINDING_CODE {entry["fixture_path"]}: {finding_error}')
+                if not semantic_errors and not finding_errors:
+                    valid_out+=1
                 try:
-                    resolver=RefResolver(base_uri=(ROOT/'schemas/common/prompt_output_envelope.schema.json').resolve().as_uri(), referrer=unified_schema)
-                    Draft202012Validator(unified_schema, resolver=resolver).validate(case['expected_output'])
+                    schema_validator(ROOT/'schemas/common/prompt_output_envelope.schema.json').validate(case['expected_output'])
                     unified_out+=1
                 except Exception as e:
                     errors.append(f'UNIFIED_OUTPUT {entry["fixture_path"]}: {e}')
@@ -130,8 +223,11 @@ counts['model_endpoints']=len(endpoint_ids); counts['models']=len(models['models
 # Routing and environment invariants
 for p in reg['prompts']:
     pid=p['prompt_id']; env=p['required_environment']
-    if pid.startswith('P-PUBLIC-RESEARCH-') and env!='ONLINE_PUBLIC': errors.append(f'PUBLIC_PROMPT_ENV {pid}: {env}')
-    if not pid.startswith('P-PUBLIC-RESEARCH-') and pid!='P-TARGETED-REPAIR' and env!='OFFLINE_LOCAL': errors.append(f'OFFLINE_PROMPT_ENV {pid}: {env}')
+    online_public_prefixes = ('P-PUBLIC-RESEARCH-', 'P-BACKGROUND-RESEARCH-')
+    offline_public_critics = {'P-PUBLIC-RESEARCH-PLAN-SCOPE-CRITIC', 'P-BACKGROUND-RESEARCH-PLAN-CRITIC'}
+    if pid.startswith(online_public_prefixes) and pid not in offline_public_critics and env!='ONLINE_PUBLIC':
+        errors.append(f'PUBLIC_PROMPT_ENV {pid}: {env}')
+    if not pid.startswith(online_public_prefixes) and pid!='P-TARGETED-REPAIR' and env!='OFFLINE_LOCAL': errors.append(f'OFFLINE_PROMPT_ENV {pid}: {env}')
     if pid=='P-TARGETED-REPAIR' and env!='SAME_AS_ORIGINAL': errors.append(f'REPAIR_ENV {env}')
 routing=yaml.safe_load((ROOT/'policies/model_routing.yaml').read_text(encoding='utf-8'))
 if routing.get('default',{}).get('deny') is not True: errors.append('MODEL_ROUTING_DEFAULT_NOT_DENY')

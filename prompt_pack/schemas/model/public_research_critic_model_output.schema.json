@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "public_research_critic_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issue_type": {
+            "type": "string",
+            "enum": [
+              "UNSUPPORTED_CLAIM",
+              "OVERGENERALIZED_CLAIM",
+              "MISSING_COUNTEREVIDENCE",
+              "UNANSWERED_RESEARCH_QUESTION"
+            ]
+          },
+          "claim_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "question_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "repair_instruction": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "issue_type",
+          "claim_id",
+          "question_index",
+          "description",
+          "evidence_source_ids",
+          "repair_instruction"
+        ]
+      }
+    },
+    "missing_counterevidence_topics": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "issues",
+    "missing_counterevidence_topics"
+  ]
+}

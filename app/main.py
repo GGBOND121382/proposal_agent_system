@@ -5,50 +5,50 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api_models import GateDecisionRequest, ProjectCreate, PromptExecuteRequest, WorkflowStartRequest
+from .api_models import (
+    GateDecisionRequest,
+    ProjectCreate,
+    ProjectDocumentTypeUpdate,
+    PromptExecuteRequest,
+    WF3BTopicRequest,
+    WorkflowRebuildRequest,
+    WorkflowStartRequest,
+)
 from .config import Settings
-from .context import ContextBuilder
 from .db import Database
-from .diagram_enrichment import DiagramEnrichmentService
 from .documents import ALLOWED_EXTENSIONS, parse_document
-from .executor import PromptExecutionError, PromptExecutor
-from .exporter import DocxExporter, ExportDenied
-from .llm import ModelGateway
 from .pack import PromptPack
-from .post_export_acceptance import PostExportAcceptanceError, PostExportAcceptanceManager
-from .research import PublicResearchService
-from .skill_setup import build_skill_executor
-from .security import SecurityRouter
-from .track_b import TrackBAgentPromptValidator
+from .executor import PromptExecutionError
+from .exporter import ExportDenied
+from .post_export_acceptance import PostExportAcceptanceError
+from .runtime_factory import build_runtime_stack
+from .version import __version__
+from .workflow_catalog import ALL_WORKFLOWS
 from .util import new_id, safe_filename, sha256_json, utc_now
-from .workflows import WORKFLOWS, WorkflowEngine
 
 settings = Settings.load()
 pack = PromptPack(settings.prompt_pack_dir)
 db = Database(settings.db_path)
-router = SecurityRouter(pack)
-gateway = ModelGateway(settings, pack)
-context_builder = ContextBuilder(db, pack)
-executor = PromptExecutor(
-    db,
-    pack,
-    router,
-    gateway,
-    quality_guard=TrackBAgentPromptValidator(pack),
-    quality_guard_enabled=settings.proposal_quality_guard_enabled,
-)
-skill_executor = build_skill_executor(db, settings)
-research = PublicResearchService(settings, skill_executor)
-diagram_enrichment = DiagramEnrichmentService(db, pack, skill_executor)
-workflows = WorkflowEngine(db, pack, context_builder, executor, research, diagram_enrichment)
-exporter = DocxExporter(db, settings)
-post_export_acceptance = PostExportAcceptanceManager(db, settings, exporter)
+runtime = build_runtime_stack(settings, pack, db)
+router = runtime.router
+gateway = runtime.gateway
+context_builder = runtime.context_builder
+executor = runtime.executor
+skill_executor = runtime.skill_executor
+research = runtime.research
+diagram_enrichment = runtime.diagram_enrichment
+workflows = runtime.workflows
+lifecycle = runtime.lifecycle
+exporter = runtime.exporter
+post_export_acceptance = runtime.post_export_acceptance
+dependency_preflight = runtime.dependency_preflight
 
-app = FastAPI(title="项目申请书智能体系统", version="0.6.0")
+app = FastAPI(title="项目申请书智能体系统", version=__version__)
+app.add_event_handler("shutdown", runtime.close)
 app.mount("/static", StaticFiles(directory=settings.root_dir / "app" / "static"), name="static")
 
 
@@ -68,7 +68,41 @@ def config_status() -> dict[str, Any]:
     endpoints = []
     for item in pack.endpoints["endpoints"]:
         endpoints.append({"endpoint_id": item["endpoint_id"], "environment": item["environment"], "enabled": item.get("enabled", False), "base_url_configured": bool(item.get("base_url")), "internet_access": item.get("network_policy", {}).get("internet_access", False)})
-    return {"runtime_mode": settings.runtime_mode, "public_search_provider": settings.public_search_provider, "endpoints": endpoints}
+    report = dependency_preflight.application_report(require_export=False)
+    return {
+        "runtime_mode": settings.runtime_mode,
+        "public_search_provider": settings.public_search_provider,
+        "browser_search_enabled": settings.browser_search_enabled,
+        "browser_fetch_fallback_enabled": settings.browser_fetch_fallback_enabled,
+        "endpoints": endpoints,
+        "preflight": report.as_dict(),
+    }
+
+
+@app.post("/api/config/probe")
+def probe_config(timeout_seconds: int = Query(10, ge=1, le=60)) -> dict[str, Any]:
+    """Explicitly probe configured model and search services.
+
+    Network probes are never performed implicitly while rendering the status page;
+    an operator must request them through this endpoint or ``scripts/check_config.py``.
+    """
+    return dependency_preflight.probe(timeout_seconds=timeout_seconds).as_dict()
+
+
+@app.get("/api/projects/{project_id}/dependency-preflight")
+def project_dependency_preflight(
+    project_id: str,
+    workflow_type: str = Query(...),
+) -> dict[str, Any]:
+    if not db.fetchone("SELECT id FROM projects WHERE id=?", (project_id,)):
+        raise HTTPException(404, "Project not found")
+    if workflow_type not in ALL_WORKFLOWS:
+        raise HTTPException(404, f"Unknown workflow: {workflow_type}")
+    return dependency_preflight.workflow_report(
+        project_id,
+        workflow_type,
+        {},
+    ).as_dict()
 
 
 @app.get("/api/prompts")
@@ -102,6 +136,7 @@ def create_project(req: ProjectCreate) -> dict[str, Any]:
         "allowed_model_endpoint_ids": ["offline-primary"] + (["online-public-primary"] if req.internet_access_allowed and req.anonymized_external_processing_allowed else []),
         "retention_days": 365,
         "task_instruction": req.task_instruction,
+        "document_type": req.document_type,
     }
     db.execute("INSERT INTO projects(id,name,description,security_level,config_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (project_id, req.name, req.description, req.security_level, json.dumps(config, ensure_ascii=False), now, now))
     db.audit("PROJECT_CREATED", project_id=project_id, object_id=project_id, metadata={"security_level": req.security_level})
@@ -124,6 +159,21 @@ def get_project(project_id: str) -> dict[str, Any]:
     row["config"] = json.loads(row.pop("config_json"))
     row["document_count"] = db.fetchone("SELECT COUNT(*) AS n FROM documents WHERE project_id=?", (project_id,))["n"]
     return row
+
+
+@app.patch("/api/projects/{project_id}/document-type")
+def set_project_document_type(project_id: str, req: ProjectDocumentTypeUpdate) -> dict[str, Any]:
+    project = get_project(project_id)
+    config = project["config"]
+    previous = config.get("document_type")
+    config["document_type"] = req.document_type
+    db.execute(
+        "UPDATE projects SET config_json=?, updated_at=? WHERE id=?",
+        (json.dumps(config, ensure_ascii=False), utc_now(), project_id),
+    )
+    db.audit("PROJECT_DOCUMENT_TYPE_SET", project_id=project_id, object_id=project_id,
+             metadata={"previous": previous, "document_type": req.document_type, "source": "USER"})
+    return get_project(project_id)
 
 
 @app.post("/api/projects/{project_id}/documents")
@@ -173,6 +223,9 @@ def list_documents(project_id: str) -> list[dict[str, Any]]:
 @app.post("/api/prompts/{prompt_id}/execute")
 async def execute_prompt(prompt_id: str, req: PromptExecuteRequest) -> dict[str, Any]:
     try:
+        dependency_report = dependency_preflight.prompt_report(req.project_id, prompt_id)
+        if dependency_report.blocking_issues:
+            raise HTTPException(409, dependency_report.as_dict())
         envelope = req.input_data or context_builder.build(prompt_id, req.project_id, workflow_id=req.workflow_id, overrides=req.overrides)
         return await executor.execute(prompt_id, envelope, project_id=req.project_id, workflow_id=req.workflow_id)
     except KeyError as exc:
@@ -197,6 +250,62 @@ async def start_workflow(req: WorkflowStartRequest) -> dict[str, Any]:
         return await workflows.advance(wf["id"]) if req.auto_advance else wf
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/rebuild")
+async def rebuild_workflow(
+    workflow_id: str,
+    req: WorkflowRebuildRequest | None = None,
+) -> dict[str, Any]:
+    request = req or WorkflowRebuildRequest()
+    try:
+        return await lifecycle.rebuild(
+            workflow_id,
+            scope=request.scope,
+            auto_advance=request.auto_advance,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/workflow-rebuilds/{operation_id}/resume")
+async def resume_workflow_rebuild(operation_id: str) -> dict[str, Any]:
+    try:
+        return await lifecycle.resume(operation_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/workflow-rebuilds/{operation_id}/abort-and-restore")
+def abort_workflow_rebuild_and_restore(operation_id: str) -> dict[str, Any]:
+    try:
+        return lifecycle.abort_and_restore(operation_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/api/workflow-rebuilds")
+def list_workflow_rebuilds(
+    project_id: str = Query(...),
+    limit: int = Query(50, ge=1, le=200),
+) -> list[dict[str, Any]]:
+    return lifecycle.list_operations(project_id, limit=limit)
+
+
+@app.get("/api/workflow-rebuilds/{operation_id}")
+def get_workflow_rebuild(operation_id: str) -> dict[str, Any]:
+    try:
+        return lifecycle.get_operation(operation_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.post("/api/workflows/{workflow_id}/advance")
@@ -205,6 +314,20 @@ async def advance_workflow(workflow_id: str) -> dict[str, Any]:
         return await workflows.advance(workflow_id)
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/workflows/{workflow_id}/wf3b-topic")
+async def provide_wf3b_topic(
+    workflow_id: str,
+    req: WF3BTopicRequest,
+) -> dict[str, Any]:
+    try:
+        workflow = workflows.provide_wf3b_topic(workflow_id, req.topic)
+        return await workflows.advance(workflow_id) if req.auto_advance else workflow
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get("/api/workflows")
@@ -228,15 +351,82 @@ def get_workflow(workflow_id: str) -> dict[str, Any]:
         raise HTTPException(404, str(exc)) from exc
 
 
+@app.get("/api/workflows/{workflow_id}/staged-files")
+def staged_workflow_files(workflow_id: str) -> dict[str, Any]:
+    try:
+        return workflows.staged_files(workflow_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/workflows/{workflow_id}/report")
+def get_workflow_report(workflow_id: str) -> dict[str, Any]:
+    row = db.fetchone("SELECT state_json FROM workflows WHERE id=?", (workflow_id,))
+    if not row:
+        raise HTTPException(404, "Workflow not found")
+    state = json.loads(row.get("state_json") or "{}")
+    progress = state.get("report_section_progress") or {}
+    markdown = None
+    artifact_id = str(state.get("report_markdown_artifact_id") or "")
+    if artifact_id:
+        artifact = db.fetchone(
+            "SELECT content_json FROM artifacts WHERE id=? AND artifact_type='REPORT_MARKDOWN'",
+            (artifact_id,),
+        )
+        if artifact:
+            markdown = (json.loads(artifact["content_json"]) or {}).get("markdown")
+    return {
+        "workflow_id": workflow_id,
+        "delivery": state.get("report_delivery") or None,
+        "sections": [
+            {
+                "section_key": str(key),
+                "title": entry.get("title"),
+                "status": entry.get("status"),
+                "attempts": entry.get("attempts"),
+                "last_error": entry.get("last_error"),
+                "summary": entry.get("summary"),
+            }
+            for key, entry in progress.items()
+            if isinstance(entry, dict)
+        ],
+        "markdown": markdown,
+    }
+
+
+@app.get("/api/workflows/{workflow_id}/report/download")
+def download_workflow_report(workflow_id: str, format: str = "md") -> FileResponse:
+    row = db.fetchone("SELECT state_json FROM workflows WHERE id=?", (workflow_id,))
+    if not row:
+        raise HTTPException(404, "Workflow not found")
+    state = json.loads(row.get("state_json") or "{}")
+    delivery = state.get("report_delivery") or {}
+    path_value = str(
+        delivery.get("markdown_path" if format == "md" else "docx_path") or ""
+    )
+    path = Path(path_value) if path_value else None
+    if path is None or not path.exists():
+        raise HTTPException(404, "Report file not found")
+    media_type = (
+        "text/markdown"
+        if format == "md"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    return FileResponse(path, media_type=media_type, filename=path.name)
+
+
 @app.get("/api/gates")
 def list_gates(project_id: str | None = None, workflow_id: str | None = None) -> list[dict[str, Any]]:
     return workflows.list_gates(project_id, workflow_id)
 
 
 @app.post("/api/gates/{gate_id}/decide")
-def decide_gate(gate_id: str, req: GateDecisionRequest) -> dict[str, Any]:
+def decide_gate(gate_id: str, req: GateDecisionRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
     try:
-        return workflows.decide_gate(gate_id, action=req.action, decided_by=req.decided_by, decided_role=req.decided_role, comment=req.comment, answers=req.answers, context_hash=req.context_hash)
+        gate = workflows.decide_gate(gate_id, action=req.action, decided_by=req.decided_by, decided_role=req.decided_role, comment=req.comment, answers=req.answers, context_hash=req.context_hash)
+        if req.auto_advance and gate["status"] == "APPROVED":
+            background_tasks.add_task(workflows.advance, gate["workflow_id"])
+        return gate
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
     except PermissionError as exc:
@@ -263,13 +453,14 @@ def list_research_archives(project_id: str) -> list[dict[str, Any]]:
     if not root.exists():
         return []
     result = []
-    for manifest in sorted(root.glob("*/manifest.json"), reverse=True):
+    for manifest in root.glob("*/manifest.json"):
         try:
             payload = json.loads(manifest.read_text(encoding="utf-8"))
         except Exception:
             continue
         result.append({
             "session_id": payload.get("session_id"),
+            "workflow_id": payload.get("workflow_id"),
             "retrieval_mode": payload.get("retrieval_mode"),
             "provider": payload.get("provider"),
             "created_at": payload.get("created_at"),
@@ -277,6 +468,7 @@ def list_research_archives(project_id: str) -> list[dict[str, Any]]:
             "warning_count": payload.get("warning_count"),
             "manifest_path": str(manifest),
         })
+    result.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     return result
 
 
@@ -289,6 +481,70 @@ def download_research_archive(project_id: str, session_id: str) -> FileResponse:
     archive = shutil.make_archive(str(settings.exports_dir / f"{safe_filename(project_id)}-{safe_filename(session_id)}"), "zip", root)
     path = Path(archive)
     return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
+_SOURCE_DETAIL_FIELDS = (
+    "source_id", "title", "url", "domain", "source_category", "authority_rank",
+    "fetch_mode", "fetch_fallback_reason", "full_text_available", "text_length", "matched_query",
+)
+
+
+@app.get("/api/projects/{project_id}/research-archives/{session_id}/detail")
+def research_archive_detail(project_id: str, session_id: str) -> dict[str, Any]:
+    root = settings.data_dir / "research_archive" / safe_filename(project_id) / safe_filename(session_id)
+    manifest_path = root / "manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(404, "Research archive not found")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    sources = [
+        {field: record.get(field) for field in _SOURCE_DETAIL_FIELDS}
+        for record in manifest.get("records") or []
+    ]
+
+    claims: list[dict[str, Any]] = []
+    workflow_id = manifest.get("workflow_id")
+    if workflow_id:
+        row = db.fetchone(
+            "SELECT output_json FROM prompt_runs WHERE workflow_id=? AND prompt_id IN ('P-BACKGROUND-RESEARCH-SYNTHESIS','P-PUBLIC-RESEARCH-SYNTHESIS') AND status='PASS' ORDER BY created_at DESC LIMIT 1",
+            (workflow_id,),
+        )
+        if row and row.get("output_json"):
+            output = json.loads(row["output_json"])
+            for claim in (output.get("result") or {}).get("claims") or []:
+                claims.append({
+                    "claim_id": claim.get("claim_id"),
+                    "claim_text": claim.get("claim_text"),
+                    "dimension": claim.get("dimension"),
+                    "knowledge_status": claim.get("knowledge_status"),
+                    "subject_id": claim.get("subject_id"),
+                })
+
+    claim_bindings: list[dict[str, Any]] = []
+    binding_dir = root / "claim_bindings"
+    if binding_dir.exists():
+        binding_files = sorted(binding_dir.glob("claim-binding-*.json"), key=lambda p: p.stat().st_mtime)
+        if binding_files:
+            binding_payload = json.loads(binding_files[-1].read_text(encoding="utf-8"))
+            for binding in binding_payload.get("bindings") or []:
+                claim_bindings.append({
+                    "claim_id": binding.get("claim_id"),
+                    "source_ids": binding.get("source_ids") or [],
+                    "evidence_mode": binding.get("evidence_mode"),
+                })
+
+    return {
+        "session_id": manifest.get("session_id"),
+        "workflow_id": workflow_id,
+        "created_at": manifest.get("created_at"),
+        "retrieval_mode": manifest.get("retrieval_mode"),
+        "queries": manifest.get("queries") or [],
+        "sufficiency": manifest.get("research_sufficiency"),
+        "gaps": manifest.get("research_gaps") or [],
+        "sources": sources,
+        "claims": claims,
+        "claim_bindings": claim_bindings,
+    }
 
 
 @app.get("/api/runs")
@@ -355,6 +611,9 @@ def ingest_delivery_findings(project_id: str, payload: dict[str, Any]) -> dict[s
 @app.post("/api/projects/{project_id}/export")
 def export_project(project_id: str) -> FileResponse:
     try:
+        dependency_report = dependency_preflight.application_report(require_export=False)
+        if dependency_report.blocking_issues:
+            raise HTTPException(409, dependency_report.as_dict())
         path = exporter.export(project_id)
         return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=path.name)
     except KeyError as exc:
@@ -366,6 +625,9 @@ def export_project(project_id: str) -> FileResponse:
 @app.post("/api/projects/{project_id}/export-package")
 def export_project_package(project_id: str) -> FileResponse:
     try:
+        dependency_report = dependency_preflight.application_report(require_export=False)
+        if dependency_report.blocking_issues:
+            raise HTTPException(409, dependency_report.as_dict())
         path = exporter.export_package(project_id)
         return FileResponse(path, media_type="application/zip", filename=path.name)
     except KeyError as exc:
@@ -378,6 +640,9 @@ def export_project_package(project_id: str) -> FileResponse:
 def run_post_export_acceptance(project_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     values = payload or {}
     try:
+        dependency_report = dependency_preflight.application_report(require_export=True)
+        if dependency_report.blocking_issues:
+            raise HTTPException(409, dependency_report.as_dict())
         return post_export_acceptance.run(
             project_id,
             workflow_id=values.get("workflow_id"),
@@ -403,4 +668,4 @@ def latest_post_export_acceptance(project_id: str) -> dict[str, Any]:
 
 @app.get("/api/workflow-types")
 def workflow_types() -> dict[str, Any]:
-    return WORKFLOWS
+    return ALL_WORKFLOWS

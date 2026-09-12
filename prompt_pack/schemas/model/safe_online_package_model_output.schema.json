@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "safe_online_package_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "task_description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "queries": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "allowed_context": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "prohibited_inferences": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "prohibited_outputs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "task_description",
+    "queries",
+    "allowed_context",
+    "prohibited_inferences",
+    "prohibited_outputs"
+  ]
+}

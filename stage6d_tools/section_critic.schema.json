@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "actual_model_id",
+    "endpoint_id",
+    "section_id",
+    "verdict",
+    "checked_paragraph_ids",
+    "quality_dimensions",
+    "findings",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "prompt_id": {
+      "const": "P-STAGE6D-SECTION-CONTENT-CRITIC"
+    },
+    "prompt_version": {
+      "const": "1.0.0"
+    },
+    "actual_model_id": {
+      "type": "string",
+      "minLength": 2
+    },
+    "endpoint_id": {
+      "type": "string",
+      "minLength": 2
+    },
+    "section_id": {
+      "pattern": "^SEC-(12|13|14)$"
+    },
+    "verdict": {
+      "enum": [
+        "ACCEPT",
+        "REVISE"
+      ]
+    },
+    "checked_paragraph_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "quality_dimensions": {
+      "type": "array",
+      "minItems": 7,
+      "items": {
+        "type": "object",
+        "required": [
+          "dimension",
+          "result",
+          "comment"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "dimension": {
+            "enum": [
+              "CONTRACT_COVERAGE",
+              "ARGUMENT_CHAIN",
+              "EVIDENCE_BOUNDARY",
+              "RESEARCH_SUBSTANCE",
+              "SECTION_UNIQUENESS",
+              "CLAIM_STATUS",
+              "PAGE_DENSITY"
+            ]
+          },
+          "result": {
+            "enum": [
+              "PASS",
+              "FAIL"
+            ]
+          },
+          "comment": {
+            "type": "string",
+            "minLength": 8
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "target",
+          "message",
+          "repair_instruction"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "MINOR",
+              "MAJOR",
+              "BLOCKING"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "repair_instruction": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 20
+    }
+  }
+}

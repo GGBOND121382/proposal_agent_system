@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-WRITE-CRITIC",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -606,7 +606,7 @@
     "prompt_version": "3.0.0",
     "status": "BLOCK",
     "result": {
-      "verdict": "ACCEPT",
+      "verdict": "BLOCK",
       "checked_paragraph_ids": [
         "p-001"
       ],
@@ -747,7 +747,7 @@
     },
     "findings": [
       {
-        "code": "WRITE_CRITIC_UNSOURCED_CLAIM",
+        "code": "PARAGRAPH_UNCHECKED",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

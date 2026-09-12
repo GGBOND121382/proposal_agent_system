@@ -15,13 +15,10 @@ _kernel.NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.])-?\d+(?:\.\d+)?%?")
 
 
 class TrackBAgentPromptValidator(AgentPromptKernelValidator):
-    """Production Track-B validator with schema-preserving integration reports.
+    """Production Track-B non-mutating quality observer.
 
-    The underlying validator recomputes redundancy statistics from MAIN_BODY
-    sections only.  The public Prompt output schema already contains the
-    ``redundancy_report`` object, so Track B replaces that object in place and
-    removes internal bookkeeping fields rather than extending the frozen
-    Prompt/Schema interface.
+    Integration statistics are recomputed on a private observer copy so Track B
+    can audit MAIN_BODY sections without rewriting the provider output.
     """
 
     def _replace_document_statistics_with_main_body_only(

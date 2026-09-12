@@ -1,0 +1,74 @@
+name: Unified Contract Registry Gate
+
+on:
+  push:
+    branches:
+      - main
+      - "agent/**"
+    paths:
+      - "app/contract_registry.py"
+      - "app/staged_contracts.py"
+      - "app/status_ontology.py"
+      - "app/executor.py"
+      - "prompt_pack/**"
+      - "stage*_tools/**"
+      - "scripts/validate_contract_registry.py"
+      - "scripts/validate_status_contract.py"
+      - "scripts/migrate_contract_artifact.py"
+      - "tests/test_contract_*"
+      - "tests/test_status_ontology.py"
+      - ".github/workflows/contract-registry.yml"
+  pull_request:
+    paths:
+      - "app/contract_registry.py"
+      - "app/staged_contracts.py"
+      - "app/status_ontology.py"
+      - "app/executor.py"
+      - "prompt_pack/**"
+      - "stage*_tools/**"
+      - "scripts/validate_contract_registry.py"
+      - "scripts/validate_status_contract.py"
+      - "scripts/migrate_contract_artifact.py"
+      - "tests/test_contract_*"
+      - "tests/test_status_ontology.py"
+      - ".github/workflows/contract-registry.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-registry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Compile every model-output gateway
+        run: |
+          python -m compileall -q \
+            app scripts \
+            stage1_tools stage2_tools stage3_tools stage4_tools stage4a_tools \
+            stage5_tools stage6a_tools stage6b_tools stage6c_tools stage6d_tools stage7_tools
+      - name: Audit schemas, prompts and gateways
+        run: |
+          python prompt_pack/tools/validate_pack.py
+          python scripts/validate_contract_registry.py
+          python scripts/validate_status_contract.py
+      - name: Run drift, migration and strictness regressions
+        run: |
+          python -m pytest -q \
+            tests/test_contract_registry_v3.py \
+            tests/test_contract_migration_v3.py \
+            tests/test_status_ontology.py \
+            tests/test_output_container_contract_v5.py

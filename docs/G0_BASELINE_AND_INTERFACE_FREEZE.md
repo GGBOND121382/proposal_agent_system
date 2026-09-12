@@ -53,9 +53,9 @@ G0 不以说明文档作为唯一证据。仓库同时提供以下可执行交�
 状态机契约固定：
 
 - 五条工作流的步骤顺序；
-- Workflow 状态：`RUNNING`、`WAITING_GATE`、`BLOCKED`、`COMPLETED`、`CANCELLED`；
+- Workflow 状态：`RUNNING`、`WAITING_GATE`、`WAITING_PREREQUISITE`、`WAITING_CONFIGURATION`、`BLOCKED`、`COMPLETED`、`CANCELLED`；
 - Gate 状态：`OPEN`、`APPROVED`、`REJECTED`、`CANCELLED`；
-- Gate 责任角色和安全 Gate 动作；
+- Gate 责任角色、业务输入 Gate 动作和安全 Gate 动作；
 - Critic 与 Producer 的定向修复映射。
 
 SQLite 契约固定全部业务表的列集合。Artifact 至少保留：

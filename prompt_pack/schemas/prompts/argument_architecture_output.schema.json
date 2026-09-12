@@ -10,7 +10,7 @@
       "const": "P-ARGUMENT-ARCHITECTURE"
     },
     "prompt_version": {
-      "const": "3.1.0"
+      "const": "9.0.0"
     },
     "status": {
       "type": "string",
@@ -26,7 +26,230 @@
       "additionalProperties": false,
       "properties": {
         "argument_architecture": {
-          "$ref": "../common/argument_graph.schema.json"
+          "type": "object",
+          "properties": {
+            "graph_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "central_proposition": {
+              "type": "object",
+              "properties": {
+                "node_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "statement": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "proposition_type": {
+                  "type": "string",
+                  "enum": [
+                    "SCIENTIFIC_HYPOTHESIS",
+                    "TECHNICAL_PRINCIPLE",
+                    "DESIGN_PROPOSITION",
+                    "UNKNOWN"
+                  ]
+                },
+                "falsifiable_or_comparable": {
+                  "type": "boolean"
+                },
+                "boundary_conditions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "source_refs": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "../common/source_ref.schema.json"
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "node_id",
+                "statement",
+                "proposition_type",
+                "falsifiable_or_comparable",
+                "boundary_conditions",
+                "source_refs"
+              ]
+            },
+            "research_questions": {
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "node_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "question_type": {
+                    "type": "string",
+                    "enum": [
+                      "SCIENTIFIC",
+                      "TECHNICAL",
+                      "ENGINEERING"
+                    ]
+                  },
+                  "linked_gap_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "answerability": {
+                    "type": "string",
+                    "enum": [
+                      "TESTABLE",
+                      "COMPARABLE",
+                      "DESIGN_VERIFIABLE",
+                      "UNCLEAR"
+                    ]
+                  },
+                  "success_evidence": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "node_id",
+                  "statement",
+                  "question_type",
+                  "linked_gap_ids",
+                  "answerability",
+                  "success_evidence"
+                ]
+              }
+            },
+            "scope_boundaries": {
+              "type": "object",
+              "properties": {
+                "in_scope": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "out_of_scope": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "in_scope",
+                "out_of_scope"
+              ]
+            },
+            "nodes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "node_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "node_type": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "CONFIRMED",
+                      "SUPPORTED",
+                      "PLANNED",
+                      "UNKNOWN",
+                      "CONFLICTED"
+                    ]
+                  },
+                  "source_refs": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "../common/source_ref.schema.json"
+                    }
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "node_id",
+                  "node_type",
+                  "statement",
+                  "status",
+                  "source_refs"
+                ]
+              }
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "edge_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "relation": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "rationale": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "edge_id",
+                  "source_id",
+                  "relation",
+                  "target_id",
+                  "rationale"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "graph_id",
+            "central_proposition",
+            "research_questions",
+            "scope_boundaries",
+            "nodes",
+            "edges"
+          ]
         },
         "research_design_matrix": {
           "type": "array",
@@ -45,8 +268,7 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "minItems": 1
+                }
               },
               "objective_ids": {
                 "type": "array",
@@ -54,8 +276,7 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "minItems": 1
+                }
               },
               "work_package_ids": {
                 "type": "array",
@@ -63,8 +284,7 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "minItems": 1
+                }
               },
               "method_ids": {
                 "type": "array",
@@ -72,8 +292,7 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "minItems": 1
+                }
               },
               "evaluation_ids": {
                 "type": "array",
@@ -81,8 +300,7 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "minItems": 1
+                }
               },
               "innovation_ids": {
                 "type": "array",
@@ -90,8 +308,7 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "minItems": 1
+                }
               },
               "foundation_evidence_ids": {
                 "type": "array",
@@ -107,8 +324,7 @@
                   "type": "string",
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-                },
-                "minItems": 1
+                }
               },
               "falsification_or_comparison_rule": {
                 "type": "string",
@@ -128,7 +344,6 @@
               "falsification_or_comparison_rule"
             ]
           },
-          "minItems": 1,
           "maxItems": 4
         },
         "evidence_gap_report": {
@@ -141,6 +356,53 @@
                 "type": "string",
                 "minLength": 1,
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "defect_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "defect_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "finding_code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "semantic_component": {
+                "type": "string",
+                "minLength": 1
+              },
+              "semantic_object_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "semantic_review_unit_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "quality_dimension": {
+                "type": "string",
+                "minLength": 1
+              },
+              "suggested_route": {
+                "enum": [
+                  "ORIGINAL_PRODUCER",
+                  "ARGUMENT_ARCHITECTURE_AGENT",
+                  "USER",
+                  "BLOCK"
+                ]
+              },
+              "thread_index": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
               },
               "required_node_type": {
                 "type": "string",
@@ -160,10 +422,19 @@
             },
             "required": [
               "gap_id",
+              "defect_key",
+              "defect_family",
+              "finding_code",
+              "semantic_component",
+              "semantic_object_id",
+              "semantic_review_unit_key",
+              "quality_dimension",
               "required_node_type",
+              "thread_index",
               "reason",
               "blocking",
-              "suggested_source_or_question"
+              "suggested_source_or_question",
+              "suggested_route"
             ]
           }
         },
@@ -176,8 +447,7 @@
               "items": {
                 "type": "string",
                 "minLength": 1
-              },
-              "minItems": 1
+              }
             },
             "appendix_topics": {
               "type": "array",
@@ -225,6 +495,82 @@
             "blocking_node_ids",
             "summary"
           ]
+        },
+        "authored_evidence_bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "node_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "node_id",
+              "evidence_ids"
+            ]
+          }
+        },
+        "authored_thread_assumptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "thread_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "assumption_node_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "thread_index",
+              "assumption_node_ids"
+            ]
+          }
+        },
+        "authored_state": {
+          "$ref": "../model/argument_architecture_model_output.schema.json"
+        },
+        "projection_meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "projection_version": {
+              "type": "string",
+              "const": "ARGUMENT_PROJECTOR_V2"
+            },
+            "source_state_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "projection_input_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "projection_version",
+            "source_state_sha256",
+            "projection_input_sha256"
+          ]
         }
       },
       "required": [
@@ -232,7 +578,11 @@
         "research_design_matrix",
         "evidence_gap_report",
         "scope_decision",
-        "readiness"
+        "readiness",
+        "authored_evidence_bindings",
+        "authored_thread_assumptions",
+        "authored_state",
+        "projection_meta"
       ]
     },
     "findings": {
@@ -279,5 +629,70 @@
     "user_questions",
     "source_refs",
     "warnings"
+  ],
+  "allOf": [
+    {
+      "$comment": "Semantic contract: incomplete/unknown structure may be emitted only on non-PASS paths.",
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "properties": {
+              "research_design_matrix": {
+                "minItems": 1,
+                "items": {
+                  "properties": {
+                    "gap_ids": {
+                      "minItems": 1
+                    },
+                    "objective_ids": {
+                      "minItems": 1
+                    },
+                    "work_package_ids": {
+                      "minItems": 1
+                    },
+                    "method_ids": {
+                      "minItems": 1
+                    },
+                    "evaluation_ids": {
+                      "minItems": 1
+                    },
+                    "innovation_ids": {
+                      "minItems": 1
+                    },
+                    "closest_prior_work_ids": {
+                      "minItems": 1
+                    }
+                  }
+                }
+              },
+              "scope_decision": {
+                "properties": {
+                  "main_body_focus": {
+                    "minItems": 1
+                  }
+                }
+              },
+              "argument_architecture": {
+                "properties": {
+                  "research_questions": {
+                    "minItems": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   ]
 }

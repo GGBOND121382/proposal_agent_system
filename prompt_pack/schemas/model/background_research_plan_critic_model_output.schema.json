@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "background_research_plan_critic_model_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "issue_type": {
+            "type": "string",
+            "enum": [
+              "OUTSIDE_APPROVED_SCOPE",
+              "SENSITIVE_INFERENCE_RISK",
+              "DIMENSION_MISMATCH"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_excerpt": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "query_index",
+          "issue_type",
+          "description",
+          "evidence_excerpt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "issues"
+  ]
+}

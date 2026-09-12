@@ -7,15 +7,125 @@ from types import SimpleNamespace
 import pytest
 
 from app.db import Database
-from app.exporter import DocxExporter, ExportDenied
+from app.exporter import ExportDenied
+from app.runtime_api import DocxExporter
 from app.pack import PromptPack
-from app.proposal_quality import ProposalQualityGuard
+from app.decision_arbiter import DecisionArbiter
+from app.proposal_quality import ProposalQualityGuard, QualityFinding
+from app.quality_guard import build_guard_report
 from app.quality import QualityGateBlocked, QualityLifecycleManager
 from app.simulated_llm import SimulatedLLM
 from app.util import utc_now
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_quality_p0_user_routed_finding_preserves_actionable_human_gate():
+    output = {
+        "status": "NEED_USER_INPUT",
+        "result": {},
+        "findings": [],
+        "user_questions": [{
+            "question_id": "UQ-001",
+            "blocking": True,
+        }],
+    }
+    finding = QualityFinding(
+        "QG_FOUNDATION_UNKNOWN",
+        "P0",
+        "READINESS",
+        "PROJECT_DEFINITION",
+        "BASE-001",
+        "Project foundation requires owner-supplied evidence.",
+        None,
+        "USER",
+    )
+    report = build_guard_report(
+        "P-PROJECT-READINESS-CRITIC",
+        output,
+        [finding.as_dict()],
+    )
+
+    record = DecisionArbiter().arbitrate(
+        output,
+        report,
+        prompt_id="P-PROJECT-READINESS-CRITIC",
+    )
+
+    assert output["status"] == "NEED_USER_INPUT"
+    assert record.decision == "WAITING_HUMAN_INPUT"
+    assert record.guard_report["findings"][0]["severity"] == "P0"
+
+
+def test_blueprint_quality_unifies_section_function_roles_and_bound_claims():
+    _, _, guard = _runtime_quality()
+    payload = {
+        "section_profile": {"profile_id": "ABSTRACT"},
+        "section_contract": {
+            "section_contract_id": "SC-001",
+            "required_argument_roles": [
+                "BACKGROUND_POSITIONING",
+                "PROBLEM_SUMMARY",
+                "METHOD_COMMITMENT",
+                "EXPECTED_CONTRIBUTION",
+            ],
+            "must_advance_claim_ids": [
+                "CP-001",
+                "RQ-001",
+                "INNO-001",
+            ],
+            "unique_information_keys": [
+                "abstract-context",
+                "abstract-problem",
+                "abstract-method",
+                "abstract-contribution",
+            ],
+        },
+        "prior_section_digest": [],
+    }
+    blueprint = {
+        "paragraphs": [
+            {
+                "argument_role": "CONTEXT",
+                "primary_claim_id": "CP-001",
+                "project_item_slots": [],
+                "technical_slots": [],
+                "fact_slots": ["fact-001"],
+                "novel_content_key": "abstract-context",
+            },
+            {
+                "argument_role": "PROBLEM",
+                "primary_claim_id": "CP-001",
+                "project_item_slots": ["RQ-001"],
+                "technical_slots": [],
+                "fact_slots": ["fact-002"],
+                "novel_content_key": "abstract-problem",
+            },
+            {
+                "argument_role": "METHOD",
+                "primary_claim_id": "CP-001",
+                "project_item_slots": ["INNO-001"],
+                "technical_slots": [],
+                "fact_slots": ["fact-003"],
+                "novel_content_key": "abstract-method",
+            },
+            {
+                "argument_role": "CONTRIBUTION",
+                "primary_claim_id": "CP-001",
+                "project_item_slots": ["INNO-001"],
+                "technical_slots": [],
+                "fact_slots": ["fact-004"],
+                "novel_content_key": "abstract-contribution",
+            },
+        ],
+    }
+
+    findings = guard._audit_blueprint(blueprint, payload)
+    codes = {finding.code for finding in findings}
+
+    assert "QG_BLUEPRINT_REQUIRED_ROLES_MISSING" not in codes
+    assert "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING" not in codes
 
 
 def _runtime_quality():
@@ -68,7 +178,7 @@ def test_e1_relation_fact_metric_and_source_rules_are_deterministic():
     project["relations"][0]["target_item_type"] = "METRIC"
     metric = next(item for item in project["items"] if item["item_type"] == "METRIC")
     metric["content"]["verifier"] = ""
-    checked_project = guard.apply("P-PROJECT-DEFINITION-EXTRACT", project_env, project_output)
+    checked_project = guard.observe("P-PROJECT-DEFINITION-EXTRACT", project_env, project_output)
     assert {
         "QG_RELATION_MATRIX_DIRECTION_INVALID",
         "QG_METRIC_BASIS_INCOMPLETE",
@@ -78,7 +188,7 @@ def test_e1_relation_fact_metric_and_source_rules_are_deterministic():
     fact_output = sim.invoke("P-FACT-EXTRACT", fact_env)
     fact_output["result"]["fact_candidates"][0]["claim_text"] = "项目周期为36个月；项目经费为100万元。"
     fact_output["result"]["coverage"] = []
-    checked_fact = guard.apply("P-FACT-EXTRACT", fact_env, fact_output)
+    checked_fact = guard.observe("P-FACT-EXTRACT", fact_env, fact_output)
     assert {"QG_FACT_NOT_ATOMIC", "QG_FACT_SOURCE_COVERAGE_INCOMPLETE"}.issubset(_codes(checked_fact))
 
 
@@ -88,7 +198,7 @@ def test_e2_section_gate_uses_profile_specific_responsibility():
     env["payload"]["source_section"]["title"] = "创新点"
     env["payload"]["section_profile"]["profile_id"] = "RESEARCH_CONTENT"
     output = sim.invoke("P-WRITE-BLUEPRINT", env)
-    checked = guard.apply("P-WRITE-BLUEPRINT", env, output)
+    checked = guard.observe("P-WRITE-BLUEPRINT", env, output)
     assert "QG_WRONG_SECTION_PROFILE" in _codes(checked)
     finding = next(item for item in checked["findings"] if item["code"] == "QG_WRONG_SECTION_PROFILE")
     assert finding["suggested_route"] in {"PLANNING_AGENT", "WRITING_AGENT"}
@@ -114,7 +224,7 @@ def test_e3_e4_integration_checks_conflict_mapping_and_full_argument_chain():
         "evidence": "missing",
     })
     output["result"]["argument_chain_checks"] = output["result"]["argument_chain_checks"][:-1]
-    checked = guard.apply("P-INTEGRATION-CRITIC", env, output)
+    checked = guard.observe("P-INTEGRATION-CRITIC", env, output)
     assert {
         "QG_CROSS_SECTION_VALUE_CONFLICT",
         "QG_CROSS_SECTION_MAPPING_INCOMPLETE",
@@ -213,6 +323,16 @@ def test_e6_p1_requires_repair_and_independent_critic_review(tmp_path: Path):
     assert verified["lifecycle"]["review_evidence"][0]["run_id"] == "critic-review"
 
 
+def test_critic_scope_uses_canonical_producer_prompt():
+    manager = QualityLifecycleManager(SimpleNamespace())
+
+    assert manager._scope_key("P-FACT-EXTRACT", {}) == "stage:P-FACT-EXTRACT"
+    assert manager._scope_key("P-FACT-CRITIC", {}) == "stage:P-FACT-EXTRACT"
+    assert manager._scope_key("P-PROJECT-DEFINITION-CRITIC", {}) == (
+        "stage:P-PROJECT-DEFINITION-EXTRACT"
+    )
+
+
 def test_e6_export_gate_cannot_override_open_quality_blocker(tmp_path: Path):
     db, project_id, workflow_id = _db(tmp_path)
     manager = QualityLifecycleManager(db)
@@ -241,6 +361,89 @@ def test_e6_export_gate_cannot_override_open_quality_blocker(tmp_path: Path):
         exporter._authorized_project(project_id)
 
 
+def test_delivery_blockers_ignore_superseded_workflow_lineage(tmp_path: Path):
+    db, project_id, workflow_id = _db(tmp_path)
+    manager = QualityLifecycleManager(db)
+    manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id="critic-old",
+        status="REVISE",
+        output={"findings": [_finding("OLD_WORKFLOW_BLOCKER")]},
+    )
+    db.execute(
+        """INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (
+            "wf-new",
+            project_id,
+            "WF-4_PROPOSAL_AUTHORING",
+            "COMPLETED",
+            7,
+            "{}",
+            "2099-01-01T00:00:00+00:00",
+            "2099-01-01T00:00:00+00:00",
+        ),
+    )
+
+    assert manager.open_blockers(project_id)
+    assert manager.open_delivery_blockers(project_id) == []
+
+
+def test_acceptance_delivery_keeps_qg_blockers_but_allows_confirmed_test_gaps(tmp_path: Path):
+    db, project_id, workflow_id = _db(tmp_path)
+    manager = QualityLifecycleManager(db)
+    accepted_run_id = "critic-accepted-test-gap"
+    manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id=accepted_run_id,
+        status="NEED_USER_INPUT",
+        output={
+            "findings": [
+                _finding("TEST_INPUT_GAP"),
+                _finding("QG_DETERMINISTIC_BLOCKER"),
+            ]
+        },
+    )
+    db.execute(
+        "UPDATE workflows SET status='COMPLETED',state_json=?,updated_at=? WHERE id=?",
+        (
+            json.dumps(
+                {
+                    "accepted_step_results": {
+                        "0": {"run_id": accepted_run_id, "status": "NEED_USER_INPUT"}
+                    }
+                }
+            ),
+            "2099-01-01T00:00:00+00:00",
+            workflow_id,
+        ),
+    )
+    db.execute(
+        """INSERT INTO workflows(id,project_id,workflow_type,status,current_step,state_json,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (
+            "wf-acceptance-export",
+            project_id,
+            "WF-5_SECURITY_REVIEW_AND_EXPORT",
+            "BLOCKED",
+            2,
+            json.dumps({"options": {"acceptance_run": True}}),
+            "2099-01-02T00:00:00+00:00",
+            "2099-01-02T00:00:00+00:00",
+        ),
+    )
+
+    blockers = manager.open_delivery_blockers(project_id)
+
+    assert [item["finding"]["code"] for item in blockers] == [
+        "QG_DETERMINISTIC_BLOCKER"
+    ]
+
+
 def test_quality_matrix_is_auditable_and_append_only(tmp_path: Path):
     db, project_id, workflow_id = _db(tmp_path)
     manager = QualityLifecycleManager(db)
@@ -265,3 +468,59 @@ def test_quality_matrix_is_auditable_and_append_only(tmp_path: Path):
     rows = db.fetchall("SELECT version,status FROM artifacts WHERE artifact_type='QUALITY_FINDING' ORDER BY version")
     assert [row["version"] for row in rows] == [1, 2]
     assert [row["status"] for row in rows] == ["OPEN", "REPAIR_RECORDED"]
+
+
+def test_targeted_repair_and_rereview_bind_same_code_to_exact_finding_path(tmp_path: Path):
+    db, project_id, workflow_id = _db(tmp_path)
+    manager = QualityLifecycleManager(db)
+    finding_a = _finding()
+    finding_a["target_path_or_span"] = "/result/section_contracts/0/title"
+    finding_a["description"] = "First title is invalid."
+    finding_b = _finding()
+    finding_b["target_path_or_span"] = "/result/section_contracts/1/title"
+    finding_b["description"] = "Second title is invalid."
+
+    opened = manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id="critic-open-same-code",
+        status="REVISE",
+        output={"findings": [finding_a, finding_b]},
+    )
+    assert len(opened) == 2
+
+    manager.record_targeted_repair(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        repair_run_id="repair-only-first-path",
+        finding_codes=[finding_a["code"]],
+        finding_instances=[finding_a],
+        critic_prompt_id="P-REVISION-PLAN-CRITIC",
+        workflow_state={},
+    )
+
+    by_path = {
+        item["finding"]["target_path_or_span"]: item
+        for item in manager.list_findings(project_id)
+    }
+    assert by_path[finding_a["target_path_or_span"]]["lifecycle"]["state"] == "REPAIR_RECORDED"
+    assert by_path[finding_b["target_path_or_span"]]["lifecycle"]["state"] == "OPEN"
+
+    manager.observe_prompt_result(
+        project_id=project_id,
+        workflow_id=workflow_id,
+        prompt_id="P-REVISION-PLAN-CRITIC",
+        run_id="critic-review-same-code",
+        status="REVISE",
+        output={"findings": [finding_b]},
+    )
+
+    by_path = {
+        item["finding"]["target_path_or_span"]: item
+        for item in manager.list_findings(project_id)
+    }
+    assert by_path[finding_a["target_path_or_span"]]["lifecycle"]["state"] == "VERIFIED"
+    assert by_path[finding_b["target_path_or_span"]]["lifecycle"]["state"] == "OPEN"
+    assert by_path[finding_a["target_path_or_span"]]["lifecycle"]["repair_evidence"][0]["run_id"] == "repair-only-first-path"
+    assert by_path[finding_b["target_path_or_span"]]["lifecycle"]["repair_evidence"] == []

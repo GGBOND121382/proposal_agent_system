@@ -1,62 +1,176 @@
 {
-  "contract_version": "1.0.0",
-  "baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
-  "scope": "Security classification, security-level mapping, outbound package protection, model routing, approval gates, and the security steps in WF-1/WF-3/WF-5.",
-  "security_levels": [
-    "PUBLIC",
-    "INTERNAL",
-    "SENSITIVE",
-    "CLASSIFIED"
-  ],
-  "security_workflow_invariants": {
-    "wf1_prefix": [
-      "P-SECURITY-CLASSIFY",
-      "P-SECURITY-CLASSIFY-CRITIC"
-    ],
-    "wf3_outbound_prefix": [
-      "P-SAFE-ONLINE-PACKAGE",
-      "P-SAFE-ONLINE-PACKAGE-CRITIC"
-    ],
-    "wf5_prefix": [
-      "P-FINAL-CONFIDENTIALITY-REVIEW"
-    ],
-    "security_gate_roles": {
-      "OUTBOUND_SECURITY_APPROVAL": "SECURITY_REVIEWER",
-      "ONLINE_RESULT_IMPORT_APPROVAL": "SECURITY_REVIEWER",
-      "FINAL_CONTENT_SECURITY_APPROVAL": "SECURITY_REVIEWER",
-      "FINAL_EXPORT_APPROVAL": "EXPORT_APPROVER"
-    },
-    "security_gate_actions": [
-      "APPROVE",
-      "RETURN",
-      "REJECT",
-      "CANCEL"
-    ],
-    "offline_environment": "OFFLINE_LOCAL",
-    "public_environment": "ONLINE_PUBLIC",
-    "repair_environment": "SAME_AS_ORIGINAL"
-  },
-  "frozen_pathspecs": [
-    "app/security.py",
-    "app/privacy.py",
-    "app/llm.py",
-    "app/workflow_defs.py",
-    "app/workflow_gates.py",
-    "prompt_pack/prompts/security",
-    "prompt_pack/schemas/prompts/security_classify_input.schema.json",
-    "prompt_pack/schemas/prompts/security_classify_output.schema.json",
-    "prompt_pack/schemas/prompts/security_classify_critic_input.schema.json",
-    "prompt_pack/schemas/prompts/security_classify_critic_output.schema.json",
-    "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
-    "prompt_pack/schemas/prompts/safe_online_package_output.schema.json",
-    "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
-    "prompt_pack/schemas/prompts/safe_online_package_critic_output.schema.json",
-    "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
-    "prompt_pack/schemas/prompts/online_result_import_critic_output.schema.json",
-    "prompt_pack/schemas/prompts/final_confidentiality_review_input.schema.json",
-    "prompt_pack/schemas/prompts/final_confidentiality_review_output.schema.json",
-    "prompt_pack/policies/model_routing.yaml",
-    "prompt_pack/config/model_endpoints.yaml"
-  ],
-  "approved_changes": []
+    "contract_version":  "1.2.0",
+    "baseline_commit":  "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
+    "scope":  "Security classification, security-level mapping, outbound package protection, model routing, approval gates, and the security steps in WF-1/WF-3/WF-5.",
+    "security_levels":  [
+                            "PUBLIC",
+                            "INTERNAL",
+                            "SENSITIVE",
+                            "CLASSIFIED"
+                        ],
+    "security_workflow_invariants":  {
+                                         "wf1_prefix":  [
+                                                            "P-SECURITY-CLASSIFY",
+                                                            "P-SECURITY-CLASSIFY-CRITIC"
+                                                        ],
+                                         "wf3_outbound_prefix":  [
+                                                                     "P-SAFE-ONLINE-PACKAGE",
+                                                                     "P-SAFE-ONLINE-PACKAGE-CRITIC"
+                                                                 ],
+                                         "wf5_prefix":  [
+                                                            "P-FINAL-CONFIDENTIALITY-REVIEW"
+                                                        ],
+                                         "security_gate_roles":  {
+                                                                     "OUTBOUND_SECURITY_APPROVAL":  "SECURITY_REVIEWER",
+                                                                     "ONLINE_RESULT_IMPORT_APPROVAL":  "SECURITY_REVIEWER",
+                                                                     "FINAL_CONTENT_SECURITY_APPROVAL":  "SECURITY_REVIEWER",
+                                                                     "FINAL_EXPORT_APPROVAL":  "EXPORT_APPROVER"
+                                                                 },
+                                         "security_gate_actions":  [
+                                                                       "APPROVE",
+                                                                       "RETURN",
+                                                                       "REJECT",
+                                                                       "CANCEL"
+                                                                   ],
+                                         "offline_environment":  "OFFLINE_LOCAL",
+                                         "public_environment":  "ONLINE_PUBLIC",
+                                         "repair_environment":  "SAME_AS_ORIGINAL"
+                                     },
+    "frozen_pathspecs":  [
+                             "app/private_storage.py",
+                             "app/security.py",
+                             "app/privacy.py",
+                             "app/llm.py",
+                             "app/workflow_defs.py",
+                             "app/workflow_gates.py",
+                             "prompt_pack/prompts/security",
+                             "prompt_pack/schemas/prompts/security_classify_input.schema.json",
+                             "prompt_pack/schemas/prompts/security_classify_output.schema.json",
+                             "prompt_pack/schemas/prompts/security_classify_critic_input.schema.json",
+                             "prompt_pack/schemas/prompts/security_classify_critic_output.schema.json",
+                             "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+                             "prompt_pack/schemas/prompts/safe_online_package_output.schema.json",
+                             "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+                             "prompt_pack/schemas/prompts/safe_online_package_critic_output.schema.json",
+                             "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+                             "prompt_pack/schemas/prompts/online_result_import_critic_output.schema.json",
+                             "prompt_pack/schemas/prompts/final_confidentiality_review_input.schema.json",
+                             "prompt_pack/schemas/prompts/final_confidentiality_review_output.schema.json",
+                             "prompt_pack/policies/model_routing.yaml",
+                             "prompt_pack/config/model_endpoints.yaml"
+                         ],
+    "approved_changes":  [
+                             {
+                                 "path":  "app/privacy.py",
+                                 "blob_sha":  "1c05b256151b76a46533734b07c33faeb3aad60f",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved audited patch hardening for outbound credential and security-label protection.",
+                                 "approval_reference":  "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+                             },
+                             {
+                                 "path":  "app/private_storage.py",
+                                 "blob_sha":  "54ddd0956a3783a3afa7a1654f4052f2a9e3cdde",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved cross-platform private-storage enforcement using POSIX modes and protected Windows DACLs.",
+                                 "approval_reference":  "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+                             },
+                             {
+                                 "path":  "app/security.py",
+                                 "blob_sha":  "47aef1644f37d00e56c893b5a76de31041921bc6",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved audited patch hardening for explicit outbound endpoint authorization.",
+                                 "approval_reference":  "docs/AUDITED_PATCH_CHANGE_APPROVAL_20260809.md"
+                             },
+                             {
+                                 "path":  "app/llm.py",
+                                 "blob_sha":  "d756f7061a6aad6dccd1169c9c22f1055d514081",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "app/workflow_defs.py",
+                                 "blob_sha":  "f1ce26031f47672b476cee271e8faa97dcd5cf9e",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "app/workflow_gates.py",
+                                 "blob_sha":  "2eeda796049a8d668500b94ee9004adcdadbf65f",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/config/model_endpoints.yaml",
+                                 "blob_sha":  "7d2d63dc058a850fcfb01512134adb4911016310",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/final_confidentiality_review_input.schema.json",
+                                 "blob_sha":  "c5e4c75e0039c24a1cdc3566ee08d392becf1019",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+                                 "blob_sha":  "e3b799b80b38686a357f3cf19536777a727fabf4",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+                                 "blob_sha":  "2511780ea4110dc32bed2163748e9ab44d489bb7",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+                                 "blob_sha":  "b1e886fcf205c5b1bd7974e50c676d57a6aecac6",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/security_classify_critic_input.schema.json",
+                                 "blob_sha":  "40cd3a9337d40cfc5bf0e22a527fb971cd45e4aa",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/security_classify_input.schema.json",
+                                 "blob_sha":  "2db417ba4fefe4c6f7c4b72a81a99ef9ab83b0b4",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved provider and gate persistence repair. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "docs/WORKFLOW_ROOT_CAUSE_REPAIR_20260802.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/safe_online_package_input.schema.json",
+                                 "blob_sha":  "157c759a644ce8b0d8e640ee9b3dcffe2d64049f",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/safe_online_package_critic_input.schema.json",
+                                 "blob_sha":  "06fa28dabaf62d6cb7f529d0201034e2bdf7ee69",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+                             },
+                             {
+                                 "path":  "prompt_pack/schemas/prompts/online_result_import_critic_input.schema.json",
+                                 "blob_sha":  "99cd5316c55bd3d257895933122b6d613e808c81",
+                                 "owner":  "Security Runtime Maintainers",
+                                 "reason":  "Approved Phase 4 update: shared WF-3B step accepts the TOPIC_BACKGROUND_RESEARCH workflow type in the task envelope. Security roles, actions, confidentiality levels, and offline/online routing invariants remain unchanged.",
+                                 "approval_reference":  "proposal_agent_search_and_background_workflow_update_plan_20260901.md"
+                             }
+                         ]
 }

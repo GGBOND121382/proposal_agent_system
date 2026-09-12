@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "type":"object",
+  "required":["schema_version","prompt_id","prompt_version","actual_model_id","endpoint_id","section_id","verdict","checked_paragraph_ids","semantic_identity_preserved","style_dimensions","findings","summary"],
+  "additionalProperties":false,
+  "properties":{
+    "schema_version":{"const":"1.0"},
+    "prompt_id":{"const":"P-STAGE6A-EXPRESSION-CRITIC"},
+    "prompt_version":{"const":"1.0.0"},
+    "actual_model_id":{"type":"string","minLength":2},
+    "endpoint_id":{"type":"string","minLength":2},
+    "section_id":{"pattern":"^SEC-0[1-5]$"},
+    "verdict":{"enum":["ACCEPT","REVISE"]},
+    "checked_paragraph_ids":{"type":"array","minItems":1,"items":{"type":"string"},"uniqueItems":true},
+    "semantic_identity_preserved":{"type":"boolean"},
+    "style_dimensions":{"type":"array","minItems":6,"items":{"type":"object","required":["dimension","result","comment"],"additionalProperties":false,"properties":{"dimension":{"enum":["FORMALITY","LOGIC_TRANSITIONS","TERMINOLOGY","DENSITY","REDUNDANCY","CLAIM_CALIBRATION"]},"result":{"enum":["PASS","FAIL"]},"comment":{"type":"string","minLength":8}}}},
+    "findings":{"type":"array","items":{"type":"object"}},
+    "summary":{"type":"string","minLength":20}
+  }
+}

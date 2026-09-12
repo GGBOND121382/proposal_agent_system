@@ -7,7 +7,12 @@ from collections import Counter
 
 from app.quality import QualityLifecycleManager
 from app.track_b import TrackBAgentPromptValidator
-from app.workflows import WorkflowEngine
+from app.runtime_api import WorkflowEngine
+from app.workflow_status import (
+    WorkflowStatus,
+    is_recoverable_block,
+    should_pause_automatic_advancement,
+)
 from tests.test_runtime import add_standard_materials, create_project, finish_workflow, runtime
 
 
@@ -53,14 +58,14 @@ def _inject_one_cross_section_conflict(executor):
         ]
         output["result"]["routing_actions"] = [
             {
-                "finding_code": "G2_TECHNICAL_ROUTE_TERM_CONFLICT",
+                "finding_code": "CROSS_SECTION_CONSISTENCY_CONFLICT",
                 "route": "WRITING_AGENT",
                 "reason": "技术路线章节使用的核心术语与冻结的跨章合同不一致，应由原写作责任章节定向重写。",
             }
         ]
         output["findings"] = [
             {
-                "code": "G2_TECHNICAL_ROUTE_TERM_CONFLICT",
+                "code": "CROSS_SECTION_CONSISTENCY_CONFLICT",
                 "severity": "P1",
                 "category": "INTEGRATION",
                 "target_type": "SECTION_CANDIDATE",
@@ -94,12 +99,12 @@ def test_three_section_chain_rejects_missing_required_role(runtime):
             if workflow["status"] == "WAITING_GATE":
                 _approve_open_gate(engine, workflow["id"])
                 continue
-            if workflow["status"] in {"BLOCKED", "COMPLETED"}:
+            if should_pause_automatic_advancement(workflow["status"]):
                 return workflow
         return workflow
 
     workflow = asyncio.run(scenario())
-    assert workflow["status"] == "BLOCKED"
+    assert workflow["status"] == "BLOCKED_CONTENT"
     assert "缺少章节角色：TECHNICAL_ROUTE" in workflow["state"]["last_error"]
 
 
@@ -144,13 +149,15 @@ def test_three_section_cross_chapter_repair_review_and_restart(runtime):
             if current["status"] == "WAITING_GATE":
                 _approve_open_gate(engine, current["id"])
                 continue
-            if current["status"] in {"BLOCKED", "COMPLETED"}:
+            if current["status"] == "COMPLETED" or is_recoverable_block(current["status"]):
                 return current
         return current
 
     checkpoint = asyncio.run(run_until_interruption())
-    assert interrupted["done"] is True
-    assert checkpoint["status"] == "RUNNING"
+    assert interrupted["done"] is True, checkpoint["state"].get("last_error")
+    assert checkpoint["status"] == WorkflowStatus.BLOCKED_TECHNICAL.value
+    assert checkpoint["state"]["runtime_recoverable"] is True
+    assert checkpoint["state"]["runtime_failure_point"] == "WORKFLOW_ADVANCE"
     assert checkpoint["state"]["integration_repair_rounds"] == 1
     assert checkpoint["state"]["integration_repair_section_ids"] == [calls["target_section_id"]]
 
@@ -170,7 +177,7 @@ def test_three_section_cross_chapter_repair_review_and_restart(runtime):
             if current["status"] == "WAITING_GATE":
                 _approve_open_gate(restarted, current["id"])
                 continue
-            if current["status"] in {"BLOCKED", "COMPLETED"}:
+            if current["status"] == "COMPLETED" or is_recoverable_block(current["status"]):
                 return current
         return current
 
@@ -191,7 +198,7 @@ def test_three_section_cross_chapter_repair_review_and_restart(runtime):
         {
             "round": 1,
             "finding_codes": [
-                "G2_TECHNICAL_ROUTE_TERM_CONFLICT",
+                "CROSS_SECTION_CONSISTENCY_CONFLICT",
                 "QG_CROSS_SECTION_VALUE_CONFLICT",
             ],
             "responsible_section_ids": [calls["target_section_id"]],
@@ -210,7 +217,7 @@ def test_three_section_cross_chapter_repair_review_and_restart(runtime):
     assert counts == Counter({"技术路线": 2, "立项依据": 1, "研究内容": 1})
 
     findings = restarted.quality_manager.list_findings(project_id, workflow_id=workflow["id"])
-    target = next(item for item in findings if item["finding"]["code"] == "G2_TECHNICAL_ROUTE_TERM_CONFLICT")
+    target = next(item for item in findings if item["finding"]["code"] == "CROSS_SECTION_CONSISTENCY_CONFLICT")
     assert target["lifecycle"]["state"] == "VERIFIED"
     assert target["lifecycle"]["repair_evidence"]
     assert target["lifecycle"]["review_evidence"]

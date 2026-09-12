@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stage3ProjectDefinitionCritic",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "stage",
+    "verdict",
+    "approved_candidate_hash",
+    "checked_dimensions",
+    "findings",
+    "unresolved_items",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "stage": {
+      "const": "STAGE_3_PROJECT_DEFINITION_CRITIC"
+    },
+    "verdict": {
+      "enum": [
+        "ACCEPT",
+        "REVISE",
+        "BLOCK"
+      ]
+    },
+    "approved_candidate_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "checked_dimensions": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dimension",
+          "passed",
+          "evidence",
+          "blocking_ids"
+        ],
+        "properties": {
+          "dimension": {
+            "enum": [
+              "DOCUMENT_CONTRACT",
+              "CENTRAL_PROPOSITION",
+              "RESEARCH_GAPS",
+              "RESEARCH_QUESTIONS",
+              "OBJECTIVE_CONTENT_ALIGNMENT",
+              "METHOD_AND_EVALUATION",
+              "ENGINEERING_RESEARCH_BOUNDARY",
+              "FACT_SOURCE_BOUNDARY",
+              "OPEN_ITEM_INHERITANCE",
+              "NEXT_STAGE_BOUNDARY"
+            ]
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 12
+          },
+          "blocking_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "severity",
+          "code",
+          "message",
+          "target_ids",
+          "suggested_route"
+        ],
+        "properties": {
+          "finding_id": {
+            "type": "string",
+            "pattern": "^FIND-[0-9]{3}$"
+          },
+          "severity": {
+            "enum": [
+              "BLOCKING",
+              "MAJOR",
+              "MINOR",
+              "INFO"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 3
+          },
+          "message": {
+            "type": "string",
+            "minLength": 8
+          },
+          "target_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "suggested_route": {
+            "enum": [
+              "STAGE2_FACT_BASE",
+              "STAGE3_PROJECT_DEFINITION",
+              "STAGE4_ARGUMENT_ARCHITECTURE",
+              "USER_INPUT",
+              "NONE"
+            ]
+          }
+        }
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^OPEN-[0-9]{3}$"
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 50
+    }
+  }
+}

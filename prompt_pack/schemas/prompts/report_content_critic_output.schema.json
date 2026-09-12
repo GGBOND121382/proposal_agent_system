@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "report_content_critic_output.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "prompt_id": {
+      "const": "P-REPORT-CONTENT-CRITIC"
+    },
+    "prompt_version": {
+      "const": "1.0.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "REVISE",
+        "NEED_USER_INPUT",
+        "BLOCK"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "ACCEPT",
+            "REVISE",
+            "BLOCK"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "verdict"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^RC_[A-Z0-9_]+$"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "P0",
+              "P1",
+              "P2"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "section_key": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "severity",
+          "description"
+        ]
+      }
+    },
+    "unresolved_items": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/unresolved_item.schema.json"
+      }
+    },
+    "user_questions": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/user_question.schema.json"
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/source_ref.schema.json"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "prompt_id",
+    "prompt_version",
+    "status",
+    "result",
+    "findings",
+    "unresolved_items",
+    "user_questions",
+    "source_refs",
+    "warnings"
+  ]
+}

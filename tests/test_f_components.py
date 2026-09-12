@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -109,11 +110,13 @@ def test_quality_guard_rejects_shallow_unsupported_project_graph():
         "source_refs": [],
         "warnings": [],
     }
-    checked = ProposalQualityGuard().apply(
+    before = copy.deepcopy(output)
+    report = ProposalQualityGuard().observe(
         "P-PROJECT-DEFINITION-EXTRACT", {"payload": {}}, output
     )
-    codes = {item["code"] for item in checked["findings"]}
-    assert checked["status"] == "REVISE"
+    codes = {item["code"] for item in report["findings"]}
+    assert report["status"] == "REVISE"
+    assert output == before
     assert "QG_PROJECT_GRAPH_INCOMPLETE" in codes
     assert "QG_PROJECT_GRAPH_TOO_SHALLOW" in codes
     assert "QG_CONFIRMED_ITEM_WITHOUT_EVIDENCE" in codes

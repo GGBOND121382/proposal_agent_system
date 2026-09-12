@@ -1,0 +1,174 @@
+{
+  "case_id": "report_outline-need_user_input",
+  "prompt_id": "P-REPORT-OUTLINE",
+  "case_type": "need_user_input",
+  "description": "任务简报缺少交付结构说明且受众未确认，应生成具体用户问题",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "REPORT_OUTLINE",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "task_type": "REPORT_OUTLINE",
+      "document_type": "SURVEY_REPORT",
+      "topic": {
+        "topic_id": "topic-dash",
+        "topic_description": "美国空军公开系统 DASH（人机协同决策支持）公开对象调研"
+      },
+      "research_dimension_mode": "SURVEY_TECHNICAL",
+      "survey_research_brief": {
+        "must_answer_questions": [
+          "DASH 是什么、由谁主导、演进脉络如何？",
+          "DASH 效果如何、哪些仍不知道？"
+        ]
+      },
+      "background_cards": [
+        {
+          "card_id": "card-001",
+          "dimension": "OBJECT_AND_EVOLUTION",
+          "claim_text": "DASH 是美国空军部公开披露的人机协同决策支持系统。",
+          "source_ids": [
+            "src-001"
+          ],
+          "evidence_mode": "FULLTEXT",
+          "scope_qualifiers": [],
+          "limitations": []
+        },
+        {
+          "card_id": "card-003",
+          "dimension": "EVALUATION_AND_EFFECT",
+          "claim_text": "公开报道称 DASH 在演习中将方案生成时间从数小时缩短到数分钟量级。",
+          "source_ids": [
+            "src-003"
+          ],
+          "evidence_mode": "SNIPPET",
+          "scope_qualifiers": [],
+          "limitations": [
+            "无第三方独立评估"
+          ]
+        }
+      ],
+      "background_gaps": []
+    },
+    "expected_output_schema": "schemas/prompts/report_outline_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE",
+    "prompt_version": "1.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "report_title": "DASH 系统公开调研报告（保守提纲）",
+      "overall_gaps": [
+        "缺少公开量化效果评估数据"
+      ],
+      "report_sections": [
+        {
+          "section_key": "object-evolution",
+          "title": "背景调研：对象与演进",
+          "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+          "must_answer_questions": [
+            "DASH 是什么、由谁主导、演进脉络如何？"
+          ],
+          "evidence_card_ids": [
+            "card-001"
+          ],
+          "known_gaps": []
+        },
+        {
+          "section_key": "effect-evidence",
+          "title": "背景调研：效果证据",
+          "goal": "回答 DASH 效果如何、哪些仍不知道",
+          "must_answer_questions": [
+            "DASH 效果如何、哪些仍不知道？"
+          ],
+          "evidence_card_ids": [
+            "card-003"
+          ],
+          "known_gaps": [
+            "缺少公开量化效果评估数据"
+          ]
+        }
+      ]
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-002",
+        "type": "UNCERTAIN",
+        "description": "报告交付结构与目标受众尚未确认",
+        "target_paths": [
+          "payload/survey_research_brief"
+        ],
+        "required_action": "用户确认",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-002",
+        "question_type": "CONFIRMATION",
+        "question": "任务简报未给出 deliverable_notes，报告章节结构是否采用默认调研报告结构（摘要、背景调研、综合分析、结论、参考资料对照表）？",
+        "reason": "交付结构影响章节划分与篇幅分配",
+        "target_paths": [
+          "payload/survey_research_brief"
+        ],
+        "answer_schema": {
+          "type": "BOOLEAN",
+          "allowed_values": [
+            true,
+            false
+          ]
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

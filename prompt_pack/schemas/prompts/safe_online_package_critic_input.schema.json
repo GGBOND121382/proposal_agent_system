@@ -26,6 +26,7 @@
             "PROJECT_INTAKE",
             "TEMPLATE_EXTRACTION",
             "HYBRID_ONLINE_ASSIST",
+            "TOPIC_BACKGROUND_RESEARCH",
             "PROPOSAL_AUTHORING",
             "SECURITY_REVIEW_AND_EXPORT"
           ]
@@ -283,6 +284,27 @@
             "matched_rules",
             "redacted_fields"
           ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
+        },
+        "allowed_topics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "delivery_mode": {
+          "type": "string",
+          "enum": [
+            "PUBLIC_OBJECT_SURVEY"
+          ]
         }
       },
       "additionalProperties": false,
@@ -295,7 +317,15 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/safe_online_package_critic_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
     }
   },
   "additionalProperties": false,

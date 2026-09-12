@@ -149,17 +149,22 @@ def replay(traces: list[tuple[Path, dict[str, Any]]]) -> tuple[list[dict[str, An
         output = copy.deepcopy(trace.get("output") or {})
         envelope = trace.get("input_envelope") or {}
         try:
-            checked = guard.apply(prompt_id, envelope, output)
-            codes = [str(item.get("code")) for item in checked.get("findings") or [] if str(item.get("code", "")).startswith("QG_")]
+            report = guard.observe(prompt_id, envelope, output)
+            codes = [
+                str(item.get("code"))
+                for item in report.get("findings") or []
+                if str(item.get("code", "")).startswith("QG_")
+            ]
             for code in codes:
                 code_counts[code] += 1
-            if checked.get("status") != "PASS":
+            if report.get("status") != "PASS":
                 prompt_rejections[prompt_id] += 1
             records.append({
                 "trace_file": path.name,
                 "prompt_id": prompt_id,
                 "original_status": trace.get("status"),
-                "replayed_status": checked.get("status"),
+                "replayed_status": report.get("status"),
+                "model_status_observed": report.get("model_status_observed"),
                 "finding_codes": codes,
             })
         except Exception as exc:  # report malformed historical data rather than hiding it

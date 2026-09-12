@@ -10,7 +10,7 @@
       "const": "P-EXPRESSION-CRITIC"
     },
     "prompt_version": {
-      "const": "3.1.0"
+      "const": "3.4.0"
     },
     "task": {
       "type": "object",
@@ -567,7 +567,8 @@
         },
         "narrative_architecture": {
           "type": "object",
-          "minProperties": 5
+          "minProperties": 5,
+          "additionalProperties": true
         },
         "section_contract": {
           "$ref": "../common/section_contract.schema.json"
@@ -1025,6 +1026,12 @@
             "style_metrics",
             "claim_advancement"
           ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,
@@ -1049,7 +1056,15 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/expression_critic_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
     }
   },
   "additionalProperties": false,

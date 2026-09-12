@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "targeted_repair_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "task_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "producer_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "object_type": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "producer_role",
+        "object_type"
+      ]
+    },
+    "repair_targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "target_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "path_exists": {
+            "type": "boolean"
+          },
+          "current_value": {},
+          "problem": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "local_context": {}
+        },
+        "required": [
+          "target_id",
+          "path",
+          "path_exists",
+          "current_value",
+          "problem",
+          "local_context"
+        ]
+      }
+    },
+    "reference_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "related_findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "repair_instruction": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "description",
+              "repair_instruction"
+            ]
+          }
+        },
+        "candidate_entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "entity_id": {
+                "type": "string"
+              },
+              "entity_type": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entity_id",
+              "entity_type",
+              "statement",
+              "status"
+            ]
+          }
+        },
+        "semantic_neighborhoods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "context_id": {
+                "type": "string"
+              },
+              "research_question": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "gap": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "objective": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "work_packages": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            },
+            "required": [
+              "context_id",
+              "research_question",
+              "gap",
+              "objective",
+              "work_packages"
+            ]
+          }
+        },
+        "status_context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "current_status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "blocking_user_questions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "blocking_user_findings": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "current_status",
+            "blocking_user_questions",
+            "blocking_user_findings"
+          ]
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "target": {
+                "type": "string"
+              },
+              "answer": {}
+            },
+            "required": [
+              "target",
+              "answer"
+            ]
+          }
+        }
+      },
+      "required": [
+        "related_findings",
+        "candidate_entities",
+        "semantic_neighborhoods",
+        "status_context",
+        "human_resolutions"
+      ]
+    },
+    "previous_attempt_feedback": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "task_context",
+    "repair_targets",
+    "reference_context",
+    "previous_attempt_feedback"
+  ]
+}

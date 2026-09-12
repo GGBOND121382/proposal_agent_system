@@ -1,0 +1,215 @@
+{
+  "case_id": "background_research_plan-need_user_input",
+  "prompt_id": "P-BACKGROUND-RESEARCH-PLAN",
+  "case_type": "need_user_input",
+  "description": "topic 地域范围未确认，应生成具体用户问题",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-BACKGROUND-RESEARCH-PLAN",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "BACKGROUND_RESEARCH_PLAN",
+      "attempt": 1,
+      "writing_mode": "SUBSTANTIVE_REVISION"
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "safe_online_package": {
+        "object_id": "obj-001",
+        "object_type": "GENERIC",
+        "version": 1,
+        "object_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "security_level": "INTERNAL",
+        "display_name": "示例对象"
+      },
+      "task_type": "PUBLIC_BACKGROUND_RESEARCH",
+      "topic": {
+        "topic_id": "topic-001",
+        "topic_description": "城市内河水质多源感知与异常预警"
+      },
+      "required_dimensions": [
+        "APPLICATION_SCENARIO",
+        "STAKEHOLDER_AND_PAIN",
+        "INDUSTRY_SCALE_AND_TREND",
+        "POLICY_STANDARD_AND_PROGRAM",
+        "REPRESENTATIVE_CASE",
+        "OPERATIONAL_CONSTRAINT"
+      ],
+      "optional_dimensions": [
+        "CURRENT_ADOPTION",
+        "RESEARCH_SIGNIFICANCE"
+      ],
+      "known_public_sources": [],
+      "time_constraints": {
+        "start_date": "2021-01-01",
+        "end_date": null,
+        "freshness_required": true
+      },
+      "evidence_requirements": [
+        "数字与趋势必须绑定官方统计或可核验一手来源"
+      ],
+      "retrieval_contract": {
+        "required_channels": [
+          "WEB_SEARCH",
+          "ACADEMIC"
+        ],
+        "required_providers": [],
+        "minimum_fulltext_sources_per_query": 1,
+        "allow_snippet_only": true,
+        "require_web_discovery": true
+      },
+      "safe_online_package_content": {
+        "package_id": "pkg-001",
+        "task_type": "PUBLIC_BACKGROUND_RESEARCH",
+        "task_description": "调研城市内河水质多源感知与异常预警的公开应用背景。",
+        "queries": [
+          "城市内河水质监测 应用场景"
+        ],
+        "allowed_context": [
+          "公开网页",
+          "公开统计"
+        ],
+        "prohibited_inferences": [
+          "不得推断内部项目身份"
+        ],
+        "prohibited_outputs": [
+          "不得输出内部数据"
+        ],
+        "security_level": "PUBLIC"
+      }
+    },
+    "expected_output_schema": "schemas/prompts/background_research_plan_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-BACKGROUND-RESEARCH-PLAN",
+    "prompt_version": "1.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "plan_id": "bplan-001",
+      "task_type": "PUBLIC_BACKGROUND_RESEARCH",
+      "topic_id": "topic-001",
+      "required_dimensions": [
+        "APPLICATION_SCENARIO",
+        "STAKEHOLDER_AND_PAIN",
+        "INDUSTRY_SCALE_AND_TREND",
+        "POLICY_STANDARD_AND_PROGRAM",
+        "REPRESENTATIVE_CASE",
+        "OPERATIONAL_CONSTRAINT"
+      ],
+      "queries": [
+        {
+          "query_id": "query-001",
+          "query": "城市内河水质在线监测 应用场景 城管 生态环境部门",
+          "dimension": "APPLICATION_SCENARIO",
+          "purpose": "识别该 topic 在真实城市治理中的使用场景"
+        },
+        {
+          "query_id": "query-002",
+          "query": "水质监测 市场规模 增长率 官方统计 2024",
+          "dimension": "INDUSTRY_SCALE_AND_TREND",
+          "purpose": "获取可核验的行业规模与趋势数据"
+        },
+        {
+          "query_id": "query-003",
+          "query": "地表水环境质量标准 水质监测 政策 规划 试点",
+          "dimension": "POLICY_STANDARD_AND_PROGRAM",
+          "purpose": "定位相关政策、标准与正式项目"
+        }
+      ],
+      "time_scope": "2021-01-01/2026-12-31",
+      "evidence_requirements": [
+        "数字与趋势必须绑定官方统计或可核验一手来源"
+      ],
+      "prohibited_inferences": [
+        "不得推断内部项目身份"
+      ],
+      "binding_contract_version": "1.0",
+      "required_channels": [
+        "WEB_SEARCH",
+        "ACADEMIC"
+      ],
+      "provider_execution_requirements": {
+        "required_providers": [],
+        "execute_all_approved_queries": true
+      },
+      "minimum_fulltext_sources_per_query": 1,
+      "allow_snippet_only": true,
+      "require_web_discovery": true
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-002",
+        "type": "UNCERTAIN",
+        "description": "topic 目标地域范围尚未确认",
+        "target_paths": [
+          "payload/topic"
+        ],
+        "required_action": "用户确认",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-002",
+        "question_type": "CONFIRMATION",
+        "question": "背景调研是否限定为中国大陆地区？",
+        "reason": "地区限定影响规模与政策维度查询",
+        "target_paths": [
+          "payload/topic"
+        ],
+        "answer_schema": {
+          "type": "BOOLEAN",
+          "allowed_values": [
+            true,
+            false
+          ]
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

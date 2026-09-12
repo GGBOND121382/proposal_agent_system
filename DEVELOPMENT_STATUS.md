@@ -4,7 +4,7 @@
 
 - 唯一代码基线固定为 `ac7e3032a51c682c6bee6e2461d3393cc14835d7`，产品版本固定为 `0.6.0`；
 - `pyproject.toml`、FastAPI 版本和 Docker Compose 镜像标签由自动 Gate 校验，已消除 `0.5.0-offline` 镜像标签漂移；
-- 30 个 Prompt/Schema、Agent 责任、五条工作流、Gate、Critic/Producer 映射、SQLite 表结构和 Artifact/Trace 字段已形成机器可校验契约；
+- 30 个 Prompt/Schema、Agent 责任、六条工作流、Gate、Critic/Producer 映射、SQLite 表结构和 Artifact/Trace 字段已形成机器可校验契约；
 - 安全分类、密级集合、外发保护、模型路由、审批 Gate 与 WF-1/WF-3/WF-5 安全步骤已按代码基线冻结；
 - Git、SQLite、Trace、材料与恢复包目录规范已固定；
 - G0 恢复包包含源码归档、依赖声明、材料清单、SQLite 一致性快照、Trace JSONL、冻结契约和逐文件 SHA-256；
@@ -21,15 +21,15 @@
 - 全篇缺陷按最早责任阶段路由：论证缺陷回到论证架构，规划缺陷回到章节规划，纯表达重复只重写受影响章节；
 - 全篇模型输入与完整质量上下文分离，实际模型输入受限，完整正文继续用于确定性质量计算和审计；
 - 历史167份质量相关Trace全部被新版规则判定为需要修订，解析错误0；
-- 新14章正向端到端五条工作流全部完成，全文12维评价全部通过；
-- 自动测试45项全部通过，Prompt Pack 30个Prompt、150组Replay静态验证通过。
+- 新14章正向端到端六条工作流全部完成（含 WF-3B_TOPIC_BACKGROUND_RESEARCH：topic 应用背景调研，产出 TOPIC_BACKGROUND_RESULT），全文12维评价全部通过；
+- 当前注册 30 个 Prompt、150 组 Replay；pytest 可收集 883 项测试。测试通过状态以最新 CI/本地回归报告为准。
 
 ## 已验证
 
 - 历史Trace负向重放：167/167识别旧缺陷；
 - 正向端到端：108次Prompt调用、14章、完整候选14/14、重复与信息键冲突均为0；
 - 弱模型上下文：单章蓝图/正文/表达输入最高约33/37/38 KB，全篇实际模型输入约88 KB，完整159 KB质量上下文独立保留；
-- Python静态编译、Prompt Pack校验和45项pytest：PASS；
+- Python静态编译与 Prompt Pack 校验由 CI 执行；pytest 数量从代码自动收集，禁止手工固化旧统计；
 - GitHub Actions在Ubuntu 24.04与Python 3.12环境中完成依赖安装、应用编译、Prompt Pack校验和完整pytest：PASS。
 
 ## 明确边界

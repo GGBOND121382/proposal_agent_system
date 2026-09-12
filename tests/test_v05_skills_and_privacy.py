@@ -102,7 +102,9 @@ def test_public_research_plan_inherits_transport_safe_package():
     }
     assert pack.validate("P-PUBLIC-RESEARCH-PLAN", "input", envelope) == []
     output = SimulatedLLM(pack).invoke("P-PUBLIC-RESEARCH-PLAN", envelope)
-    assert output["result"]["queries"] == approved_queries
+    assert [item["query"] for item in output["result"]["queries"]] == approved_queries
+    assert output["result"]["binding_contract_version"] == "1.0"
+    assert all(item["linked_question_indexes"] for item in output["result"]["queries"])
     assert "车辆路径、时间窗、取送和多仓问题有哪些精确与启发式方法？" in output["result"]["research_questions"]
 
 
@@ -140,3 +142,108 @@ def test_vertical_figure_is_scaled_to_printable_page(tmp_path):
     output = tmp_path / "scaled.docx"
     document.save(output)
     assert output.exists()
+
+
+def test_public_retrieval_projection_redacts_contact_details():
+    from app.privacy import assert_online_payload_safe, redact_public_retrieval_content
+
+    content = [
+        {
+            "source_id": "public-src-abc123",
+            "quoted_text": "联系人邮箱 jane.doe@example.edu，电话 13812345678 详见附录。",
+            "url": "https://example.edu/report",
+            "content_hash": "a" * 64,
+        }
+    ]
+    # Before redaction the strict outbound blocker rejects the same payload.
+    try:
+        assert_online_payload_safe({"payload": {"retrieved_sources": content}}, {})
+        raise AssertionError("expected OutboundPrivacyError")
+    except Exception as exc:
+        assert "EMAIL" in str(exc)
+
+    redacted, matches = redact_public_retrieval_content(content)
+    assert "[EMAIL]" in redacted[0]["quoted_text"]
+    assert "[PHONE]" in redacted[0]["quoted_text"]
+    assert "jane.doe@example.edu" not in redacted[0]["quoted_text"]
+    # Opaque integrity fields are never rewritten.
+    assert redacted[0]["content_hash"] == "a" * 64
+    assert redacted[0]["url"] == "https://example.edu/report"
+    assert {match.entity_type for match in matches} == {"EMAIL", "PHONE"}
+    # After redaction the same payload passes the outbound blocker.
+    assert_online_payload_safe({"payload": {"retrieved_sources": redacted}}, {})
+
+
+def test_background_synthesis_projection_redacts_and_records_audit():
+    from app.context_base import ContextBuilder
+    from app.privacy import assert_online_payload_safe
+
+    class NullDB:
+        def fetchone(self, sql, params=()):
+            return None
+
+        def fetchall(self, sql, params=()):
+            return []
+
+    class PermissivePack:
+        relation_matrix = {"version": "2.0", "allowed_relations": []}
+
+        def validate(self, prompt_id, kind, value):
+            return []
+
+        def inlined_schema(self, prompt_id, kind):
+            return {
+                "type": "object",
+                "properties": {
+                    "payload": {
+                        "type": "object",
+                        "properties": {"retrieved_sources": {}},
+                        "additionalProperties": {},
+                    }
+                },
+                "additionalProperties": {},
+            }
+
+    state = {
+        "workflow_type": "WF-3B_TOPIC_BACKGROUND_RESEARCH",
+        "background_search_results": {
+            "sources": [
+                {
+                    "source_id": "public-src-xyz789",
+                    "quoted_text": "获取全文请联系 jane.doe@example.edu。",
+                    "url": "https://example.edu/report",
+                    "content_hash": "b" * 64,
+                }
+            ],
+            "passages": [],
+        },
+    }
+    envelope = {"payload": {"retrieved_sources": []}}
+    project = {
+        "id": "project-redaction",
+        "name": "项目",
+        "description": "描述",
+        "security_level": "INTERNAL",
+    }
+
+    ContextBuilder(NullDB(), PermissivePack())._apply_common_payload(
+        envelope,
+        "P-BACKGROUND-RESEARCH-SYNTHESIS",
+        project,
+        {},
+        [],
+        "c" * 64,
+        state,
+        "wf-redaction-test",
+    )
+
+    projected = envelope["payload"]["retrieved_sources"]
+    assert "[EMAIL]" in projected[0]["quoted_text"]
+    assert "jane.doe@example.edu" not in projected[0]["quoted_text"]
+    records = state.get("retrieval_privacy_redactions")
+    assert records, "audit record must be written when redaction fires"
+    assert records[0]["prompt_id"] == "P-BACKGROUND-RESEARCH-SYNTHESIS"
+    assert records[0]["redacted_count"] >= 1
+    assert "EMAIL" in records[0]["entity_types"]
+    assert records[0]["recorded_at"]
+    assert_online_payload_safe({"payload": {"retrieved_sources": projected}}, {})

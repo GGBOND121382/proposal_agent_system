@@ -34,7 +34,12 @@ def _section(section_key: str, title: str, level: int, text: str, security_level
     }
 
 
-def _parse_text(text: str, security_level: str) -> list[dict[str, Any]]:
+def _parse_text(
+    text: str,
+    security_level: str,
+    *,
+    allow_numbered_headings: bool = True,
+) -> list[dict[str, Any]]:
     sections: list[dict[str, Any]] = []
     current_title = "全文"
     current_level = 0
@@ -59,7 +64,7 @@ def _parse_text(text: str, security_level: str) -> list[dict[str, Any]]:
             flush()
             current_level = len(m.group(1))
             current_title = m.group(2).strip()
-        elif m2:
+        elif allow_numbered_headings and m2:
             flush()
             current_level = max(1, m2.group(1).count(".") + 1)
             current_title = stripped
@@ -121,7 +126,15 @@ def parse_document(filename: str, content: bytes, role: str, security_level: str
                 text = json.dumps(json.loads(text), ensure_ascii=False, indent=2)
             except json.JSONDecodeError:
                 pass
-        sections = _parse_text(text, security_level)
+        # Markdown has an explicit heading grammar (``#`` through ``######``).
+        # Treating ordinary ordered-list items such as ``1. requirement`` as
+        # headings destroys their body text and creates empty source sections.
+        # Preserve legacy numbered-heading recognition only for plain-text files.
+        sections = _parse_text(
+            text,
+            security_level,
+            allow_numbered_headings=(ext == ".txt"),
+        )
 
     return {
         "document_id": new_id("doc"),

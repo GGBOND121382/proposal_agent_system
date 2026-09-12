@@ -119,7 +119,7 @@
     "prompt_version": "2.0.0",
     "status": "NEED_USER_INPUT",
     "result": {
-      "verdict": "ACCEPT_FOR_HUMAN_APPROVAL",
+      "verdict": "REVISE",
       "reidentification_risk": "LOW",
       "checked_prohibited_fields": [
         "真实项目名称"
@@ -150,7 +150,8 @@
         ],
         "answer_schema": {
           "type": "OBJECT",
-          "allowed_values": []
+          "allowed_values": [],
+          "properties": {}
         },
         "blocking": true,
         "priority": "P1"

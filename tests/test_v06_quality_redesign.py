@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.diagram_enrichment import DiagramEnrichmentService
 from app.documents import parse_document
-from app.executor import PromptExecutor
+from app.runtime_api import PromptExecutor
 from app.pack import PromptPack
 from app.proposal_quality import ProposalQualityGuard
 from app.simulated_llm import SimulatedLLM
@@ -55,9 +55,83 @@ def _codes(output):
 
 def test_valid_synthetic_argument_pipeline_passes_quality_guard():
     _, _, guard, p_env, p_out, a_env, a_out, r_env, r_out = _valid_project_argument_readiness()
-    assert guard.apply("P-PROJECT-DEFINITION-EXTRACT", p_env, copy.deepcopy(p_out))["status"] == "PASS"
-    assert guard.apply("P-ARGUMENT-ARCHITECTURE", a_env, copy.deepcopy(a_out))["status"] == "PASS"
-    assert guard.apply("P-PROJECT-READINESS-CRITIC", r_env, copy.deepcopy(r_out))["status"] == "PASS"
+    assert guard.observe("P-PROJECT-DEFINITION-EXTRACT", p_env, copy.deepcopy(p_out))["status"] == "PASS"
+    assert guard.observe("P-ARGUMENT-ARCHITECTURE", a_env, copy.deepcopy(a_out))["status"] == "PASS"
+    assert guard.observe("P-PROJECT-READINESS-CRITIC", r_env, copy.deepcopy(r_out))["status"] == "PASS"
+
+
+def test_argument_critic_allows_checked_node_superset():
+    guard = ProposalQualityGuard()
+    node_types = [
+        "RESEARCH_GAP",
+        "CLOSEST_PRIOR_WORK",
+        "OBJECTIVE",
+        "WORK_PACKAGE",
+        "FORMAL_MODEL",
+        "EXPERIMENT_DESIGN",
+        "NOVEL_MECHANISM",
+        "TEAM_EVIDENCE",
+    ]
+    nodes = [
+        {"node_id": f"node-{index}", "node_type": node_type, "status": "UNKNOWN"}
+        for index, node_type in enumerate(node_types)
+    ]
+    architecture = {
+        "argument_architecture": {
+            "central_proposition": {
+                "node_id": "central-proposition",
+                "statement": "A testable proposition",
+                "falsifiable_or_comparable": True,
+            },
+            "research_questions": [{"node_id": "question-1"}],
+            "nodes": nodes,
+        },
+        "research_design_matrix": [{
+            "research_question_id": "question-1",
+            "gap_ids": ["node-0"],
+            "objective_ids": ["node-2"],
+            "work_package_ids": ["node-3"],
+            "method_ids": ["node-4"],
+            "evaluation_ids": ["node-5"],
+            "innovation_ids": ["node-6"],
+            "closest_prior_work_ids": ["node-1"],
+        }],
+        "evidence_gap_report": [],
+        "readiness": {"ready": False},
+    }
+    expected_ids = {
+        "central-proposition",
+        "question-1",
+        *(node["node_id"] for node in nodes),
+    }
+    architecture["argument_architecture"]["nodes"].append({
+        "node_id": "item-system-redundant",
+        "node_type": "DELIVERABLE",
+        "status": "UNKNOWN",
+    })
+    required_dimensions = [
+        "CENTRAL_THESIS",
+        "ARGUMENT_CHAIN",
+        "EVIDENCE_SUPPORT",
+        "METHOD_SUBSTANCE",
+        "INNOVATION_BASELINE",
+        "FEASIBILITY_FOUNDATION",
+        "METRIC_JUSTIFICATION",
+    ]
+    critic_output = {
+        "result": {
+            "checked_node_ids": sorted(expected_ids | {"upstream-extra"}),
+            "chain_checks": [{} for _ in range(7)],
+            "quality_dimensions": [
+                {"dimension": dimension, "passed": True, "score": 3}
+                for dimension in required_dimensions
+            ],
+        }
+    }
+
+    findings = guard._audit_argument_architecture(architecture, critic_output)
+
+    assert "QG_ARGUMENT_CRITIC_PARTIAL" not in {finding.code for finding in findings}
 
 
 def test_shallow_project_definition_is_rejected():
@@ -66,7 +140,7 @@ def test_shallow_project_definition_is_rejected():
     project = candidate["result"]["project_definition"]
     project["items"] = [item for item in project["items"] if item["item_type"] == "OBJECTIVE"]
     project["relations"] = []
-    checked = guard.apply("P-PROJECT-DEFINITION-EXTRACT", env, candidate)
+    checked = guard.observe("P-PROJECT-DEFINITION-EXTRACT", env, candidate)
     assert checked["status"] == "REVISE"
     assert {"QG_PROJECT_GRAPH_INCOMPLETE", "QG_PROJECT_GRAPH_TOO_SHALLOW"}.issubset(_codes(checked))
 
@@ -85,7 +159,7 @@ def test_foundation_cannot_be_confirmed_by_guide_or_user_statement():
                 "authority_rank": 90,
                 "security_level": "INTERNAL",
             }]
-    checked = guard.apply("P-PROJECT-DEFINITION-EXTRACT", env, candidate)
+    checked = guard.observe("P-PROJECT-DEFINITION-EXTRACT", env, candidate)
     assert checked["status"] == "REVISE"
     assert "QG_FOUNDATION_STATUS_EXCEEDS_EVIDENCE" in _codes(checked)
 
@@ -108,9 +182,20 @@ def test_false_section_planning_readiness_without_foundation_is_rejected():
     candidate = copy.deepcopy(output)
     candidate["result"]["ready_for_section_planning"] = True
     candidate["result"]["writeable_section_profiles"] = sorted(ProposalQualityGuard.REQUIRED_SECTION_PROFILES)
-    checked = guard.apply("P-PROJECT-READINESS-CRITIC", env, candidate)
+    checked = guard.observe("P-PROJECT-READINESS-CRITIC", env, candidate)
     assert checked["status"] == "REVISE"
     assert "QG_FOUNDATION_FALSE_READY" in _codes(checked)
+
+
+def test_conservative_not_ready_report_is_not_false_readiness():
+    _, _, guard, _, _, _, _, env, output = _valid_project_argument_readiness()
+    candidate = copy.deepcopy(output)
+    candidate["result"]["ready_for_section_planning"] = False
+    candidate["result"]["writeable_section_profiles"] = ["BACKGROUND_AND_SIGNIFICANCE"]
+
+    checked = guard.observe("P-PROJECT-READINESS-CRITIC", env, candidate)
+
+    assert "QG_FALSE_READINESS" not in _codes(checked)
 
 
 def test_format_only_template_is_rejected():
@@ -121,7 +206,7 @@ def test_format_only_template_is_rejected():
     template["components"] = template["components"][:2]
     template["argument_patterns"] = []
     template["expression_patterns"] = []
-    checked = guard.apply("P-TEMPLATE-EXTRACT", env, output)
+    checked = guard.observe("P-TEMPLATE-EXTRACT", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_TEMPLATE_ONLY_FORMAT" in _codes(checked)
 
@@ -139,7 +224,7 @@ def test_fifty_four_cloned_tasks_and_document_bloat_are_rejected():
         task["revision_task_id"] = f"task-{i:03d}"
         task["objective"] = f"补充《章节{i:03d}》的定位、问题、方法、指标和输出。"
         plan["tasks"].append(task)
-    checked = guard.apply("P-REVISION-PLAN", env, output)
+    checked = guard.observe("P-REVISION-PLAN", env, output)
     assert checked["status"] == "REVISE"
     assert {"QG_PLAN_DOCUMENT_BLOAT", "QG_PLAN_TASKS_TEMPLATE_CLONED"}.issubset(_codes(checked))
 
@@ -156,7 +241,7 @@ def test_wrong_section_profile_and_generic_blueprint_are_rejected():
     ]
     for index, paragraph in enumerate(output["result"]["blueprint"]["paragraphs"]):
         paragraph["function"] = generic[index % len(generic)]
-    checked = guard.apply("P-WRITE-BLUEPRINT", env, output)
+    checked = guard.observe("P-WRITE-BLUEPRINT", env, output)
     assert checked["status"] == "REVISE"
     assert {"QG_WRONG_SECTION_PROFILE", "QG_BLUEPRINT_GENERIC_SIX_PART_TEMPLATE"}.issubset(_codes(checked))
 
@@ -166,7 +251,7 @@ def test_write_critic_must_read_every_paragraph():
     env = pack.replay_input("P-WRITE-CRITIC")
     output = sim.invoke("P-WRITE-CRITIC", env)
     output["result"]["checked_paragraph_ids"] = []
-    checked = guard.apply("P-WRITE-CRITIC", env, output)
+    checked = guard.observe("P-WRITE-CRITIC", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_CRITIC_DID_NOT_READ_ALL_PARAGRAPHS" in _codes(checked)
 
@@ -187,7 +272,7 @@ def test_integration_rejects_partial_candidate_set_and_unknown_mapping_ids():
         "target_ids": ["nonexistent-task"],
         "complete": True,
     }]
-    checked = guard.apply("P-INTEGRATION-CRITIC", env, output)
+    checked = guard.observe("P-INTEGRATION-CRITIC", env, output)
     assert checked["status"] == "REVISE"
     assert {"QG_INTEGRATION_CANDIDATE_SET_INCOMPLETE", "QG_INTEGRATION_FABRICATED_MAPPING"}.issubset(_codes(checked))
 
@@ -198,7 +283,7 @@ def test_expression_editor_cannot_drop_trace_links():
     output = sim.invoke("P-EXPRESSION-POLISH", env)
     assert env["payload"]["content_candidate"]["trace_links"]
     output["result"]["trace_links"] = []
-    checked = guard.apply("P-EXPRESSION-POLISH", env, output)
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_EXPRESSION_TRACE_CHANGED" in _codes(checked)
 
@@ -225,10 +310,11 @@ def test_integration_rejects_cross_section_template_repetition():
     env["payload"]["candidate_sections"] = sections
     env["payload"]["document_section_map"] = section_map
     output = sim.invoke("P-INTEGRATION-CRITIC", env)
-    checked = guard.apply("P-INTEGRATION-CRITIC", env, output)
+    checked = guard.observe("P-INTEGRATION-CRITIC", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_DOCUMENT_TEMPLATE_REPETITION" in _codes(checked)
-    assert set(checked["result"]["redundancy_report"]["affected_section_ids"]) == {f"section-{i:03d}" for i in range(4)}
+    report = checked["observations"]["main_body_redundancy_report"]
+    assert set(report["affected_section_ids"]) == {f"section-{i:03d}" for i in range(4)}
 
 
 def test_blueprint_rejects_reuse_of_prior_section_information_key():
@@ -244,7 +330,7 @@ def test_blueprint_rejects_reuse_of_prior_section_information_key():
         "paragraph_roles": ["PROBLEM"],
         "sentence_signatures": ["signature-prior-001"],
     }]
-    checked = guard.apply("P-WRITE-BLUEPRINT", env, output)
+    checked = guard.observe("P-WRITE-BLUEPRINT", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_BLUEPRINT_REUSES_PRIOR_INFORMATION" in _codes(checked)
 
@@ -254,9 +340,29 @@ def test_content_rejects_inconsistent_claim_advancement_summary():
     env = pack.replay_input("P-WRITE-CONTENT")
     output = sim.invoke("P-WRITE-CONTENT", env)
     output["result"]["claim_advancement"]["new_information_keys"] = ["unrelated-information-key"]
-    checked = guard.apply("P-WRITE-CONTENT", env, output)
+    checked = guard.observe("P-WRITE-CONTENT", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_CONTENT_ADVANCEMENT_SUMMARY_INCONSISTENT" in _codes(checked)
+
+
+def test_content_rejects_duplicate_or_non_contiguous_paragraph_sequence():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-WRITE-CONTENT")
+    output = sim.invoke("P-WRITE-CONTENT", env)
+    first = copy.deepcopy(output["result"]["paragraphs"][0])
+    second = copy.deepcopy(first)
+    second.update({
+        "paragraph_id": "paragraph-sequence-2",
+        "sequence": 1,
+        "text": first["text"] + " 第二段补充不同的验证内容。",
+        "novel_content_key": str(first["novel_content_key"]) + "-second",
+    })
+    output["result"]["paragraphs"] = [first, second]
+
+    checked = guard.observe("P-WRITE-CONTENT", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_SECTION_PARAGRAPH_SEQUENCE_INVALID" in _codes(checked)
 
 
 def test_integration_rejects_duplicate_information_claim_concentration_and_same_skeleton():
@@ -291,14 +397,14 @@ def test_integration_rejects_duplicate_information_claim_concentration_and_same_
     env["payload"]["document_section_map"] = section_map
     env["payload"]["argument_graph"]["central_proposition"]["node_id"] = "prop-001"
     output = sim.invoke("P-INTEGRATION-CRITIC", env)
-    checked = guard.apply("P-INTEGRATION-CRITIC", env, output)
+    checked = guard.observe("P-INTEGRATION-CRITIC", env, output)
     assert checked["status"] == "REVISE"
     assert {
         "QG_DOCUMENT_TEMPLATE_REPETITION",
         "QG_DOCUMENT_DUPLICATE_INFORMATION_KEYS",
         "QG_DOCUMENT_CLAIM_OVERCONCENTRATION",
     }.issubset(_codes(checked))
-    report = checked["result"]["redundancy_report"]
+    report = checked["observations"]["main_body_redundancy_report"]
     assert report["duplicate_information_key_groups"] == 1
     assert report["claim_overconcentration_groups"] == 1
     assert report["template_skeleton_groups"] >= 1
@@ -312,7 +418,7 @@ def test_generated_quality_defect_cannot_be_resolved_by_empty_confirmation():
             "suggested_route": "PLANNING_AGENT",
         }]
     }
-    from app.workflows import WorkflowEngine
+    from app.runtime_api import WorkflowEngine
     assert WorkflowEngine._has_nonconfirmable_quality_failure(output) is True
 
 
@@ -323,9 +429,67 @@ def test_expression_editor_cannot_change_semantic_identity():
     assert output["result"]["paragraphs"]
     output["result"]["paragraphs"][0]["primary_claim_id"] = "different-claim-id"
     output["result"]["claim_advancement"]["advanced_claim_ids"] = ["different-claim-id"]
-    checked = guard.apply("P-EXPRESSION-POLISH", env, output)
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_EXPRESSION_SEMANTIC_IDENTITY_CHANGED" in _codes(checked)
+
+
+def test_expression_editor_cannot_change_paragraph_sequence():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-POLISH")
+    output = sim.invoke("P-EXPRESSION-POLISH", env)
+    output["result"]["paragraphs"][0]["sequence"] += 1
+
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_EXPRESSION_SEMANTIC_IDENTITY_CHANGED" in _codes(checked)
+
+
+def test_expression_editor_cannot_relabel_source_lineage_as_current_polish_action():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-POLISH")
+    output = sim.invoke("P-EXPRESSION-POLISH", env)
+    output["result"]["source_preservation_summary"][0]["action"] = "PRESERVED"
+
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_EXPRESSION_SOURCE_LINEAGE_CHANGED" in _codes(checked)
+
+
+def test_expression_editor_cannot_change_trace_binding_behind_same_trace_id():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-POLISH")
+    output = sim.invoke("P-EXPRESSION-POLISH", env)
+    output["result"]["trace_links"][0]["support_type"] = "INDIRECT"
+
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_EXPRESSION_TRACE_BINDING_CHANGED" in _codes(checked)
+
+
+def test_expression_editor_must_preserve_unresolved_items_and_trace_manifest():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-POLISH")
+    output = sim.invoke("P-EXPRESSION-POLISH", env)
+    output["result"]["unresolved_items"] = [{
+        "item_id": "unresolved-new",
+        "description": "new unresolved item",
+        "required_action": "confirm",
+        "owner_role": "PROJECT_OWNER",
+        "blocking": True,
+    }]
+    output["result"]["preserved_trace_ids"] = ["trace-other"]
+
+    checked = guard.observe("P-EXPRESSION-POLISH", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert {
+        "QG_EXPRESSION_UNRESOLVED_ITEMS_CHANGED",
+        "QG_EXPRESSION_PRESERVED_TRACE_LIST_MISMATCH",
+    }.issubset(_codes(checked))
 
 
 def test_integration_revision_findings_reach_rewrite_prompts(runtime):
@@ -410,7 +574,7 @@ def test_plan_rejects_multiple_information_owners_and_dependency_cycle():
     second["unique_information_keys"] = ["shared-information-key"]
     plan["narrative_architecture"]["section_contracts"] = [first, second]
     plan["target_section_ids"] = ["section-a", "section-b"]
-    checked = guard.apply("P-REVISION-PLAN", env, output)
+    checked = guard.observe("P-REVISION-PLAN", env, output)
     assert checked["status"] == "REVISE"
     assert {
         "QG_PLAN_INFORMATION_KEY_MULTIPLE_OWNERS",
@@ -424,16 +588,33 @@ def test_quality_guard_failure_outputs_remain_schema_valid():
     expression_env = pack.replay_input("P-EXPRESSION-POLISH")
     expression_output = sim.invoke("P-EXPRESSION-POLISH", expression_env)
     expression_output["result"]["paragraphs"][0]["primary_claim_id"] = "changed-claim"
-    checked_expression = guard.apply("P-EXPRESSION-POLISH", expression_env, expression_output)
+    checked_expression = guard.observe("P-EXPRESSION-POLISH", expression_env, expression_output)
     assert checked_expression["status"] == "REVISE"
-    assert pack.validate("P-EXPRESSION-POLISH", "output", checked_expression) == []
+    assert pack.validate("P-EXPRESSION-POLISH", "output", expression_output) == []
 
     argument_env = pack.replay_input("P-ARGUMENT-ARCHITECTURE")
     argument_output = sim.invoke("P-ARGUMENT-ARCHITECTURE", argument_env)
     argument_output["result"]["argument_architecture"]["central_proposition"]["falsifiable_or_comparable"] = False
-    checked_argument = guard.apply("P-ARGUMENT-ARCHITECTURE", argument_env, argument_output)
+    checked_argument = guard.observe("P-ARGUMENT-ARCHITECTURE", argument_env, argument_output)
     assert checked_argument["status"] == "REVISE"
-    assert pack.validate("P-ARGUMENT-ARCHITECTURE", "output", checked_argument) == []
+    assert pack.validate("P-ARGUMENT-ARCHITECTURE", "output", argument_output) == []
+
+
+def test_expression_critic_uses_role_specific_compact_contract():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-EXPRESSION-CRITIC")
+    output = sim.invoke("P-EXPRESSION-CRITIC", env)
+
+    assert set(output["result"]) == {
+        "verdict",
+        "checked_paragraph_ids",
+        "expression_assessment",
+    }
+    assert len(output["result"]["expression_assessment"]["checks"]) == 8
+    assert pack.validate("P-EXPRESSION-CRITIC", "output", output) == []
+
+    report = guard.observe("P-EXPRESSION-CRITIC", env, output)
+    assert "QG_CRITIC_DIMENSIONS_TOO_SHALLOW" not in _codes(report)
 
 
 def test_section_critic_must_check_profile_rules_and_required_scorecard():
@@ -450,7 +631,7 @@ def test_section_critic_must_check_profile_rules_and_required_scorecard():
         item for item in output["result"]["quality_dimensions"]
         if item["dimension"] != "METHOD_SUBSTANCE"
     ]
-    checked = guard.apply("P-WRITE-CRITIC", env, output)
+    checked = guard.observe("P-WRITE-CRITIC", env, output)
     assert checked["status"] == "REVISE"
     assert {
         "QG_CRITIC_PROFILE_RULES_NOT_CHECKED",
@@ -466,7 +647,7 @@ def test_integration_critic_must_cover_full_quality_scorecard():
         item for item in output["result"]["quality_dimensions"]
         if item["dimension"] not in {"FEASIBILITY_FOUNDATION", "METRIC_JUSTIFICATION"}
     ]
-    checked = guard.apply("P-INTEGRATION-CRITIC", env, output)
+    checked = guard.observe("P-INTEGRATION-CRITIC", env, output)
     assert checked["status"] == "REVISE"
     assert "QG_INTEGRATION_SCOPE_TOO_NARROW" in _codes(checked)
 
@@ -524,12 +705,13 @@ def test_simulated_multisection_output_has_unique_claim_ownership_and_no_templat
         for index, title in enumerate(titles, 1)
     ]
     seed_plan_env["payload"]["source_section"] = copy.deepcopy(seed_plan_env["payload"]["linked_sections"][0])
-    plan_output = guard.apply(
+    plan_output = sim.invoke("P-REVISION-PLAN", seed_plan_env)
+    plan_observation = guard.observe(
         "P-REVISION-PLAN",
         seed_plan_env,
-        sim.invoke("P-REVISION-PLAN", seed_plan_env),
+        plan_output,
     )
-    assert plan_output["status"] == "PASS", _codes(plan_output)
+    assert plan_observation["status"] == "PASS", _codes(plan_observation)
     plan = plan_output["result"]["revision_plan"]
     contracts = [
         item for item in plan["narrative_architecture"]["section_contracts"]
@@ -555,12 +737,13 @@ def test_simulated_multisection_output_has_unique_claim_ownership_and_no_templat
             "prior_section_digest": prior_digest,
             "revision_findings": [],
         })
-        blueprint_output = guard.apply(
+        blueprint_output = sim.invoke("P-WRITE-BLUEPRINT", blueprint_env)
+        blueprint_observation = guard.observe(
             "P-WRITE-BLUEPRINT",
             blueprint_env,
-            sim.invoke("P-WRITE-BLUEPRINT", blueprint_env),
+            blueprint_output,
         )
-        assert blueprint_output["status"] == "PASS", (section["title"], _codes(blueprint_output))
+        assert blueprint_observation["status"] == "PASS", (section["title"], _codes(blueprint_observation))
 
         content_env = pack.replay_input("P-WRITE-CONTENT")
         content_env["payload"].update({
@@ -572,12 +755,13 @@ def test_simulated_multisection_output_has_unique_claim_ownership_and_no_templat
             "prior_section_digest": prior_digest,
             "revision_findings": [],
         })
-        content_output = guard.apply(
+        content_output = sim.invoke("P-WRITE-CONTENT", content_env)
+        content_observation = guard.observe(
             "P-WRITE-CONTENT",
             content_env,
-            sim.invoke("P-WRITE-CONTENT", content_env),
+            content_output,
         )
-        assert content_output["status"] == "PASS", (section["title"], _codes(content_output))
+        assert content_observation["status"] == "PASS", (section["title"], _codes(content_observation))
         candidate = content_output["result"]
         candidate_sections.append({"section_id": section["section_id"], "candidate": candidate})
         document_section_map.append({
@@ -601,13 +785,14 @@ def test_simulated_multisection_output_has_unique_claim_ownership_and_no_templat
         "narrative_architecture": plan["narrative_architecture"],
         "project_definition": project_output["result"]["project_definition"],
     })
-    checked = guard.apply(
+    integration_output = sim.invoke("P-INTEGRATION-CRITIC", integration_env)
+    checked = guard.observe(
         "P-INTEGRATION-CRITIC",
         integration_env,
-        sim.invoke("P-INTEGRATION-CRITIC", integration_env),
+        integration_output,
     )
     assert checked["status"] == "PASS", _codes(checked)
-    report = checked["result"]["redundancy_report"]
+    report = integration_output["result"]["redundancy_report"]
     assert all(report[key] == 0 for key in [
         "exact_duplicate_groups", "semantic_template_groups",
         "duplicate_information_key_groups", "claim_overconcentration_groups",
@@ -706,3 +891,35 @@ def test_diagram_fallback_requires_explicit_semantic_intent():
     ))
     assert result["result"]["paragraphs"] == output["result"]["paragraphs"]
     assert "warnings" not in result
+
+
+def test_content_rejects_duplicate_paragraph_identity():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-WRITE-CONTENT")
+    output = sim.invoke("P-WRITE-CONTENT", env)
+    first = copy.deepcopy(output["result"]["paragraphs"][0])
+    second = copy.deepcopy(first)
+    second.update({
+        "sequence": 2,
+        "text": first["text"] + " 第二段补充独立的验证边界。",
+        "novel_content_key": str(first["novel_content_key"]) + "-identity-second",
+    })
+    output["result"]["paragraphs"] = [first, second]
+    output["result"]["candidate_text"] = first["text"] + "\n\n" + second["text"]
+
+    checked = guard.observe("P-WRITE-CONTENT", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_SECTION_PARAGRAPH_IDENTITY_INVALID" in _codes(checked)
+
+
+def test_content_rejects_candidate_text_paragraph_divergence():
+    pack, sim, guard = _pack_sim_guard()
+    env = pack.replay_input("P-WRITE-CONTENT")
+    output = sim.invoke("P-WRITE-CONTENT", env)
+    output["result"]["candidate_text"] = "与结构化段落完全不同的遗留正文。"
+
+    checked = guard.observe("P-WRITE-CONTENT", env, output)
+
+    assert checked["status"] == "REVISE"
+    assert "QG_CANDIDATE_TEXT_PARAGRAPH_DIVERGENCE" in _codes(checked)

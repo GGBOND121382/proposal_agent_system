@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0",
+  "fixture_scope": "control_plane excerpt derived from immutable full request/response SHA anchors",
+  "project_id": "project-8595abee7b9c4047",
+  "workflow_id": "wf-f29b7e641f4c4987",
+  "historical_run_inventory": [
+    {"run_id":"run-07fc40992d0946f9","prompt_id":"P-SAFE-ONLINE-PACKAGE","status":"PASS","input_sha256":"4f697a97ada1d8e2f79373f331981bd16f6ded571fd2d519c08dfa003446d8ca","output_sha256":"914775e197aafe023862c026baaad56f082f3b25c81bb4e0e26fedd5d8dcb324"},
+    {"run_id":"run-add7d9fedb2a4483","prompt_id":"P-SAFE-ONLINE-PACKAGE-CRITIC","status":"PASS","input_sha256":"963fddcfd592744784d530b17ddb4c882da05dcc1e07a4412d030374b1d6e256","output_sha256":"a08fc94a62c1e5262ef7768afa53e992dbd9fbe5d5acd06dc698bd7e68a77e41"},
+    {"run_id":"run-65a65c0e963a425e","prompt_id":"P-PUBLIC-RESEARCH-PLAN","status":"PASS","input_sha256":"c847c00c662dc6e0a54bcc46b50b19ad0c600ce3d15055afaf5b3417e190d74a","output_sha256":"c9e9afc8e7b1acf3ae83a44eb28f182ea7821fbaee8daea431c5e9e927b582d5"},
+    {"run_id":"run-ef65772880274b45","prompt_id":"P-PUBLIC-RESEARCH-SYNTHESIS","status":"REVISE","input_sha256":"88416b1cb85e491d3cb29f79a896559371049714349d09ffd79813ef5251513d","output_sha256":"40a3e12cfd7a34bd55678332c7d4db7039428aa73feda4699fc07474e8062934"},
+    {"run_id":"run-de8115e860304095","prompt_id":"P-PUBLIC-RESEARCH-CRITIC","status":"BLOCK","input_sha256":"5399c8efb6a7d5b95148c081d19f369ad1a8db36ece8b2b9d38c300e10ddfe09","output_sha256":"1b21481dd81b3e6796dd1ff5187dd1315c693b03da0c6431b8209ab42ac222ca"},
+    {"run_id":"run-c6168c0320354a95","prompt_id":"P-PUBLIC-RESEARCH-SYNTHESIS","status":"PASS","input_sha256":"6c2bd5d30a80c4dce83de31f3cc61257ec401e919740d3704e70ca725604aa7d","output_sha256":"5cf2b6869f26ddacbbd466a191dd5853997f50c402e8d56b249acb7dd36ded1b"},
+    {"run_id":"run-9adaf66163eb4db6","prompt_id":"P-PUBLIC-RESEARCH-CRITIC","status":"PASS","input_sha256":"11acb86378acaf7c1c0799c552791bd19c180e5fb2e7facf289cbfc86526f193","output_sha256":"68a3871760ad9b50b79cfe2b31010ce52773498965c4e1e076f5eb5d7c4aaf2c"},
+    {"run_id":"run-ca78064053684e54","prompt_id":"P-ONLINE-RESULT-IMPORT-CRITIC","status":"PASS","input_sha256":"5118ab47ede898ab6cfbd96880c8426f2f9a0b0ee21462af19399baf13fd6e64","output_sha256":"6731c0b5467934723288d2f135c68566fe0c877b16f84b67d583196a1bdd931e"}
+  ],
+  "request_size_baseline": {
+    "measurement": "latest immutable provider request per node on 2026-08-26; system prompt plus compact input envelope characters",
+    "P-SAFE-ONLINE-PACKAGE": {"system_prompt_chars":13307,"provider_envelope_chars":2133,"provider_visible_chars":15440},
+    "P-SAFE-ONLINE-PACKAGE-CRITIC": {"system_prompt_chars":12554,"provider_envelope_chars":2089,"provider_visible_chars":14643},
+    "P-PUBLIC-RESEARCH-PLAN": {"system_prompt_chars":14299,"provider_envelope_chars":1103,"provider_visible_chars":15402},
+    "P-PUBLIC-RESEARCH-SYNTHESIS": {"system_prompt_chars":15870,"provider_envelope_chars":1230,"provider_visible_chars":17100},
+    "P-PUBLIC-RESEARCH-CRITIC": {"system_prompt_chars":13153,"provider_envelope_chars":1331,"provider_visible_chars":14484},
+    "P-ONLINE-RESULT-IMPORT-CRITIC": {"system_prompt_chars":12993,"provider_envelope_chars":1890,"provider_visible_chars":14883}
+  },
+  "cases": {
+    "advisory_only_synthesis": {
+      "run_id": "run-ef65772880274b45",
+      "call_key": "call-f1bdb9d59bf414189b041b675ada170f",
+      "input_sha256": "88416b1cb85e491d3cb29f79a896559371049714349d09ffd79813ef5251513d",
+      "output_sha256": "40a3e12cfd7a34bd55678332c7d4db7039428aa73feda4699fc07474e8062934",
+      "historical_counts": {"findings": 4, "unresolved_items": 4, "user_questions": 2},
+      "output": {
+        "prompt_id": "P-PUBLIC-RESEARCH-SYNTHESIS",
+        "status": "REVISE",
+        "findings": [
+          {"code": "PUBLIC_SYNTHESIS_UNSOURCED", "blocking": false},
+          {"code": "PUBLIC_SYNTHESIS_OVERGENERALIZED", "blocking": false},
+          {"code": "PUBLIC_SYNTHESIS_SOURCE_CONFLICT", "blocking": false},
+          {"code": "PUBLIC_SYNTHESIS_UNSOURCED", "blocking": false}
+        ],
+        "unresolved_items": [
+          {"item_id": "URI-001", "blocking": false},
+          {"item_id": "URI-002", "blocking": false},
+          {"item_id": "URI-003", "blocking": false},
+          {"item_id": "URI-004", "blocking": false}
+        ],
+        "user_questions": [
+          {"question_id": "uq-001", "blocking": false},
+          {"question_id": "uq-002", "blocking": false}
+        ],
+        "warnings": []
+      }
+    },
+    "critic_cross_capability": {
+      "run_id": "run-de8115e860304095",
+      "call_key": "call-62fd78830efccbf9f056383f694df8a0",
+      "input_sha256": "5399c8efb6a7d5b95148c081d19f369ad1a8db36ece8b2b9d38c300e10ddfe09",
+      "output_sha256": "1b21481dd81b3e6796dd1ff5187dd1315c693b03da0c6431b8209ab42ac222ca",
+      "output": {
+        "prompt_id": "P-PUBLIC-RESEARCH-CRITIC",
+        "status": "REVISE",
+        "findings": [
+          {
+            "code": "PUBLIC_CRITIC_WEAK_SOURCE",
+            "target_type": "retrieved_sources",
+            "target_path_or_span": "payload.retrieved_sources[0] public-src-d076583d1da54399",
+            "description": "Source has been formally withdrawn by authors.",
+            "repair_instruction": "Remove this source from retrieved_sources.",
+            "suggested_route": "ORIGINAL_PRODUCER",
+            "repairable": true,
+            "blocking": true
+          },
+          {
+            "code": "PUBLIC_CRITIC_WEAK_SOURCE",
+            "target_type": "retrieved_sources",
+            "target_path_or_span": "payload.retrieved_sources[2] public-src-7bb1ce9fdc944757",
+            "description": "Astrophysics source is irrelevant to the research questions.",
+            "repair_instruction": "Remove this irrelevant source from retrieved_sources.",
+            "suggested_route": "ORIGINAL_PRODUCER",
+            "repairable": true,
+            "blocking": true
+          },
+          {
+            "code": "PUBLIC_CRITIC_UNSUPPORTED_CLAIM",
+            "target_type": "synthesis_candidate.claims",
+            "target_path_or_span": "payload.synthesis_candidate.claims[*]",
+            "description": "Core research questions need additional sources.",
+            "repair_instruction": "Revise the research plan and run targeted searches.",
+            "suggested_route": "PLANNING_AGENT",
+            "repairable": true,
+            "blocking": false
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,39 +1,619 @@
 from __future__ import annotations
 
+import json
+import os
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from .base import SkillContext, SkillResult
-from .public_research import PublicResearchArchiveError, PublicResearchArchiveSkill
+from .public_research import (
+    PublicResearchArchiveSkill,
+    PublicResearchPlanContractError,
+    PublicResearchRetrievalError,
+)
 from .research_audit import upgrade_archive_result
-from .research_plan import deduplicate_candidates, normalize_and_validate_plan
+from .research_execution import (
+    ResearchExecutionContractError,
+    build_plan_lock,
+    validate_connector_execution,
+)
+from .research_plan import (
+    MAX_BACKGROUND_RESEARCH_QUERIES,
+    deduplicate_candidates,
+    normalize_and_validate_plan,
+)
+from .research_screening import screen_and_select_candidates
+from .research_quality import assess_candidate_relevance, build_query_relevance_profiles, build_retrieval_health
+from .search_providers.base import CHANNEL_WEB_SEARCH, provider_channel
+from .research_validation import write_validation_bundle
+from .search_gateway import SearchGateway, normalize_search_queries
+from .search_providers import (
+    AcademicSearchProvider,
+    BrowserSearchProvider,
+    SearchProviderError,
+    SearxngSearchProvider,
+)
+from ..util import safe_filename, utc_now, write_json
 
 _DUPLICATE_ISSUES: ContextVar[tuple[dict[str, Any], ...]] = ContextVar("research_duplicate_issues", default=())
+_NORMALIZED_PLAN: ContextVar[dict[str, Any] | None] = ContextVar("research_normalized_plan", default=None)
+_STRICT_RESEARCH: ContextVar[bool] = ContextVar("research_strict_execution", default=False)
+_SELECTION_REPORT: ContextVar[dict[str, Any] | None] = ContextVar("research_selection_report", default=None)
+_EXECUTION_REPORT: ContextVar[dict[str, Any] | None] = ContextVar("research_execution_report", default=None)
+_EFFECTIVE_MAX_RESULTS: ContextVar[int] = ContextVar("research_effective_max_results", default=40)
+_QUALITY_PROFILE: ContextVar[str] = ContextVar("research_quality_profile", default="legacy")
+_LIVE_DISCOVERY: ContextVar[bool] = ContextVar("research_live_discovery", default=False)
 
 
 class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
-    """Track-C production wrapper around the existing retrieval/archive implementation."""
+    """WF-3 public research with plan locking, academic discovery and audited coverage."""
 
-    version = "2.0.0"
-    description = "Plan-validated public search with canonical deduplication, hash verification, coverage evidence, and claim binding support."
+    version = "2.3.0"
+    description = (
+        "Plan-validated public/academic search with exact execution binding, deterministic "
+        "screening, canonical deduplication, coverage evidence and claim binding support."
+    )
+
+    @staticmethod
+    def _candidate_budget_per_query() -> int:
+        raw = os.getenv("PUBLIC_SEARCH_CANDIDATES_PER_QUERY", "8").strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 8
+        return max(3, min(value, 25))
+
+    @staticmethod
+    def _minimum_results_per_query() -> int:
+        raw = os.getenv("PUBLIC_RESEARCH_MIN_SOURCES_PER_QUERY", "3").strip()
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 3
+        return max(1, min(value, 8))
+
+    def _with_execution_contract_defaults(
+        self,
+        plan: dict[str, Any],
+        provider: str,
+    ) -> dict[str, Any]:
+        """Fill the Phase 3 retrieval execution contract from settings/provider.
+
+        The contract is runtime-owned: values already present in the approved plan are
+        authoritative and never overwritten here; only absent fields are derived.
+        """
+
+        plan = dict(plan)
+        settings = self.settings
+        if "required_channels" not in plan:
+            configured = [
+                item.strip().upper()
+                for item in str(getattr(settings, "public_search_required_channels", "") or "").split(",")
+                if item.strip()
+            ]
+            if configured:
+                plan["required_channels"] = list(dict.fromkeys(configured))
+            else:
+                plan["required_channels"] = {
+                    "academic": ["ACADEMIC"],
+                    "hybrid": ["ACADEMIC", "WEB_SEARCH"],
+                    "searxng": ["WEB_SEARCH"],
+                    "browser": ["WEB_SEARCH"],
+                    "browser_search": ["WEB_SEARCH"],
+                }.get(provider, [])
+        if "provider_execution_requirements" not in plan:
+            required_providers = [
+                item.strip().lower()
+                for item in str(getattr(settings, "public_search_required_providers", "") or "").split(",")
+                if item.strip()
+            ]
+            plan["provider_execution_requirements"] = {
+                "required_providers": list(dict.fromkeys(required_providers)),
+                "execute_all_approved_queries": True,
+            }
+        if "minimum_fulltext_sources_per_query" not in plan:
+            plan["minimum_fulltext_sources_per_query"] = int(
+                getattr(settings, "public_research_min_fulltext_sources_per_query", 1) or 0
+            )
+        if "allow_snippet_only" not in plan:
+            plan["allow_snippet_only"] = bool(getattr(settings, "public_search_allow_snippet_only", True))
+        if "require_web_discovery" not in plan:
+            plan["require_web_discovery"] = bool(getattr(settings, "public_search_require_web_discovery", False))
+        return plan
+
+    def _academic_connector_file(
+        self,
+        provider: str,
+        normalized_plan: dict[str, Any],
+        context: SkillContext,
+    ) -> tuple[Path, dict[str, Any]]:
+        queries = list(normalized_plan.get("queries") or [])
+        search_queries = normalize_search_queries(
+            normalized_plan.get("query_items") or queries
+        )
+        per_query = self._candidate_budget_per_query()
+        root = (
+            Path(context.data_dir)
+            / "research_discovery_inputs"
+            / safe_filename(context.project_id)
+            / safe_filename(context.workflow_id or "workflow")
+        )
+        root.mkdir(parents=True, exist_ok=True)
+        discovery: dict[str, Any] | None = None
+        academic_error: Exception | None = None
+        try:
+            academic_batch = SearchGateway(
+                [
+                    AcademicSearchProvider(
+                        self.settings,
+                        time_scope=normalized_plan.get("time_scope"),
+                    )
+                ]
+            ).search(
+                search_queries,
+                per_query_limit=per_query,
+            )
+            discovery = dict(
+                academic_batch.provider_manifests.get("academic-multi-source") or {}
+            )
+            if not discovery:
+                raise RuntimeError("Academic search provider returned no discovery manifest")
+        except Exception as exc:
+            academic_error = exc
+            if provider == "academic":
+                raise PublicResearchRetrievalError(
+                    f"Academic discovery failed: {exc}",
+                    details={"exception_type": type(exc).__name__},
+                ) from exc
+
+        if discovery is None:
+            discovery = {
+                "schema_version": "1.0",
+                "run_id": f"academic-discovery-fallback-{safe_filename(context.workflow_id or 'workflow')}",
+                "connector": "wf3-hybrid-discovery",
+                "created_at": utc_now(),
+                "agent_generated_queries": list(queries),
+                "providers": [],
+                "responses": [{"query": query, "retrieved_at": utc_now(), "results": []} for query in queries],
+                "provider_runs": [],
+                "failures": [],
+                "per_query_limit": per_query,
+                "time_scope": normalized_plan.get("time_scope"),
+            }
+        if academic_error is not None:
+            discovery.setdefault("failures", []).append(
+                {
+                    "provider": "academic-multi-source",
+                    "category": "RETRIEVAL",
+                    "error_code": "ACADEMIC_DISCOVERY_ALL_PROVIDERS_FAILED",
+                    "message": f"{type(academic_error).__name__}: {academic_error}",
+                }
+            )
+
+        if provider == "hybrid":
+            requirements = normalized_plan.get("provider_execution_requirements") or {}
+            required_providers = {
+                str(item or "").strip().lower()
+                for item in requirements.get("required_providers") or []
+                if str(item or "").strip()
+            }
+            browser_required = bool(required_providers & {"browser", "browser_search"})
+            browser_enabled = bool(getattr(self.settings, "browser_search_enabled", False))
+            try:
+                web_batch = SearchGateway(
+                    [SearxngSearchProvider(self.settings, max_workers=4)]
+                ).search(
+                    search_queries,
+                    per_query_limit=per_query,
+                    continue_on_error=True,
+                )
+                web_candidates = web_batch.candidates()
+                web_failures = list(web_batch.failures)
+                web_runs = [run.to_dict() for run in web_batch.runs]
+            except SearchProviderError as exc:
+                web_candidates, web_failures, web_runs = [], [exc.to_failure()], []
+            except Exception as exc:
+                web_candidates, web_failures, web_runs = [], [
+                    {
+                        "provider": "searxng",
+                        "category": "RETRIEVAL",
+                        "error_code": "HYBRID_SEARXNG_DISCOVERY_ERROR",
+                        "message": f"{type(exc).__name__}: {exc}",
+                    }
+                ]
+            # Browser search runs as the SearXNG fallback and additionally whenever the
+            # approved execution contract names it as a required provider, even if
+            # SearXNG already returned candidates.
+            if browser_required and not browser_enabled:
+                web_failures.append(
+                    {
+                        "provider": "browser_search",
+                        "category": "CONFIGURATION",
+                        "error_code": "REQUIRED_PROVIDER_DISABLED",
+                        "message": "The approved execution contract requires browser_search but BROWSER_SEARCH_ENABLED is off.",
+                    }
+                )
+            min_hits = max(
+                0,
+                int(getattr(self.settings, "browser_fallback_min_hits_per_query", 0) or 0),
+            )
+            fallback_queries = self._browser_fallback_queries(
+                web_candidates,
+                search_queries,
+                min_hits=min_hits,
+                browser_required=browser_required,
+                relevance_profiles=build_query_relevance_profiles(normalized_plan),
+            )
+            if browser_enabled and fallback_queries:
+                try:
+                    browser_batch = SearchGateway(
+                        [
+                            BrowserSearchProvider(
+                                self.settings,
+                                worker=self.browser_worker,
+                                evidence_dir=root / "browser_search",
+                            )
+                        ]
+                    ).search(
+                        fallback_queries,
+                        per_query_limit=per_query,
+                        continue_on_error=True,
+                    )
+                    web_candidates = [*web_candidates, *browser_batch.candidates()]
+                    web_failures.extend(browser_batch.failures)
+                    web_runs.extend(run.to_dict() for run in browser_batch.runs)
+                except SearchProviderError as exc:
+                    web_failures.append(exc.to_failure())
+                except Exception as exc:
+                    web_failures.append(
+                        {
+                            "provider": "browser_search",
+                            "category": "RETRIEVAL",
+                            "error_code": "HYBRID_BROWSER_DISCOVERY_ERROR",
+                            "message": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+            by_query = {
+                str(row.get("query") or ""): row
+                for row in discovery.get("responses") or []
+                if isinstance(row, dict)
+            }
+            for candidate in web_candidates:
+                query = str(candidate.get("matched_query") or "").strip()
+                if query not in by_query:
+                    continue
+                candidate = dict(candidate)
+                candidate["matched_queries"] = [query]
+                verification = dict(candidate.get("verification") or {})
+                discovery_provider = str(
+                    candidate.get("discovery_provider") or "searxng"
+                )
+                verification.update(
+                    {
+                        "status": f"{discovery_provider.upper()}_DISCOVERY_RETURNED",
+                        "discovery_provider": discovery_provider,
+                        "query": query,
+                        "matched_queries": [query],
+                    }
+                )
+                candidate["verification"] = verification
+                candidate["academic_provider"] = discovery_provider
+                by_query[query].setdefault("results", []).append(candidate)
+            discovered_web_providers = [
+                str(run.get("provider") or "")
+                for run in web_runs
+                if str(run.get("provider") or "")
+            ]
+            discovery.setdefault("providers", []).extend(discovered_web_providers)
+            discovery["providers"] = list(dict.fromkeys(discovery["providers"]))
+            discovery.setdefault("failures", []).extend(web_failures)
+            discovery.setdefault("provider_runs", []).extend(web_runs)
+
+        query_id_by_text = {
+            str(item.get("query") or ""): str(item.get("query_id") or "")
+            for item in normalized_plan.get("query_items") or []
+            if isinstance(item, dict)
+        }
+        for row in discovery.get("responses") or []:
+            if not isinstance(row, dict):
+                continue
+            query = str(row.get("query") or "")
+            query_id = query_id_by_text.get(query)
+            if query_id:
+                row["query_id"] = query_id
+        discovery["plan_hash"] = build_plan_lock(normalized_plan)["plan_hash"]
+        discovery["retrieval_provider"] = provider
+
+        path = root / f"{safe_filename(str(discovery.get('run_id') or 'academic-discovery'))}.json"
+        write_json(path, discovery)
+        return path, discovery
 
     def run(self, payload: dict[str, Any], context: SkillContext) -> SkillResult:
         strict = bool(payload.get("require_structured_plan", False))
+        quality_profile = str(payload.get("research_quality_profile") or "legacy").strip().lower()
+        original_provider = str(payload.get("provider") or self.settings.public_search_provider).lower()
+        contracted_plan = self._with_execution_contract_defaults(
+            dict(payload.get("plan") or {}),
+            original_provider,
+        )
         try:
-            normalized_plan, validation = normalize_and_validate_plan(payload.get("plan") or {}, strict=strict)
+            normalized_plan, validation = normalize_and_validate_plan(
+                contracted_plan,
+                strict=strict,
+                max_queries=(
+                    MAX_BACKGROUND_RESEARCH_QUERIES
+                    if quality_profile == "application_background"
+                    else 12
+                ),
+            )
         except ValueError as exc:
-            raise PublicResearchArchiveError(str(exc)) from exc
+            raise PublicResearchPlanContractError(str(exc)) from exc
         if validation["status"] == "BLOCK":
             codes = [str(item.get("code")) for item in validation["findings"]]
-            raise PublicResearchArchiveError("Research plan validation failed: " + ", ".join(codes))
-        token = _DUPLICATE_ISSUES.set(())
+            raise PublicResearchPlanContractError(
+                "Research plan validation failed: " + ", ".join(codes),
+                details={"validation": validation, "normalized_plan": normalized_plan},
+            )
+
+        configured_max = max(1, min(int(payload.get("max_results") or self.settings.public_search_max_results), 100))
+        effective_max = configured_max
+        if strict and quality_profile in {"proposal_related_work", "application_background"}:
+            minimum_required = (
+                len(normalized_plan.get("queries") or [])
+                * self._minimum_results_per_query()
+            )
+            # The archive is validated after fetch failures and identity/content
+            # deduplication. Reserving exactly the minimum makes one ordinary
+            # failure deterministically fatal, so keep a bounded 20%/five-source
+            # screening margin without weakening the actual coverage threshold.
+            capacity_margin = max(5, (minimum_required + 4) // 5)
+            effective_max = max(
+                configured_max,
+                min(100, minimum_required + capacity_margin),
+            )
+
+        token_duplicate = _DUPLICATE_ISSUES.set(())
+        token_plan = _NORMALIZED_PLAN.set(normalized_plan)
+        token_strict = _STRICT_RESEARCH.set(strict)
+        token_selection = _SELECTION_REPORT.set(None)
+        token_execution = _EXECUTION_REPORT.set(None)
+        token_max = _EFFECTIVE_MAX_RESULTS.set(effective_max)
+        token_quality = _QUALITY_PROFILE.set(quality_profile)
+        token_live = _LIVE_DISCOVERY.set(original_provider in {"academic", "hybrid"})
+        discovery_file: Path | None = None
+        discovery_manifest: dict[str, Any] | None = None
         try:
             effective = dict(payload)
-            effective["plan"] = {**(payload.get("plan") or {}), "queries": normalized_plan["queries"]}
-            result = super().run(effective, context)
-            return upgrade_archive_result(result, normalized_plan, validation, list(_DUPLICATE_ISSUES.get()))
+            effective["plan"] = {**contracted_plan, "queries": normalized_plan["queries"]}
+            effective["max_results"] = effective_max
+            if original_provider in {"academic", "hybrid"}:
+                discovery_file, discovery_manifest = self._academic_connector_file(
+                    original_provider,
+                    normalized_plan,
+                    context,
+                )
+                effective["provider"] = "connector"
+                effective["connector_file"] = str(discovery_file)
+            try:
+                result = super().run(effective, context)
+            except ResearchExecutionContractError as exc:
+                raise PublicResearchPlanContractError(
+                    str(exc),
+                    details={"code": exc.code, **exc.details},
+                ) from exc
+            except PublicResearchRetrievalError as exc:
+                details = dict(getattr(exc, "details", {}) or {})
+                if not details.get("candidate_count"):
+                    details["selection_report"] = self._selection_summary(_SELECTION_REPORT.get())
+                    details["discovery_provider_summary"] = self._discovery_provider_summary(discovery_manifest)
+                    details["discovery_input"] = str(discovery_file) if discovery_file else None
+                raise PublicResearchRetrievalError(str(exc), details=details) from exc
+
+            retrieval_health = build_retrieval_health(
+                discovery_manifest,
+                retrieval_provider=original_provider,
+                queries=list(normalized_plan.get("queries") or []),
+                execution_contract=normalized_plan,
+            )
+            result = upgrade_archive_result(
+                result,
+                normalized_plan,
+                validation,
+                list(_DUPLICATE_ISSUES.get()),
+                quality_profile=quality_profile,
+                selection_report=_SELECTION_REPORT.get(),
+                execution_report=_EXECUTION_REPORT.get(),
+                min_sources_per_query=self._minimum_results_per_query(),
+                min_fulltext_sources_per_query=int(
+                    normalized_plan.get("minimum_fulltext_sources_per_query") or 0
+                ),
+                retrieval_health=retrieval_health,
+            )
+            if original_provider in {"academic", "hybrid"}:
+                manifest_path = Path(result.output["archive_manifest"])
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["provider"] = original_provider
+                manifest["retrieval_mode"] = (
+                    "LIVE_ACADEMIC_MULTI_SOURCE"
+                    if original_provider == "academic"
+                    else "LIVE_HYBRID_ACADEMIC_WEB"
+                )
+                manifest["discovery_input"] = str(discovery_file) if discovery_file else None
+                manifest["discovery_providers"] = list((discovery_manifest or {}).get("providers") or [])
+                manifest["retrieval_health"] = retrieval_health
+                write_json(manifest_path, manifest)
+                result.output["mode"] = manifest["retrieval_mode"]
+                result.output["discovery_input"] = manifest["discovery_input"]
+                result.output["discovery_providers"] = manifest["discovery_providers"]
+                result.output["retrieval_health"] = retrieval_health
+
+            # Persist the quality-observation bundle before the sufficiency gate can
+            # raise. An INSUFFICIENT run is exactly the run that needs the best audit
+            # trail for diagnosis, so validation artifacts must not depend on PASS.
+            validation_root = write_validation_bundle(
+                context=context,
+                original_plan=dict(payload.get("plan") or {}),
+                normalized_plan=normalized_plan,
+                plan_validation=validation,
+                provider=original_provider,
+                quality_profile=quality_profile,
+                configured_max_results=configured_max,
+                effective_max_results=effective_max,
+                discovery_manifest=discovery_manifest,
+                discovery_input=str(discovery_file) if discovery_file else None,
+                result_output=result.output,
+            )
+            result.output["validation_bundle_dir"] = str(validation_root)
+            result.artifacts = list(result.artifacts or []) + [str(validation_root / "00_run_manifest.json"), str(validation_root / "08_quality_summary.json")]
+
+            if strict and quality_profile in {"proposal_related_work", "application_background"}:
+                sufficiency = result.output.get("research_sufficiency") or {}
+                if sufficiency.get("status") == "BLOCKING_FAILURE":
+                    raise PublicResearchRetrievalError(
+                        "Public research cannot continue because retrieval produced no usable evidence or an approved query was not executed by any enabled provider.",
+                        details={
+                            "research_sufficiency": sufficiency,
+                            "coverage": result.output.get("coverage"),
+                            "retrieval_health": result.output.get("retrieval_health"),
+                            "selection_report": result.output.get("selection_report"),
+                            "archive_manifest": result.output.get("archive_manifest"),
+                            "validation_bundle_dir": result.output.get("validation_bundle_dir"),
+                            "source_count": len(result.output.get("source_catalog") or []),
+                        },
+                    )
+            if strict and normalized_plan.get("require_web_discovery"):
+                # A mandated web-discovery channel failure is fatal regardless of the
+                # quality profile: Academic success must never mask it.
+                blocking_codes = {
+                    str(code)
+                    for code in (retrieval_health.get("blocking_reason_codes") or [])
+                }
+                if any(
+                    code.startswith("REQUIRED_CHANNEL_FAILED:WEB_SEARCH")
+                    or code.startswith("REQUIRED_CHANNEL_NOT_EXECUTED:WEB_SEARCH")
+                    for code in blocking_codes
+                ):
+                    raise PublicResearchRetrievalError(
+                        "Public research cannot continue because the required web-discovery channel failed; academic results cannot substitute for it.",
+                        details={
+                            "code": "REQUIRED_WEB_DISCOVERY_FAILED",
+                            "retrieval_health": retrieval_health,
+                            "coverage": result.output.get("coverage"),
+                            "archive_manifest": result.output.get("archive_manifest"),
+                            "validation_bundle_dir": result.output.get("validation_bundle_dir"),
+                        },
+                    )
+            return result
         finally:
-            _DUPLICATE_ISSUES.reset(token)
+            _DUPLICATE_ISSUES.reset(token_duplicate)
+            _NORMALIZED_PLAN.reset(token_plan)
+            _STRICT_RESEARCH.reset(token_strict)
+            _SELECTION_REPORT.reset(token_selection)
+            _EXECUTION_REPORT.reset(token_execution)
+            _EFFECTIVE_MAX_RESULTS.reset(token_max)
+            _QUALITY_PROFILE.reset(token_quality)
+            _LIVE_DISCOVERY.reset(token_live)
+
+    @staticmethod
+    def _browser_fallback_queries(
+        web_candidates: list[dict[str, Any]],
+        search_queries: list[Any],
+        *,
+        min_hits: int,
+        browser_required: bool,
+        relevance_profiles: dict[str, dict[str, Any]] | None = None,
+    ) -> list[Any]:
+        """Decide which approved queries the browser search fallback must run.
+
+        The fallback always covers every approved query when SearXNG produced no
+        candidates at all or when the execution contract names browser_search as
+        a required provider.  Otherwise, with ``min_hits > 0``, only queries whose
+        SearXNG hit count is below the threshold are retried through the browser.
+        """
+
+        queries = list(search_queries or [])
+        if browser_required or not web_candidates:
+            return queries
+        if min_hits <= 0 and relevance_profiles is None:
+            return []
+        hits_by_query: dict[str, int] = {}
+        for candidate in web_candidates:
+            if not isinstance(candidate, dict):
+                continue
+            matched = str(candidate.get("matched_query") or "").strip()
+            if relevance_profiles is not None and not assess_candidate_relevance(
+                matched, candidate, relevance_profiles
+            ).get("qualifies_for_coverage"):
+                continue
+            if matched:
+                hits_by_query[matched] = hits_by_query.get(matched, 0) + 1
+        return [
+            query
+            for query in queries
+            if hits_by_query.get(str(getattr(query, "query", query) or "").strip(), 0) < max(1, min_hits)
+        ]
+
+    def _archive_candidate(self, candidate, raw_dir, text_dir, meta_dir, provider):
+        discovery_provider = str(candidate.get("discovery_provider") or candidate.get("academic_provider") or "")
+        fetch_live_web = (
+            _LIVE_DISCOVERY.get() and provider == "connector"
+            and provider_channel(discovery_provider) == CHANNEL_WEB_SEARCH
+        )
+        if not fetch_live_web:
+            return super()._archive_candidate(candidate, raw_dir, text_dir, meta_dir, provider)
+        try:
+            return super()._archive_candidate(candidate, raw_dir, text_dir, meta_dir, discovery_provider)
+        except PublicResearchRetrievalError as exc:
+            # Retain the failed discovery receipt, without promoting its snippet
+            # into a fetched document or an admissible source for synthesis.
+            record = super()._archive_candidate(candidate, raw_dir, text_dir, meta_dir, "connector")
+            record.update(fetch_mode="SNIPPET_ONLY", extraction_quality="SHORT",
+                          extraction_failure_reason="WEB_DOCUMENT_FETCH_FAILED", fetch_fallback_reason=str(exc))
+            write_json(Path(record["metadata_path"]), record)
+            return record
+
+    @staticmethod
+    def _selection_summary(report: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(report, dict):
+            return None
+        summary = {
+            key: report.get(key)
+            for key in (
+                "status",
+                "input_candidate_count",
+                "screened_candidate_count",
+                "deduplicated_candidate_count",
+                "selected_candidate_count",
+                "semantic_relevance_enforced",
+                "semantic_relevance_counts",
+                "selected_by_query",
+            )
+            if key in report
+        }
+        issues = [dict(item) for item in report.get("issues") or [] if isinstance(item, dict)]
+        summary["issue_count"] = len(issues)
+        summary["issues"] = issues[:10]
+        return summary
+
+    @staticmethod
+    def _discovery_provider_summary(discovery_manifest: dict[str, Any] | None) -> dict[str, Any]:
+        summary: dict[str, Any] = {}
+        manifest = discovery_manifest if isinstance(discovery_manifest, dict) else {}
+        for run in manifest.get("provider_runs") or []:
+            if not isinstance(run, dict):
+                continue
+            name = str(run.get("provider") or "unknown")
+            entry = summary.setdefault(name, {"runs": 0, "hits": 0, "failures": 0})
+            entry["runs"] += 1
+            entry["hits"] += int(run.get("result_count") or 0)
+        for failure in manifest.get("failures") or []:
+            if not isinstance(failure, dict):
+                continue
+            name = str(failure.get("provider") or "unknown")
+            entry = summary.setdefault(name, {"runs": 0, "hits": 0, "failures": 0})
+            entry["failures"] += 1
+        return summary
 
     @staticmethod
     def _deduplicate(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -41,12 +621,73 @@ class VerifiablePublicResearchArchiveSkill(PublicResearchArchiveSkill):
         _DUPLICATE_ISSUES.set((*_DUPLICATE_ISSUES.get(), *issues))
         return kept
 
+    def _screen(self, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        plan = _NORMALIZED_PLAN.get() or {}
+        strict = _STRICT_RESEARCH.get()
+        if not values:
+            return values
+        selected, report = screen_and_select_candidates(
+            values,
+            plan,
+            max_results=_EFFECTIVE_MAX_RESULTS.get(),
+            strict=strict,
+            min_per_query=self._minimum_results_per_query(),
+            enforce_semantic_relevance=(strict and _QUALITY_PROFILE.get() in {"proposal_related_work", "application_background"}),
+        )
+        _SELECTION_REPORT.set(report)
+        # Screening performs identity dedup before archive selection.  Re-emit those
+        # duplicate facts through the established audit channel so Track-C keeps its
+        # DUPLICATE_SOURCE / SOURCE_CONFLICT semantics instead of hiding them inside a
+        # new shortlist-only report.
+        duplicate_events = []
+        for issue in report.get("issues") or []:
+            if issue.get("code") != "CANDIDATE_DEDUPLICATED":
+                continue
+            duplicate_events.append({
+                key: value
+                for key, value in issue.items()
+                if key not in {"type", "code"}
+            })
+        if duplicate_events:
+            _DUPLICATE_ISSUES.set((*_DUPLICATE_ISSUES.get(), *duplicate_events))
+        return selected
+
     def _load_recorded(self, record_file):
-        return self._deduplicate(super()._load_recorded(record_file))
+        return self._deduplicate(self._screen(super()._load_recorded(record_file)))
 
     def _load_connector(self, connector_file, planned_queries):
+        plan = _NORMALIZED_PLAN.get() or {}
+        # Validate the raw execution envelope before the legacy loader classifies
+        # missing query responses as a configuration problem.  In strict WF-3 this is
+        # a plan-contract violation, not something that editing .env can repair.
+        if _STRICT_RESEARCH.get():
+            path = Path(connector_file)
+            try:
+                raw_manifest = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                raw_manifest = None
+            if isinstance(raw_manifest, dict):
+                _EXECUTION_REPORT.set(
+                    validate_connector_execution(raw_manifest, plan, strict=True)
+                )
         candidates, manifest = super()._load_connector(connector_file, planned_queries)
-        return self._deduplicate(candidates), manifest
+        report = validate_connector_execution(manifest, plan, strict=_STRICT_RESEARCH.get())
+        _EXECUTION_REPORT.set(report)
+        return self._deduplicate(self._screen(candidates)), manifest
 
     def _search_searxng(self, queries, max_results):
-        return self._deduplicate(super()._search_searxng(queries, max_results))
+        # Search each query to the candidate budget.  The archive limit is applied only
+        # after all query pools have been screened, so a small global max_results cannot
+        # silently starve later research questions.
+        candidate_budget = self._candidate_budget_per_query()
+        candidates, query_failures = super()._search_searxng(queries, candidate_budget)
+        _EXECUTION_REPORT.set(
+            {
+                "status": "PASS" if not query_failures else "WARN",
+                "plan_hash": build_plan_lock(_NORMALIZED_PLAN.get() or {})["plan_hash"],
+                "planned_query_count": len(queries),
+                "executed_query_count": len(queries) - len({str(item.get('query') or '') for item in query_failures}),
+                "findings": query_failures,
+            }
+        )
+        return self._deduplicate(self._screen(candidates)), query_failures

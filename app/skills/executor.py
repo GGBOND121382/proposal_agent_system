@@ -6,6 +6,7 @@ from typing import Any
 
 from .base import SkillContext, SkillResult
 from .registry import SkillRegistry
+from ..secret_redaction import redact_secret_text
 from ..util import new_id, sha256_json, utc_now
 
 
@@ -18,6 +19,13 @@ class SkillExecutor:
         self.db = db
         self.registry = registry
         self.settings = settings
+
+
+    def close(self) -> None:
+        """Release resources owned by registered skills."""
+        close_all = getattr(self.registry, "close_all", None)
+        if callable(close_all):
+            close_all()
 
     def execute(
         self,
@@ -47,7 +55,7 @@ class SkillExecutor:
             output = result.output
             return result
         except Exception as exc:  # Skill boundary: persist exact failure before rethrow.
-            error = str(exc)
+            error = redact_secret_text(str(exc))
             raise SkillExecutionError(f"{skill_id}: {error}") from exc
         finally:
             duration_ms = int((time.perf_counter() - started) * 1000)

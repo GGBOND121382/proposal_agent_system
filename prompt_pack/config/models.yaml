@@ -1,4 +1,20 @@
-version: '2.0'
+version: '2.1'
+provider_capabilities:
+  MiniMax-M3:
+    context_window_tokens: 1000000
+    recommended_output_tokens: 131072
+    hard_max_output_tokens: 524288
+    output_parameter: max_completion_tokens
+  MiniMax-M2.7:
+    context_window_tokens: 204800
+    recommended_output_tokens: 65536
+    hard_max_output_tokens: 204800
+    output_parameter: max_completion_tokens
+  MiniMax-M2.7-highspeed:
+    context_window_tokens: 204800
+    recommended_output_tokens: 65536
+    hard_max_output_tokens: 204800
+    output_parameter: max_completion_tokens
 models:
 - model_id: offline-general-primary
   endpoint_id: offline-primary
@@ -6,34 +22,37 @@ models:
   enabled: true
   capabilities:
     structured_output: true
+    strict_json_schema: PROVIDER_NEGOTIATED
+    json_object_fallback: true
     long_context: true
     chinese_writing: true
     document_analysis: true
   defaults:
     temperature: 0.1
     top_p: 0.9
-    max_output_tokens: 10000
 - model_id: offline-critic-primary
   endpoint_id: offline-primary
   provider_model_name: ${OFFLINE_CRITIC_MODEL}
   enabled: true
   capabilities:
     structured_output: true
+    strict_json_schema: PROVIDER_NEGOTIATED
+    json_object_fallback: true
     long_context: true
     chinese_writing: true
     document_analysis: true
   defaults:
     temperature: 0.0
     top_p: 1.0
-    max_output_tokens: 7000
 - model_id: online-public-primary
   endpoint_id: online-public-primary
   provider_model_name: ${ONLINE_PUBLIC_MODEL}
   enabled: ${ONLINE_LLM_ENABLED:false}
   capabilities:
     structured_output: true
+    strict_json_schema: PROVIDER_NEGOTIATED
+    json_object_fallback: true
     long_context: true
   defaults:
     temperature: 0.1
     top_p: 0.9
-    max_output_tokens: 8000

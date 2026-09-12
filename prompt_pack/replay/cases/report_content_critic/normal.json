@@ -1,0 +1,167 @@
+{
+  "case_id": "report_content_critic-normal",
+  "prompt_id": "P-REPORT-CONTENT-CRITIC",
+  "case_type": "normal",
+  "description": "全部章节草稿完整回应必答问题且引用一致，应判定通过",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-CONTENT-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "REPORT_CONTENT_CRITIC",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "document_type": "SURVEY_REPORT",
+      "outline_sections": [
+        {
+          "section_key": "object-evolution",
+          "title": "背景调研：对象与演进",
+          "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+          "must_answer_questions": [
+            "DASH 是什么、由谁主导、演进脉络如何？"
+          ],
+          "evidence_card_ids": [
+            "bgcard-001"
+          ],
+          "known_gaps": []
+        },
+        {
+          "section_key": "effect-evidence",
+          "title": "背景调研：效果证据",
+          "goal": "回答 DASH 效果如何、哪些仍不知道",
+          "must_answer_questions": [
+            "DASH 效果如何、哪些仍不知道？"
+          ],
+          "evidence_card_ids": [
+            "bgcard-002"
+          ],
+          "known_gaps": [
+            "缺少公开量化效果评估数据"
+          ]
+        }
+      ],
+      "section_drafts": [
+        {
+          "section_key": "object-evolution",
+          "title": "背景调研：对象与演进",
+          "markdown_body": "DASH 是美国空军部公开披露的人机协同决策支持项目，公开定位是加速作战管理中的决策流程 [bgcard-001]。",
+          "cited_card_ids": [
+            "bgcard-001"
+          ]
+        },
+        {
+          "section_key": "effect-evidence",
+          "title": "背景调研：效果证据",
+          "markdown_body": "公开报道显示 DASH 在演习中缩短了方案生成时间，但未给出指标定义与基线数值，目前只能确认定性结论 [bgcard-002]。量化效果数据本次未取得证据，仍属未知。",
+          "cited_card_ids": [
+            "bgcard-002"
+          ],
+          "unresolved_questions": [
+            "DASH 效果的量化指标本次未取得证据"
+          ]
+        }
+      ],
+      "background_cards": [
+        {
+          "card_id": "bgcard-001",
+          "dimension": "OBJECT_AND_EVOLUTION",
+          "claim_text": "DASH 是美国空军部公开披露的人机协同决策支持系统，用于加速作战管理决策。",
+          "source_ids": [
+            "src-1"
+          ],
+          "evidence_mode": "FULL_TEXT",
+          "scope_qualifiers": [],
+          "limitations": []
+        },
+        {
+          "card_id": "bgcard-002",
+          "dimension": "EVALUATION_AND_EFFECT",
+          "claim_text": "公开报道显示 DASH 在演习中缩短了方案生成时间。",
+          "source_ids": [
+            "src-2"
+          ],
+          "evidence_mode": "SNIPPET",
+          "scope_qualifiers": [],
+          "limitations": [
+            "无第三方独立评估"
+          ]
+        }
+      ],
+      "source_catalog": [
+        {
+          "source_id": "src-1",
+          "title": "美国空军部 DASH 项目公开报道",
+          "url": "https://example.gov/dash-1",
+          "source_type": "GOVERNMENT",
+          "published_at": "2024-06-01"
+        }
+      ],
+      "survey_research_brief": {
+        "must_answer_questions": [
+          "DASH 是什么、由谁主导、演进脉络如何？",
+          "DASH 效果如何、哪些仍不知道？"
+        ],
+        "deliverable_notes": [
+          "背景调研为报告主体"
+        ]
+      }
+    },
+    "expected_output_schema": "schemas/prompts/report_content_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-CONTENT-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "PASS",
+    "result": {
+      "verdict": "ACCEPT"
+    },
+    "findings": [],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "PASS"
+  }
+}

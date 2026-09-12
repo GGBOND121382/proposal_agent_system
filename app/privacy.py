@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .secret_redaction import contains_secret_material, redact_secret_text
+
 
 _EMAIL_RE = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![A-Za-z0-9.-])")
 _PHONE_RE = re.compile(r"(?<!\d)(?:(?:\+?86)[ -]?)?1[3-9]\d(?:[ -]?\d){8}(?!\d)")
@@ -112,16 +114,69 @@ def find_sensitive_values(value: Any, config: dict[str, Any], *, include_generic
                 matches.append(PrivacyMatch(path, "EMAIL", "电子邮箱", "[EMAIL]"))
             if not opaque_field and _PHONE_RE.search(text):
                 matches.append(PrivacyMatch(path, "PHONE", "联系电话", "[PHONE]"))
+            if contains_secret_material(text):
+                matches.append(PrivacyMatch(path, "CREDENTIAL", "认证凭据", "[REDACTED_CREDENTIAL]"))
     unique: dict[tuple[str, str, str], PrivacyMatch] = {}
     for match in matches:
         unique[(match.path, match.entity_type, match.placeholder)] = match
     return list(unique.values())
 
 
+
+def find_online_security_label_violations(value: Any, path: str = "$") -> list[PrivacyMatch]:
+    """Reject non-PUBLIC objects embedded in an ONLINE_PUBLIC envelope."""
+
+    matches: list[PrivacyMatch] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child = f"{path}.{key}"
+            if key in {"security_level", "original_security_level", "input_max_security_level", "project_security_level"}:
+                if isinstance(item, str) and item.strip().upper() != "PUBLIC":
+                    matches.append(PrivacyMatch(child, "SECURITY_LABEL", "非公开安全级别", "[PUBLIC_ONLY]"))
+            matches.extend(find_online_security_label_violations(item, child))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            matches.extend(find_online_security_label_violations(item, f"{path}[{index}]"))
+    return matches
+
 def assert_online_payload_safe(value: Any, config: dict[str, Any]) -> None:
     matches = find_sensitive_values(value, config, include_generic_patterns=True)
+    matches.extend(find_online_security_label_violations(value))
     if matches:
         raise OutboundPrivacyError(matches)
+
+
+def redact_public_retrieval_content(value: Any, path: str = "$") -> tuple[Any, list[PrivacyMatch]]:
+    """Redact generic contact details from publicly retrieved content.
+
+    Retrieved sources and extracted passages originate from the public web, so
+    the strict outbound blocker would otherwise reject public pages merely for
+    containing a contact email.  Projections sent to the online model redact
+    those details in place; the local evidence archive keeps the original text.
+    """
+
+    matches: list[PrivacyMatch] = []
+
+    def redact(node: Any, current: str) -> Any:
+        if isinstance(node, dict):
+            return {key: redact(item, f"{current}.{key}") for key, item in node.items()}
+        if isinstance(node, list):
+            return [redact(item, f"{current}[{index}]") for index, item in enumerate(node)]
+        if not isinstance(node, str) or _is_opaque_machine_field(current):
+            return node
+        text = node
+        if _EMAIL_RE.search(text):
+            text = _EMAIL_RE.sub("[EMAIL]", text)
+            matches.append(PrivacyMatch(current, "EMAIL", "电子邮箱", "[EMAIL]"))
+        if _PHONE_RE.search(text):
+            text = _PHONE_RE.sub("[PHONE]", text)
+            matches.append(PrivacyMatch(current, "PHONE", "联系电话", "[PHONE]"))
+        if contains_secret_material(text):
+            text = redact_secret_text(text)
+            matches.append(PrivacyMatch(current, "CREDENTIAL", "认证凭据", "[REDACTED_CREDENTIAL]"))
+        return text
+
+    return redact(value, path), matches
 
 
 def sanitize_safe_online_package(output: dict[str, Any], config: dict[str, Any]) -> tuple[dict[str, Any], list[PrivacyMatch]]:
@@ -157,6 +212,10 @@ def sanitize_safe_online_package(output: dict[str, Any], config: dict[str, Any])
         if not _is_opaque_machine_field(path) and _PHONE_RE.search(text):
             text = _PHONE_RE.sub("[PHONE]", text)
             matches.append(PrivacyMatch(path, "PHONE", "联系电话", "[PHONE]"))
+        if contains_secret_material(text):
+            from .secret_redaction import redact_secret_text
+            text = redact_secret_text(text)
+            matches.append(PrivacyMatch(path, "CREDENTIAL", "认证凭据", "[REDACTED_CREDENTIAL]"))
         return text
 
     sanitized["result"] = replace(result)

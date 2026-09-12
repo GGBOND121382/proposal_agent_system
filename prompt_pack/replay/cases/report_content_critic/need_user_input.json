@@ -1,0 +1,179 @@
+{
+  "case_id": "report_content_critic-need_user_input",
+  "prompt_id": "P-REPORT-CONTENT-CRITIC",
+  "case_type": "need_user_input",
+  "description": "草稿存在未知卡引用与虚构指标，且任务简报缺必答问题清单，需用户确认核对依据",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-CONTENT-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "REPORT_CONTENT_CRITIC",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "document_type": "SURVEY_REPORT",
+      "outline_sections": [
+        {
+          "section_key": "object-evolution",
+          "title": "背景调研：对象与演进",
+          "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+          "must_answer_questions": [
+            "DASH 是什么？"
+          ],
+          "evidence_card_ids": [
+            "bgcard-001"
+          ],
+          "known_gaps": []
+        },
+        {
+          "section_key": "effect-evidence",
+          "title": "背景调研：效果证据",
+          "goal": "回答 DASH 效果如何",
+          "must_answer_questions": [
+            "DASH 效果如何？"
+          ],
+          "evidence_card_ids": [],
+          "known_gaps": [
+            "缺少公开量化效果评估数据"
+          ]
+        }
+      ],
+      "section_drafts": [
+        {
+          "section_key": "object-evolution",
+          "title": "背景调研：对象与演进",
+          "markdown_body": "DASH 是美国空军部公开披露的人机协同决策支持项目 [bgcard-001]。",
+          "cited_card_ids": [
+            "bgcard-001"
+          ]
+        },
+        {
+          "section_key": "effect-evidence",
+          "title": "背景调研：效果证据",
+          "markdown_body": "DASH 在 2025 年演习中将方案生成时间从 4 小时缩短到 3 分钟，准确率达 97.5% [bgcard-999]，官方从未披露过任何局限。",
+          "cited_card_ids": [
+            "bgcard-999"
+          ]
+        }
+      ],
+      "background_cards": [
+        {
+          "card_id": "bgcard-001",
+          "dimension": "OBJECT_AND_EVOLUTION",
+          "claim_text": "DASH 是美国空军部公开披露的人机协同决策支持系统。",
+          "source_ids": [
+            "src-1"
+          ],
+          "evidence_mode": "FULL_TEXT",
+          "scope_qualifiers": [],
+          "limitations": []
+        }
+      ],
+      "survey_research_brief": {
+        "evidence_requirements": [
+          "事实性陈述必须绑定公开来源证据卡"
+        ]
+      }
+    },
+    "expected_output_schema": "schemas/prompts/report_content_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-CONTENT-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "verdict": "REVISE"
+    },
+    "findings": [
+      {
+        "code": "RC_UNSUPPORTED_CLAIM",
+        "severity": "P1",
+        "description": "章节 effect-evidence 的引用 [bgcard-999] 指向输入 background_cards 中不存在的证据卡",
+        "section_key": "effect-evidence"
+      },
+      {
+        "code": "RC_FABRICATED_DETAIL",
+        "severity": "P0",
+        "description": "章节 effect-evidence 断言具体数值（4 小时缩短到 3 分钟、准确率 97.5%）且声称“官方从未披露任何局限”，均无直接证据支撑",
+        "section_key": "effect-evidence"
+      }
+    ],
+    "unresolved_items": [
+      {
+        "item_id": "unres-002",
+        "type": "UNCERTAIN",
+        "description": "任务简报缺少必答问题清单，无法核对必答问题覆盖",
+        "target_paths": [
+          "payload/survey_research_brief"
+        ],
+        "required_action": "用户确认",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-002",
+        "question_type": "CONFIRMATION",
+        "question": "任务简报未提供 must_answer_questions，是否以提纲各章的 must_answer_questions 作为必答问题覆盖的核对依据？",
+        "reason": "缺少必答问题清单时无法判定 RC_MUST_ANSWER_MISSING",
+        "target_paths": [
+          "payload/survey_research_brief"
+        ],
+        "answer_schema": {
+          "type": "BOOLEAN",
+          "allowed_values": [
+            true,
+            false
+          ]
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

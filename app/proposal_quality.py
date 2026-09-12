@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import collections
+import copy
 import math
 import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .candidate_integrity import candidate_text_divergence, paragraph_identity_error
+from .paragraph_order import (
+    canonical_candidate_text,
+    ordered_paragraphs,
+    paragraph_sequence_error,
+)
+from .contracts import get_semantic_contract
+from .quality_guard import build_guard_report
+from .contracts.semantic_checks import check_blueprint_semantics
 from .util import sha256_text
 
 
@@ -48,6 +58,73 @@ SECTION_PROFILE_QUALITY_DIMENSIONS = {
     "RESEARCH_FOUNDATION": {"FEASIBILITY_FOUNDATION"},
 }
 
+SECTION_FUNCTION_ROLE_ALIASES = {
+    "BACKGROUND_POSITIONING": "CONTEXT",
+    "PROBLEM_SUMMARY": "PROBLEM",
+    "METHOD_COMMITMENT": "METHOD",
+    "EXPECTED_CONTRIBUTION": "CONTRIBUTION",
+    "CASE_ANALYSIS": "CONTEXT",
+    "PRIOR_WORK_SURVEY": "EVIDENCE",
+    "GAP_FORMATION": "WARRANT",
+    "CENTRAL_STATEMENT": "CENTRAL_CLAIM",
+    "GAP_TO_RQ_MAPPING": "RESEARCH_QUESTION",
+    "DIFFICULTY_EXPLANATION": "LIMITATION_MECHANISM",
+    "OBJECTIVE_MAPPING": "CENTRAL_CLAIM",
+    "SUCCESS_DEFINITION": "EVALUATION",
+    "PROPOSITION_CONNECTION": "WARRANT",
+    "RESEARCH_OBJECT_DEFINITION": "CONTEXT",
+    "MECHANISM_OUTLINE": "METHOD",
+    "INTERMEDIATE_OUTPUT": "CONTRIBUTION",
+    "TASK_DEPENDENCY": "WARRANT",
+    "TECHNICAL_ROUTE": "METHOD",
+    "ARCHITECTURE_LAYERS": "METHOD",
+    "VERIFICATION_EXECUTION": "EVALUATION",
+    "SYSTEM_CONSTRAINTS": "BOUNDARY",
+    "BASELINE_COMPARISON": "EVIDENCE",
+    "NOVEL_MECHANISM": "CENTRAL_CLAIM",
+    "EXPECTED_IMPROVEMENT": "CONTRIBUTION",
+    "APPLICABLE_CONDITIONS": "BOUNDARY",
+    "SCENARIO_DEFINITION": "CONTEXT",
+    "CONTROL_GROUPS": "EVALUATION",
+    "PERTURBATION_SET": "EVALUATION",
+    "BASELINE_PROCEDURE": "METHOD",
+    "METRIC_DIMENSIONS": "EVALUATION",
+    "UNKNOWN_DECLARATION": "BOUNDARY",
+    "UNKNOWN_INVENTORY": "EVIDENCE",
+    "IMPACT_ASSESSMENT": "LIMITATION_MECHANISM",
+    "MITIGATION_STRATEGY": "METHOD",
+    "REVISED_PLAN": "CONTRIBUTION",
+    "PHASE_PLAN": "METHOD",
+    "RISK_IDENTIFICATION": "COUNTERARGUMENT",
+    "RISK_CONTROL": "WARRANT",
+    "EXPECTED_DELIVERABLES": "CONTRIBUTION",
+    "DELIVERY_FORM": "CONTRIBUTION",
+    "CENTRAL_RECAP": "CENTRAL_CLAIM",
+    "RQ_COMMITMENT": "RESEARCH_QUESTION",
+    "CONTRIBUTION_STATEMENT": "CONTRIBUTION",
+}
+
+
+def _canonical_argument_role(value: Any) -> str:
+    role = str(value or "")
+    return SECTION_FUNCTION_ROLE_ALIASES.get(role, role)
+
+
+def _missing_required_argument_roles(
+    required_values: Iterable[Any],
+    actual_roles: set[str],
+) -> list[str]:
+    missing: list[str] = []
+    for value in required_values:
+        raw = str(value or "")
+        canonical = _canonical_argument_role(raw)
+        acceptable = {canonical}
+        if raw in {"PROBLEM_SUMMARY", "PROBLEM"}:
+            acceptable.add("RESEARCH_QUESTION")
+        if not (acceptable & actual_roles):
+            missing.append(canonical)
+    return sorted(set(missing))
+
 
 @dataclass(frozen=True)
 class QualityFinding:
@@ -60,9 +137,14 @@ class QualityFinding:
     repair_instruction: str | None
     suggested_route: str
     blocking: bool = True
+    rule_id: str | None = None
+    responsibility: str = "DETERMINISTIC_GUARD"
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "rule_id": self.rule_id or self.code,
+            "responsibility": self.responsibility,
+            "source": "DETERMINISTIC_GUARD",
             "code": self.code,
             "severity": self.severity,
             "category": self.category,
@@ -122,10 +204,7 @@ def _template_skeleton(text: str) -> str:
     return value
 
 def _content_text(candidate: dict[str, Any]) -> str:
-    text = str(candidate.get("candidate_text") or "")
-    if text:
-        return text
-    return "\n".join(str(item.get("text") or "") for item in candidate.get("paragraphs", []) if isinstance(item, dict))
+    return canonical_candidate_text(candidate, separator="\n")
 
 
 def _section_title(payload: dict[str, Any]) -> str:
@@ -139,6 +218,69 @@ def _item_types(project_definition: dict[str, Any]) -> collections.Counter[str]:
         for item in project_definition.get("items", [])
         if isinstance(item, dict) and item.get("item_type")
     )
+
+
+_RESEARCH_REPORT_MARKERS = ("调研", "情报", "分析报告", "PROJECT_BRIEF", "RESEARCH_REPORT")
+_APPLICATION_MARKERS = ("申报", "指南", "任务书", "APPLICATION_GUIDE", "TASK_BOOK")
+_NEGATION_PREFIXES = ("非", "无", "不")
+
+
+def _contains_application_marker(combined: str) -> bool:
+    """Match application markers, ignoring negated mentions like "非指南类"."""
+    for marker in _APPLICATION_MARKERS:
+        token = marker.upper()
+        start = 0
+        while True:
+            idx = combined.find(token, start)
+            if idx < 0:
+                break
+            previous = combined[idx - 1] if idx > 0 else ""
+            if previous not in _NEGATION_PREFIXES:
+                return True
+            start = idx + 1
+    return False
+
+
+def _document_kind_hint(payload: dict[str, Any]) -> str:
+    """Prefer the user's explicit genre; use heuristics only for legacy inputs.
+
+    The persisted scheme profile schema is frozen (additionalProperties:
+    false), so the semantic document_kind cannot be stored there.  The hint
+    combines the confirmed scheme profile text with human resolutions; absent
+    any signal the gate keeps the strict APPLICATION behavior.
+    """
+    explicit = payload.get("document_type")
+    if explicit == "SURVEY_REPORT":
+        return "RESEARCH_REPORT"
+    if explicit in {"RESEARCH_PROPOSAL", "ENGINEERING_PROPOSAL"}:
+        return "APPLICATION"
+    scheme = payload.get("scheme_profile")
+    if not isinstance(scheme, dict):
+        scheme = payload.get("scheme_candidate")
+    texts: list[str] = []
+    if isinstance(scheme, dict):
+        for key in ("scheme_type", "research_attribute", "scheme_name"):
+            value = str(scheme.get(key) or "").strip()
+            if value:
+                texts.append(value)
+    for item in payload.get("human_resolutions") or []:
+        if not isinstance(item, dict):
+            continue
+        target = str(item.get("target") or "")
+        if "research_attribute" not in target and "scheme_type" not in target:
+            continue
+        answer = item.get("answer")
+        answer_text = answer if isinstance(answer, str) else ""
+        if answer_text.strip():
+            texts.append(answer_text.strip())
+    combined = " ".join(texts).upper()
+    if not combined:
+        return "APPLICATION"
+    if _contains_application_marker(combined):
+        return "APPLICATION"
+    if any(marker.upper() in combined for marker in _RESEARCH_REPORT_MARKERS):
+        return "RESEARCH_REPORT"
+    return "APPLICATION"
 
 
 def _has_real_source(item: dict[str, Any]) -> bool:
@@ -193,7 +335,7 @@ class ProposalQualityGuard:
 
     CRITICAL_RESEARCH_TYPES = {
         "GAP", "PROBLEM", "OBJECTIVE", "WORK_PACKAGE", "METHOD", "EXPERIMENT",
-        "INNOVATION", "DELIVERABLE", "METRIC", "ACHIEVEMENT", "CAPABILITY",
+        "INNOVATION", "DELIVERABLE", "METRIC",
     }
 
     REQUIRED_SECTION_PROFILES = {
@@ -208,9 +350,16 @@ class ProposalQualityGuard:
         "METRIC_JUSTIFICATION", "SECTION_UNIQUENESS", "STYLE_AND_DENSITY",
     }
 
-    def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    # Document kinds where the submitter's own EXPERIMENT/INNOVATION items are
+    # legitimately absent (e.g. a research brief investigating an external
+    # system).  Detection is heuristic because the persisted scheme profile
+    # schema is frozen; see _document_kind_hint.
+    RESEARCH_REPORT_EXEMPT_TYPES = {"EXPERIMENT", "INNOVATION"}
+
+    def observe(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
         payload = envelope.get("payload") or {}
         findings: list[QualityFinding] = []
+        observations: dict[str, Any] = {}
 
         if prompt_id in {"P-PROJECT-DEFINITION-EXTRACT", "P-PROJECT-DEFINITION-CRITIC"}:
             pd = (
@@ -218,7 +367,9 @@ class ProposalQualityGuard:
                 if prompt_id == "P-PROJECT-DEFINITION-EXTRACT"
                 else payload.get("project_definition_candidate")
             ) or {}
-            findings.extend(self._audit_project_definition(pd))
+            findings.extend(
+                self._audit_project_definition(pd, document_kind=_document_kind_hint(payload))
+            )
 
         elif prompt_id in {"P-FACT-EXTRACT", "P-FACT-CRITIC"}:
             fact_package = (
@@ -242,12 +393,17 @@ class ProposalQualityGuard:
             findings.extend(self._audit_template(template))
 
         elif prompt_id in {"P-ARGUMENT-ARCHITECTURE", "P-ARGUMENT-ARCHITECTURE-CRITIC"}:
-            architecture = (
-                output.get("result")
-                if prompt_id == "P-ARGUMENT-ARCHITECTURE"
-                else payload.get("architecture_candidate")
-            ) or {}
-            findings.extend(self._audit_argument_architecture(architecture, output if prompt_id.endswith("CRITIC") else None))
+            # v8: Argument semantic correctness/status is owned by the authoritative
+            # state projector + canonical work-item resolver. The generic quality
+            # guard is audit-only here and must not create a second actionable rule
+            # source or trust a persisted derived cache.
+            state_policy = get_semantic_contract().rule("SC-ARGUMENT-STATE-OWNERSHIP").config
+            observations["argument_semantic_authority"] = {
+                "mode": str(state_policy.get("quality_guard_mode") or ""),
+                "authoritative_root": str(state_policy.get("authoritative_root") or ""),
+                "projection_version": str(state_policy.get("projection_version") or ""),
+                "derived_cache_trusted": False,
+            }
 
         elif prompt_id in {"P-REVISION-PLAN", "P-REVISION-PLAN-CRITIC"}:
             plan = (
@@ -279,24 +435,63 @@ class ProposalQualityGuard:
 
         elif prompt_id == "P-EXPRESSION-CRITIC":
             findings.extend(self._audit_expression_preservation(payload.get("content_candidate") or {}, payload.get("polished_candidate") or {}))
-            findings.extend(self._audit_critic_coverage(payload.get("polished_candidate") or {}, output, None))
+            findings.extend(
+                self._audit_critic_coverage(
+                    payload.get("polished_candidate") or {},
+                    output,
+                    None,
+                    require_general_quality_dimensions=False,
+                )
+            )
 
         elif prompt_id == "P-INTEGRATION-CRITIC":
-            findings.extend(self._audit_document(payload, output))
+            findings.extend(
+                self._audit_document(
+                    payload,
+                    output,
+                    observations=observations,
+                )
+            )
 
-        self._merge_findings(output, findings)
-        return output
+        return self._guard_report(
+            prompt_id,
+            output,
+            findings,
+            observations=observations or None,
+        )
+    def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+        """Return an isolated copy of the model-owned output.
 
-    def _audit_project_definition(self, pd: dict[str, Any]) -> list[QualityFinding]:
+        Deterministic observations are a separate decision channel and must never
+        be merged into, or used to rewrite, the model container.  Runtime callers
+        use :meth:`observe`; this legacy adapter remains only to preserve callers
+        that require a detached copy.
+        """
+
+        return copy.deepcopy(output)
+
+    def _audit_project_definition(
+        self, pd: dict[str, Any], *, document_kind: str = "APPLICATION"
+    ) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
         types = _item_types(pd)
-        missing = sorted(self.CRITICAL_RESEARCH_TYPES - set(types))
+        required_types = self.CRITICAL_RESEARCH_TYPES
+        # A research report investigating an external system legitimately has
+        # no submitter-side EXPERIMENT/INNOVATION items, and graph completeness
+        # is not an entry defect: the producer's own NEED_USER_INPUT gate and
+        # the semantic critic own completeness there.  Keep the findings as
+        # advisory observations instead of hard-blocking the intake.
+        research_report = document_kind == "RESEARCH_REPORT"
+        if research_report:
+            required_types = required_types - self.RESEARCH_REPORT_EXEMPT_TYPES
+        missing = sorted(required_types - set(types))
         if missing:
             findings.append(QualityFinding(
                 "QG_PROJECT_GRAPH_INCOMPLETE", "P1", "PROJECT_DEFINITION", "PROJECT_DEFINITION",
                 "items", f"研究项目知识图谱缺少关键对象类型：{', '.join(missing)}。只有目标或系统功能不能构成可写的科研项目定义。",
                 "从材料中分别抽取研究差距、研究问题、目标、任务、方法、实验、创新、成果、指标和研究基础；缺失项保持UNKNOWN并阻断写作。",
                 "PROJECT_KNOWLEDGE_AGENT",
+                blocking=not research_report,
             ))
         if sum(types.values()) < 10:
             findings.append(QualityFinding(
@@ -304,6 +499,7 @@ class ProposalQualityGuard:
                 "items", f"项目定义仅含{sum(types.values())}个对象，无法支撑完整研究论证。",
                 "扩展为具有多类型节点和真实关系的项目论证图，而不是用一个OBJECTIVE代表整个项目。",
                 "PROJECT_KNOWLEDGE_AGENT",
+                blocking=not research_report,
             ))
         confirmed_without_source = [
             str(item.get("item_id")) for item in pd.get("items", [])
@@ -333,13 +529,19 @@ class ProposalQualityGuard:
                 "PROJECT_KNOWLEDGE_AGENT",
             ))
         objectives = [i for i in pd.get("items", []) if isinstance(i, dict) and i.get("item_type") == "OBJECTIVE"]
-        objective_text = " ".join(_texts([i.get("content") for i in objectives]))
-        if objectives and re.search(r"构建.*系统|形成.*原型", objective_text) and not any(t in types for t in ["PROBLEM", "INNOVATION", "EXPERIMENT"]):
+        # Check each objective separately: joining all texts first would let a
+        # regex span across unrelated objectives and misfire.
+        masquerading = any(
+            re.search(r"构建.*系统|形成.*原型", " ".join(_texts([i.get("content")])))
+            for i in objectives
+        )
+        if objectives and masquerading and not any(t in types for t in ["PROBLEM", "INNOVATION", "EXPERIMENT"]):
             findings.append(QualityFinding(
                 "QG_ENGINEERING_OBJECTIVE_MASQUERADES_AS_RESEARCH", "P1", "PROJECT_DEFINITION", "OBJECTIVE",
                 "items", "项目目标仅描述构建系统/原型，未由研究问题、新机制和验证命题支撑，存在文种漂移。",
                 "先形成中心研究命题和可检验研究问题，再把原型系统降为验证载体或成果，而不是研究目标本身。",
                 "PROJECT_KNOWLEDGE_AGENT",
+                blocking=not research_report,
             ))
 
         item_by_id = {
@@ -407,7 +609,8 @@ class ProposalQualityGuard:
             claim_id = str(fact.get("claim_id") or "fact")
             text = str(fact.get("claim_text") or "").strip()
             clauses = [part for part in re.split(r"[；;。]", text) if part.strip()]
-            if len(clauses) > 1 or re.search(r"既.+又|不仅.+而且|同时.+并且", text):
+            directive_claim = fact.get("claim_type") == "REQUIREMENT"
+            if not directive_claim and (len(clauses) > 1 or re.search(r"既.+又|不仅.+而且|同时.+并且", text)):
                 non_atomic.append(claim_id)
             if not fact.get("subject_id") or not fact.get("temporal_status") or not fact.get("knowledge_status"):
                 incomplete.append(claim_id)
@@ -442,7 +645,9 @@ class ProposalQualityGuard:
         return findings
 
     def _audit_readiness(self, payload: dict[str, Any], output: dict[str, Any]) -> list[QualityFinding]:
-        findings = self._audit_project_definition(payload.get("project_definition") or {})
+        findings = self._audit_project_definition(
+            payload.get("project_definition") or {}, document_kind=_document_kind_hint(payload)
+        )
         result = output.get("result") or {}
         stage = str(payload.get("readiness_stage") or "READY_FOR_ARGUMENT_ARCHITECTURE")
         if result.get("assessed_stage") != stage:
@@ -480,7 +685,10 @@ class ProposalQualityGuard:
                     "移除RESEARCH_FOUNDATION可写状态，将相关节点改为UNKNOWN，并向负责人请求成果、原型、数据或预实验材料。",
                     "PROJECT_KNOWLEDGE_AGENT",
                 ))
-        if not self.REQUIRED_SECTION_PROFILES.issubset(writable) or not result.get("ready_for_section_planning", False):
+        if (
+            not self.REQUIRED_SECTION_PROFILES.issubset(writable)
+            and result.get("ready_for_section_planning", False)
+        ):
             findings.append(QualityFinding(
                 "QG_FALSE_READINESS", "P1", "READINESS", "READINESS_REPORT",
                 "result.writeable_section_profiles", "论证架构尚未覆盖申请书核心章节，却允许进入章节规划。",
@@ -561,14 +769,66 @@ class ProposalQualityGuard:
         if critic_output is not None:
             result = critic_output.get("result") or {}
             checked = {str(x) for x in result.get("checked_node_ids") or []}
-            expected = {x for x in node_ids if x}
-            if checked != expected:
-                findings.append(QualityFinding("QG_ARGUMENT_CRITIC_PARTIAL", "P1", "ARGUMENT", "ARGUMENT_CRITIC", "result.checked_node_ids", f"论证Critic仅检查{len(checked)}/{len(expected)}个节点。", "逐节点核查全部研究问题、方法、验证、创新和基础节点。", "ORIGINAL_PRODUCER"))
+            referenced_node_ids = {
+                str(value)
+                for row in matrix
+                if isinstance(row, dict)
+                for field, values in row.items()
+                if field.endswith("_ids") and isinstance(values, list)
+                for value in values
+                if str(value or "").strip()
+            }
+            referenced_node_ids.update(
+                str(value)
+                for edge in graph.get("edges") or []
+                if isinstance(edge, dict)
+                for value in (edge.get("source_id"), edge.get("target_id"))
+                if str(value or "").strip()
+            )
+            expected = {
+                str(node.get("node_id"))
+                for node in nodes
+                if isinstance(node, dict)
+                and node.get("node_id")
+                and node.get("node_type") not in {"CENTRAL_PROPOSITION", "RESEARCH_QUESTION"}
+                and not str(node.get("node_id")).startswith("closest-")
+                and (
+                    not str(node.get("node_id")).startswith("item-system-")
+                    or str(node.get("node_id")) in referenced_node_ids
+                )
+            }
+            expected.add(str(proposition.get("node_id") or ""))
+            expected.update(
+                str(question.get("node_id"))
+                for question in questions
+                if isinstance(question, dict) and question.get("node_id")
+            )
+            expected.discard("")
+            if not expected.issubset(checked):
+                covered = len(expected & checked)
+                findings.append(QualityFinding("QG_ARGUMENT_CRITIC_PARTIAL", "P1", "ARGUMENT", "ARGUMENT_CRITIC", "result.checked_node_ids", f"论证Critic仅检查{covered}/{len(expected)}个必检节点。", "逐节点核查全部研究问题、方法、验证、创新和基础节点。", "ORIGINAL_PRODUCER"))
             if len(result.get("chain_checks") or []) < 7:
                 findings.append(QualityFinding("QG_ARGUMENT_CRITIC_CHAIN_SCOPE", "P1", "ARGUMENT", "ARGUMENT_CRITIC", "result.chain_checks", "论证Critic没有覆盖七条核心关系链。", "补齐差距到问题、问题到目标、目标到任务、任务到方法、方法到验证、最近工作到创新、基础到可行性检查。", "ORIGINAL_PRODUCER"))
             scorecard = {str(item.get("dimension")): item for item in result.get("quality_dimensions") or [] if isinstance(item, dict)}
             required = {"CENTRAL_THESIS", "ARGUMENT_CHAIN", "EVIDENCE_SUPPORT", "METHOD_SUBSTANCE", "INNOVATION_BASELINE", "FEASIBILITY_FOUNDATION", "METRIC_JUSTIFICATION"}
-            invalid = sorted(dim for dim in required if dim not in scorecard or not scorecard[dim].get("passed", False) or float(scorecard[dim].get("score", 0)) < 3)
+            invalid = []
+            for dimension in sorted(required):
+                item = scorecard.get(dimension)
+                if not item:
+                    invalid.append(dimension)
+                    continue
+                score = item.get("score")
+                passed = item.get("passed")
+                evidence = item.get("evidence") or []
+                required_action = str(item.get("required_action") or "").strip()
+                if (
+                    not isinstance(score, (int, float))
+                    or not 0 <= float(score) <= 4
+                    or not isinstance(passed, bool)
+                    or not evidence
+                    or (not passed and not required_action)
+                ):
+                    invalid.append(dimension)
             if invalid:
                 findings.append(QualityFinding(
                     "QG_ARGUMENT_CRITIC_SCORECARD_INCOMPLETE", "P1", "ARGUMENT", "ARGUMENT_CRITIC",
@@ -588,9 +848,55 @@ class ProposalQualityGuard:
             findings.append(QualityFinding("QG_EXPRESSION_PARAGRAPH_ID_CHANGED", "P1", "EXPRESSION", "POLISHED_CANDIDATE", "paragraphs", "表达编辑改变了段落集合或段落ID，无法证明仅修改表达。", "恢复原段落ID；实质性增删必须返回写作阶段。", "EXPRESSION_EDITOR_AGENT"))
         if original_traces != polished_traces:
             findings.append(QualityFinding("QG_EXPRESSION_TRACE_CHANGED", "P1", "SOURCE", "POLISHED_CANDIDATE", "trace_links", "表达编辑新增或丢失了来源关系。", "保持输入输出Trace集合完全一致；需要新增证据时返回项目知识阶段。", "EXPRESSION_EDITOR_AGENT"))
+        elif {
+            str(item.get("trace_id")): item
+            for item in original.get("trace_links", [])
+            if isinstance(item, dict) and item.get("trace_id")
+        } != {
+            str(item.get("trace_id")): item
+            for item in polished.get("trace_links", [])
+            if isinstance(item, dict) and item.get("trace_id")
+        }:
+            findings.append(QualityFinding(
+                "QG_EXPRESSION_TRACE_BINDING_CHANGED", "P1", "SOURCE", "POLISHED_CANDIDATE",
+                "trace_links",
+                "表达编辑保留了Trace ID，但改变了Trace的目标路径、来源、支持类型或来源哈希。",
+                "逐项恢复输入中的完整Trace对象；需要改变来源绑定时退回证据写作阶段。",
+                "EXPRESSION_EDITOR_AGENT",
+            ))
+        preserved_trace_ids = {
+            str(trace_id)
+            for trace_id in polished.get("preserved_trace_ids", [])
+            if trace_id
+        }
+        if preserved_trace_ids != original_traces:
+            findings.append(QualityFinding(
+                "QG_EXPRESSION_PRESERVED_TRACE_LIST_MISMATCH", "P1", "SOURCE", "POLISHED_CANDIDATE",
+                "preserved_trace_ids",
+                "表达编辑输出的Trace保存清单与输入Trace集合不一致。",
+                "令preserved_trace_ids精确列出输入候选中的全部且仅有Trace ID。",
+                "EXPRESSION_EDITOR_AGENT",
+            ))
+        if original.get("source_preservation_summary") != polished.get("source_preservation_summary"):
+            findings.append(QualityFinding(
+                "QG_EXPRESSION_SOURCE_LINEAGE_CHANGED", "P1", "SOURCE", "POLISHED_CANDIDATE",
+                "source_preservation_summary",
+                "表达编辑改变了写作阶段已经确定的来源保留/改写沿革。",
+                "原样复制输入的source_preservation_summary；本轮语言修改只记录在edit_log中。",
+                "EXPRESSION_EDITOR_AGENT",
+            ))
+        if original.get("unresolved_items") != polished.get("unresolved_items"):
+            findings.append(QualityFinding(
+                "QG_EXPRESSION_UNRESOLVED_ITEMS_CHANGED", "P1", "EXPRESSION", "POLISHED_CANDIDATE",
+                "unresolved_items",
+                "表达编辑新增、删除或改写了未决事项，已经越过语言润色边界。",
+                "原样保留输入中的unresolved_items；需要解决未决事实时返回相应上游阶段。",
+                "EXPRESSION_EDITOR_AGENT",
+            ))
         original_by_id = {str(p.get("paragraph_id")): p for p in original.get("paragraphs", []) if isinstance(p, dict) and p.get("paragraph_id")}
         polished_by_id = {str(p.get("paragraph_id")): p for p in polished.get("paragraphs", []) if isinstance(p, dict) and p.get("paragraph_id")}
         immutable_fields = (
+            "sequence",
             "blueprint_paragraph_id", "paragraph_role", "primary_claim_id",
             "novel_content_key", "section_contract_id",
         )
@@ -762,7 +1068,13 @@ class ProposalQualityGuard:
         for p in paragraphs:
             if not isinstance(p, dict):
                 continue
-            slot_signatures.append((tuple(p.get("fact_slots") or []), tuple(p.get("project_item_slots") or [])))
+            slot_signatures.append((
+                tuple(p.get("fact_slots") or []),
+                tuple(p.get("project_item_slots") or []),
+                tuple(p.get("technical_slots") or []),
+                tuple(p.get("metric_slots") or []),
+                tuple(p.get("required_evidence_ids") or []),
+            ))
         if len(slot_signatures) >= 4 and len(set(slot_signatures)) <= 1:
             findings.append(QualityFinding(
                 "QG_BLUEPRINT_SINGLE_SOURCE_FOR_ALL_PARAGRAPHS", "P1", "BLUEPRINT", "BLUEPRINT",
@@ -779,74 +1091,55 @@ class ProposalQualityGuard:
                 "PLANNING_AGENT",
             ))
 
-        contract = payload.get("section_contract") or {}
-        contract_id = str(contract.get("section_contract_id") or "")
-        contract_keys = [str(x) for x in contract.get("unique_information_keys") or []]
-        required_roles = {str(x) for x in contract.get("required_argument_roles") or []}
-        actual_roles = {str(p.get("argument_role") or "") for p in paragraphs if isinstance(p, dict)}
-        paragraph_keys = [str(p.get("novel_content_key") or "") for p in paragraphs if isinstance(p, dict)]
-        paragraph_claims = {str(p.get("primary_claim_id") or "") for p in paragraphs if isinstance(p, dict)}
-        required_claims = {str(x) for x in contract.get("must_advance_claim_ids") or []}
-        prior_digests = payload.get("prior_section_digest") or []
-        prior_keys = {
-            str(key)
-            for digest in prior_digests if isinstance(digest, dict)
-            for key in digest.get("new_information_keys") or []
-        }
-
-        if contract_id and not all(paragraph_keys):
+        for violation in check_blueprint_semantics(blueprint, payload):
             findings.append(QualityFinding(
-                "QG_BLUEPRINT_MISSING_INFORMATION_IDENTITY", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.novel_content_key", "蓝图段落缺少新增信息键，后续无法判断章节是否推进了新内容。",
-                "为每个段落指定属于本章节合同的novel_content_key。", "WRITING_AGENT",
-            ))
-        if len(paragraph_keys) != len(set(paragraph_keys)):
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_DUPLICATE_INFORMATION_KEYS", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.novel_content_key", "同一章节内多个段落复用了相同新增信息键。",
-                "每个段落只推进一个独立信息单元，并使用唯一novel_content_key。", "WRITING_AGENT",
-            ))
-        foreign_keys = sorted(
-            key for key in paragraph_keys if key and contract_keys and not any(key == root or key.startswith(root + "-") or key.startswith(root + ":") for root in contract_keys)
-        )
-        if foreign_keys:
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_INFORMATION_KEY_OUTSIDE_CONTRACT", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.novel_content_key", f"有{len(foreign_keys)}个新增信息键不属于本章节合同。",
-                "仅使用section_contract.unique_information_keys及其子键。", "WRITING_AGENT",
-            ))
-        reused_prior = sorted(set(paragraph_keys) & prior_keys)
-        if reused_prior:
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_REUSES_PRIOR_INFORMATION", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.novel_content_key", f"蓝图复用了前文章节的{len(reused_prior)}个信息键。",
-                "更换为本章节独有信息键；共享背景只能通过allowed_shared_context_ids引用。", "WRITING_AGENT",
-            ))
-        missing_roles = sorted(required_roles - actual_roles)
-        if missing_roles:
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_REQUIRED_ROLES_MISSING", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.argument_role", f"蓝图缺少章节合同要求的论证角色：{', '.join(missing_roles)}。",
-                "补齐章节Profile要求的论证角色，不得用通用段落替代。", "WRITING_AGENT",
-            ))
-        missing_claims = sorted(required_claims - paragraph_claims)
-        if missing_claims:
-            findings.append(QualityFinding(
-                "QG_BLUEPRINT_REQUIRED_CLAIMS_MISSING", "P1", "BLUEPRINT", "BLUEPRINT",
-                "paragraphs.primary_claim_id", f"蓝图没有推进章节合同要求的{len(missing_claims)}个命题。",
-                "将must_advance_claim_ids逐项绑定到至少一个段落。", "WRITING_AGENT",
+                violation.code,
+                "P1",
+                violation.category,
+                "BLUEPRINT",
+                violation.target_path,
+                violation.description,
+                violation.repair_instruction,
+                "WRITING_AGENT",
+                blocking=violation.blocking,
+                rule_id=violation.rule_id,
+                responsibility=violation.responsibility.value,
             ))
         return findings
 
     def _audit_section_content(self, candidate: dict[str, Any], payload: dict[str, Any]) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
-        paragraphs = [p for p in candidate.get("paragraphs", []) if isinstance(p, dict)]
+        paragraphs = ordered_paragraphs(candidate.get("paragraphs"))
         text = _content_text(candidate)
         if not text:
             return [QualityFinding(
                 "QG_EMPTY_SECTION", "P1", "CONTENT", "SECTION_CANDIDATE", "candidate_text",
                 "章节正文为空。", "重新生成正文。", "WRITING_AGENT",
             )]
+        sequence_error = paragraph_sequence_error(candidate.get("paragraphs"))
+        if sequence_error:
+            findings.append(QualityFinding(
+                "QG_SECTION_PARAGRAPH_SEQUENCE_INVALID", "P1", "CONTENT", "SECTION_CANDIDATE",
+                "paragraphs[*].sequence", sequence_error,
+                "令段落sequence唯一、连续且从1开始；数组顺序可以任意，确定性消费者将按sequence排序。",
+                "WRITING_AGENT",
+            ))
+        identity_error = paragraph_identity_error(candidate.get("paragraphs"))
+        if identity_error:
+            findings.append(QualityFinding(
+                "QG_SECTION_PARAGRAPH_IDENTITY_INVALID", "P1", "CONTENT", "SECTION_CANDIDATE",
+                "paragraphs[*].paragraph_id", identity_error,
+                "令paragraph_id非空且在章节内唯一，保证Critic、修复指令和Trace都能精确指向一个段落。",
+                "WRITING_AGENT",
+            ))
+        representation_error = candidate_text_divergence(candidate)
+        if representation_error:
+            findings.append(QualityFinding(
+                "QG_CANDIDATE_TEXT_PARAGRAPH_DIVERGENCE", "P1", "CONTENT", "SECTION_CANDIDATE",
+                "candidate_text,paragraphs", representation_error,
+                "以按sequence排序的paragraphs为唯一正文来源，并重新生成完全一致的candidate_text镜像。",
+                "WRITING_AGENT",
+            ))
         paragraph_texts = [str(p.get("text") or "").strip() for p in paragraphs]
         duplicate_count = sum(count - 1 for text, count in collections.Counter(paragraph_texts).items() if count > 1 and len(text) >= 20)
         sentence_counts = collections.Counter(_normalized_sentences(text))
@@ -880,6 +1173,7 @@ class ProposalQualityGuard:
             allowed_ids.add(str(proposition["node_id"]))
         allowed_ids.update(str(item.get("node_id")) for item in argument_graph.get("research_questions", []) if isinstance(item, dict) and item.get("node_id"))
         allowed_ids.update(str(item.get("node_id")) for item in argument_graph.get("nodes", []) if isinstance(item, dict) and item.get("node_id"))
+        allowed_ids.update(str(item.get("edge_id")) for item in argument_graph.get("edges", []) if isinstance(item, dict) and item.get("edge_id"))
         section_contract = payload.get("section_contract") or {}
         if section_contract.get("section_contract_id"):
             allowed_ids.add(str(section_contract["section_contract_id"]))
@@ -896,11 +1190,16 @@ class ProposalQualityGuard:
         contract_id = str(section_contract.get("section_contract_id") or "")
         required_claims = {str(x) for x in section_contract.get("must_advance_claim_ids") or []}
         contract_keys = [str(x) for x in section_contract.get("unique_information_keys") or []]
-        required_roles = {str(x) for x in section_contract.get("required_argument_roles") or []}
+        required_role_values = (
+            section_contract.get("required_argument_roles") or []
+        )
         paragraph_contracts = {str(p.get("section_contract_id") or "") for p in paragraphs}
         paragraph_claims = {str(p.get("primary_claim_id") or "") for p in paragraphs}
         paragraph_keys = [str(p.get("novel_content_key") or "") for p in paragraphs]
-        paragraph_roles = {str(p.get("paragraph_role") or "") for p in paragraphs}
+        paragraph_roles = {
+            _canonical_argument_role(p.get("paragraph_role"))
+            for p in paragraphs
+        }
         prior_keys = {
             str(key)
             for digest in payload.get("prior_section_digest") or [] if isinstance(digest, dict)
@@ -909,6 +1208,7 @@ class ProposalQualityGuard:
         advancement = candidate.get("claim_advancement") or {}
         advancement_claims = {str(x) for x in advancement.get("advanced_claim_ids") or []}
         advancement_keys = {str(x) for x in advancement.get("new_information_keys") or []}
+        paragraph_claims.update(advancement_claims)
 
         if contract_id and paragraph_contracts != {contract_id}:
             findings.append(QualityFinding(
@@ -922,7 +1222,10 @@ class ProposalQualityGuard:
                 "paragraphs.primary_claim_id", "正文没有覆盖章节合同要求推进的全部命题。",
                 "按must_advance_claim_ids补齐论证段落。", "WRITING_AGENT",
             ))
-        if required_roles - paragraph_roles:
+        if _missing_required_argument_roles(
+            required_role_values,
+            paragraph_roles,
+        ):
             findings.append(QualityFinding(
                 "QG_CONTENT_REQUIRED_ROLES_MISSING", "P1", "CONTENT", "SECTION_CANDIDATE",
                 "paragraphs.paragraph_role", "正文缺少章节合同要求的论证角色。",
@@ -956,9 +1259,70 @@ class ProposalQualityGuard:
                 "claim_advancement", "章节推进摘要与段落中的命题/信息键不一致。",
                 "从段落primary_claim_id和novel_content_key确定性生成推进摘要。", "WRITING_AGENT",
             ))
+
+        # Push whole-document closure requirements down to the responsible
+        # section.  Provider-swappable generation should fail immediately after
+        # the innovation/conclusion section is produced, rather than waiting for
+        # every other chapter and the final integration call to finish.
+        node_types = {
+            str(item.get("node_id")): str(item.get("node_type") or "")
+            for item in argument_graph.get("nodes") or []
+            if isinstance(item, dict) and item.get("node_id")
+        }
+        prior_ids = {node_id for node_id, node_type in node_types.items() if node_type == "CLOSEST_PRIOR_WORK"}
+        innovation_ids = {node_id for node_id, node_type in node_types.items() if node_type == "NOVEL_MECHANISM"}
+        question_ids = {
+            str(item.get("node_id"))
+            for item in argument_graph.get("research_questions") or []
+            if isinstance(item, dict) and item.get("node_id")
+        }
+        central_id = str((argument_graph.get("central_proposition") or {}).get("node_id") or "")
+        claim_bound_ids = set(paragraph_claims) | set(advancement_claims)
+        evidence_bound_ids = {
+            str(value)
+            for paragraph in paragraphs
+            for value in paragraph.get("evidence_ids") or []
+            if value
+        }
+        bound_ids = claim_bound_ids | evidence_bound_ids
+        if main_profile == "INNOVATION":
+            if not prior_ids or not innovation_ids:
+                findings.append(QualityFinding(
+                    "QG_INNOVATION_GRAPH_EVIDENCE_INCOMPLETE", "P1", "ARGUMENT", "ARGUMENT_GRAPH",
+                    "argument_graph.nodes",
+                    "论证图缺少最近工作或新增机制节点，创新章节无法建立可验证比较链。",
+                    "返回论证架构阶段补齐最近工作、局限机制、新增机制及验证关系。",
+                    "ARGUMENT_ARCHITECTURE_AGENT",
+                ))
+            elif not (evidence_bound_ids & prior_ids) or not (bound_ids & innovation_ids):
+                findings.append(QualityFinding(
+                    "QG_INNOVATION_SECTION_LACKS_BASELINE_BINDING", "P1", "CONTENT", "SECTION_CANDIDATE",
+                    "paragraphs.evidence_ids,paragraphs.primary_claim_id",
+                    "创新章节没有同时绑定最接近工作与新增机制。",
+                    "仅重写创新章节，明确最近工作、机制性局限、本项目新增机制和可比较验证。",
+                    "WRITING_AGENT",
+                ))
+        if main_profile == "CONCLUSION":
+            required_closure_ids = ({central_id} if central_id else set()) | question_ids | innovation_ids
+            missing_closure_ids = sorted(required_closure_ids - bound_ids)
+            if missing_closure_ids:
+                findings.append(QualityFinding(
+                    "QG_CONCLUSION_DOES_NOT_CLOSE_ARGUMENT", "P1", "ARGUMENT", "SECTION_CANDIDATE",
+                    "paragraphs.primary_claim_id,paragraphs.evidence_ids,claim_advancement.advanced_claim_ids",
+                    f"结论章节未逐项回答研究问题或回扣中心命题/贡献节点：{missing_closure_ids}。",
+                    "仅重写结论章节，逐项回答研究问题并回扣中心命题和经验证的贡献；不得引入新方法。",
+                    "WRITING_AGENT",
+                ))
         return findings
 
-    def _audit_critic_coverage(self, candidate: dict[str, Any], output: dict[str, Any], payload: dict[str, Any] | None = None) -> list[QualityFinding]:
+    def _audit_critic_coverage(
+        self,
+        candidate: dict[str, Any],
+        output: dict[str, Any],
+        payload: dict[str, Any] | None = None,
+        *,
+        require_general_quality_dimensions: bool = True,
+    ) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
         result = output.get("result") or {}
         expected_ids = {str(p.get("paragraph_id")) for p in candidate.get("paragraphs", []) if isinstance(p, dict) and p.get("paragraph_id")}
@@ -971,7 +1335,12 @@ class ProposalQualityGuard:
                 "ORIGINAL_PRODUCER",
             ))
         rules = {str(item.get("rule")) for item in result.get("profile_acceptance_results") or [] if isinstance(item, dict)}
-        if len(rules) < 6:
+        quality_dimensions = {
+            str(item.get("dimension"))
+            for item in result.get("quality_dimensions") or []
+            if isinstance(item, dict) and item.get("dimension")
+        }
+        if require_general_quality_dimensions and len(quality_dimensions) < 6:
             findings.append(QualityFinding(
                 "QG_CRITIC_DIMENSIONS_TOO_SHALLOW", "P1", "CONTENT", "WRITE_CRITIC",
                 "result.profile_acceptance_results", "正文Critic只检查结构和Trace，没有检查文种、中心命题、方法实质、创新、指标依据、基础和重复。",
@@ -1007,12 +1376,30 @@ class ProposalQualityGuard:
                 ))
         return findings
 
-    def _audit_document(self, payload: dict[str, Any], output: dict[str, Any]) -> list[QualityFinding]:
+    def _audit_document(
+        self,
+        payload: dict[str, Any],
+        output: dict[str, Any],
+        *,
+        observations: dict[str, Any] | None = None,
+    ) -> list[QualityFinding]:
         findings: list[QualityFinding] = []
-        sections = payload.get("candidate_sections") or []
+        all_sections = [
+            item
+            for item in payload.get("candidate_sections") or []
+            if isinstance(item, dict)
+        ]
         section_map = payload.get("document_section_map") or []
-        expected_candidate_ids = {str(item.get("section_id")) for item in section_map if isinstance(item, dict) and item.get("candidate_id")}
-        actual_candidate_ids = {str(item.get("section_id")) for item in sections if isinstance(item, dict)}
+        expected_candidate_ids = {
+            str(item.get("section_id"))
+            for item in section_map
+            if isinstance(item, dict) and item.get("candidate_id")
+        }
+        actual_candidate_ids = {
+            str(item.get("section_id"))
+            for item in all_sections
+            if item.get("section_id")
+        }
         if expected_candidate_ids and actual_candidate_ids != expected_candidate_ids:
             findings.append(QualityFinding(
                 "QG_INTEGRATION_CANDIDATE_SET_INCOMPLETE", "P1", "INTEGRATION", "CANDIDATE_DOCUMENT",
@@ -1020,6 +1407,16 @@ class ProposalQualityGuard:
                 "终止审查并报告上下文装配错误，禁止使用Replay种子或单章候选替代全文。",
                 "INTEGRATION_AGENT",
             ))
+        placements = {
+            str(item.get("section_id")): str(item.get("placement") or "MAIN_BODY")
+            for item in ((payload.get("narrative_architecture") or {}).get("section_contracts") or [])
+            if isinstance(item, dict) and item.get("section_id")
+        }
+        sections = [
+            item
+            for item in all_sections
+            if placements.get(str(item.get("section_id") or ""), "MAIN_BODY") != "APPENDIX"
+        ]
         texts = []
         all_paragraphs: list[tuple[str, str]] = []
         all_sentences: list[tuple[str, str]] = []
@@ -1038,9 +1435,7 @@ class ProposalQualityGuard:
             for claim_id in advancement.get("advanced_claim_ids") or []:
                 if claim_id:
                     claim_locations[str(claim_id)].add(section_id)
-            for paragraph in candidate.get("paragraphs", []):
-                if not isinstance(paragraph, dict):
-                    continue
+            for paragraph in ordered_paragraphs(candidate.get("paragraphs")):
                 paragraph_text = str(paragraph.get("text") or "").strip()
                 if not paragraph_text:
                     continue
@@ -1078,18 +1473,22 @@ class ProposalQualityGuard:
             ]
             for sid in ids if sid
         })
-        result = output.setdefault("result", {})
-        result["redundancy_report"] = {
-            "exact_duplicate_groups": len(exact_repeated),
-            "semantic_template_groups": len(high_repeat),
-            "affected_section_ids": affected_section_ids,
-            "representative_signatures": [sha256_text(text)[:16] for text in list(exact_repeated)[:4]]
-            + [sha256_text(sentence)[:16] for sentence in list(high_repeat)[:4]]
-            + [sha256_text(skeleton)[:16] for skeleton in list(template_skeletons)[:4]],
-            "duplicate_information_key_groups": len(duplicate_information),
-            "claim_overconcentration_groups": len(claim_overconcentration),
-            "template_skeleton_groups": len(template_skeletons),
-        }
+        if observations is not None:
+            observations["main_body_redundancy_report"] = {
+                "exact_duplicate_groups": len(exact_repeated),
+                "semantic_template_groups": len(high_repeat),
+                "affected_section_ids": affected_section_ids,
+                "representative_signatures": [],
+                "duplicate_information_key_groups": len(duplicate_information),
+                "claim_overconcentration_groups": len(claim_overconcentration),
+                "template_skeleton_groups": len(template_skeletons),
+                "main_body_section_count": len(sections),
+                "excluded_appendix_section_ids": sorted(
+                    str(item.get("section_id"))
+                    for item in all_sections
+                    if item not in sections and item.get("section_id")
+                ),
+            }
         if exact_repeated or high_repeat or template_skeletons:
             findings.append(QualityFinding(
                 "QG_DOCUMENT_TEMPLATE_REPETITION", "P1", "INTEGRATION", "CANDIDATE_DOCUMENT",
@@ -1196,21 +1595,21 @@ class ProposalQualityGuard:
             ))
         return findings
 
-    @staticmethod
-    def _merge_findings(output: dict[str, Any], findings: list[QualityFinding]) -> None:
-        if not findings:
-            return
-        existing = output.setdefault("findings", [])
-        existing_codes = {str(item.get("code")) for item in existing if isinstance(item, dict)}
-        for finding in findings:
-            if finding.code not in existing_codes:
-                existing.append(finding.as_dict())
-                existing_codes.add(finding.code)
-        if any(f.severity == "P0" for f in findings):
-            output["status"] = "BLOCK"
-        elif any(f.severity == "P1" and f.blocking for f in findings):
-            output["status"] = "REVISE"
-        result = output.get("result")
-        if isinstance(result, dict) and "verdict" in result and output.get("status") != "PASS":
-            allowed = {"ACCEPT", "REVISE", "BLOCK"}
-            result["verdict"] = "BLOCK" if output["status"] == "BLOCK" else "REVISE"
+    def _guard_report(
+        self,
+        prompt_id: str,
+        output: dict[str, Any],
+        findings: list[QualityFinding],
+        *,
+        observations: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return build_guard_report(
+            prompt_id,
+            output,
+            [item.as_dict() for item in findings],
+            observations=observations,
+            components=[{
+                "observer": type(self).__name__,
+                "finding_count": len(findings),
+            }],
+        )

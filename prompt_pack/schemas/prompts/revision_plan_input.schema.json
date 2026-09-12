@@ -10,7 +10,7 @@
       "const": "P-REVISION-PLAN"
     },
     "prompt_version": {
-      "const": "2.0.0"
+      "const": "3.1.0"
     },
     "task": {
       "type": "object",
@@ -263,6 +263,12 @@
             "$ref": "../common/finding.schema.json"
           },
           "description": "来自上一轮全篇审查、需要当前上游阶段处理的结构化意见；首次运行时为空数组。"
+        },
+        "human_resolutions": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/human_resolution.schema.json"
+          }
         }
       },
       "additionalProperties": false,
@@ -284,7 +290,15 @@
     },
     "expected_output_schema": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "const": "schemas/prompts/revision_plan_output.schema.json"
+    },
+    "trusted_source_catalog": {
+      "type": "array",
+      "items": {
+        "$ref": "../common/trusted_source_catalog_entry.schema.json"
+      },
+      "uniqueItems": true
     }
   },
   "additionalProperties": false,

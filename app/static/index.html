@@ -19,9 +19,11 @@
     <aside>
       <button class="nav active" data-panel="projects">项目与材料</button>
       <button class="nav" data-panel="workflows">工作流</button>
+      <button class="nav" data-panel="research">调研结果</button>
       <button class="nav" data-panel="gates">人工门禁</button>
       <button class="nav" data-panel="prompts">提示词调试</button>
       <button class="nav" data-panel="runs">运行记录</button>
+      <button id="probeConfig" class="secondary">检测运行依赖</button>
       <div class="runtime" id="runtime"></div>
     </aside>
 
@@ -33,13 +35,18 @@
             <h3>新建项目</h3>
             <label>项目名称<input name="name" required /></label>
             <label>说明<textarea name="description"></textarea></label>
+            <label>报告类型<select name="document_type" required><option value="RESEARCH_PROPOSAL">科研项目申请书</option><option value="ENGINEERING_PROPOSAL">工程方案</option><option value="SURVEY_REPORT">调研分析报告</option></select></label>
             <label>安全等级<select name="security_level"><option>INTERNAL</option><option>PUBLIC</option><option>SENSITIVE</option><option>CLASSIFIED</option></select></label>
-            <label class="check"><input type="checkbox" name="internet_access_allowed" /> 允许经审批后使用在线公共研究</label>
+            <label class="check"><input type="checkbox" name="internet_access_allowed" /> 允许经审批后访问互联网</label>
+            <label class="check"><input type="checkbox" name="anonymized_external_processing_allowed" /> 允许经安全脱敏和人工审批后外发公共研究任务</label>
             <button type="submit">创建</button>
           </form>
           <div class="card">
             <h3>当前项目</h3>
             <select id="projectSelect"></select>
+            <label>报告类型<select id="projectDocumentType"><option value="">尚未指定</option><option value="RESEARCH_PROPOSAL">科研项目申请书</option><option value="ENGINEERING_PROPOSAL">工程方案</option><option value="SURVEY_REPORT">调研分析报告</option></select></label>
+            <button id="saveProjectDocumentType" type="button">保存报告类型</button>
+            <small>按所选类型处理材料。已有工作流请在保存后重建。</small>
             <pre id="projectInfo">尚未选择项目</pre>
           </div>
         </div>
@@ -64,14 +71,63 @@
         <div class="card">
           <select id="workflowType">
             <option>WF-1_PROJECT_INTAKE</option><option>WF-2_TEMPLATE_EXTRACTION</option>
-            <option>WF-3_HYBRID_ONLINE_ASSIST</option><option>WF-4_PROPOSAL_AUTHORING</option>
+            <option>WF-3_HYBRID_ONLINE_ASSIST</option><option value="WF-3B_TOPIC_BACKGROUND_RESEARCH">WF-3B Topic 背景调研</option><option>WF-4_PROPOSAL_AUTHORING</option>
             <option>WF-5_SECURITY_REVIEW_AND_EXPORT</option>
           </select>
           <button id="startWorkflow">启动并运行至下一个门禁</button>
           <button id="advanceWorkflow">继续选中的工作流</button>
+          <button id="rebuildWorkflow" class="warning" disabled>一键重建所选工作流</button>
+          <button id="resumeRebuild" class="success" hidden>继续重建</button>
+          <button id="abortRebuild" class="warning" hidden>撤销重建并恢复原工作流</button>
           <button id="exportDocx">导出 DOCX</button><button id="exportPackage">导出审计包</button>
+          <div id="rebuildHint" class="rebuild-hint">选择一个工作流后即可一键重建；系统会自动关联并重建其下游。</div>
+          <div id="wf3Options" class="workflow-options" hidden>
+            <h4>WF-3 公开研究需求（可留空，由系统从 WF-1 结果推导；无法推导时转人工门禁）</h4>
+            <label>公开研究问题<textarea id="wf3Question" placeholder="例如：检索与核心研究问题最接近的公开工作、代表性基线和评价指标。"></textarea></label>
+            <label>必须联网的原因<textarea id="wf3Reason">需要检索可公开访问且可核验的资料，以补足内部材料无法独立确认的相关工作、比较基线或评价依据。</textarea></label>
+            <label>期望输出<textarea id="wf3Desired">返回带来源绑定的代表性公开资料、方法或基线、评价指标、适用边界及可用于申请书论证的结论摘要。</textarea></label>
+            <label>任务类型<select id="wf3TaskType"><option>PUBLIC_RESEARCH</option><option>PUBLIC_TEMPLATE_ANALYSIS</option><option>GENERIC_LANGUAGE_ASSIST</option></select></label>
+          </div>
+          <div id="wf3bOptions" class="workflow-options" hidden>
+            <h4>WF-3B Topic 背景调研（可留空，由系统从 WF-1 结果取 topic 并默认覆盖该文种的全部维度；需 WF-1 已完成后启动）</h4>
+            <label>Topic 覆盖（可选）<textarea id="wf3bTopicOverride" placeholder="留空则从 WF-1 结果取 topic；填写后以此 topic 做应用背景调研。"></textarea></label>
+            <label>补充说明 focus（可选）<textarea id="wf3bFocus" placeholder="例如：重点关注近三年的示范应用与成本变化。"></textarea></label>
+            <fieldset>
+              <legend>技术调研维度（调研报告默认全选这 6 维；不勾选任何项=按文种默认）</legend>
+              <label><input type="checkbox" class="wf3bDimension" value="OBJECT_AND_EVOLUTION" /> OBJECT_AND_EVOLUTION 对象与演进</label>
+              <label><input type="checkbox" class="wf3bDimension" value="FUNCTION_AND_ARCHITECTURE" /> FUNCTION_AND_ARCHITECTURE 功能与架构</label>
+              <label><input type="checkbox" class="wf3bDimension" value="WORKFLOW_AND_INTERACTION" /> WORKFLOW_AND_INTERACTION 流程与交互</label>
+              <label><input type="checkbox" class="wf3bDimension" value="TECHNOLOGY_AND_IMPLEMENTATION" /> TECHNOLOGY_AND_IMPLEMENTATION 技术与实现</label>
+              <label><input type="checkbox" class="wf3bDimension" value="EVALUATION_AND_EFFECT" /> EVALUATION_AND_EFFECT 评估与效果</label>
+              <label><input type="checkbox" class="wf3bDimension" value="LIMITATIONS_AND_GAPS" /> LIMITATIONS_AND_GAPS 局限与缺口</label>
+            </fieldset>
+            <fieldset>
+              <legend>应用背景维度（科研申请书默认全部 8 维；调研报告可作显式补充）</legend>
+              <label><input type="checkbox" class="wf3bDimension" value="APPLICATION_SCENARIO" /> APPLICATION_SCENARIO 应用场景</label>
+              <label><input type="checkbox" class="wf3bDimension" value="STAKEHOLDER_AND_PAIN" /> STAKEHOLDER_AND_PAIN 利益方与痛点</label>
+              <label><input type="checkbox" class="wf3bDimension" value="INDUSTRY_SCALE_AND_TREND" /> INDUSTRY_SCALE_AND_TREND 规模与趋势</label>
+              <label><input type="checkbox" class="wf3bDimension" value="POLICY_STANDARD_AND_PROGRAM" /> POLICY_STANDARD_AND_PROGRAM 政策标准与规划</label>
+              <label><input type="checkbox" class="wf3bDimension" value="REPRESENTATIVE_CASE" /> REPRESENTATIVE_CASE 代表性案例</label>
+              <label><input type="checkbox" class="wf3bDimension" value="CURRENT_ADOPTION" /> CURRENT_ADOPTION 现有应用成熟度</label>
+              <label><input type="checkbox" class="wf3bDimension" value="OPERATIONAL_CONSTRAINT" /> OPERATIONAL_CONSTRAINT 运行约束</label>
+              <label><input type="checkbox" class="wf3bDimension" value="RESEARCH_SIGNIFICANCE" /> RESEARCH_SIGNIFICANCE 研究意义</label>
+            </fieldset>
+          </div>
         </div>
         <div id="workflowList"></div>
+        <div id="reportPanel" hidden>
+          <div class="card"><h3>调研报告（所选工作流）</h3><div id="reportSummary"></div><div id="reportSections"></div><div id="reportDownload"></div></div>
+          <div class="card"><h3>全文预览</h3><pre id="reportMarkdown" style="white-space:pre-wrap;max-height:480px;overflow:auto"></pre></div>
+        </div>
+      </div>
+
+      <div id="research" class="panel">
+        <div class="panel-head"><h2>调研结果</h2><button id="refreshResearch">刷新</button></div>
+        <div class="card row"><select id="researchSessionSelect"></select></div>
+        <div id="researchSummary"></div>
+        <div class="card"><h3>调研结论（claim 与来源绑定）</h3><div id="researchClaims"></div></div>
+        <div class="card"><h3>研究缺口</h3><div id="researchGaps"></div></div>
+        <div class="card"><h3>来源清单</h3><div id="researchSources"></div></div>
       </div>
 
       <div id="gates" class="panel">

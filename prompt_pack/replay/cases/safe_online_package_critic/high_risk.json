@@ -121,7 +121,7 @@
     "prompt_version": "2.0.0",
     "status": "BLOCK",
     "result": {
-      "verdict": "ACCEPT_FOR_HUMAN_APPROVAL",
+      "verdict": "BLOCK",
       "reidentification_risk": "LOW",
       "checked_prohibited_fields": [
         "真实项目名称"

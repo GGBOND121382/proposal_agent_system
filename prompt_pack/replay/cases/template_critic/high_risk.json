@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-TEMPLATE-CRITIC",
-    "prompt_version": "2.0.0",
+    "prompt_version": "3.0.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -219,7 +219,7 @@
     "prompt_version": "3.0.0",
     "status": "BLOCK",
     "result": {
-      "verdict": "ACCEPT",
+      "verdict": "BLOCK",
       "checked_component_ids": [
         "comp-001"
       ],
@@ -260,7 +260,7 @@
     },
     "findings": [
       {
-        "code": "TEMPLATE_CRITIC_FACT_LEAK",
+        "code": "TEMPLATE_ONLY_FORMAT",
         "severity": "P0",
         "category": "SYSTEM",
         "target_type": "INPUT",

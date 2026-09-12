@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "argument_architecture_critic_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project_task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "objective": {"type": "string", "minLength": 1},
+        "document_type": {"type": "string"},
+        "evaluation_logic": {"type": "string"},
+        "max_research_questions": {"type": "integer", "minimum": 1, "maximum": 6},
+        "acceptance_preferences": {"type": "array", "items": {"type": "string"}},
+        "specific_requirements": {"type": "array", "items": {"type": "string"}},
+        "priority_order": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["objective", "document_type", "evaluation_logic", "max_research_questions", "specific_requirements", "priority_order", "acceptance_preferences"]
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "must_preserve": {"type": "array", "items": {"type": "string"}},
+        "forbidden_changes": {"type": "array", "items": {"type": "string"}},
+        "main_body_exclusions": {"type": "array", "items": {"type": "string"}},
+        "appendix_topics": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["must_preserve", "forbidden_changes", "main_body_exclusions", "appendix_topics"]
+    },
+    "evidence_cards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ref": {"type": "string", "pattern": "^EV-[0-9]{3}$"},
+          "evidence_type": {"type": "string", "minLength": 1},
+          "knowledge_status": {"type": "string", "minLength": 1},
+          "statement": {"type": "string", "minLength": 1},
+          "qualifiers": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["evidence_ref", "evidence_type", "knowledge_status", "statement", "qualifiers"]
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "review_graph": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "units": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "review_ref": {"type": "string", "pattern": "^RU-[0-9]{3}$"},
+                  "semantic_component": {
+                    "type": "string",
+                    "enum": ["CENTRAL_PROPOSITION", "GAP", "QUESTION", "OBJECTIVE", "WORK_PACKAGE", "METHOD", "EVALUATION", "INNOVATION", "PRIOR_WORK", "FOUNDATION", "SCOPE", "THREAD", "LIMITATION", "ASSUMPTION", "THEORETICAL_PROPERTY", "BASELINE", "ABLATION", "SUCCESS_CRITERION", "CONTRIBUTION"]
+                  },
+                  "thread_index": {"type": ["integer", "null"], "minimum": 0},
+                  "presence": {"type": "string", "enum": ["PRESENT", "MISSING"]},
+                  "statement": {"type": "string", "minLength": 1},
+                  "evidence_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^EV-[0-9]{3}$"}}
+                },
+                "required": ["review_ref", "semantic_component", "thread_index", "presence", "statement", "evidence_refs"]
+              }
+            },
+            "relations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "source_ref": {"type": "string", "pattern": "^RU-[0-9]{3}$"},
+                  "relation": {"type": "string", "minLength": 1},
+                  "target_ref": {"type": "string", "pattern": "^RU-[0-9]{3}$"}
+                },
+                "required": ["source_ref", "relation", "target_ref"]
+              }
+            },
+            "coverage_policy": {"const": "ALL_ASSIGNED_UNITS_RUNTIME_RECEIPT"}
+          },
+          "required": ["units", "relations", "coverage_policy"]
+        },
+        "evidence_gaps": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+        "readiness_summary": {"type": "string"}
+      },
+      "required": ["review_graph", "evidence_gaps", "readiness_summary"]
+    },
+    "human_resolutions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {"target": {"type": "string"}, "answer": {}},
+        "required": ["target", "answer"]
+      }
+    }
+  },
+  "required": ["project_task", "constraints", "evidence_cards", "candidate", "human_resolutions"]
+}

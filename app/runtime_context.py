@@ -4,12 +4,20 @@ import copy
 import json
 import os
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
 from .context import ContextBuilder as BaseContextBuilder
+from .context_base import _CURRENT_WORKFLOW_ID, _WORKFLOW_ARTIFACT_SOURCE_CACHE
 from .runtime_policy import CapabilityPolicy, LIVE_ENVELOPE_REGISTRY
 from .util import sha256_json, utc_now
+
+
+_LIVE_ASSEMBLING: ContextVar[bool] = ContextVar("proposal_live_context_assembling", default=False)
+_LIVE_TOUCHED_PATHS: ContextVar[set[str] | None] = ContextVar(
+    "proposal_live_context_touched_paths", default=None
+)
 
 
 class LiveContextBlocked(ValueError):
@@ -200,6 +208,14 @@ class LiveContextBuilder(BaseContextBuilder):
         self.policy = CapabilityPolicy.from_environment()
         self.policy.assert_environment(self.runtime_mode)
 
+    @staticmethod
+    def _touched_paths() -> set[str]:
+        paths = _LIVE_TOUCHED_PATHS.get()
+        if paths is None:
+            paths = set()
+            _LIVE_TOUCHED_PATHS.set(paths)
+        return paths
+
     def _set_path_if_valid(
         self,
         prompt_id: str,
@@ -209,9 +225,32 @@ class LiveContextBuilder(BaseContextBuilder):
         *,
         strict: bool = False,
     ) -> bool:
+        if (
+            getattr(self, "runtime_mode", "REPLAY") == "LIVE"
+            and _LIVE_ASSEMBLING.get()
+        ):
+            parts = dotted_path.split(".")
+            node: Any = envelope
+            for part in parts[:-1]:
+                if not isinstance(node, dict) or part not in node or not isinstance(node[part], dict):
+                    if strict:
+                        raise ValueError(
+                            f"Critical context path does not exist for {prompt_id}: {dotted_path}"
+                        )
+                    return False
+                node = node[part]
+            if not isinstance(node, dict):
+                if strict:
+                    raise ValueError(
+                        f"Critical context path does not exist for {prompt_id}: {dotted_path}"
+                    )
+                return False
+            node[parts[-1]] = copy.deepcopy(value)
+            self._touched_paths().add(dotted_path)
+            return True
         changed = super()._set_path_if_valid(prompt_id, envelope, dotted_path, value, strict=strict)
         if changed and getattr(self, "runtime_mode", "REPLAY") == "LIVE":
-            self._live_touched_paths.add(dotted_path)
+            self._touched_paths().add(dotted_path)
         return changed
 
     def _path_was_touched(self, dotted_path: str) -> bool:
@@ -219,7 +258,7 @@ class LiveContextBuilder(BaseContextBuilder):
             touched == dotted_path
             or dotted_path.startswith(touched + ".")
             or touched.startswith(dotted_path + ".")
-            for touched in getattr(self, "_live_touched_paths", set())
+            for touched in self._touched_paths()
         )
 
     def build(
@@ -239,137 +278,175 @@ class LiveContextBuilder(BaseContextBuilder):
                 workflow_state=workflow_state,
                 overrides=overrides,
             )
-        project = self.db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
-        if not project:
-            raise KeyError(f"Project not found: {project_id}")
-        config = json.loads(project["config_json"])
-        docs = self._documents(project_id)
-        state = workflow_state or {}
-        context_hash = sha256_json(
-            {
-                "project": project,
-                "documents": [item["document_hash"] for item in docs],
-                "workflow_state": state,
+        touched_token = _LIVE_TOUCHED_PATHS.set(set())
+        try:
+            return self._build_live(
+                prompt_id,
+                project_id,
+                workflow_id=workflow_id,
+                workflow_state=workflow_state,
+                overrides=overrides,
+            )
+        finally:
+            _LIVE_TOUCHED_PATHS.reset(touched_token)
+
+    def _build_live(
+        self,
+        prompt_id: str,
+        project_id: str,
+        *,
+        workflow_id: str | None,
+        workflow_state: dict[str, Any] | None,
+        overrides: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+            project = self.db.fetchone("SELECT * FROM projects WHERE id=?", (project_id,))
+            if not project:
+                raise KeyError(f"Project not found: {project_id}")
+            config = json.loads(project["config_json"])
+            docs = self._documents(project_id)
+            state = workflow_state or {}
+            context_hash = sha256_json(
+                {
+                    "project": project,
+                    "documents": [item["document_hash"] for item in docs],
+                    "workflow_state": state,
+                }
+            )
+            scaffold = build_schema_scaffold(self.pack.inlined_schema(prompt_id, "input"))
+            envelope = scaffold.value
+            if not isinstance(envelope, dict):
+                raise ValueError(f"Input schema for {prompt_id} did not produce an object scaffold")
+
+            task = envelope.setdefault("task", {})
+            active_section = str(state.get("active_section_id") or "")
+            repair_attempts = state.get("repair_attempts") or {}
+            section_attempt_key = (
+                f"section:{active_section}:{prompt_id}" if active_section else prompt_id
+            )
+            attempt = int(repair_attempts.get(section_attempt_key, repair_attempts.get(prompt_id, 0))) + 1
+            task["task_id"] = "task-" + sha256_json(
+                {
+                    "prompt_id": prompt_id,
+                    "project_id": project_id,
+                    "workflow_id": workflow_id,
+                    "active_section_id": active_section,
+                    "attempt": attempt,
+                }
+            )[:16]
+            task["current_step"] = prompt_id.removeprefix("P-").replace("-", "_")
+            workflow_type = str(state.get("workflow_type") or "WF-1_PROJECT_INTAKE")
+            task["workflow_type"] = (
+                workflow_type.split("_", 1)[1]
+                if workflow_type.startswith("WF-") and "_" in workflow_type
+                else workflow_type
+            )
+            task["attempt"] = min(max(attempt, 1), 2)
+
+            required_environment = self._required_environment(prompt_id, state)
+            execution_level = "PUBLIC" if required_environment == "ONLINE_PUBLIC" else project["security_level"]
+            envelope.setdefault("security_context", {}).update(
+                {
+                    "project_security_level": execution_level,
+                    "input_max_security_level": execution_level,
+                    "required_environment": required_environment,
+                    "allowed_model_endpoint_ids": self._allowed_endpoints(project["security_level"], config, prompt_id),
+                    "prohibited_fields": config.get("prohibited_external_fields", []),
+                    "recipient_scope": config.get("recipient_scope", ["内部用户"]),
+                    "online_transfer_approval_status": self._online_approval_status(workflow_id),
+                    "policy_version": "2.0",
+                }
+            )
+            envelope.setdefault("scope", {}).update(
+                {
+                    "project_id": project_id,
+                    "target_object_ids": envelope.get("scope", {}).get("target_object_ids") or [],
+                    "read_only_object_ids": envelope.get("scope", {}).get("read_only_object_ids") or [],
+                    "protected_object_ids": envelope.get("scope", {}).get("protected_object_ids") or [],
+                }
+            )
+            envelope["expected_output_schema"] = self.pack.entry(prompt_id)["output_schema"]
+            workflow_token = _CURRENT_WORKFLOW_ID.set(workflow_id)
+            source_cache_token = _WORKFLOW_ARTIFACT_SOURCE_CACHE.set({})
+            assembling_token = _LIVE_ASSEMBLING.set(True)
+            try:
+                with self._workflow_build_scope(prompt_id, workflow_id, state):
+                    self._apply_common_payload(
+                        envelope,
+                        prompt_id,
+                        project,
+                        config,
+                        docs,
+                        context_hash,
+                        state,
+                        workflow_id,
+                    )
+            finally:
+                _LIVE_ASSEMBLING.reset(assembling_token)
+                _WORKFLOW_ARTIFACT_SOURCE_CACHE.reset(source_cache_token)
+                _CURRENT_WORKFLOW_ID.reset(workflow_token)
+
+            fallback_values = {
+                "payload.task_instruction": config.get("task_instruction") or project.get("description") or project.get("name"),
+                "payload.project_name": project.get("name"),
+                "payload.project_description": project.get("description"),
+                "payload.intended_uses": [config.get("task_instruction") or project.get("description") or project.get("name")],
             }
-        )
-        scaffold = build_schema_scaffold(self.pack.inlined_schema(prompt_id, "input"))
-        self._live_touched_paths: set[str] = set()
-        envelope = scaffold.value
-        if not isinstance(envelope, dict):
-            raise ValueError(f"Input schema for {prompt_id} did not produce an object scaffold")
+            for path, value in fallback_values.items():
+                if value:
+                    self._set_path_if_valid(prompt_id, envelope, path, value)
+            if overrides:
+                for path, value in overrides.items():
+                    self._set_path_if_valid(prompt_id, envelope, path, value, strict=True)
 
-        task = envelope.setdefault("task", {})
-        active_section = str(state.get("active_section_id") or "")
-        repair_attempts = state.get("repair_attempts") or {}
-        section_attempt_key = (
-            f"section:{active_section}:{prompt_id}" if active_section else prompt_id
-        )
-        attempt = int(repair_attempts.get(section_attempt_key, repair_attempts.get(prompt_id, 0))) + 1
-        task["task_id"] = "task-" + sha256_json(
-            {
-                "prompt_id": prompt_id,
-                "project_id": project_id,
-                "workflow_id": workflow_id,
-                "active_section_id": active_section,
-                "attempt": attempt,
+            prune_roots: set[str] = set()
+            for path, marker_info in scaffold.markers.items():
+                _marker, required_marker, optional_root = marker_info
+                if not required_marker and optional_root and not self._path_was_touched(optional_root):
+                    prune_roots.add(optional_root)
+            for root in sorted(prune_roots, key=lambda item: item.count("."), reverse=True):
+                _delete_path(envelope, root)
+
+            errors = self.pack.validate(prompt_id, "input", envelope)
+            if errors:
+                raise ValueError("LIVE context builder produced invalid input: " + "; ".join(errors[:20]))
+
+            explicit_protocol_paths = {
+                "schema_version",
+                "prompt_id",
+                "prompt_version",
+                "task.task_id",
+                "task.workflow_type",
+                "task.current_step",
+                "task.attempt",
+                "security_context.project_security_level",
+                "security_context.input_max_security_level",
+                "security_context.required_environment",
+                "security_context.online_transfer_approval_status",
+                "security_context.allowed_model_endpoint_ids",
+                "security_context.prohibited_fields",
+                "security_context.recipient_scope",
+                "security_context.policy_version",
+                "scope.project_id",
+                "scope.target_object_ids",
+                "scope.read_only_object_ids",
+                "scope.protected_object_ids",
+                "freshness",
+                "expected_output_schema",
             }
-        )[:16]
-        task["current_step"] = prompt_id.removeprefix("P-").replace("-", "_")
-        workflow_type = str(state.get("workflow_type") or "WF-1_PROJECT_INTAKE")
-        task["workflow_type"] = (
-            workflow_type.split("_", 1)[1]
-            if workflow_type.startswith("WF-") and "_" in workflow_type
-            else workflow_type
-        )
-        task["attempt"] = min(max(attempt, 1), 2)
-
-        required_environment = self._required_environment(prompt_id, state)
-        execution_level = "PUBLIC" if required_environment == "ONLINE_PUBLIC" else project["security_level"]
-        envelope.setdefault("security_context", {}).update(
-            {
-                "project_security_level": execution_level,
-                "input_max_security_level": execution_level,
-                "required_environment": required_environment,
-                "allowed_model_endpoint_ids": self._allowed_endpoints(project["security_level"], config, prompt_id),
-                "prohibited_fields": config.get("prohibited_external_fields", []),
-                "recipient_scope": config.get("recipient_scope", ["内部用户"]),
-                "online_transfer_approval_status": self._online_approval_status(workflow_id),
-                "policy_version": "2.0",
-            }
-        )
-        envelope.setdefault("scope", {}).update(
-            {
-                "project_id": project_id,
-                "target_object_ids": envelope.get("scope", {}).get("target_object_ids") or [],
-                "read_only_object_ids": envelope.get("scope", {}).get("read_only_object_ids") or [],
-                "protected_object_ids": envelope.get("scope", {}).get("protected_object_ids") or [],
-            }
-        )
-        envelope["expected_output_schema"] = self.pack.entry(prompt_id)["output_schema"]
-        self._apply_common_payload(envelope, prompt_id, project, config, docs, context_hash, state, workflow_id)
-
-        fallback_values = {
-            "payload.task_instruction": config.get("task_instruction") or project.get("description") or project.get("name"),
-            "payload.project_name": project.get("name"),
-            "payload.project_description": project.get("description"),
-            "payload.intended_uses": [config.get("task_instruction") or project.get("description") or project.get("name")],
-        }
-        for path, value in fallback_values.items():
-            if value:
-                self._set_path_if_valid(prompt_id, envelope, path, value)
-        if overrides:
-            for path, value in overrides.items():
-                self._set_path_if_valid(prompt_id, envelope, path, value, strict=True)
-
-        prune_roots: set[str] = set()
-        for path, marker_info in scaffold.markers.items():
-            _marker, required_marker, optional_root = marker_info
-            if not required_marker and optional_root and not self._path_was_touched(optional_root):
-                prune_roots.add(optional_root)
-        for root in sorted(prune_roots, key=lambda item: item.count("."), reverse=True):
-            _delete_path(envelope, root)
-
-        errors = self.pack.validate(prompt_id, "input", envelope)
-        if errors:
-            raise ValueError("LIVE context builder produced invalid input: " + "; ".join(errors[:20]))
-
-        explicit_protocol_paths = {
-            "schema_version",
-            "prompt_id",
-            "prompt_version",
-            "task.task_id",
-            "task.workflow_type",
-            "task.current_step",
-            "task.attempt",
-            "security_context.project_security_level",
-            "security_context.input_max_security_level",
-            "security_context.required_environment",
-            "security_context.online_transfer_approval_status",
-            "security_context.allowed_model_endpoint_ids",
-            "security_context.prohibited_fields",
-            "security_context.recipient_scope",
-            "security_context.policy_version",
-            "scope.project_id",
-            "scope.target_object_ids",
-            "scope.read_only_object_ids",
-            "scope.protected_object_ids",
-            "freshness",
-            "expected_output_schema",
-        }
-        unresolved = []
-        for path, marker_info in scaffold.markers.items():
-            marker, required_marker, _optional_root = marker_info
-            if path in explicit_protocol_paths:
-                continue
-            exists, current = _get_path(envelope, path)
-            if (
-                exists
-                and current == marker
-                and required_marker
-                and not self._path_was_touched(path)
-            ):
-                unresolved.append(path)
-        if unresolved:
-            raise LiveContextBlocked(prompt_id, sorted(unresolved))
-        LIVE_ENVELOPE_REGISTRY.register(envelope)
-        return envelope
+            unresolved = []
+            for path, marker_info in scaffold.markers.items():
+                marker, required_marker, _optional_root = marker_info
+                if path in explicit_protocol_paths:
+                    continue
+                exists, current = _get_path(envelope, path)
+                if (
+                    exists
+                    and current == marker
+                    and required_marker
+                    and not self._path_was_touched(path)
+                ):
+                    unresolved.append(path)
+            if unresolved:
+                raise LiveContextBlocked(prompt_id, sorted(unresolved))
+            LIVE_ENVELOPE_REGISTRY.register(envelope)
+            return envelope

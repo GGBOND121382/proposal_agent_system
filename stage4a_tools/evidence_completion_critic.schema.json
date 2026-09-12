@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "verdict", "approved_candidate_hash", "checked_source_ids", "checked_gap_ids", "quality_dimensions", "findings", "next_stage_decision", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "verdict": {"enum": ["ACCEPT", "REVISE"]},
+    "approved_candidate_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "checked_source_ids": {"type": "array", "items": {"type": "string"}},
+    "checked_gap_ids": {"type": "array", "items": {"type": "string"}},
+    "quality_dimensions": {
+      "type": "array", "minItems": 6,
+      "items": {
+        "type": "object",
+        "required": ["dimension", "result", "comment"],
+        "additionalProperties": false,
+        "properties": {
+          "dimension": {"enum": ["SOURCE_VERIFIABILITY", "PRIOR_WORK_CLOSENESS", "INNOVATION_BOUNDARY", "FOUNDATION_EVIDENCE_SCOPE", "METRIC_JUSTIFICATION", "READINESS_CLASSIFICATION"]},
+          "result": {"enum": ["PASS", "FAIL"]},
+          "comment": {"type": "string", "minLength": 10}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "code": {"type": "string"},
+          "severity": {"enum": ["INFO", "MINOR", "MAJOR", "BLOCKING"]},
+          "message": {"type": "string"}
+        }
+      }
+    },
+    "next_stage_decision": {"enum": ["ALLOW_PROVISIONAL_SECTION_PLANNING", "HOLD_SECTION_PLANNING"]},
+    "summary": {"type": "string", "minLength": 20}
+  }
+}

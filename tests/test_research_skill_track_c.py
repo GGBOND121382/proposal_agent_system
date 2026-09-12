@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from app.skills.base import SkillContext
-from app.skills.public_research import PublicResearchArchiveError
+from app.skills.public_research import PublicResearchArchiveError, PublicResearchSecurityError
 from app.skills.research_audit import verify_research_archive
 from app.skills.research_claims import validate_public_claims
 from app.skills.verifiable_public_research import VerifiablePublicResearchArchiveSkill
@@ -33,9 +35,18 @@ def _plan() -> dict:
             "2021—2026年动态运输优化的最近工作、基线方法和局限机制是什么？",
             "官方标准如何规定可核验评价过程？",
         ],
+        "binding_contract_version": "1.0",
         "queries": [
-            "dynamic transportation optimization benchmark review limitations 2021 2026",
-            "official evaluation standard reproducible evidence 2021 2026",
+            {
+                "query_id": "query-001",
+                "query": "dynamic transportation optimization benchmark review limitations 2021 2026",
+                "linked_question_indexes": [0],
+            },
+            {
+                "query_id": "query-002",
+                "query": "official evaluation standard reproducible evidence 2021 2026",
+                "linked_question_indexes": [1],
+            },
         ],
         "source_priorities": ["官方标准", "同行评议论文", "官方项目页面"],
         "time_scope": "2021-01-01/2026-12-31",
@@ -44,16 +55,21 @@ def _plan() -> dict:
     }
 
 
+def _query_texts(plan: dict) -> list[str]:
+    return [item["query"] if isinstance(item, dict) else str(item) for item in plan["queries"]]
+
+
 def _connector_file(tmp_path: Path) -> Path:
     plan = _plan()
+    queries = _query_texts(plan)
     payload = {
         "run_id": "connector-run-c-001",
         "connector": "approved-test-connector",
         "created_at": "2026-07-15T00:00:00Z",
-        "agent_generated_queries": plan["queries"],
+        "agent_generated_queries": queries,
         "responses": [
             {
-                "query": plan["queries"][0],
+                "query": queries[0],
                 "retrieved_at": "2026-07-15T00:00:00Z",
                 "results": [
                     {
@@ -82,7 +98,7 @@ def _connector_file(tmp_path: Path) -> Path:
                 ],
             },
             {
-                "query": plan["queries"][1],
+                "query": queries[1],
                 "retrieved_at": "2026-07-15T00:00:00Z",
                 "results": [
                     {
@@ -316,3 +332,336 @@ def test_c5_innovation_claim_requires_recent_baseline_and_limitation_evidence(tm
     report = validate_public_claims(synthesis, result.output)
     assert report["status"] == "BLOCK"
     assert "PUBLIC_INNOVATION_EVIDENCE_GAP" in {item["code"] for item in report["findings"]}
+
+
+def test_external_innovation_case_is_not_misclassified_as_project_novelty(tmp_path):
+    result = _run(tmp_path)
+    for name in ("recent_work", "comparable_baselines", "limitation_mechanisms"):
+        result.output["coverage"]["dimensions"][name]["status"] = "INSUFFICIENT"
+    source = result.output["sources"][0]
+    synthesis = {
+        "claims": [{
+            "claim_id": "external-case-innovation",
+            "claim_text": "A published case describes a crisis-driven innovation.",
+            "claim_type": "PUBLIC_CLAIM",
+            "subject_id": None,
+            "temporal_status": "CURRENT",
+            "qualifiers": ["External representative case; transferability is limited"],
+            "target_section_profiles": ["BACKGROUND_AND_SIGNIFICANCE", "LITERATURE_REVIEW"],
+            "numeric_values": [],
+            "source_refs": [source],
+            "knowledge_status": "DOCUMENT_EXTRACTED",
+            "security_level": "PUBLIC",
+        }],
+        "source_comparisons": [], "conflicts": [], "limitations": [],
+        "coverage_summary": "External case only",
+    }
+
+    report = validate_public_claims(synthesis, result.output)
+
+    assert report["status"] == "PASS"
+    assert not {
+        "PUBLIC_INNOVATION_EVIDENCE_GAP",
+        "PUBLIC_INNOVATION_RESEARCH_SUFFICIENCY_GAP",
+    } & {item["code"] for item in report["findings"]}
+
+
+def test_cross_language_legacy_queries_are_not_rejected_by_token_overlap():
+    from app.skills.research_plan import normalize_and_validate_plan
+
+    plan = {
+        "plan_id": "legacy-cross-language",
+        "task_type": "PUBLIC_RESEARCH",
+        "research_questions": [
+            "公开研究中常用的评价方法、基线与局限是什么？",
+            "如何建立可复核的公开证据链？",
+        ],
+        "queries": [
+            "evaluation methods benchmark limitations systematic review",
+            "verifiable public evidence provenance audit trail",
+        ],
+        "source_priorities": ["官方来源", "同行评议论文"],
+        "time_scope": "2021-2026",
+        "evidence_requirements": ["可核验来源"],
+        "prohibited_inferences": ["不得推断内部项目"],
+    }
+
+    normalized, validation = normalize_and_validate_plan(plan, strict=True)
+
+    assert validation["status"] == "WARN"
+    assert "RESEARCH_PLAN_UNBOUND_QUERY" not in {
+        item["code"] for item in validation["findings"]
+    }
+    assert all(item["binding_basis"] == "LEGACY_PLAN_SCOPE" for item in normalized["query_items"])
+
+
+def test_explicit_cross_language_query_bindings_are_language_independent():
+    from app.skills.research_plan import normalize_and_validate_plan
+
+    plan = {
+        "plan_id": "explicit-cross-language",
+        "task_type": "PUBLIC_RESEARCH",
+        "binding_contract_version": "1.0",
+        "research_questions": ["公开评价方法有哪些？", "如何保留证据链？"],
+        "queries": [
+            {
+                "query_id": "query-001",
+                "query": "public evaluation methods benchmark review",
+                "linked_question_indexes": [0],
+            },
+            {
+                "query_id": "query-002",
+                "query": "provenance evidence retention audit trail",
+                "linked_question_indexes": [1],
+            },
+        ],
+        "source_priorities": ["官方来源"],
+        "time_scope": "2021-2026",
+        "evidence_requirements": ["可核验来源"],
+        "prohibited_inferences": ["不得推断内部项目"],
+    }
+
+    normalized, validation = normalize_and_validate_plan(plan, strict=True)
+
+    assert validation["status"] == "PASS"
+    assert [item["linked_question_indexes"] for item in normalized["query_items"]] == [[0], [1]]
+    assert {item["binding_basis"] for item in normalized["query_items"]} == {"EXPLICIT"}
+
+
+def test_new_binding_contract_rejects_missing_or_invalid_indexes():
+    from app.skills.research_plan import normalize_and_validate_plan
+
+    plan = {
+        "plan_id": "bad-binding",
+        "task_type": "PUBLIC_RESEARCH",
+        "binding_contract_version": "1.0",
+        "research_questions": ["公开评价方法有哪些？"],
+        "queries": [
+            {"query_id": "query-001", "query": "public evaluation benchmark", "linked_question_indexes": []},
+            {"query_id": "query-002", "query": "evidence audit trail", "linked_question_indexes": [9]},
+        ],
+        "source_priorities": ["官方来源"],
+        "time_scope": "2021-2026",
+        "evidence_requirements": ["可核验来源"],
+        "prohibited_inferences": ["不得推断内部项目"],
+    }
+
+    _, validation = normalize_and_validate_plan(plan, strict=True)
+    codes = {item["code"] for item in validation["findings"]}
+
+    assert validation["status"] == "BLOCK"
+    assert "RESEARCH_PLAN_UNBOUND_QUERY" in codes
+    assert "RESEARCH_PLAN_INVALID_QUERY_BINDING" in codes
+
+
+def test_legacy_cross_language_plan_reaches_retrieval_without_model_regeneration(tmp_path):
+    connector = _connector_file(tmp_path)
+    legacy = _plan()
+    legacy.pop("binding_contract_version", None)
+    legacy["queries"] = _query_texts(legacy)
+
+    result = VerifiablePublicResearchArchiveSkill(_settings(tmp_path, connector)).run(
+        {
+            "provider": "connector",
+            "connector_file": str(connector),
+            "require_structured_plan": True,
+            "plan": legacy,
+            "max_results": 20,
+        },
+        SkillContext(
+            project_id="project-legacy-cross-language",
+            workflow_id="wf-legacy-cross-language",
+            security_level="PUBLIC",
+            data_dir=str(tmp_path),
+        ),
+    )
+
+    assert result.status == "PASS"
+    assert result.output["plan_validation"]["status"] in {"PASS", "WARN"}
+    assert "RESEARCH_PLAN_UNBOUND_QUERY" not in {
+        item["code"] for item in result.output["plan_validation"]["findings"]
+    }
+    assert result.output["queries"] == legacy["queries"]
+
+
+def test_explicit_binding_contract_rejects_unstable_ids_and_indexes():
+    from app.skills.research_plan import normalize_and_validate_plan
+
+    plan = {
+        "plan_id": "unstable-binding",
+        "task_type": "PUBLIC_RESEARCH",
+        "binding_contract_version": "1.0",
+        "research_questions": ["公开评价方法有哪些？", "公开评价方法有哪些？"],
+        "queries": [
+            {
+                "query_id": "query-001",
+                "query": "public evaluation benchmark review",
+                "linked_question_indexes": [0],
+            },
+            {
+                "query_id": "query-001",
+                "query": "evidence provenance audit trail",
+                "linked_question_indexes": [1.5],
+            },
+        ],
+        "source_priorities": ["官方来源"],
+        "time_scope": "2021-2026",
+        "evidence_requirements": ["可核验来源"],
+        "prohibited_inferences": ["不得推断内部项目"],
+    }
+
+    _, validation = normalize_and_validate_plan(plan, strict=True)
+    codes = {item["code"] for item in validation["findings"]}
+
+    assert validation["status"] == "BLOCK"
+    assert "RESEARCH_PLAN_DUPLICATE_QUESTION" in codes
+    assert "RESEARCH_PLAN_DUPLICATE_QUERY_ID" in codes
+    assert "RESEARCH_PLAN_INVALID_QUERY_BINDING" in codes
+
+
+def test_public_research_facade_preserves_typed_category_across_nested_causes() -> None:
+    from app.research import (
+        PublicResearchConfigurationError as FacadeConfigurationError,
+        _facade_error,
+    )
+    from app.skills.executor import SkillExecutionError
+    from app.skills.public_research import PublicResearchConfigurationError
+
+    try:
+        try:
+            raise ValueError("invalid JSON")
+        except ValueError as low_level:
+            raise PublicResearchConfigurationError(
+                "Connector research file is not readable JSON",
+                details={"path": "connector.json"},
+            ) from low_level
+    except PublicResearchConfigurationError as typed:
+        try:
+            raise SkillExecutionError("public_research.archive failed") from typed
+        except SkillExecutionError as boundary:
+            mapped = _facade_error(boundary)
+
+    assert isinstance(mapped, FacadeConfigurationError)
+    assert mapped.category == "CONFIGURATION"
+    assert mapped.details == {"path": "connector.json"}
+
+
+def test_all_security_rejected_candidates_remain_security_failures(tmp_path: Path) -> None:
+    query = "public benchmark"
+    connector = tmp_path / "private-only-connector.json"
+    connector.write_text(
+        json.dumps(
+            {
+                "run_id": "connector-private-only",
+                "connector": "approved-test-connector",
+                "responses": [
+                    {
+                        "query": query,
+                        "results": [
+                            {
+                                "title": "Local-only source",
+                                "url": "http://127.0.0.1/private",
+                                "content_text": "This must never enter the public archive.",
+                            }
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublicResearchSecurityError) as caught:
+        VerifiablePublicResearchArchiveSkill(_settings(tmp_path, connector)).run(
+            {
+                "provider": "connector",
+                "connector_file": str(connector),
+                "plan": {"queries": [query]},
+            },
+            SkillContext(
+                project_id="project-private-only",
+                workflow_id="wf-private-only",
+                security_level="PUBLIC",
+                data_dir=str(tmp_path),
+            ),
+        )
+
+    assert caught.value.category == "SECURITY"
+    assert caught.value.details["candidate_failures"][0]["category"] == "SECURITY"
+
+
+def test_claim_quote_verifies_against_archived_fulltext_with_privacy_redaction(tmp_path):
+    # The model quotes the privacy projection ([EMAIL]) while the archive keeps
+    # the original text.  Quotes must verify against the hash-pinned snapshot
+    # after applying the same redaction, not just against title/excerpt.
+    archive = tmp_path / "archive"
+    (archive / "text").mkdir(parents=True)
+    body = (
+        "Evaluation and Benchmarking of Multi-Agent LLM Systems. "
+        "Contact the corresponding author at editor@example.org for details. "
+        "This sentence only appears deep inside the fetched full text."
+    )
+    text_path = archive / "text" / "public-src-fulltext.txt"
+    text_path.write_text(body, encoding="utf-8")
+    text_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    manifest = {
+        "records": [{
+            "source_id": "public-src-fulltext",
+            "text_path": str(text_path),
+            "text_sha256": text_sha256,
+        }]
+    }
+    manifest_path = archive / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    research_output = {
+        "mode": "LIVE",
+        "archive_manifest": str(manifest_path),
+        "source_catalog": [{
+            "source_id": "public-src-fulltext",
+            "title": "Multi-Agent LLM Systems Review",
+            "excerpt": "A short abstract without the quoted sentences.",
+            "snapshot_sha256": "0" * 64,
+        }],
+    }
+
+    def synthesis_with_quote(quote: str) -> dict:
+        return {
+            "claims": [{
+                "claim_id": "public-claim-fulltext-001",
+                "claim_text": "全文中的论述支持该主张。",
+                "claim_type": "PUBLIC_CLAIM",
+                "subject_id": None,
+                "temporal_status": "CURRENT",
+                "qualifiers": [],
+                "numeric_values": [],
+                "source_refs": [{
+                    "source_id": "public-src-fulltext",
+                    "source_type": "PUBLIC_SOURCE",
+                    "source_hash": "0" * 64,
+                    "quoted_text": quote,
+                    "authority_rank": 50,
+                    "security_level": "PUBLIC",
+                }],
+                "knowledge_status": "DOCUMENT_EXTRACTED",
+                "security_level": "PUBLIC",
+            }],
+            "source_comparisons": [],
+            "conflicts": [],
+            "limitations": [],
+            "coverage_summary": "",
+        }
+
+    deep_quote = "This sentence only appears deep inside the fetched full text."
+    report = validate_public_claims(synthesis_with_quote(deep_quote), research_output)
+    assert report["status"] == "PASS"
+    assert report["bindings"][0]["evidence_mode"] == "DIRECT_SOURCE_SUPPORTED"
+
+    redacted_quote = "Contact the corresponding author at [EMAIL] for details."
+    report = validate_public_claims(synthesis_with_quote(redacted_quote), research_output)
+    assert report["status"] == "PASS"
+
+    fabricated = "This sentence was never published anywhere."
+    report = validate_public_claims(synthesis_with_quote(fabricated), research_output)
+    assert report["status"] == "BLOCK"
+    assert report["findings"][0]["code"] == "PUBLIC_CLAIM_QUOTE_NOT_FOUND"

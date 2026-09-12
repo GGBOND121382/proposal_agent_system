@@ -8,6 +8,7 @@ from typing import Any
 
 from pypdf import PdfReader
 
+from .dependency_preflight import RuntimeDependencyPreflight
 from .util import sha256_bytes, utc_now, write_json
 
 
@@ -25,7 +26,7 @@ class PdfConverter:
         docx_path = docx_path.resolve()
         if not docx_path.is_file() or docx_path.suffix.lower() != ".docx":
             raise PdfConversionError(f"DOCX input is missing or invalid: {docx_path.name}")
-        executable = shutil.which("libreoffice") or shutil.which("soffice")
+        executable = RuntimeDependencyPreflight._find_libreoffice()
         if not executable:
             raise PdfConversionError(
                 "LibreOffice/soffice is unavailable; PDF conversion cannot be silently skipped"

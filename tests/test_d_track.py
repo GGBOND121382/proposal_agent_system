@@ -72,7 +72,7 @@ def _run(prompt_id: str, candidate_id: str, created_at: str, *, status: str = "P
     result = {
         "candidate_id": candidate_id,
         "candidate_text": "正文",
-        "paragraphs": [{"sequence": 1, "text": "正文"}],
+        "paragraphs": [{"paragraph_id": "p-1", "sequence": 1, "text": "正文"}],
     }
     return {
         "id": f"{prompt_id}-{created_at}",
@@ -104,7 +104,10 @@ def test_docx_export_candidates_require_later_expression_critic_pass(tmp_path: P
 def test_pdf_converter_fails_closed_without_libreoffice(tmp_path: Path, monkeypatch):
     docx = tmp_path / "sample.docx"
     Document().save(docx)
-    monkeypatch.setattr("app.pdf_exporter.shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "app.pdf_exporter.RuntimeDependencyPreflight._find_libreoffice",
+        lambda: None,
+    )
     with pytest.raises(PdfConversionError, match="cannot be silently skipped"):
         PdfConverter(SimpleNamespace()).convert(docx)
 

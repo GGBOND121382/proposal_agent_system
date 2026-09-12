@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "prompt_id": "P-STAGE6D-WRITE-SECTION",
+  "prompt_version": "1.0.0",
+  "actual_model_id": "gpt-5.6-thinking",
+  "endpoint_id": "chatgpt-conversation-file-bridge",
+  "status": "PASS",
+  "section_id": "SEC-12",
+  "candidate": {
+    "candidate_id": "cand-stage6d-sec-12-001",
+    "section_name": "研究计划与里程碑",
+    "markdown": "# 研究计划与里程碑\n\n## 阶段依赖与里程碑\n\n研究计划不预设具体年度，而按能力依赖推进。起始阶段以WP-1共享决策态势与增量知识建模为前置条件，形成对象Schema、版本规则和一致性测试记录等中间工件；随后开展WP-2多智能体候选生成与交叉批判，并与WP-3人工偏好注入及权限交接联动，只有候选、Finding、人工决定和工具结果能够稳定追踪后，才进入后续调度研究。\n\n中间阶段以WP-4优势冲刺资源调度与停止决策为核心，将剩余时间、方案差距、风险和边际增益纳入同一调度协议；其Gate不是“功能可运行”这一单一条件，而是调度日志、停止与降级试验、固定顺序对照及人工覆盖记录共同通过。最终由WP-5完成原型集成和跨场景验证，以可复现实验数据、对照消融报告、失败案例和全过程Trace作为验收证据，对应OBJ-2、OBJ-3和OBJ-4。\n\n> **TAB-07：工作包依赖、阶段Gate与验收证据表**\n\n## 计划调整机制\n\n待正式项目周期确定后，将上述能力阶段映射到具体季度或年度，但不改变WP-1至WP-5的依赖顺序。映射时以可用周期、人员投入、场景数据到位时间和工具接口成熟度为约束，对每个里程碑补充起止时间、责任角色和审查窗口；OPEN-004与OPEN-011未关闭前，当前计划仅作为可逆的内容计划，不能被解释为正式进度承诺。\n\n若场景数据、确定性工具或人工参与条件变化，计划按依赖关系重排，而不是机械压缩所有任务：基础Schema或规则工具不足时，回退到WP-1补齐状态和校验能力；候选多样性不足时优先强化WP-2；人工反馈冲突时暂停WP-4资源竞争并回到WP-3明确偏好版本；验证场景代表性不足时延后结论外推并扩展WP-5。每次重排均记录触发原因、受影响工件、重新验收证据和恢复条件。\n",
+    "subsections": [
+      {
+        "subsection_id": "SEC-12-01",
+        "title": "阶段依赖与里程碑",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-12-01",
+            "role": "按能力依赖组织工作包",
+            "text": "研究计划不预设具体年度，而按能力依赖推进。起始阶段以WP-1共享决策态势与增量知识建模为前置条件，形成对象Schema、版本规则和一致性测试记录等中间工件；随后开展WP-2多智能体候选生成与交叉批判，并与WP-3人工偏好注入及权限交接联动，只有候选、Finding、人工决定和工具结果能够稳定追踪后，才进入后续调度研究。",
+            "node_ids": [
+              "OBJ-1",
+              "OBJ-2",
+              "OBJ-3",
+              "WP-1",
+              "WP-2",
+              "WP-3"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "plan_dependency_wp1_wp3"
+          },
+          {
+            "paragraph_id": "P-SEC-12-02",
+            "role": "定义阶段性证据和Gate",
+            "text": "中间阶段以WP-4优势冲刺资源调度与停止决策为核心，将剩余时间、方案差距、风险和边际增益纳入同一调度协议；其Gate不是“功能可运行”这一单一条件，而是调度日志、停止与降级试验、固定顺序对照及人工覆盖记录共同通过。最终由WP-5完成原型集成和跨场景验证，以可复现实验数据、对照消融报告、失败案例和全过程Trace作为验收证据，对应OBJ-2、OBJ-3和OBJ-4。",
+            "node_ids": [
+              "OBJ-2",
+              "OBJ-3",
+              "OBJ-4",
+              "WP-4",
+              "WP-5"
+            ],
+            "rq_ids": [
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "plan_gate_evidence_wp4_wp5"
+          }
+        ]
+      },
+      {
+        "subsection_id": "SEC-12-02",
+        "title": "计划调整机制",
+        "paragraphs": [
+          {
+            "paragraph_id": "P-SEC-12-03",
+            "role": "说明周期确定后的映射",
+            "text": "待正式项目周期确定后，将上述能力阶段映射到具体季度或年度，但不改变WP-1至WP-5的依赖顺序。映射时以可用周期、人员投入、场景数据到位时间和工具接口成熟度为约束，对每个里程碑补充起止时间、责任角色和审查窗口；OPEN-004与OPEN-011未关闭前，当前计划仅作为可逆的内容计划，不能被解释为正式进度承诺。",
+            "node_ids": [
+              "WP-1",
+              "WP-2",
+              "WP-3",
+              "WP-4",
+              "WP-5"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "BOUNDARY_STATEMENT",
+            "novel_content_key": "plan_cycle_mapping_rule"
+          },
+          {
+            "paragraph_id": "P-SEC-12-04",
+            "role": "说明场景和证据变化后的重排",
+            "text": "若场景数据、确定性工具或人工参与条件变化，计划按依赖关系重排，而不是机械压缩所有任务：基础Schema或规则工具不足时，回退到WP-1补齐状态和校验能力；候选多样性不足时优先强化WP-2；人工反馈冲突时暂停WP-4资源竞争并回到WP-3明确偏好版本；验证场景代表性不足时延后结论外推并扩展WP-5。每次重排均记录触发原因、受影响工件、重新验收证据和恢复条件。",
+            "node_ids": [
+              "WP-1",
+              "WP-2",
+              "WP-3",
+              "WP-4",
+              "WP-5"
+            ],
+            "rq_ids": [
+              "RQ-1",
+              "RQ-2",
+              "RQ-3"
+            ],
+            "source_ids": [],
+            "claim_status": "PROJECT_PLAN",
+            "novel_content_key": "plan_reordering_rules"
+          }
+        ]
+      }
+    ],
+    "visual_placeholders": [
+      {
+        "visual_id": "TAB-07",
+        "caption": "工作包依赖、阶段Gate与验收证据表",
+        "placement_after_paragraph_id": "P-SEC-12-02"
+      }
+    ],
+    "unresolved_open_item_ids": [
+      "OPEN-004",
+      "OPEN-011"
+    ],
+    "key_terms": [
+      {
+        "term": "能力依赖里程碑",
+        "canonical_form": "能力依赖里程碑"
+      },
+      {
+        "term": "阶段Gate",
+        "canonical_form": "阶段Gate"
+      }
+    ],
+    "section_contribution": "给出不绑定虚构年度的工作包依赖、里程碑证据、周期映射与动态重排规则。"
+  },
+  "findings": [],
+  "warnings": []
+}

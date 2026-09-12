@@ -124,6 +124,7 @@
     "result": {
       "import_recommendation": "IMPORT_REFERENCE_ONLY",
       "accepted_claim_ids": [],
+      "reference_only_claim_ids": [],
       "rejected_claim_ids": [],
       "prompt_injection_detected": false,
       "scope_violation_detected": false,
@@ -153,7 +154,8 @@
         ],
         "answer_schema": {
           "type": "OBJECT",
-          "allowed_values": []
+          "allowed_values": [],
+          "properties": {}
         },
         "blocking": true,
         "priority": "P1"

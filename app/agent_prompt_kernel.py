@@ -18,6 +18,9 @@ from .proposal_quality import (
     _normalized_sentences,
     _template_skeleton,
 )
+from .full_integration_quality import FullProposalQualityGuard
+from .json_pointer import JsonPointerError, is_ancestor_or_same, parse_pointer, paths_overlap
+from .quality_guard import build_guard_report, observe_guard
 
 
 CRITIC_PROMPTS = {
@@ -75,6 +78,88 @@ STRUCTURAL_BLOCK_RE = re.compile(
 )
 NUMBER_RE = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?%?")
 CITATION_RE = re.compile(r"\[(?:\d+(?:\s*[-,，]\s*\d+)*)\]")
+
+
+def _guard_content_text(candidate: dict[str, Any]) -> str:
+    """Expose every persisted text representation to fail-closed guards.
+
+    ``canonical_candidate_text`` intentionally prefers ordered paragraph text
+    because that is what review and export consume.  Older records and some
+    provider outputs may nevertheless retain a separate ``candidate_text``.
+    A stale or mutated legacy representation must not become invisible to
+    structural-preservation or main-body boundary checks merely because valid
+    paragraphs are also present.
+    """
+
+    canonical = _content_text(candidate)
+    legacy = str(candidate.get("candidate_text") or "").strip()
+    if not legacy or legacy == canonical.strip():
+        return canonical
+    if not canonical:
+        return legacy
+    return f"{canonical}\n{legacy}"
+
+# Number-like tokens used only as structural identifiers must not be treated as
+# quantitative claims.  The fact ledger requires object/unit/condition binding
+# for substantive quantities (for example, “2个原型”, “2027年” and “100%”),
+# but labels such as “阶段0”, “WF-1”, “版本2.0” or a Markdown list ordinal do
+# not carry that semantics.  Keep this distinction deterministic so replacing
+# the language-model executor cannot turn harmless identifiers into fake
+# measurements merely to satisfy the quality gate.
+_IDENTIFIER_NUMBER_PREFIX_RE = re.compile(
+    r"(?:"
+    r"阶段|章节|章|节|版本|版次|工作流|流程|步骤|批次|轮次|序号|编号|标识|"
+    r"stage|phase|chapter|section|version|ver|v|workflow|wf|step|round|batch|id|no"
+    r")\s*(?:[-_:#.]\s*)?$",
+    re.IGNORECASE,
+)
+_IDENTIFIER_NUMBER_SUFFIX_RE = re.compile(
+    r"^\s*(?:阶段|章|章节|节|版|版本|号)(?:\b|(?=[一-龥]))",
+    re.IGNORECASE,
+)
+
+
+def _substantive_numeric_tokens(text: str) -> list[str]:
+    """Return numeric tokens that represent values rather than identifiers.
+
+    The production Track-B module widens ``NUMBER_RE`` so numbers adjacent to
+    Chinese text are visible.  This helper then removes only deterministic
+    identifier forms; all other numbers remain subject to value/unit/object/
+    condition binding.
+    """
+
+    tokens: list[str] = []
+    for match in NUMBER_RE.finditer(text or ""):
+        start, end = match.span()
+        before = text[:start]
+        after = text[end:]
+        left = before[-32:]
+        right = after[:32]
+
+        # Ordered-list and parenthesized ordinal markers: ``1.`` / ``1、`` /
+        # ``(1)`` / ``（1）``.  They describe structure, not a measurement.
+        line_prefix = before[before.rfind("\n") + 1 :]
+        if not line_prefix.strip() and re.match(r"^\s*[.、)）]", right):
+            continue
+        if re.search(r"[(（]\s*$", left) and re.match(r"^\s*[)）]", right):
+            continue
+
+        # Chinese/English stage, chapter, workflow and version labels.
+        if _IDENTIFIER_NUMBER_PREFIX_RE.search(left):
+            continue
+        if _IDENTIFIER_NUMBER_SUFFIX_RE.search(right):
+            continue
+
+        # Code-like identifiers such as ``P-1``, ``node_2`` or ``WF-1-A``.
+        if re.search(r"[A-Za-z][A-Za-z0-9_-]*[-_:]$", left):
+            continue
+        if re.match(r"^[-_:][A-Za-z0-9_-]", right):
+            continue
+        if re.search(r"[A-Za-z][A-Za-z0-9_-]*-\d+(?:/\d+)*/$", left):
+            continue
+
+        tokens.append(match.group(0))
+    return tokens
 
 
 def _safe_evidence_ref(value: Any) -> str:
@@ -171,32 +256,41 @@ class AgentPromptKernelValidator:
 
     def __init__(self, pack=None):
         self.pack = pack
-        self.base_guard = ProposalQualityGuard()
+        self.base_guard = FullProposalQualityGuard()
 
-    def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    def observe(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+        """Return a composite, non-mutating deterministic guard report.
+
+        The base proposal guard and Track-B checks are independent observers.
+        Their Findings are combined only in the guard report; the model-owned
+        output container remains unchanged.
+        """
+
         payload = envelope.get("payload") or {}
-        original_status = str(output.get("status") or "PASS")
-        original_verdict = (output.get("result") or {}).get("verdict")
+        base_report = observe_guard(self.base_guard, prompt_id, envelope, output)
+        working_output = copy.deepcopy(output)
         model_findings = copy.deepcopy(output.get("findings") or [])
 
-        checked = self.base_guard.apply(prompt_id, envelope, output)
+        # Integration statistics are recomputed only on the private observer
+        # view.  They may inform Track-B checks but are never written back to the
+        # provider output.
         if prompt_id == "P-INTEGRATION-CRITIC":
-            self._replace_document_statistics_with_main_body_only(payload, checked)
+            self._replace_document_statistics_with_main_body_only(payload, working_output)
 
         findings: list[TrackBFinding] = []
         if prompt_id in {"P-SCHEME-EXTRACT", "P-SCHEME-CRITIC"}:
             scheme = (
-                (checked.get("result") or {}).get("scheme_profile")
+                (working_output.get("result") or {}).get("scheme_profile")
                 if prompt_id == "P-SCHEME-EXTRACT"
                 else payload.get("scheme_candidate")
             ) or {}
             coverage = (
-                (checked.get("result") or {}).get("extraction_coverage") or []
+                (working_output.get("result") or {}).get("extraction_coverage") or []
                 if prompt_id == "P-SCHEME-EXTRACT"
                 else None
             )
             ambiguous = (
-                (checked.get("result") or {}).get("ambiguous_rule_ids") or []
+                (working_output.get("result") or {}).get("ambiguous_rule_ids") or []
                 if prompt_id == "P-SCHEME-EXTRACT"
                 else []
             )
@@ -204,7 +298,7 @@ class AgentPromptKernelValidator:
 
         if prompt_id in {"P-PROJECT-DEFINITION-EXTRACT", "P-PROJECT-DEFINITION-CRITIC"}:
             project_definition = (
-                (checked.get("result") or {}).get("project_definition")
+                (working_output.get("result") or {}).get("project_definition")
                 if prompt_id == "P-PROJECT-DEFINITION-EXTRACT"
                 else payload.get("project_definition_candidate")
             ) or {}
@@ -212,12 +306,12 @@ class AgentPromptKernelValidator:
 
         if prompt_id in {"P-FACT-EXTRACT", "P-FACT-CRITIC"}:
             facts = (
-                (checked.get("result") or {}).get("fact_candidates")
+                (working_output.get("result") or {}).get("fact_candidates")
                 if prompt_id == "P-FACT-EXTRACT"
                 else payload.get("fact_candidates")
             ) or []
             coverage = (
-                (checked.get("result") or {}).get("coverage") or []
+                (working_output.get("result") or {}).get("coverage") or []
                 if prompt_id == "P-FACT-EXTRACT"
                 else None
             )
@@ -227,12 +321,14 @@ class AgentPromptKernelValidator:
             findings.extend(self._audit_finding_precision(model_findings, payload))
 
         if prompt_id == "P-TARGETED-REPAIR":
-            findings.extend(self._audit_repair_scope(payload, checked.get("result") or {}))
+            findings.extend(
+                self._audit_repair_scope(payload, working_output.get("result") or {})
+            )
 
         if prompt_id in {"P-EXPRESSION-POLISH", "P-EXPRESSION-CRITIC"}:
             source = payload.get("content_candidate") or {}
             polished = (
-                checked.get("result") or {}
+                working_output.get("result") or {}
                 if prompt_id == "P-EXPRESSION-POLISH"
                 else payload.get("polished_candidate") or {}
             )
@@ -250,7 +346,7 @@ class AgentPromptKernelValidator:
             if profile_id == "CONCLUSION":
                 findings.extend(
                     self._audit_conclusion(
-                        _candidate_for_prompt(prompt_id, payload, checked),
+                        _candidate_for_prompt(prompt_id, payload, working_output),
                         payload,
                     )
                 )
@@ -258,9 +354,56 @@ class AgentPromptKernelValidator:
         if prompt_id == "P-INTEGRATION-CRITIC":
             findings.extend(self._audit_body_appendix_boundary(payload))
 
-        ProposalQualityGuard._merge_findings(checked, findings)
-        self._recalculate_status(checked, original_status, original_verdict)
-        return checked
+        track_findings = [item.as_dict() for item in findings]
+        combined = [
+            *[copy.deepcopy(item) for item in base_report.get("findings") or []],
+            *track_findings,
+        ]
+        observations: dict[str, Any] = copy.deepcopy(
+            base_report.get("observations") or {}
+        )
+        if prompt_id == "P-INTEGRATION-CRITIC":
+            redundancy_report = (
+                (working_output.get("result") or {}).get(
+                    "main_body_redundancy_report"
+                )
+            )
+            if isinstance(redundancy_report, dict):
+                observations.setdefault("main_body_redundancy_report", copy.deepcopy(
+                    redundancy_report
+                ))
+        return build_guard_report(
+            prompt_id,
+            output,
+            combined,
+            observations=observations or None,
+            components=[
+                {
+                    "observer": type(self.base_guard).__name__,
+                    "status": base_report.get("status"),
+                    "finding_count": len(base_report.get("findings") or []),
+                },
+                {
+                    "observer": type(self).__name__,
+                    "status": (
+                        "BLOCK"
+                        if any(item.severity == "P0" and item.blocking for item in findings)
+                        else "REVISE"
+                        if any(item.blocking for item in findings)
+                        else "PASS"
+                    ),
+                    "finding_count": len(findings),
+                },
+            ],
+        )
+
+    def apply(self, prompt_id: str, envelope: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+        """Legacy compatibility adapter returning an isolated model-output copy.
+
+        Runtime quality decisions must use :meth:`observe`.
+        """
+
+        return copy.deepcopy(output)
 
     @staticmethod
     def _audit_scheme(
@@ -428,6 +571,12 @@ class AgentPromptKernelValidator:
                 continue
             claim_id = str(claim.get("claim_id") or f"claim-{index}")
             text = str(claim.get("claim_text") or "").strip()
+            # REQUIREMENT records are extracted task directives, not truth-apt
+            # propositions: enumerating scope items or carrying dates, word
+            # counts and designations does not make them multi-proposition
+            # facts or unbound measurements.  Atomicity and numeric binding
+            # only constrain claims that assert a state of the world.
+            directive_claim = claim.get("claim_type") == "REQUIREMENT"
             if claim_id in claim_ids:
                 findings.append(_finding(
                     "QG_FACT_ID_DUPLICATE",
@@ -446,7 +595,7 @@ class AgentPromptKernelValidator:
                 if part.strip()
             ]
             enumerated = bool(re.search(r"(?:^|[，,；;])(?:一是|二是|三是|首先|其次|最后)", text))
-            if len(clauses) > 1 or enumerated:
+            if not directive_claim and (len(clauses) > 1 or enumerated):
                 findings.append(_finding(
                     "QG_FACT_NOT_ATOMIC",
                     "FACT",
@@ -479,9 +628,9 @@ class AgentPromptKernelValidator:
                     "PROJECT_KNOWLEDGE_AGENT",
                     evidence_refs=[claim_id],
                 ))
-            numeric_tokens = NUMBER_RE.findall(text)
+            numeric_tokens = _substantive_numeric_tokens(text)
             numeric_values = claim.get("numeric_values") or []
-            if numeric_tokens and not numeric_values:
+            if not directive_claim and numeric_tokens and not numeric_values:
                 findings.append(_finding(
                     "QG_FACT_NUMERIC_BINDING_MISSING",
                     "FACT",
@@ -525,11 +674,10 @@ class AgentPromptKernelValidator:
         payload: dict[str, Any],
     ) -> list[TrackBFinding]:
         audit: list[TrackBFinding] = []
-        candidate_text = ""
-        for field in ("content_candidate", "polished_candidate", "blueprint_candidate", "architecture_candidate"):
-            value = payload.get(field)
-            if isinstance(value, dict):
-                candidate_text += "\n" + json.dumps(value, ensure_ascii=False)
+        # Critic findings may cite any object supplied in the input payload (for
+        # example a current-section ID or proposal-contract ID), not only the
+        # candidate object under review.
+        candidate_text = json.dumps(payload, ensure_ascii=False)
         for index, finding in enumerate(findings):
             if not isinstance(finding, dict) or finding.get("severity") not in {"P0", "P1"}:
                 continue
@@ -539,7 +687,19 @@ class AgentPromptKernelValidator:
             instruction = str(finding.get("repair_instruction") or "").strip()
             description = str(finding.get("description") or "").strip()
             vague = bool(re.fullmatch(r"(内容)?(不够|需要|建议)?(深入|完善|优化|补充)[。！!]?", description))
-            evidence_in_text = any(ref in candidate_text for ref in refs) if candidate_text and refs else False
+            evidence_in_text = False
+            if candidate_text and refs:
+                for ref in refs:
+                    if ref in candidate_text:
+                        evidence_in_text = True
+                        break
+                    reference_tokens = re.findall(
+                        r"[A-Za-z][A-Za-z0-9]*[-_:][A-Za-z0-9_:-]+",
+                        ref,
+                    )
+                    if any(token in candidate_text for token in reference_tokens):
+                        evidence_in_text = True
+                        break
             if not path or not refs or len(instruction) < 8 or vague or (candidate_text and refs and not evidence_in_text):
                 audit.append(_finding(
                     "QG_CRITIC_FINDING_NOT_PRECISE",
@@ -555,16 +715,61 @@ class AgentPromptKernelValidator:
 
     @staticmethod
     def _audit_repair_scope(payload: dict[str, Any], result: dict[str, Any]) -> list[TrackBFinding]:
+        """Enforce the Targeted Repair allowlist with strict RFC 6901 paths.
+
+        ``allowed_paths`` is the sole authority.  The validator must not infer
+        broader permissions from prose repair instructions, finding codes, or
+        semantic paragraph identifiers.  Such hidden expansion previously made
+        the effective contract differ from the schema and prompt.
+        """
+
         findings: list[TrackBFinding] = []
-        allowed = [str(item) for item in payload.get("allowed_paths") or []]
-        protected = [str(item) for item in payload.get("protected_paths") or []]
-        changed = [str(item) for item in result.get("changed_paths") or []]
 
-        def under(path: str, roots: list[str]) -> bool:
-            return any(path == root or path.startswith(root + ".") or path.startswith(root + "[") for root in roots)
+        def validated_paths(field_name: str, values: list[Any]) -> tuple[list[str], list[str]]:
+            valid: list[str] = []
+            invalid: list[str] = []
+            for value in values:
+                pointer = str(value or "").strip()
+                try:
+                    parse_pointer(pointer)
+                except JsonPointerError:
+                    invalid.append(pointer)
+                    continue
+                valid.append(pointer)
+            return valid, invalid
 
-        outside = [path for path in changed if not under(path, allowed)]
-        protected_hits = [path for path in changed if under(path, protected)]
+        allowed, invalid_allowed = validated_paths(
+            "payload.allowed_paths", list(payload.get("allowed_paths") or [])
+        )
+        protected, invalid_protected = validated_paths(
+            "payload.protected_paths", list(payload.get("protected_paths") or [])
+        )
+        changed, invalid_changed = validated_paths(
+            "result.changed_paths", list(result.get("changed_paths") or [])
+        )
+        invalid_paths = [*invalid_allowed, *invalid_protected, *invalid_changed]
+        if invalid_paths:
+            findings.append(_finding(
+                "QG_REPAIR_PATH_INVALID",
+                "CONTENT",
+                "REPAIRED_OBJECT",
+                "result.changed_paths",
+                f"定向修复包含{len(invalid_paths)}个非RFC 6901 JSON Pointer路径。",
+                "使用以/开头的RFC 6901 JSON Pointer；不得使用点号、方括号或语义ID路径。",
+                "ORIGINAL_PRODUCER",
+                evidence_refs=invalid_paths,
+            ))
+
+        outside = [
+            path
+            for path in changed
+            if not any(is_ancestor_or_same(root, path) for root in allowed)
+        ]
+        protected_hits = [
+            path
+            for path in changed
+            if any(paths_overlap(path, root) for root in protected)
+        ]
         if outside or protected_hits:
             findings.append(_finding(
                 "QG_REPAIR_PATH_OUTSIDE_ALLOWLIST",
@@ -572,27 +777,42 @@ class AgentPromptKernelValidator:
                 "REPAIRED_OBJECT",
                 "result.changed_paths",
                 f"定向修复修改了{len(outside)}个未授权路径和{len(protected_hits)}个受保护路径。",
-                "只修改allowed_paths的子路径；恢复protected_paths及其Hash。",
+                "只修改allowed_paths的自身或子路径；不得修改protected_paths的自身、祖先或子路径。",
                 "ORIGINAL_PRODUCER",
                 evidence_refs=[*outside, *protected_hits],
             ))
-        requested_codes = {
-            str(item.get("code"))
+        requested_ids = {
+            str(item.get("finding_instance_id"))
             for item in payload.get("findings_to_repair") or []
-            if isinstance(item, dict) and item.get("code")
+            if isinstance(item, dict) and item.get("finding_instance_id")
         }
-        resolved = {str(item) for item in result.get("resolved_finding_codes") or []}
-        unknown = sorted(resolved - requested_codes)
+        resolved = {str(item) for item in result.get("resolved_finding_ids") or []}
+        unresolved = {
+            str(item) for item in result.get("unresolved_finding_ids") or []
+        }
+        unknown = sorted((resolved | unresolved) - requested_ids)
+        missing = sorted(requested_ids - resolved - unresolved)
         if unknown:
             findings.append(_finding(
                 "QG_REPAIR_RESOLVED_UNKNOWN_FINDING",
                 "CONTENT",
                 "REPAIRED_OBJECT",
-                "result.resolved_finding_codes",
+                "result.resolved_finding_ids",
                 f"修复结果宣称关闭{len(unknown)}个本轮未请求的Finding。",
                 "只报告findings_to_repair中的代码；其余问题必须由独立Critic重新发现和关闭。",
                 "ORIGINAL_PRODUCER",
                 evidence_refs=unknown,
+            ))
+        if missing:
+            findings.append(_finding(
+                "QG_REPAIR_FINDING_UNCLASSIFIED",
+                "CONTENT",
+                "REPAIRED_OBJECT",
+                "result.unresolved_finding_ids",
+                f"Targeted repair omitted {len(missing)} finding instances.",
+                "Classify every finding_instance_id as resolved or unresolved.",
+                "ORIGINAL_PRODUCER",
+                evidence_refs=missing,
             ))
         return findings
 
@@ -602,8 +822,8 @@ class AgentPromptKernelValidator:
         polished: dict[str, Any],
     ) -> list[TrackBFinding]:
         findings: list[TrackBFinding] = []
-        source_text = _content_text(source)
-        polished_text = _content_text(polished)
+        source_text = _guard_content_text(source)
+        polished_text = _guard_content_text(polished)
         source_blocks = [re.sub(r"\s+", " ", item).strip() for item in STRUCTURAL_BLOCK_RE.findall(source_text)]
         polished_blocks = [re.sub(r"\s+", " ", item).strip() for item in STRUCTURAL_BLOCK_RE.findall(polished_text)]
         if source_blocks != polished_blocks:
@@ -825,7 +1045,7 @@ class AgentPromptKernelValidator:
             section_id = str(item.get("section_id") or "")
             if placements.get(section_id, "MAIN_BODY") != "MAIN_BODY":
                 continue
-            text = _content_text(item.get("candidate") or {})
+            text = _guard_content_text(item.get("candidate") or {})
             hits = sorted(term for term in forbidden_terms if term and term in text)
             if hits:
                 findings.append(_finding(
@@ -839,29 +1059,6 @@ class AgentPromptKernelValidator:
                     evidence_refs=[section_id],
                 ))
         return findings
-
-    @staticmethod
-    def _recalculate_status(
-        output: dict[str, Any],
-        original_status: str,
-        original_verdict: Any,
-    ) -> None:
-        findings = [item for item in output.get("findings") or [] if isinstance(item, dict)]
-        if any(item.get("severity") == "P0" and item.get("blocking", True) for item in findings):
-            status = "BLOCK"
-        elif any(item.get("severity") == "P1" and item.get("blocking", True) for item in findings):
-            status = "REVISE"
-        else:
-            status = original_status
-        output["status"] = status
-        result = output.get("result")
-        if isinstance(result, dict) and "verdict" in result:
-            if status == "BLOCK":
-                result["verdict"] = "BLOCK"
-            elif status == "REVISE":
-                result["verdict"] = "REVISE"
-            elif original_verdict is not None:
-                result["verdict"] = original_verdict
 
     @staticmethod
     def validate_repository(root: Path) -> dict[str, Any]:

@@ -1,0 +1,2053 @@
+from __future__ import annotations
+
+"""Deterministic provenance and cross-reference integrity for model outputs.
+
+The JSON Schema layer proves shape, not truth.  This module binds every
+``source_refs`` entry to an object that was actually present in the current
+input envelope (or to persisted metadata for that same input document), and
+checks reference-only ID arrays against identifiers that are visible in the
+input or explicitly defined in the current output.
+"""
+
+import copy
+import hashlib
+import json
+import re
+from collections import defaultdict
+from typing import Any, Iterable, Mapping
+
+from .contracts.semantic_contract import ReferenceSemantic, get_semantic_contract
+
+_SOURCE_REF_FIELDS = (
+    "source_id",
+    "source_type",
+    "document_version_id",
+    "section_id",
+    "span_start",
+    "span_end",
+    "quoted_text",
+    "source_hash",
+    "authority_rank",
+    "security_level",
+)
+_ALLOWED_SOURCE_TYPES = {
+    "USER_CONFIRMATION",
+    "APPLICATION_GUIDE",
+    "TASK_BOOK",
+    "CONTRACT",
+    "CURRENT_PROPOSAL",
+    "TECHNICAL_MATERIAL",
+    "EVIDENCE_MATERIAL",
+    "HISTORICAL_DOCUMENT",
+    "REFERENCE_PROPOSAL",
+    "PUBLIC_SOURCE",
+    "MODEL_INFERENCE",
+}
+_SOURCE_TYPE_ALIASES = {
+    "PROJECT_BRIEF": "HISTORICAL_DOCUMENT",
+    "TECHNICAL_DESIGN": "TECHNICAL_MATERIAL",
+    "TEAM_PROFILE": "HISTORICAL_DOCUMENT",
+    "BUDGET_MATERIAL": "HISTORICAL_DOCUMENT",
+    "REVIEW_COMMENT": "HISTORICAL_DOCUMENT",
+    "OTHER": "HISTORICAL_DOCUMENT",
+    "FACT": "EVIDENCE_MATERIAL",
+    "CONFIRMED_FACT": "EVIDENCE_MATERIAL",
+    "ARGUMENT_NODE": "MODEL_INFERENCE",
+    "ARGUMENT_GRAPH": "MODEL_INFERENCE",
+    "PROJECT_ITEM": "TECHNICAL_MATERIAL",
+}
+_AUTHORITY = {
+    "USER_CONFIRMATION": 100,
+    "APPLICATION_GUIDE": 95,
+    "TASK_BOOK": 95,
+    "CONTRACT": 95,
+    "CURRENT_PROPOSAL": 85,
+    "TECHNICAL_MATERIAL": 80,
+    "EVIDENCE_MATERIAL": 80,
+    "PUBLIC_SOURCE": 80,
+    "MODEL_INFERENCE": 60,
+    "REFERENCE_PROPOSAL": 30,
+    "HISTORICAL_DOCUMENT": 20,
+}
+_PROTOCOL_ID_FIELDS = {
+    "project_id",
+    "workflow_id",
+    "prompt_id",
+    "model_id",
+    "endpoint_id",
+    "document_version_id",
+    "parent_version_id",
+}
+_REFERENCE_ARRAY_FIELDS = {
+    "accepted_claim_ids",
+    "reference_only_claim_ids",
+    "rejected_claim_ids",
+    "unsupported_claim_ids",
+    "checked_item_ids",
+    "checked_rule_ids",
+    "checked_component_ids",
+    "contaminated_component_ids",
+    "checked_paragraph_ids",
+    "checked_node_ids",
+    "checked_relation_ids",
+    "invalid_relation_ids",
+    "status_upgrade_item_ids",
+    # missing_item_ids names items/fields/types that are absent by definition;
+    # requiring them to resolve to existing entities is self-contradictory.
+    "blocking_conflict_ids",
+    "claim_ids",
+    "conflict_ids",
+    "component_ids",
+    "open_conflict_ids",
+    "item_ids",
+    "target_section_ids",
+    "read_only_section_ids",
+    "protected_section_ids",
+    "required_input_ids",
+    "missing_input_ids",
+    "issue_ids",
+    "user_question_ids",
+    "checked_issue_ids",
+    "checked_task_ids",
+    "required_evidence_ids",
+    "unresolved_slot_ids",
+    "uncovered_revision_task_ids",
+    # invalid_slot_refs and critical_unresolved_slot_ids describe invalid or
+    # unresolved slots and commonly carry diagnostic paths such as
+    # ``paragraph.fact_slots.object-id``. Requiring those descriptors to
+    # resolve as existing entities is self-contradictory.
+    "trace_link_ids",
+    "advanced_claim_ids",
+    "distinguished_from_section_ids",
+    "unsupported_trace_ids",
+    "blueprint_deviation_paragraph_ids",
+    "supporting_section_ids",
+    "overflow_section_ids",
+    "linked_gap_ids",
+    "gap_ids",
+    "objective_ids",
+    "work_package_ids",
+    "method_ids",
+    "evaluation_ids",
+    "innovation_ids",
+    "foundation_evidence_ids",
+    "closest_prior_work_ids",
+    "blocking_node_ids",
+    "paragraph_ids",
+    "used_in_paragraph_ids",
+    "research_question_ids",
+    "must_advance_claim_ids",
+    "must_use_evidence_ids",
+    "prerequisite_section_ids",
+    "must_not_repeat_section_ids",
+    "allowed_shared_context_ids",
+    "input_trace_ids",
+    "output_trace_ids",
+    "missing_trace_ids",
+    "new_unapproved_trace_ids",
+    "source_ids",
+    "acceptance_refs",
+    "work_package_refs",
+    "deliverable_refs",
+    # Findings use ``evidence_refs`` rather than an ``*_ids`` name.
+    "evidence_refs",
+}
+# Identifier-array ownership comes from the same semantic registry that
+# annotates prompt schemas.  The legacy literal set remains only for fields
+# predating the registry; registered entity/finding references are always
+# validated without prompt-specific exceptions.
+_REFERENCE_ARRAY_FIELDS.update(
+    field_name
+    for field_name, semantic in get_semantic_contract().reference_field_semantics.items()
+    if semantic in {ReferenceSemantic.ENTITY_REF, ReferenceSemantic.FINDING_REF}
+)
+_EXISTING_TARGET_SEMANTICS = frozenset({
+    ReferenceSemantic.ENTITY_REF,
+    ReferenceSemantic.SOURCE_REF,
+    ReferenceSemantic.FINDING_REF,
+    ReferenceSemantic.ENTITY_OR_FIELD_PATH,
+})
+_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_REGISTERED_DIAGNOSTIC_REFS: frozenset[str] = frozenset()
+_SOURCE_ID_ALIAS_PREFIXES = tuple(
+    f"{stem}{separator}"
+    for stem in ("source", "Source", "SOURCE", "src", "Src", "SRC", "ref", "Ref", "REF")
+    for separator in ("-", ":", "/", "_")
+)
+
+TRUSTED_SOURCE_CATALOG_VERSION = "1.0"
+_NATURAL_SOURCE_ID_KEYS = (
+    "source_id",
+    "document_id",
+    "resolution_id",
+    "profile_id",
+    "need_id",
+    "object_id",
+    "package_id",
+    "plan_id",
+    "candidate_id",
+    "blueprint_id",
+    "template_id",
+    "scheme_id",
+    "claim_id",
+    "fact_id",
+    "item_id",
+    "rule_id",
+    "component_id",
+    "section_id",
+    "paragraph_id",
+    "node_id",
+    "relation_id",
+    "trace_id",
+    "issue_id",
+    "revision_task_id",
+    "question_id",
+)
+_REFERENCEABLE_ENVELOPE_PATHS = ("task", "security_context", "scope", "freshness")
+
+
+
+def _stable_hash(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def _source_id_alias_targets(raw_source_id: str, known_ids: Iterable[str]) -> list[str]:
+    """Return conservative, exact prefix aliases for a provider source ID.
+
+    The resolver never performs fuzzy matching, case folding, substring search,
+    or edit-distance repair.  An exact trusted ID always wins.  A prefixed value
+    is accepted only when removing exactly one registered presentation prefix
+    yields one trusted ID.
+    """
+    source_id = str(raw_source_id or "").strip()
+    known = set(known_ids)
+    if not source_id or source_id in known:
+        return [source_id] if source_id in known else []
+    targets: list[str] = []
+    for prefix in _SOURCE_ID_ALIAS_PREFIXES:
+        if not source_id.startswith(prefix):
+            continue
+        candidate = source_id[len(prefix):].strip()
+        if candidate and candidate in known and candidate not in targets:
+            targets.append(candidate)
+    return targets
+
+
+def _resolve_source_id_alias(raw_source_id: str, known_ids: Iterable[str]) -> tuple[str | None, str | None]:
+    source_id = str(raw_source_id or "").strip()
+    known = set(known_ids)
+    if source_id in known:
+        return source_id, None
+    targets = _source_id_alias_targets(source_id, known)
+    if len(targets) == 1:
+        return targets[0], "PRESENTATION_PREFIX"
+    return None, None
+
+
+def _resolve_reference_id_alias(
+    raw_reference_id: str,
+    known_ids: Iterable[str],
+    *,
+    registered_descriptor_suffixes: Iterable[str] = (),
+    allow_entity_field_path: bool = False,
+) -> tuple[str | None, str | None]:
+    resolved, alias_kind = _resolve_source_id_alias(
+        raw_reference_id,
+        known_ids,
+    )
+    if resolved is not None:
+        return resolved, alias_kind
+    raw = str(raw_reference_id or "").strip()
+    if allow_entity_field_path:
+        field_path_candidates = {
+            str(candidate)
+            for candidate in known_ids
+            if any(
+                raw.startswith(str(candidate) + separator)
+                for separator in (".", ":")
+            )
+        }
+        if field_path_candidates:
+            longest = max(len(candidate) for candidate in field_path_candidates)
+            longest_candidates = {
+                candidate
+                for candidate in field_path_candidates
+                if len(candidate) == longest
+            }
+            if len(longest_candidates) == 1:
+                return next(iter(longest_candidates)), "ENTITY_FIELD_PATH"
+    for registered_suffix in registered_descriptor_suffixes:
+        suffix = "-" + str(registered_suffix).strip().upper().lstrip("-")
+        if suffix != "-":
+            if not raw.upper().endswith(suffix):
+                continue
+            candidate = raw[:-len(suffix)]
+            if candidate in set(known_ids):
+                return candidate, "REGISTERED_DESCRIPTOR_SUFFIX"
+    return None, None
+
+
+def _source_type(value: Any, default: str = "MODEL_INFERENCE") -> str:
+    normalized = _SOURCE_TYPE_ALIASES.get(str(value or "").strip(), str(value or "").strip())
+    return normalized if normalized in _ALLOWED_SOURCE_TYPES else default
+
+
+def _security(value: Any, default: str = "INTERNAL") -> str:
+    text = str(value or default).strip().upper()
+    return text if text in {"PUBLIC", "INTERNAL", "SENSITIVE", "CLASSIFIED"} else default
+
+
+def _hash(value: Any) -> str | None:
+    text = str(value or "").strip().lower()
+    return text if _HASH_RE.fullmatch(text) else None
+
+
+def _canonical_ref(
+    *,
+    source_id: str,
+    source_type: str = "MODEL_INFERENCE",
+    document_version_id: Any = None,
+    section_id: Any = None,
+    span_start: Any = None,
+    span_end: Any = None,
+    quoted_text: Any = None,
+    source_hash: Any = None,
+    authority_rank: Any = None,
+    security_level: Any = "INTERNAL",
+) -> dict[str, Any]:
+    source_type = _source_type(source_type)
+    version = document_version_id.strip() if isinstance(document_version_id, str) and document_version_id.strip() else None
+    section = section_id.strip() if isinstance(section_id, str) and section_id.strip() else None
+    start = span_start if isinstance(span_start, int) and not isinstance(span_start, bool) and span_start >= 0 else None
+    end = span_end if isinstance(span_end, int) and not isinstance(span_end, bool) and span_end >= 0 else None
+    if start is not None and end is not None and end < start:
+        start = end = None
+    quote = quoted_text if isinstance(quoted_text, str) else None
+    try:
+        rank = int(authority_rank)
+    except (TypeError, ValueError):
+        rank = _AUTHORITY.get(source_type, 20)
+    rank = max(1, min(100, rank))
+    return {
+        "source_id": source_id,
+        "source_type": source_type,
+        "document_version_id": version,
+        "section_id": section,
+        "span_start": start,
+        "span_end": end,
+        "quoted_text": quote,
+        "source_hash": _hash(source_hash),
+        "authority_rank": rank,
+        "security_level": _security(security_level),
+    }
+
+
+def _pointer(path: tuple[Any, ...]) -> str:
+    return "/" + "/".join(str(part) for part in path)
+
+
+def _collect_defined_ids(value: Any) -> set[str]:
+    found: set[str] = set()
+    contract = get_semantic_contract()
+    prompt_id = (
+        str(value.get("prompt_id") or "").strip()
+        if isinstance(value, Mapping)
+        else ""
+    ) or None
+
+    def visit(node: Any, path: tuple[Any, ...]) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, (*path, index))
+            return
+        if not isinstance(node, Mapping):
+            return
+        for key, item in node.items():
+            current = (*path, key)
+            semantic = contract.field_semantic(
+                str(key), prompt_id=prompt_id, path=current
+            )
+            if (
+                key.endswith("_id")
+                and key not in _PROTOCOL_ID_FIELDS
+                and key != "source_id"
+                and (
+                    semantic is None
+                    or semantic is ReferenceSemantic.NEW_ENTITY_ID
+                )
+                and isinstance(item, (str, int))
+                and not isinstance(item, bool)
+                and str(item).strip()
+            ):
+                found.add(str(item).strip())
+            if (
+                key == "code"
+                and isinstance(item, str)
+                and item.strip()
+            ):
+                # issue_ids and similar diagnostic-reference arrays use the
+                # stable Finding code as their referenced identity.
+                found.add(item.strip())
+            if key == "source_refs" and isinstance(item, list):
+                for ref in item:
+                    if isinstance(ref, Mapping) and str(ref.get("source_id") or "").strip():
+                        found.add(str(ref["source_id"]).strip())
+            visit(item, current)
+
+    visit(value, ())
+    return found
+
+
+def _collect_named_input_object_ids(value: Any) -> set[str]:
+    """Return exact names of structured top-level input payload objects.
+
+    These names form a separate reference namespace. Only fields explicitly
+    registered by the semantic contract may cite them; they must never make a
+    plain ENTITY_REF such as ``checked_item_ids`` valid by accident.
+    """
+
+    if not isinstance(value, Mapping):
+        return set()
+    payload = value.get("payload")
+    if not isinstance(payload, Mapping):
+        return set()
+    return {
+        str(key).strip()
+        for key, item in payload.items()
+        if isinstance(key, str)
+        and key.strip()
+        and isinstance(item, (Mapping, list))
+    }
+
+
+def _collect_visible_reference_ids(value: Any) -> set[str]:
+    """Collect references already admitted by the trusted input envelope.
+
+    This is intentionally used only on input/trusted context, never on the
+    output being validated.  It lets a repair preserve upstream references
+    without allowing a newly generated output reference to authorize itself.
+    Both array and scalar references are contract-driven.
+    """
+    found: set[str] = set()
+    contract = get_semantic_contract()
+    prompt_id = (
+        str(value.get("prompt_id") or "").strip()
+        if isinstance(value, Mapping)
+        else ""
+    ) or None
+
+    def visit(node: Any, path: tuple[Any, ...]) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, (*path, index))
+            return
+        if not isinstance(node, Mapping):
+            return
+        for key, item in node.items():
+            current = (*path, key)
+            semantic = contract.field_semantic(
+                str(key), prompt_id=prompt_id, path=current
+            )
+            if _is_reference_array_field(str(key)) and isinstance(item, list):
+                found.update(
+                    str(reference).strip()
+                    for reference in item
+                    if isinstance(reference, str) and reference.strip()
+                )
+            elif semantic in _EXISTING_TARGET_SEMANTICS and isinstance(item, str) and item.strip():
+                found.add(item.strip())
+            visit(item, current)
+
+    visit(value, ())
+    return found
+
+
+def _collect_inherited_repair_entity_ids(value: Any) -> set[str]:
+    """Return entity IDs explicitly inherited from an original producer call.
+
+    ``source_id`` is normally excluded from the generic entity namespace so a
+    provenance citation cannot accidentally authorize an arbitrary entity
+    reference.  Targeted repair is different: its dedicated inherited catalog
+    is a system-built, read-only receipt of the producer's prior semantic
+    namespace.  Only that typed field bridges those IDs into ENTITY_REF.
+    """
+
+    if not isinstance(value, Mapping) or value.get("prompt_id") != "P-TARGETED-REPAIR":
+        return set()
+    payload = value.get("payload")
+    if not isinstance(payload, Mapping):
+        return set()
+    catalog = payload.get("inherited_source_catalog")
+    if not isinstance(catalog, list):
+        return set()
+    return {
+        str(entry.get("source_id") or "").strip()
+        for entry in catalog
+        if isinstance(entry, Mapping)
+        and str(entry.get("source_id") or "").strip()
+    }
+
+
+def collect_allowed_reference_ids(envelope: Any) -> set[str]:
+    """The exact reference namespace the validator will accept for this call.
+
+    Shared by output validation and by the provider-schema injection below so
+    the model is guided by the same set it is later judged against.
+    """
+    return (
+        _collect_defined_ids(envelope)
+        | _collect_visible_reference_ids(envelope)
+        | _collect_inherited_repair_entity_ids(envelope)
+        | set(_REGISTERED_DIAGNOSTIC_REFS)
+    )
+
+
+_REFERENCE_ENUM_INJECTION_LIMIT = 256
+
+
+def inject_reference_targets_into_schema(
+    output_schema: Any,
+    envelope: Any,
+    *,
+    max_ids: int = _REFERENCE_ENUM_INJECTION_LIMIT,
+) -> tuple[Any, dict[str, Any]]:
+    """Surface the call's citable reference IDs inside the submitted tool schema.
+
+    The model cannot otherwise tell citable entity IDs apart from
+    visible-but-protocol IDs (e.g. ``document_version_id``): both sit side by
+    side in the input envelope, and the output schema only carries a pattern.
+    Wrap each reference-typed string schema as ``anyOf[enum(allowed), original]``
+    so the legal values appear inline in the tool definition.  The original
+    branch keeps acceptance exactly as before (validation-neutral), and enum
+    candidates are filtered through the field's own pattern/length bounds so no
+    new value becomes acceptable.  References to entities defined inside the
+    output itself therefore remain valid.
+    """
+    report: dict[str, Any] = {
+        "injected_fields": [],
+        "allowed_id_count": 0,
+        "truncated": False,
+    }
+    if not isinstance(output_schema, dict):
+        return output_schema, report
+    allowed_full = sorted(collect_allowed_reference_ids(envelope))
+    report["truncated"] = len(allowed_full) > max_ids
+    allowed = allowed_full[:max_ids]
+    report["allowed_id_count"] = len(allowed)
+    contract = get_semantic_contract()
+    target_fields = {
+        field_name
+        for field_name, semantic in contract.reference_field_semantics.items()
+        if semantic in _EXISTING_TARGET_SEMANTICS
+    }
+    # Protocol-owned fields (project_id, document_version_id, ...) are never
+    # citable references, but their legal values are equally fixed by the
+    # input: the envelope's own values for that field name.  Listing them as an
+    # enum stops the model from inventing ids like "proj-dash-survey-v1".
+    protocol_fields = {
+        field_name
+        for field_name, semantic in contract.reference_field_semantics.items()
+        if semantic is ReferenceSemantic.PROTOCOL_REF
+    }
+    protocol_values: dict[str, list[str]] = {}
+
+    def collect_protocol(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                collect_protocol(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        for key, item in node.items():
+            if (
+                key in protocol_fields
+                and isinstance(item, str)
+                and item.strip()
+                and item.strip() not in protocol_values.setdefault(key, [])
+            ):
+                protocol_values[key].append(item.strip())
+            collect_protocol(item)
+
+    collect_protocol(envelope)
+    protocol_values = {
+        key: values[:8] for key, values in protocol_values.items() if values
+    }
+    if not target_fields and not protocol_values:
+        return output_schema, report
+
+    def fits(node: Mapping, value: str) -> bool:
+        if "const" in node and node["const"] != value:
+            return False
+        existing_enum = node.get("enum")
+        if isinstance(existing_enum, list) and value not in existing_enum:
+            return False
+        pattern = node.get("pattern")
+        if isinstance(pattern, str) and not re.search(pattern, value):
+            return False
+        min_length = node.get("minLength")
+        if isinstance(min_length, int) and len(value) < min_length:
+            return False
+        max_length = node.get("maxLength")
+        if isinstance(max_length, int) and len(value) > max_length:
+            return False
+        return True
+
+    def wrap_string_schema(node: Any, path: str, candidates: list[str]) -> Any:
+        if not isinstance(node, dict) or node.get("type") != "string":
+            return node
+        values = [value for value in candidates if fits(node, value)]
+        if not values:
+            return node
+        report["injected_fields"].append(path)
+        return {
+            "anyOf": [
+                {"enum": values},
+                copy.deepcopy(node),
+            ]
+        }
+
+    def visit(node: Any, path: str) -> Any:
+        if isinstance(node, list):
+            return [visit(item, path) for item in node]
+        if not isinstance(node, dict):
+            return node
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            node = dict(node)
+            rebuilt: dict[str, Any] = {}
+            for key, subschema in properties.items():
+                field_path = f"{path}/{key}"
+                if key in target_fields and isinstance(subschema, dict):
+                    if subschema.get("type") == "array" and isinstance(
+                        subschema.get("items"), dict
+                    ):
+                        items = wrap_string_schema(
+                            subschema["items"], field_path + "[]", allowed
+                        )
+                        if items is not subschema["items"]:
+                            subschema = {**subschema, "items": items}
+                    else:
+                        subschema = wrap_string_schema(subschema, field_path, allowed)
+                elif key in protocol_values and isinstance(subschema, dict):
+                    # anyOf string/null branches: wrap the string branch.
+                    branches = subschema.get("anyOf")
+                    if isinstance(branches, list):
+                        subschema = {
+                            **subschema,
+                            "anyOf": [
+                                wrap_string_schema(
+                                    branch, field_path, protocol_values[key]
+                                )
+                                for branch in branches
+                            ],
+                        }
+                    else:
+                        subschema = wrap_string_schema(
+                            subschema, field_path, protocol_values[key]
+                        )
+                rebuilt[key] = visit(subschema, field_path)
+            node["properties"] = rebuilt
+            return node
+        return {key: visit(item, f"{path}/{key}") for key, item in node.items()}
+
+    return visit(output_schema, ""), report
+
+
+def canonicalize_protocol_refs(
+    output: Any,
+    envelope: Any,
+) -> tuple[Any, dict[str, Any]]:
+    """Replace protocol-owned field values with the envelope's authoritative one.
+
+    Fields whose semantic is PROTOCOL_REF (project_id, document_version_id, ...)
+    are runtime-owned: when the input envelope admits exactly one value for the
+    field name, a model-invented alternative (e.g. ``proj-dash-survey-v1``) is a
+    representation error, not content.  Rewriting it deterministically prevents
+    both the producer-level protocol mismatch and the targeted-repair deadlock
+    where the repair model must touch a path outside its allowed_paths.
+    """
+    report: dict[str, Any] = {"changes": []}
+    if not isinstance(output, dict):
+        return output, report
+    contract = get_semantic_contract()
+    protocol_fields = {
+        field_name
+        for field_name, semantic in contract.reference_field_semantics.items()
+        if semantic is ReferenceSemantic.PROTOCOL_REF
+    }
+    if not protocol_fields:
+        return output, report
+    envelope_values: dict[str, set[str]] = {}
+
+    def collect(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                collect(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        for key, item in node.items():
+            if key in protocol_fields and isinstance(item, str) and item.strip():
+                envelope_values.setdefault(key, set()).add(item.strip())
+            collect(item)
+
+    collect(envelope)
+    singletons = {
+        key: next(iter(values))
+        for key, values in envelope_values.items()
+        if len(values) == 1
+    }
+    if not singletons:
+        return output, report
+
+    def visit(node: Any, path: str) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, f"{path}/{index}")
+            return
+        if not isinstance(node, dict):
+            return
+        for key, item in node.items():
+            authoritative = singletons.get(key)
+            if (
+                authoritative is not None
+                and isinstance(item, str)
+                and item.strip()
+                and item.strip() != authoritative
+            ):
+                report["changes"].append(f"{path}/{key}:{item!r}->{authoritative!r}")
+                node[key] = authoritative
+            visit(item, f"{path}/{key}")
+
+    visit(output, "")
+    return output, report
+
+
+def drop_finding_self_reference_evidence(output: Any) -> tuple[Any, dict[str, Any]]:
+    """Drop finding ``evidence_refs`` entries that cite the output itself.
+
+    A value such as ``scheme_profile.profile_hash`` anchors on a top-level key
+    of the output's own ``result`` object.  It is not an input entity, not a
+    registered input-object name and not an entity defined by this output, so
+    it carries no provenance and only trips the reference validator (and then
+    sends the targeted-repair model chasing paths outside its allowed scope).
+    The finding itself is preserved; only the self-referential entry is
+    removed.  Entries anchored on an entity actually defined in this output
+    (e.g. ``R-SCOPE-001.statement``) are legitimate and kept.
+    """
+    report: dict[str, Any] = {"changes": []}
+    if not isinstance(output, dict):
+        return output, report
+    result = output.get("result")
+    findings = output.get("findings")
+    if not isinstance(result, Mapping) or not isinstance(findings, list):
+        return output, report
+    self_anchors = {str(key) for key in result.keys()} | {"result"}
+    defined = _collect_defined_ids(output)
+    for finding_index, finding in enumerate(findings):
+        if not isinstance(finding, dict):
+            continue
+        refs = finding.get("evidence_refs")
+        if not isinstance(refs, list):
+            continue
+        kept: list[Any] = []
+        for ref_index, ref in enumerate(refs):
+            if isinstance(ref, str):
+                anchor = ref.split(".", 1)[0].strip()
+                if (
+                    anchor in self_anchors
+                    and anchor not in defined
+                    and ref.strip() not in defined
+                ):
+                    report["changes"].append(
+                        f"/findings/{finding_index}/evidence_refs/{ref_index}:{ref!r}"
+                    )
+                    continue
+            kept.append(ref)
+        if len(kept) != len(refs):
+            finding["evidence_refs"] = kept
+    return output, report
+
+
+def rebuild_scheme_extraction_coverage(output: Any) -> tuple[Any, dict[str, Any]]:
+    """Rebuild ``result.extraction_coverage`` from the rules' own source_refs.
+
+    The coverage table is a derived index: every extracted rule already binds
+    its sources via ``rules[*].source_refs[*].source_id``.  Models periodically
+    fill ``covered_rule_ids`` with input section/block IDs instead of the
+    rule_ids they just defined, which trips the deterministic coverage audit
+    (QG_SCHEME_RULE_NOT_COVERED) even though the underlying rule→source
+    bindings are present and validated separately.  Recomputing the index from
+    those bindings changes no binding; it only re-expresses them.  A rule
+    without usable source_refs stays uncovered, so the audit still catches
+    genuinely unsourced rules.
+    """
+    report: dict[str, Any] = {"changes": []}
+    if not isinstance(output, dict):
+        return output, report
+    result = output.get("result")
+    if not isinstance(result, dict):
+        return output, report
+    scheme = result.get("scheme_profile")
+    if not isinstance(scheme, dict):
+        return output, report
+    rules = [item for item in scheme.get("rules") or [] if isinstance(item, dict)]
+    if not rules:
+        return output, report
+    derived: dict[str, list[str]] = {}
+    for rule in rules:
+        rule_id = str(rule.get("rule_id") or "").strip()
+        if not rule_id:
+            continue
+        for ref in rule.get("source_refs") or []:
+            if not isinstance(ref, dict):
+                continue
+            source_id = str(ref.get("source_id") or "").strip()
+            if not source_id:
+                continue
+            covered = derived.setdefault(source_id, [])
+            if rule_id not in covered:
+                covered.append(rule_id)
+    if not derived:
+        return output, report
+    rebuilt = [
+        {"source_id": source_id, "covered_rule_ids": covered}
+        for source_id, covered in derived.items()
+    ]
+    if result.get("extraction_coverage") != rebuilt:
+        result["extraction_coverage"] = rebuilt
+        report["changes"].append(
+            "/result/extraction_coverage: rebuilt from rules[*].source_refs"
+        )
+    return output, report
+
+
+def _collect_document_version_aliases(envelope: Any) -> dict[str, str]:
+    """Map each visible document_version_id to its owning document_id.
+
+    Conflicting mappings (the same version id under two documents) are dropped
+    so the alias never guesses.
+    """
+    aliases: dict[str, str] = {}
+    conflicts: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        doc = node.get("document_id")
+        version = node.get("document_version_id")
+        if (
+            isinstance(doc, str)
+            and doc.strip()
+            and isinstance(version, str)
+            and version.strip()
+        ):
+            version = version.strip()
+            doc = doc.strip()
+            existing = aliases.get(version)
+            if existing is not None and existing != doc:
+                conflicts.add(version)
+            else:
+                aliases[version] = doc
+        for value in node.values():
+            visit(value)
+
+    visit(envelope)
+    for version in conflicts:
+        aliases.pop(version, None)
+    return aliases
+
+
+def scrub_code_owned_fields_for_repair_diff(value: Any) -> Any:
+    """Project a repair baseline/candidate to the fields the model actually owns.
+
+    The targeted-repair closure check must compare the model's semantic patch,
+    not the metadata the runtime itself completes.  Source-reference metadata
+    (``quoted_text``, spans, hashes, version IDs, authority ranks, security
+    labels, source types) is rebound from the trusted catalog by
+    ``bind_trusted_source_refs``; protocol-owned fields (``project_id`` and
+    friends) are canonicalized by ``canonicalize_protocol_refs``; ``*_hash``
+    digests are recomputed by the runtime.  Applying this projection to BOTH
+    sides of the diff keeps the comparison symmetric: a code-completed field
+    never shows up as a model-made change, while any change to a business
+    field (statements, structure, which source/section is cited, added or
+    removed references) still produces a diff path.
+    """
+    contract = get_semantic_contract()
+    protocol_fields = {
+        field_name
+        for field_name, semantic in contract.reference_field_semantics.items()
+        if semantic is ReferenceSemantic.PROTOCOL_REF
+    }
+
+    def visit(node: Any) -> Any:
+        if isinstance(node, list):
+            return [visit(item) for item in node]
+        if not isinstance(node, Mapping):
+            return node
+        projected: dict[str, Any] = {}
+        for key, item in node.items():
+            if key in protocol_fields or key.endswith("_hash"):
+                continue
+            if key in ("source_refs", "source_ref"):
+                # Only the model-chosen identity (which source, which section)
+                # is semantic; every other field is rebound by the runtime.
+                if isinstance(item, list):
+                    projected[key] = [
+                        {
+                            "source_id": ref.get("source_id"),
+                            "section_id": ref.get("section_id"),
+                        }
+                        if isinstance(ref, Mapping)
+                        else ref
+                        for ref in item
+                    ]
+                    continue
+                if isinstance(item, Mapping):
+                    projected[key] = {
+                        "source_id": item.get("source_id"),
+                        "section_id": item.get("section_id"),
+                    }
+                    continue
+            projected[key] = visit(item)
+        return projected
+
+    return visit(value)
+
+
+def _collect_source_ids(value: Any) -> set[str]:
+    """Collect source identifiers that are explicitly materialized as sources."""
+    found: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        source_id = node.get("source_id")
+        if isinstance(source_id, (str, int)) and not isinstance(source_id, bool):
+            text = str(source_id).strip()
+            if text:
+                found.add(text)
+        document_id = node.get("document_id")
+        if isinstance(document_id, (str, int)) and not isinstance(document_id, bool):
+            text = str(document_id).strip()
+            if text:
+                found.add(text)
+        for item in node.values():
+            visit(item)
+
+    visit(value)
+    return found
+
+
+def _is_reference_array_field(key: str) -> bool:
+    return key in _REFERENCE_ARRAY_FIELDS
+
+
+
+def _slug(value: Any, *, limit: int = 48) -> str:
+    text = re.sub(r"[^A-Za-z0-9]+", "-", str(value or "").strip()).strip("-").lower()
+    return (text or "input")[:limit]
+
+
+def _preferred_source_id(node: Any) -> str | None:
+    if not isinstance(node, Mapping):
+        return None
+    for key in _NATURAL_SOURCE_ID_KEYS:
+        value = node.get(key)
+        if isinstance(value, (str, int)) and not isinstance(value, bool):
+            text = str(value).strip()
+            if text and key not in _PROTOCOL_ID_FIELDS:
+                return text
+    return None
+
+
+def _source_type_for_object(path: tuple[str, ...], node: Any) -> str:
+    leaf = path[-1] if path else ""
+    if isinstance(node, Mapping):
+        if node.get("source_type"):
+            return _source_type(node.get("source_type"), "MODEL_INFERENCE")
+        if node.get("document_role"):
+            return _source_type(node.get("document_role"), "HISTORICAL_DOCUMENT")
+        object_type = str(node.get("object_type") or "")
+        if object_type.startswith("SOURCE_DOCUMENT:"):
+            return _source_type(object_type.split(":", 1)[1], "HISTORICAL_DOCUMENT")
+        if {"resolution_id", "gate_id", "answer"}.issubset(node):
+            return "USER_CONFIRMATION"
+        if any(key in node for key in ("url", "archive_hash", "retrieved_at", "publisher")):
+            return "PUBLIC_SOURCE"
+    if leaf in {"human_resolutions", "user_confirmation", "user_confirmations"}:
+        return "USER_CONFIRMATION"
+    if leaf in {"security_policy", "security_constraints", "security_context"}:
+        return "CONTRACT"
+    if leaf in {"deterministic_scan", "source_summary", "validation_report", "quality_report"}:
+        return "EVIDENCE_MATERIAL"
+    if "public" in leaf or "retrieved" in leaf:
+        return "PUBLIC_SOURCE"
+    return "MODEL_INFERENCE"
+
+
+def _synthetic_input_source_id(envelope: Mapping[str, Any], path: tuple[str, ...]) -> str:
+    prompt_id = str(envelope.get("prompt_id") or "prompt")
+    scope = envelope.get("scope") if isinstance(envelope.get("scope"), Mapping) else {}
+    project_id = str(scope.get("project_id") or "project")
+    dotted = ".".join(path)
+    digest = _stable_hash({"project_id": project_id, "prompt_id": prompt_id, "object_path": dotted})[:12]
+    prefix = f"input-{_slug(prompt_id, limit=34)}-{_slug(path[-1] if path else 'root', limit=34)}"
+    return f"{prefix[:114]}-{digest}"[:128]
+
+
+def _catalog_entry_for_object(
+    envelope: Mapping[str, Any],
+    path: tuple[str, ...],
+    node: Any,
+    *,
+    force_synthetic: bool = False,
+) -> dict[str, Any]:
+    source_id = None if force_synthetic else _preferred_source_id(node)
+    source_id = source_id or _synthetic_input_source_id(envelope, path)
+    source_type = _source_type_for_object(path, node)
+    document_version_id = node.get("document_version_id") if isinstance(node, Mapping) else None
+    section_id = node.get("section_id") if isinstance(node, Mapping) else None
+    known_hash = None
+    if isinstance(node, Mapping):
+        for key in ("source_hash", "document_hash", "profile_hash", "object_hash", "text_hash", "manifest_hash"):
+            known_hash = _hash(node.get(key))
+            if known_hash:
+                break
+    source_hash = known_hash or _stable_hash(node)
+    security_level = None
+    authority_rank = None
+    if isinstance(node, Mapping):
+        security_level = node.get("security_level") or node.get("default_security_level")
+        if isinstance(node.get("authority_rank"), int) and not isinstance(node.get("authority_rank"), bool):
+            authority_rank = int(node["authority_rank"])
+    if not security_level:
+        security_context = envelope.get("security_context") if isinstance(envelope.get("security_context"), Mapping) else {}
+        security_level = security_context.get("input_max_security_level") or "INTERNAL"
+    return {
+        "source_id": source_id,
+        "object_path": ".".join(path),
+        "source_type": source_type,
+        "document_version_id": document_version_id.strip() if isinstance(document_version_id, str) and document_version_id.strip() else None,
+        "section_id": section_id.strip() if isinstance(section_id, str) and section_id.strip() else None,
+        "source_hash": source_hash,
+        "authority_rank": authority_rank or _AUTHORITY.get(source_type, 60),
+        "security_level": _security(security_level),
+    }
+
+
+def build_trusted_source_catalog(
+    envelope: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Build a deterministic identity catalog for model-referenceable inputs.
+
+    Every root protocol object and every top-level payload object receives one
+    stable source identity.  Nested objects with their own semantic IDs are also
+    registered.  The catalog contains no copied prose; it only exposes IDs,
+    paths, hashes and security metadata already derivable from the input.
+    """
+    if not isinstance(envelope, Mapping):
+        return []
+    clean = copy.deepcopy(dict(envelope))
+    clean.pop("trusted_source_catalog", None)
+    entries: dict[str, tuple[int, dict[str, Any]]] = {}
+
+    def add(path: tuple[str, ...], node: Any, priority: int, *, force_synthetic: bool = False) -> None:
+        if not path or not isinstance(node, (Mapping, list)):
+            return
+        entry = _catalog_entry_for_object(clean, path, node, force_synthetic=force_synthetic)
+        source_id = str(entry["source_id"])
+        previous = entries.get(source_id)
+        if previous is None or priority >= previous[0]:
+            entries[source_id] = (priority, entry)
+
+    for key in _REFERENCEABLE_ENVELOPE_PATHS:
+        value = clean.get(key)
+        if isinstance(value, (Mapping, list)):
+            add((key,), value, 100, force_synthetic=True)
+
+    payload = clean.get("payload") if isinstance(clean.get("payload"), Mapping) else {}
+    top_level_natural_counts: dict[str, int] = defaultdict(int)
+    for value in payload.values():
+        if isinstance(value, (Mapping, list)):
+            natural_id = _preferred_source_id(value)
+            if natural_id:
+                top_level_natural_counts[natural_id] += 1
+    for key, value in payload.items():
+        if isinstance(value, (Mapping, list)):
+            natural_id = _preferred_source_id(value)
+            add(
+                ("payload", str(key)),
+                value,
+                120,
+                force_synthetic=bool(natural_id and top_level_natural_counts[natural_id] > 1),
+            )
+
+    def visit(node: Any, path: tuple[str, ...]) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, (*path, str(index)))
+            return
+        if not isinstance(node, Mapping):
+            return
+        already_registered_top_level = (
+            (len(path) == 1 and path[0] in _REFERENCEABLE_ENVELOPE_PATHS)
+            or (len(path) == 2 and path[0] == "payload")
+        )
+        if path and not already_registered_top_level and _preferred_source_id(node):
+            add(path, node, 80)
+        for key, item in node.items():
+            if key == "trusted_source_catalog":
+                continue
+            visit(item, (*path, str(key)))
+
+    visit(clean, ())
+    return [entry for _, entry in sorted(entries.values(), key=lambda item: item[1]["object_path"])]
+
+
+def attach_trusted_source_catalog(envelope: Mapping[str, Any] | None) -> dict[str, Any]:
+    prepared = copy.deepcopy(dict(envelope or {}))
+    prepared.pop("trusted_source_catalog", None)
+    prepared["trusted_source_catalog"] = build_trusted_source_catalog(prepared)
+    return prepared
+
+
+def _catalog_alias_index(envelope: Mapping[str, Any] | None) -> dict[str, set[str]]:
+    effective = attach_trusted_source_catalog(envelope)
+    aliases: dict[str, set[str]] = defaultdict(set)
+    for entry in effective.get("trusted_source_catalog") or []:
+        if not isinstance(entry, Mapping):
+            continue
+        source_id = str(entry.get("source_id") or "").strip()
+        object_path = str(entry.get("object_path") or "").strip()
+        if not source_id or not object_path:
+            continue
+        aliases[object_path].add(source_id)
+        # Array paths have one unambiguous dot and bracket spelling. Accepting
+        # both is representation normalization, not semantic repair.
+        bracket_path = re.sub(r"\.(\d+)(?=\.|$)", r"[\1]", object_path)
+        aliases[bracket_path].add(source_id)
+        # Models sometimes prefix root protocol objects with ``payload.``.
+        # Register that spelling only in this catalog-derived alias map; the
+        # resolver still requires one unique existing source.
+        if not object_path.startswith("payload."):
+            aliases[f"payload.{object_path}"].add(source_id)
+        leaf = object_path.rsplit(".", 1)[-1]
+        if leaf and not leaf.isdigit():
+            aliases[leaf].add(source_id)
+    return aliases
+
+
+def _resolve_catalog_source_id(
+    raw_source_id: str,
+    known_ids: Iterable[str],
+    alias_index: Mapping[str, set[str]],
+) -> tuple[str | None, str | None]:
+    source_id, alias_kind = _resolve_source_id_alias(raw_source_id, known_ids)
+    if source_id is not None:
+        return source_id, alias_kind
+    raw = str(raw_source_id or "").strip()
+    candidates = set(alias_index.get(raw) or set())
+    if len(candidates) == 1:
+        return next(iter(candidates)), "OBJECT_PATH_ALIAS"
+    for prefix in _SOURCE_ID_ALIAS_PREFIXES:
+        if not raw.startswith(prefix):
+            continue
+        candidate_alias = raw[len(prefix):].strip()
+        candidates = set(alias_index.get(candidate_alias) or set())
+        if len(candidates) == 1:
+            return next(iter(candidates)), "PREFIXED_OBJECT_PATH_ALIAS"
+    return None, None
+
+
+def trusted_source_prompt_contract(envelope: Mapping[str, Any] | None) -> str:
+    catalog = (envelope or {}).get("trusted_source_catalog") if isinstance(envelope, Mapping) else None
+    if not isinstance(catalog, list):
+        return ""
+    return (
+        "\n\n# 可信来源ID契约\n"
+        "输入根级 trusted_source_catalog 是本次调用唯一允许用于 source_refs.source_id 的来源目录。"
+        "必须逐字复制其中的 source_id；object_path 仅用于理解对象位置，不能作为 source_id。"
+        "不得使用字段名、路径名、显示前缀或自行构造的编号代替 source_id。"
+        "若实质结论没有目录中的可用来源，应返回 Finding、unresolved_items 或 NEED_USER_INPUT/BLOCK，"
+        "不得虚构来源。"
+    )
+
+
+def _catalog_from_envelope(envelope: Mapping[str, Any] | None, db: Any = None) -> dict[str, list[dict[str, Any]]]:
+    envelope = attach_trusted_source_catalog(envelope)
+    default_security = _security(
+        ((envelope.get("security_context") or {}).get("input_max_security_level"))
+        if isinstance(envelope.get("security_context"), Mapping)
+        else None
+    )
+    catalog: dict[str, dict[str | None, tuple[int, dict[str, Any]]]] = defaultdict(dict)
+
+    def add(ref: Mapping[str, Any], priority: int) -> None:
+        source_id = str(ref.get("source_id") or "").strip()
+        if not source_id:
+            return
+        canonical = _canonical_ref(
+            source_id=source_id,
+            source_type=ref.get("source_type") or "MODEL_INFERENCE",
+            document_version_id=ref.get("document_version_id"),
+            section_id=ref.get("section_id"),
+            span_start=ref.get("span_start"),
+            span_end=ref.get("span_end"),
+            quoted_text=ref.get("quoted_text"),
+            source_hash=ref.get("source_hash"),
+            authority_rank=ref.get("authority_rank"),
+            security_level=ref.get("security_level") or default_security,
+        )
+        key = canonical.get("section_id")
+        previous = catalog[source_id].get(key)
+        if previous is None or priority >= previous[0]:
+            catalog[source_id][key] = (priority, canonical)
+
+    def add_document(document: Mapping[str, Any], priority: int = 90) -> None:
+        document_id = str(document.get("document_id") or "").strip()
+        if not document_id:
+            return
+        source_type = _source_type(document.get("document_role"), "HISTORICAL_DOCUMENT")
+        base = {
+            "source_id": document_id,
+            "source_type": source_type,
+            "document_version_id": document.get("document_version_id"),
+            "source_hash": document.get("document_hash"),
+            "authority_rank": document.get("authority_rank") or _AUTHORITY.get(source_type, 20),
+            "security_level": document.get("security_level") or default_security,
+        }
+        add(base, priority)
+        for section in document.get("sections") or []:
+            if not isinstance(section, Mapping) or not str(section.get("section_id") or "").strip():
+                continue
+            text = section.get("text") if isinstance(section.get("text"), str) else None
+            section_ref = {
+                **base,
+                "section_id": section.get("section_id"),
+                "span_start": 0 if text is not None else None,
+                "span_end": len(text) if text is not None else None,
+                "quoted_text": text,
+                "source_hash": section.get("text_hash") or base.get("source_hash"),
+                "security_level": section.get("security_level") or base.get("security_level"),
+            }
+            add(section_ref, priority + 5)
+            # Legacy providers may use the section identifier itself as
+            # source_id.  It is still unambiguous because the section object is
+            # present in this exact document context; preserve that identifier
+            # while binding all document metadata from the trusted section.
+            add({**section_ref, "source_id": str(section.get("section_id"))}, priority + 4)
+
+    # The generated catalog contributes identities for otherwise anonymous
+    # input objects.  Give these entries lower priority than explicit trusted
+    # SourceRef/document/user-confirmation records so catalog generation can
+    # never erase richer persisted metadata.
+    for entry in envelope.get("trusted_source_catalog") or []:
+        if isinstance(entry, Mapping):
+            add(entry, 50)
+
+    def visit(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        if {"document_id", "document_version_id", "document_role"}.issubset(node):
+            add_document(node)
+        if {"source_id", "source_type", "authority_rank", "security_level"}.issubset(node):
+            add(node, 80)
+        if {"resolution_id", "gate_id", "answer", "decided_by", "decided_role"}.issubset(node):
+            resolution_id = str(node.get("resolution_id") or "").strip()
+            if resolution_id:
+                add(
+                    {
+                        "source_id": resolution_id,
+                        "source_type": "USER_CONFIRMATION",
+                        "document_version_id": None,
+                        "section_id": None,
+                        "span_start": None,
+                        "span_end": None,
+                        "quoted_text": None,
+                        "source_hash": _stable_hash({
+                            "question_id": node.get("question_id"),
+                            "target_paths": node.get("target_paths") or [],
+                            "answer": node.get("answer"),
+                            "decided_by": node.get("decided_by"),
+                            "decided_role": node.get("decided_role"),
+                        }),
+                        "authority_rank": 100,
+                        "security_level": default_security,
+                    },
+                    120,
+                )
+        if "object_id" in node and "object_type" in node:
+            source_id = str(node.get("object_id") or "").strip()
+            object_type = str(node.get("object_type") or "")
+            if source_id:
+                is_document = object_type.startswith("SOURCE_DOCUMENT:")
+                raw_type = object_type.split(":", 1)[1] if is_document else object_type
+                add(
+                    {
+                        "source_id": source_id,
+                        "source_type": _source_type(raw_type, "MODEL_INFERENCE") if is_document else "MODEL_INFERENCE",
+                        "source_hash": node.get("object_hash"),
+                        "authority_rank": _AUTHORITY.get(_source_type(raw_type), 60) if is_document else 60,
+                        "security_level": node.get("security_level") or default_security,
+                    },
+                    60,
+                )
+        # Public retrieval records are trusted input objects even when they do
+        # not use the common SourceRef schema verbatim.
+        if "source_id" in node and any(key in node for key in ("url", "archive_hash", "retrieved_at", "publisher")):
+            source_id = str(node.get("source_id") or "").strip()
+            if source_id:
+                add(
+                    {
+                        "source_id": source_id,
+                        "source_type": "PUBLIC_SOURCE",
+                        "source_hash": node.get("source_hash") or node.get("archive_hash") or node.get("content_hash"),
+                        "authority_rank": node.get("authority_rank") or 80,
+                        "security_level": "PUBLIC",
+                    },
+                    75,
+                )
+        for key, item in node.items():
+            if key == "trusted_source_catalog":
+                continue
+            if (
+                key.endswith("_id")
+                and key not in _PROTOCOL_ID_FIELDS
+                and key != "source_id"
+                and isinstance(item, (str, int))
+                and not isinstance(item, bool)
+                and str(item).strip()
+            ):
+                add(
+                    {
+                        "source_id": str(item).strip(),
+                        "source_type": "MODEL_INFERENCE",
+                        "authority_rank": 60,
+                        "security_level": default_security,
+                    },
+                    10,
+                )
+            visit(item)
+
+    visit(envelope)
+
+    payload = envelope.get("payload") if isinstance(envelope.get("payload"), Mapping) else {}
+    research_need = payload.get("research_need") if isinstance(payload.get("research_need"), Mapping) else {}
+    need_id = str(research_need.get("need_id") or "").strip()
+    if need_id:
+        human_resolutions = [
+            item for item in payload.get("human_resolutions") or []
+            if isinstance(item, Mapping)
+        ]
+        confirmed_paths = {
+            "research_need.question",
+            "payload.research_need.question",
+            "research_need.reason_online_needed",
+            "payload.research_need.reason_online_needed",
+            "research_need.desired_output",
+            "payload.research_need.desired_output",
+        }
+        is_user_confirmed = any(
+            str(item.get("question_id") or "") == "wf3-research-question"
+            or bool(confirmed_paths.intersection({str(path) for path in item.get("target_paths") or []}))
+            for item in human_resolutions
+        )
+        source_type = "USER_CONFIRMATION" if is_user_confirmed else "MODEL_INFERENCE"
+        add(
+            {
+                "source_id": need_id,
+                "source_type": source_type,
+                "document_version_id": None,
+                "section_id": None,
+                "span_start": None,
+                "span_end": None,
+                "quoted_text": None,
+                "source_hash": _stable_hash({
+                    "need_id": need_id,
+                    "question": research_need.get("question"),
+                    "reason_online_needed": research_need.get("reason_online_needed"),
+                    "desired_output": research_need.get("desired_output"),
+                }),
+                "authority_rank": 100 if is_user_confirmed else 60,
+                "security_level": default_security,
+            },
+            125 if is_user_confirmed else 25,
+        )
+
+    # Project identity and objective are persisted user inputs.  The simulated
+    # provider historically represents that scope with a stable
+    # USER_CONFIRMATION source ID; materialize the same source in the trusted
+    # catalog rather than allowing the provider to invent it.
+    scope = envelope.get("scope") if isinstance(envelope.get("scope"), Mapping) else {}
+    project_name = str((payload or {}).get("project_name") or (scope or {}).get("project_id") or "").strip()
+    if project_name:
+        add(
+            {
+                "source_id": "user-confirmation-project-scope",
+                "source_type": "USER_CONFIRMATION",
+                "document_version_id": None,
+                "section_id": None,
+                "span_start": None,
+                "span_end": None,
+                "quoted_text": f"用户要求围绕{project_name}形成科研项目申请书并完善智能体系统。",
+                "source_hash": hashlib.sha256((project_name + "科研项目申请书").encode("utf-8")).hexdigest(),
+                "authority_rank": 100,
+                "security_level": default_security,
+            },
+            100,
+        )
+
+    # Upgrade only documents that were already visible in this exact input.
+    project_id = str(((envelope.get("scope") or {}).get("project_id")) if isinstance(envelope.get("scope"), Mapping) else "").strip()
+    document_ids = [source_id for source_id, by_section in catalog.items() if any(ref[1].get("document_version_id") is not None or ref[1].get("source_type") != "MODEL_INFERENCE" for ref in by_section.values())]
+    if db is not None and project_id and document_ids:
+        placeholders = ",".join("?" for _ in document_ids)
+        try:
+            rows = db.fetchall(
+                f"SELECT id,role,security_level,document_hash,parsed_json FROM documents WHERE project_id=? AND id IN ({placeholders})",
+                (project_id, *document_ids),
+            )
+        except Exception:
+            rows = []
+        for row in rows:
+            try:
+                parsed = json.loads(row.get("parsed_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                parsed = {}
+            if not isinstance(parsed, dict):
+                parsed = {}
+            parsed.setdefault("document_id", row.get("id"))
+            parsed.setdefault("document_role", row.get("role") or "OTHER")
+            parsed.setdefault("document_hash", row.get("document_hash"))
+            parsed.setdefault("security_level", row.get("security_level") or default_security)
+            add_document(parsed, 110)
+
+    return {
+        source_id: [entry[1] for _, entry in sorted(by_section.items(), key=lambda item: (item[0] is not None, str(item[0])))]
+        for source_id, by_section in catalog.items()
+    }
+
+
+def bind_trusted_source_refs(
+    output: Any,
+    envelope: Mapping[str, Any] | None,
+    *,
+    db: Any = None,
+) -> tuple[Any, dict[str, Any]]:
+    """Return a copy whose source-reference objects are input-backed.
+
+    Both the common ``source_refs`` array and the schema-supported singular
+    ``source_ref`` object use the same deterministic binder. Unknown source IDs
+    are reported and left unchanged so the caller can block deterministically.
+    Known source IDs have all protocol metadata replaced by trusted values;
+    model-authored version IDs, hashes, security labels, ranks, spans and quotes
+    are never accepted as authority.
+    """
+    normalized = copy.deepcopy(output)
+    effective_envelope = attach_trusted_source_catalog(envelope)
+    catalog = _catalog_from_envelope(effective_envelope, db=db)
+    alias_index = _catalog_alias_index(effective_envelope)
+    hash_index: dict[str, set[str]] = defaultdict(set)
+    for trusted_source_id, candidates in catalog.items():
+        for candidate in candidates:
+            trusted_hash = _hash(candidate.get("source_hash"))
+            if trusted_hash:
+                hash_index[trusted_hash].add(trusted_source_id)
+    changes: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    def select(source_id: str, requested_section: str | None) -> dict[str, Any] | None:
+        candidates = catalog.get(source_id) or []
+        if requested_section:
+            for candidate in candidates:
+                if candidate.get("section_id") == requested_section:
+                    return candidate
+        for candidate in candidates:
+            if candidate.get("section_id") is None:
+                return candidate
+        return candidates[0] if len(candidates) == 1 else None
+
+    def bind_one(
+        ref: Any,
+        ref_path: tuple[Any, ...],
+        *,
+        seen: set[tuple[str, str | None]] | None = None,
+    ) -> Any | None:
+        if not isinstance(ref, Mapping):
+            errors.append(f"{_pointer(ref_path)}: source reference must be an object")
+            return ref
+
+        raw_source_id = str(ref.get("source_id") or "").strip()
+        if not raw_source_id:
+            errors.append(f"{_pointer(ref_path)}/source_id: missing source identifier")
+            return dict(ref)
+
+        requested_section = (
+            ref.get("section_id")
+            if isinstance(ref.get("section_id"), str)
+            and ref.get("section_id").strip()
+            else None
+        )
+        source_id, alias_kind = _resolve_catalog_source_id(
+            raw_source_id,
+            catalog.keys(),
+            alias_index,
+        )
+
+        provider_hash = _hash(ref.get("source_hash"))
+        if source_id is None:
+            # A provider may truncate a long opaque ID while still copying the
+            # exact 64-character source hash. Rebind only when that hash is
+            # unambiguous in the trusted catalog.
+            hash_targets = set(hash_index.get(provider_hash) or set())
+            if len(hash_targets) == 1:
+                source_id = next(iter(hash_targets))
+                alias_kind = "UNIQUE_SOURCE_HASH"
+            elif requested_section and requested_section in hash_targets:
+                source_id = requested_section
+                alias_kind = "EXACT_SECTION_HASH"
+            elif len(hash_targets) > 1:
+                section_ids = {
+                    str(candidate.get("section_id"))
+                    for target in hash_targets
+                    for candidate in catalog.get(target) or []
+                    if candidate.get("section_id")
+                    and _hash(candidate.get("source_hash")) == provider_hash
+                }
+                if (
+                    len(section_ids) == 1
+                    and next(iter(section_ids)) in hash_targets
+                ):
+                    source_id = next(iter(section_ids))
+                    alias_kind = "UNIQUE_SECTION_FOR_HASH"
+
+        if source_id is None and requested_section and requested_section in catalog:
+            # An exact trusted section ID is a first-class alias. This fallback
+            # is used only when the provider's source_id itself is not trusted.
+            source_id = requested_section
+            alias_kind = "EXACT_SECTION_ID"
+
+        if source_id is None:
+            errors.append(
+                f"{_pointer(ref_path)}/source_id: {raw_source_id!r} is not present "
+                "in the trusted input envelope"
+            )
+            return dict(ref)
+
+        trusted = select(source_id, requested_section)
+        if trusted is None:
+            # A valid document/source ID can be paired with a section alias from
+            # another trusted catalog view. First prefer the unique candidate
+            # under that source carrying the provider-copied trusted hash.
+            if provider_hash:
+                source_hash_matches = [
+                    candidate
+                    for candidate in catalog.get(source_id) or []
+                    if _hash(candidate.get("source_hash")) == provider_hash
+                ]
+                if len(source_hash_matches) == 1:
+                    trusted = source_hash_matches[0]
+                    alias_kind = alias_kind or "SOURCE_HASH_SECTION"
+
+            # If the requested section is itself catalogued, rebind only when
+            # trusted identity metadata proves that it is the same source view.
+            if trusted is None and requested_section and requested_section in catalog:
+                exact_section = select(requested_section, requested_section)
+                if exact_section is not None:
+                    exact_hash = _hash(exact_section.get("source_hash"))
+                    provider_version = str(
+                        ref.get("document_version_id") or ""
+                    ).strip()
+                    exact_version = str(
+                        exact_section.get("document_version_id") or ""
+                    ).strip()
+                    hash_compatible = bool(
+                        provider_hash
+                        and exact_hash
+                        and provider_hash == exact_hash
+                    )
+                    version_compatible = bool(
+                        not provider_hash
+                        and provider_version
+                        and exact_version
+                        and provider_version == exact_version
+                    )
+                    if hash_compatible or version_compatible:
+                        source_id = requested_section
+                        trusted = exact_section
+                        alias_kind = (
+                            "EXACT_SECTION_HASH"
+                            if hash_compatible
+                            else "EXACT_SECTION_VERSION"
+                        )
+
+        if trusted is None:
+            errors.append(
+                f"{_pointer(ref_path)}/source_id: {raw_source_id!r} does not resolve "
+                "to one unambiguous trusted section"
+            )
+            return dict(ref)
+
+        key_tuple = (source_id, trusted.get("section_id"))
+        if seen is not None:
+            if key_tuple in seen:
+                changes.append({
+                    "path": _pointer(ref_path),
+                    "action": "DROP_DUPLICATE",
+                    "source_id": source_id,
+                })
+                return None
+            seen.add(key_tuple)
+
+        authoritative = copy.deepcopy(trusted)
+        if dict(ref) != authoritative:
+            changes.append({
+                "path": _pointer(ref_path),
+                "action": "BIND_ALIAS" if alias_kind else "REBIND",
+                "source_id": source_id,
+                "provider_source_id": raw_source_id,
+                "alias_kind": alias_kind,
+                "requested_section_id": requested_section,
+                "trusted_section_id": authoritative.get("section_id"),
+            })
+        return authoritative
+
+    def visit(node: Any, path: tuple[Any, ...]) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, (*path, index))
+            return
+        if not isinstance(node, dict):
+            return
+
+        for key, value in list(node.items()):
+            current_path = (*path, key)
+            if key == "source_refs" and isinstance(value, list):
+                rebuilt: list[Any] = []
+                seen: set[tuple[str, str | None]] = set()
+                for index, ref in enumerate(value):
+                    bound = bind_one(ref, (*current_path, index), seen=seen)
+                    if bound is not None:
+                        rebuilt.append(bound)
+                node[key] = rebuilt
+            elif key == "source_ref":
+                node[key] = bind_one(value, current_path)
+            else:
+                visit(value, current_path)
+
+    visit(normalized, ())
+    report = {
+        "schema_version": "1.0",
+        "catalog_source_count": len(catalog),
+        "normalized_count": len(changes),
+        "changes": changes,
+        "unresolved_count": len(errors),
+        "errors": errors,
+    }
+    return normalized, report
+
+
+def _inside_argument_authoritative_state(path: tuple[Any, ...]) -> bool:
+    """Keep generic reference machinery out of the authoritative semantic state.
+
+    The authored state is validated by the Argument model semantic contract before
+    projection (and again transactionally after repair).  Generic reference heuristics
+    must not reinterpret business-object collection names such as ``methods`` or mutate
+    evidence identifiers inside this single-writer subtree.
+    """
+    try:
+        config = get_semantic_contract().rule("SC-ARGUMENT-STATE-OWNERSHIP").config
+    except (KeyError, ValueError):
+        return False
+    root = tuple(
+        token for token in str(config.get("authoritative_root") or "").split("/") if token
+    )
+    if not root or len(path) < len(root):
+        return False
+    return any(tuple(path[index:index + len(root)]) == root for index in range(len(path) - len(root) + 1))
+
+
+def normalize_reference_id_aliases(
+    output: Any,
+    envelope: Mapping[str, Any] | None,
+) -> tuple[Any, dict[str, Any]]:
+    """Canonicalize conservative presentation prefixes on reference-only IDs.
+
+    This is the cross-reference counterpart of trusted ``source_refs`` binding.
+    Exact IDs always win.  A wrapper such as ``ref-``/``source-`` is removed
+    only when the remainder is one identifier that is already visible in the
+    current input or defined in the current output.  Unknown or ambiguous IDs
+    remain unchanged and are rejected by ``validate_reference_ids``. Scalar
+    references use the same path-aware semantic contract as array references.
+    """
+    normalized = copy.deepcopy(output)
+    known_entities = (
+        _collect_defined_ids(envelope or {})
+        | _collect_visible_reference_ids(envelope or {})
+        | _collect_inherited_repair_entity_ids(envelope or {})
+        | _collect_defined_ids(normalized)
+        | _REGISTERED_DIAGNOSTIC_REFS
+    )
+    document_version_aliases = _collect_document_version_aliases(envelope or {})
+    named_input_objects = _collect_named_input_object_ids(envelope or {})
+    contract = get_semantic_contract()
+    prompt_id = (
+        str(normalized.get("prompt_id") or "").strip()
+        if isinstance(normalized, Mapping)
+        else ""
+    ) or None
+    changes: list[dict[str, Any]] = []
+
+    def known_for(field_name: str) -> set[str]:
+        known = set(known_entities)
+        if contract.allows_input_object(field_name):
+            known.update(named_input_objects)
+        return known
+
+    def normalize_one(
+        raw: str,
+        *,
+        field_name: str,
+        semantic: ReferenceSemantic | None,
+        path: tuple[Any, ...],
+    ) -> str:
+        identifier = raw.strip()
+        if semantic not in _EXISTING_TARGET_SEMANTICS:
+            return identifier
+        known = known_for(field_name)
+        if identifier not in known:
+            # A document_version_id is protocol-only and never citable, but it
+            # unambiguously names the one document that carries it in this
+            # envelope.  Rewrite it to the citable document_id instead of
+            # rejecting the reference outright.
+            version_target = document_version_aliases.get(identifier)
+            if version_target and version_target in known:
+                changes.append({
+                    "path": _pointer(path),
+                    "action": "BIND_REFERENCE_ALIAS",
+                    "provider_reference_id": identifier,
+                    "reference_id": version_target,
+                    "alias_kind": "DOCUMENT_VERSION_TO_DOCUMENT",
+                })
+                return version_target
+        resolved, alias_kind = _resolve_reference_id_alias(
+            identifier,
+            known,
+            registered_descriptor_suffixes=(
+                contract.registered_reference_suffixes(field_name)
+            ),
+            allow_entity_field_path=(
+                semantic is ReferenceSemantic.ENTITY_OR_FIELD_PATH
+                or contract.allows_entity_field_path(field_name)
+            ),
+        )
+        if resolved is not None and alias_kind:
+            changes.append({
+                "path": _pointer(path),
+                "action": "BIND_REFERENCE_ALIAS",
+                "provider_reference_id": identifier,
+                "reference_id": resolved,
+                "alias_kind": alias_kind,
+            })
+            return resolved
+        return identifier
+
+    def visit(node: Any, path: tuple[Any, ...]) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, (*path, index))
+            return
+        if not isinstance(node, dict):
+            return
+        if _inside_argument_authoritative_state(path):
+            return
+        for key, value in list(node.items()):
+            current = (*path, key)
+            semantic = contract.field_semantic(
+                key, prompt_id=prompt_id, path=current
+            )
+            if _is_reference_array_field(key) and isinstance(value, list):
+                rebuilt: list[Any] = []
+                for index, raw in enumerate(value):
+                    if not isinstance(raw, str):
+                        rebuilt.append(raw)
+                        continue
+                    rebuilt.append(normalize_one(
+                        raw,
+                        field_name=key,
+                        semantic=semantic,
+                        path=(*current, index),
+                    ))
+                node[key] = rebuilt
+                value = rebuilt
+            elif semantic in _EXISTING_TARGET_SEMANTICS and isinstance(value, str):
+                node[key] = normalize_one(
+                    value,
+                    field_name=key,
+                    semantic=semantic,
+                    path=current,
+                )
+                value = node[key]
+            visit(value, current)
+
+    visit(normalized, ())
+    return normalized, {
+        "schema_version": "1.0",
+        "normalization_policy": "EXACT_OR_REGISTERED_PRESENTATION_ONLY",
+        "normalized_count": len(changes),
+        "changes": changes,
+    }
+
+
+def validate_reference_ids(
+    output: Any,
+    envelope: Mapping[str, Any] | None,
+) -> list[str]:
+    """Validate scalar and array reference IDs against visible/defined entities."""
+    known_entities = (
+        _collect_defined_ids(envelope or {})
+        | _collect_visible_reference_ids(envelope or {})
+        | _collect_inherited_repair_entity_ids(envelope or {})
+        | _collect_defined_ids(output)
+        | _REGISTERED_DIAGNOSTIC_REFS
+    )
+    named_input_objects = _collect_named_input_object_ids(envelope or {})
+    contract = get_semantic_contract()
+    errors: list[str] = []
+    root_status = output.get("status") if isinstance(output, Mapping) else None
+    prompt_id = (
+        str(output.get("prompt_id") or "").strip()
+        if isinstance(output, Mapping)
+        else ""
+    ) or None
+
+    def known_for(field_name: str) -> set[str]:
+        known = set(known_entities)
+        if contract.allows_input_object(field_name):
+            known.update(named_input_objects)
+        return known
+
+    def validate_one(
+        raw: Any,
+        *,
+        field_name: str,
+        semantic: ReferenceSemantic | None,
+        path: tuple[Any, ...],
+    ) -> None:
+        if not isinstance(raw, str) or not raw.strip():
+            errors.append(f"{_pointer(path)}: reference ID must be a non-empty string")
+            return
+        if semantic not in _EXISTING_TARGET_SEMANTICS:
+            return
+        if field_name == "evidence_refs" and root_status in {"BLOCK", "ERROR"}:
+            return
+        if raw in known_for(field_name):
+            return
+        pointer = _pointer(path)
+        semantic_label = semantic.value if semantic is not None else "REFERENCE"
+        hint = ""
+        if (
+            len(path) >= 4
+            and path[0] == "result"
+            and path[1] == "research_design_matrix"
+        ):
+            hint = (
+                "; if this is a new design entity, define a complete object with "
+                f"node_id={raw!r} under /result/argument_architecture/nodes before referencing it"
+            )
+        errors.append(
+            f"{pointer}: {semantic_label} reference ID {raw!r} "
+            "is not present in its allowed input namespace or defined output entities"
+            + hint
+        )
+
+    def visit(node: Any, path: tuple[Any, ...]) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, (*path, index))
+            return
+        if not isinstance(node, Mapping):
+            return
+        if _inside_argument_authoritative_state(path):
+            return
+        for key, value in node.items():
+            current = (*path, key)
+            semantic = contract.field_semantic(
+                key, prompt_id=prompt_id, path=current
+            )
+            if _is_reference_array_field(key) and isinstance(value, list):
+                for index, raw in enumerate(value):
+                    validate_one(
+                        raw,
+                        field_name=key,
+                        semantic=semantic,
+                        path=(*current, index),
+                    )
+            elif semantic in _EXISTING_TARGET_SEMANTICS and isinstance(value, str):
+                validate_one(
+                    value,
+                    field_name=key,
+                    semantic=semantic,
+                    path=current,
+                )
+            visit(value, current)
+
+    visit(output, ())
+    return errors
+
+
+def normalize_staged_source_ref_aliases(
+    output: Any,
+    trusted_context: Any | None,
+) -> tuple[Any, dict[str, Any]]:
+    """Canonicalize conservative presentation prefixes in staged source IDs."""
+    normalized = copy.deepcopy(output)
+    effective_context = (
+        attach_trusted_source_catalog(trusted_context)
+        if isinstance(trusted_context, Mapping)
+        else trusted_context
+    )
+    known_sources = _collect_source_ids(normalized)
+    if effective_context is not None:
+        known_sources |= _collect_source_ids(effective_context)
+    alias_index = _catalog_alias_index(effective_context) if isinstance(effective_context, Mapping) else {}
+    changes: list[dict[str, Any]] = []
+
+    def visit(node: Any, path: tuple[Any, ...]) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, (*path, index))
+            return
+        if not isinstance(node, dict):
+            return
+        for key, value in list(node.items()):
+            current = (*path, key)
+            if key == "source_refs" and isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+                rebuilt: list[str] = []
+                for index, raw in enumerate(value):
+                    source_id = raw.strip()
+                    resolved, alias_kind = _resolve_catalog_source_id(
+                        source_id,
+                        known_sources,
+                        alias_index,
+                    )
+                    if resolved is not None and alias_kind:
+                        rebuilt.append(resolved)
+                        changes.append({
+                            "path": _pointer((*current, index)),
+                            "action": "BIND_ALIAS",
+                            "provider_source_id": source_id,
+                            "source_id": resolved,
+                            "alias_kind": alias_kind,
+                        })
+                    else:
+                        rebuilt.append(source_id)
+                node[key] = rebuilt
+            else:
+                visit(value, current)
+
+    visit(normalized, ())
+    return normalized, {
+        "schema_version": "1.0",
+        "normalized_count": len(changes),
+        "changes": changes,
+    }
+
+
+def validate_staged_reference_integrity(
+    output: Any,
+    trusted_context: Any | None,
+) -> list[str]:
+    """Validate file-bridged Stage 1--8 reference arrays.
+
+    Staged schemas use string source IDs rather than the runtime ``SourceRef``
+    object.  The latest persisted request envelope is treated as the trusted
+    upstream context.  Internal cross-references may target IDs defined in the
+    same output.  When no trusted request is available (for example a standalone
+    ``validate`` command), existing stage-specific deterministic validators
+    remain authoritative and only locally resolvable source references are
+    checked.
+    """
+    effective_context = (
+        attach_trusted_source_catalog(trusted_context)
+        if isinstance(trusted_context, Mapping)
+        else trusted_context
+    )
+    known = _collect_defined_ids(output)
+    known_sources = _collect_source_ids(output)
+    has_trusted_context = effective_context is not None
+    if has_trusted_context:
+        known |= (
+            _collect_defined_ids(effective_context)
+            | _collect_visible_reference_ids(effective_context)
+        )
+        known_sources |= _collect_source_ids(effective_context)
+
+    errors: list[str] = []
+
+    def visit(node: Any, path: tuple[Any, ...]) -> None:
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, (*path, index))
+            return
+        if not isinstance(node, Mapping):
+            return
+        for key, value in node.items():
+            current = (*path, key)
+            if key == "source_refs" and isinstance(value, list):
+                # Object-valued source_refs are definitions/bound records and
+                # are handled by the runtime provenance binder.  Staged
+                # workflows use arrays of source IDs.
+                if value and all(isinstance(item, str) for item in value) and known_sources:
+                    for index, raw in enumerate(value):
+                        text = raw.strip()
+                        if not text:
+                            errors.append(
+                                f"{_pointer((*current, index))}: source reference must be a non-empty string"
+                            )
+                        elif text not in known_sources:
+                            errors.append(
+                                f"{_pointer((*current, index))}: source ID {text!r} is not present in the trusted staged input or current source registry"
+                            )
+            elif has_trusted_context and _is_reference_array_field(key) and isinstance(value, list):
+                for index, raw in enumerate(value):
+                    if not isinstance(raw, str) or not raw.strip():
+                        errors.append(
+                            f"{_pointer((*current, index))}: reference ID must be a non-empty string"
+                        )
+                    elif raw not in known:
+                        errors.append(
+                            f"{_pointer((*current, index))}: reference ID {raw!r} is not present in the trusted staged input or current output entities"
+                        )
+            visit(value, current)
+
+    visit(output, ())
+    return errors
+
+
+__all__ = [
+    "TRUSTED_SOURCE_CATALOG_VERSION",
+    "attach_trusted_source_catalog",
+    "build_trusted_source_catalog",
+    "trusted_source_prompt_contract",
+    "bind_trusted_source_refs",
+    "normalize_reference_id_aliases",
+    "validate_reference_ids",
+    "normalize_staged_source_ref_aliases",
+    "validate_staged_reference_integrity",
+]

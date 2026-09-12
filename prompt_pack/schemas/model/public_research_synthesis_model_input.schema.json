@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "public_research_synthesis_model_input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "research_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "research_questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1
+              },
+              "linked_question_indexes": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "query",
+              "linked_question_indexes"
+            ]
+          }
+        },
+        "evidence_requirements": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "prohibited_inferences": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "research_questions",
+        "queries",
+        "evidence_requirements",
+        "prohibited_inferences"
+      ]
+    },
+    "evidence_passages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "relevance": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "source_id",
+          "text",
+          "relevance"
+        ]
+      }
+    },
+    "research_sufficiency": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "SUFFICIENT",
+            "DEGRADED",
+            "BLOCKING_FAILURE"
+          ]
+        },
+        "research_gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gap_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "QUERY",
+                  "GLOBAL"
+                ]
+              },
+              "linked_question_indexes": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "uniqueItems": true
+              },
+              "gap_types": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "source_count": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "required_source_count": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "authoritative_source_count": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "required_authoritative_source_count": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "gap_id",
+              "scope",
+              "linked_question_indexes",
+              "gap_types",
+              "source_count",
+              "required_source_count",
+              "authoritative_source_count",
+              "required_authoritative_source_count",
+              "description"
+            ]
+          }
+        }
+      },
+      "required": [
+        "status",
+        "research_gaps"
+      ]
+    }
+  },
+  "required": [
+    "research_plan",
+    "evidence_passages",
+    "research_sufficiency"
+  ]
+}

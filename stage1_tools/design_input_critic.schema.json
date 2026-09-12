@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stage1DesignInputCritic",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "verdict", "checked_dimensions", "strengths", "findings", "approved_candidate_hash", "stage_recommendation"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "verdict": {"enum": ["ACCEPT", "REVISE"]},
+    "checked_dimensions": {"type": "array", "minItems": 8, "items": {"type": "string"}},
+    "strengths": {"type": "array", "minItems": 3, "items": {"type": "string"}},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["finding_id", "severity", "dimension", "description", "repair_route"],
+        "properties": {
+          "finding_id": {"type": "string"}, "severity": {"enum": ["BLOCKING", "MAJOR", "MINOR"]},
+          "dimension": {"type": "string"}, "description": {"type": "string"},
+          "repair_route": {"enum": ["DESIGN_INPUT_AGENT", "HUMAN_CONFIRMATION", "NONE"]}
+        }
+      }
+    },
+    "approved_candidate_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "stage_recommendation": {"enum": ["READY_FOR_STAGE_2", "REVISE_STAGE_1"]}
+  }
+}

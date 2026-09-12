@@ -6,7 +6,7 @@
   "input": {
     "schema_version": "2.0",
     "prompt_id": "P-SCHEME-EXTRACT",
-    "prompt_version": "2.0.0",
+    "prompt_version": "2.1.0",
     "task": {
       "task_id": "task-001",
       "workflow_type": "PROPOSAL_AUTHORING",
@@ -101,7 +101,7 @@
   "expected_output": {
     "schema_version": "2.0",
     "prompt_id": "P-SCHEME-EXTRACT",
-    "prompt_version": "2.0.0",
+    "prompt_version": "2.1.0",
     "status": "NEED_USER_INPUT",
     "result": {
       "scheme_profile": {
@@ -177,7 +177,8 @@
         ],
         "answer_schema": {
           "type": "OBJECT",
-          "allowed_values": []
+          "allowed_values": [],
+          "properties": {}
         },
         "blocking": true,
         "priority": "P1"
