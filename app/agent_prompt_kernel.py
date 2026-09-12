@@ -571,6 +571,12 @@ class AgentPromptKernelValidator:
                 continue
             claim_id = str(claim.get("claim_id") or f"claim-{index}")
             text = str(claim.get("claim_text") or "").strip()
+            # REQUIREMENT records are extracted task directives, not truth-apt
+            # propositions: enumerating scope items or carrying dates, word
+            # counts and designations does not make them multi-proposition
+            # facts or unbound measurements.  Atomicity and numeric binding
+            # only constrain claims that assert a state of the world.
+            directive_claim = claim.get("claim_type") == "REQUIREMENT"
             if claim_id in claim_ids:
                 findings.append(_finding(
                     "QG_FACT_ID_DUPLICATE",
@@ -589,7 +595,7 @@ class AgentPromptKernelValidator:
                 if part.strip()
             ]
             enumerated = bool(re.search(r"(?:^|[，,；;])(?:一是|二是|三是|首先|其次|最后)", text))
-            if len(clauses) > 1 or enumerated:
+            if not directive_claim and (len(clauses) > 1 or enumerated):
                 findings.append(_finding(
                     "QG_FACT_NOT_ATOMIC",
                     "FACT",
@@ -624,7 +630,7 @@ class AgentPromptKernelValidator:
                 ))
             numeric_tokens = _substantive_numeric_tokens(text)
             numeric_values = claim.get("numeric_values") or []
-            if numeric_tokens and not numeric_values:
+            if not directive_claim and numeric_tokens and not numeric_values:
                 findings.append(_finding(
                     "QG_FACT_NUMERIC_BINDING_MISSING",
                     "FACT",

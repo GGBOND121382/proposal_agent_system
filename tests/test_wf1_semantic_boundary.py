@@ -544,3 +544,46 @@ def test_empty_string_becomes_null_where_schema_allows_null() -> None:
     assert cleaned["title"] == ""
     # Fields without a property spec (e.g. reached through $ref) are untouched.
     assert _null_empty_strings({"$ref": "common/x.json"}, "") == ""
+
+
+def test_null_literal_strings_are_normalized_before_semantic_output_validation() -> None:
+    """Reproduce the live SURVEY_REPORT failure: MiniMax emits "null" strings.
+
+    wf-64f274d7eeb14d8a step 2 (2026-09-10): P-SCHEME-EXTRACT followed the
+    survey-report prompt and wrote "application_year": "null", which failed
+    semantic model output validation before any normalization ran.
+    """
+    from app.contract_registry import normalize_exact_null_literals
+    from app.model_semantic_contracts import apply_semantic_model_output_defaults
+
+    schema = PACK.model_schema("P-SCHEME-EXTRACT", "output")
+    output = {
+        "status": "PASS",
+        "document_kind": "TECHNICAL_REPORT",
+        "scheme_name": "美空军DASH系统调研分析报告",
+        "scheme_type": "RESEARCH",
+        "funding_organization": "",
+        "application_year": "null",
+        "guide_direction_name": "公开技术调研",
+        "research_attribute": "BASIC_RESEARCH",
+        "duration_months": "null",
+        "rules": [
+            {
+                "local_id": "R1",
+                "rule_type": "MANDATORY_SCOPE",
+                "statement": "围绕DASH系统开展公开技术调研",
+                "mandatory": True,
+                "evidence_ids": ["S1"],
+            }
+        ],
+        "findings": [],
+        "unresolved_items": [],
+        "user_questions": [],
+    }
+    normalized = apply_semantic_model_output_defaults(schema, output)
+    normalized, report = normalize_exact_null_literals(normalized, schema)
+    assert normalized["application_year"] is None
+    assert normalized["duration_months"] is None
+    assert report["normalized_count"] == 2
+    errors = PACK.validate_model("P-SCHEME-EXTRACT", "output", normalized)
+    assert not any("application_year" in e or "duration_months" in e for e in errors), errors

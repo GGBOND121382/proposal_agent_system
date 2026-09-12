@@ -225,6 +225,37 @@ def test_b3_substantive_numbers_still_require_numeric_bindings():
         assert "QG_FACT_NUMERIC_BINDING_MISSING" in _codes(report), text
 
 
+def test_b3_requirement_records_are_not_truth_apt_claims():
+    pack, validator = _runtime()
+    requirement_claims = [
+        "待核查内容包括：编排与集成；数据交换；人机交互；仿真评估。",
+        "检索应覆盖DASH 1、DASH 2、DASH 3的功能差别和演进关系。",
+        "背景调研建议占正文约60%—70%；建议全文6000—10000字。",
+    ]
+    for text in requirement_claims:
+        env = pack.replay_input("P-FACT-EXTRACT")
+        output = pack.replay_output("P-FACT-EXTRACT")
+        claim = output["result"]["fact_candidates"][0]
+        claim["claim_type"] = "REQUIREMENT"
+        claim["claim_text"] = text
+        claim["numeric_values"] = []
+        report = validator.observe("P-FACT-EXTRACT", env, output)
+        assert "QG_FACT_NOT_ATOMIC" not in _codes(report), text
+        assert "QG_FACT_NUMERIC_BINDING_MISSING" not in _codes(report), text
+
+
+def test_b3_multi_clause_fact_remains_non_atomic():
+    pack, validator = _runtime()
+    env = pack.replay_input("P-FACT-EXTRACT")
+    output = pack.replay_output("P-FACT-EXTRACT")
+    claim = output["result"]["fact_candidates"][0]
+    claim["claim_type"] = "FACT"
+    claim["claim_text"] = "DASH英文全称为Decision Advantage Sprint for Human-Machine Teaming；中文检索词包括“美空军DASH”。"
+    claim["numeric_values"] = []
+    report = validator.observe("P-FACT-EXTRACT", env, output)
+    assert "QG_FACT_NOT_ATOMIC" in _codes(report)
+
+
 def test_b7_critic_findings_must_be_precise():
     pack, validator = _runtime()
     env = pack.replay_input("P-WRITE-CRITIC")

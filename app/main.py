@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .api_models import (
     GateDecisionRequest,
     ProjectCreate,
+    ProjectDocumentTypeUpdate,
     PromptExecuteRequest,
     WF3BTopicRequest,
     WorkflowRebuildRequest,
@@ -135,6 +136,7 @@ def create_project(req: ProjectCreate) -> dict[str, Any]:
         "allowed_model_endpoint_ids": ["offline-primary"] + (["online-public-primary"] if req.internet_access_allowed and req.anonymized_external_processing_allowed else []),
         "retention_days": 365,
         "task_instruction": req.task_instruction,
+        "document_type": req.document_type,
     }
     db.execute("INSERT INTO projects(id,name,description,security_level,config_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (project_id, req.name, req.description, req.security_level, json.dumps(config, ensure_ascii=False), now, now))
     db.audit("PROJECT_CREATED", project_id=project_id, object_id=project_id, metadata={"security_level": req.security_level})
@@ -157,6 +159,21 @@ def get_project(project_id: str) -> dict[str, Any]:
     row["config"] = json.loads(row.pop("config_json"))
     row["document_count"] = db.fetchone("SELECT COUNT(*) AS n FROM documents WHERE project_id=?", (project_id,))["n"]
     return row
+
+
+@app.patch("/api/projects/{project_id}/document-type")
+def set_project_document_type(project_id: str, req: ProjectDocumentTypeUpdate) -> dict[str, Any]:
+    project = get_project(project_id)
+    config = project["config"]
+    previous = config.get("document_type")
+    config["document_type"] = req.document_type
+    db.execute(
+        "UPDATE projects SET config_json=?, updated_at=? WHERE id=?",
+        (json.dumps(config, ensure_ascii=False), utc_now(), project_id),
+    )
+    db.audit("PROJECT_DOCUMENT_TYPE_SET", project_id=project_id, object_id=project_id,
+             metadata={"previous": previous, "document_type": req.document_type, "source": "USER"})
+    return get_project(project_id)
 
 
 @app.post("/api/projects/{project_id}/documents")

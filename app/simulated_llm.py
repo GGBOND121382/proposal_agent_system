@@ -1012,6 +1012,12 @@ class SimulatedLLM:
             "CURRENT_ADOPTION": "评估现有应用成熟度与主要路线",
             "OPERATIONAL_CONSTRAINT": "识别数据、实时性、资源、组织或合规约束",
             "RESEARCH_SIGNIFICANCE": "由上述事实导出研究价值",
+            "OBJECT_AND_EVOLUTION": "核实调研对象的定义、组织归属与各轮演进",
+            "FUNCTION_AND_ARCHITECTURE": "核实可证实的功能模块、输入输出与架构",
+            "WORKFLOW_AND_INTERACTION": "核实运行流程、人机协同与实验迭代过程",
+            "TECHNOLOGY_AND_IMPLEMENTATION": "核实关键技术解决的问题、作用方式与实现证据",
+            "EVALUATION_AND_EFFECT": "核实实验场景、指标与公开效果",
+            "LIMITATIONS_AND_GAPS": "核实披露边界、冲突与成熟度局限",
         }
         result["queries"] = [
             {
@@ -1045,6 +1051,172 @@ class SimulatedLLM:
 
     def _handle_background_research_plan_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         return base
+
+    _REPORT_DIMENSION_LABELS = {
+        "OBJECT_AND_EVOLUTION": "对象与演进",
+        "FUNCTION_AND_ARCHITECTURE": "功能与架构",
+        "WORKFLOW_AND_INTERACTION": "流程与交互",
+        "TECHNOLOGY_AND_IMPLEMENTATION": "技术与实现",
+        "EVALUATION_AND_EFFECT": "评估与效果",
+        "LIMITATIONS_AND_GAPS": "局限与缺口",
+        "APPLICATION_SCENARIO": "应用场景",
+        "STAKEHOLDER_AND_PAIN": "利益方与痛点",
+        "INDUSTRY_SCALE_AND_TREND": "规模与趋势",
+        "POLICY_STANDARD_AND_PROGRAM": "政策标准与规划",
+        "REPRESENTATIVE_CASE": "代表性案例",
+        "CURRENT_ADOPTION": "现有应用成熟度",
+        "OPERATIONAL_CONSTRAINT": "运行约束",
+        "RESEARCH_SIGNIFICANCE": "研究意义",
+    }
+
+    def _handle_report_outline(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        topic = payload.get("topic") if isinstance(payload.get("topic"), dict) else {}
+        topic_description = str(topic.get("topic_description") or "").strip() or "当前调研对象"
+        title_hint = str(payload.get("report_title_hint") or "").strip()
+        result["report_title"] = title_hint or f"{topic_description}调研报告"
+        cards = [item for item in payload.get("background_cards") or [] if isinstance(item, dict)]
+        gaps = [item for item in payload.get("background_gaps") or [] if isinstance(item, dict)]
+        card_ids_by_dimension: dict[str, list[str]] = {}
+        for card in cards:
+            dimension = str(card.get("dimension") or "").strip().upper()
+            card_id = str(card.get("card_id") or "").strip()
+            if dimension and card_id:
+                card_ids_by_dimension.setdefault(dimension, []).append(card_id)
+        brief = payload.get("survey_research_brief") if isinstance(payload.get("survey_research_brief"), dict) else {}
+        must_answer = [str(item).strip() for item in brief.get("must_answer_questions") or [] if str(item).strip()]
+        gap_texts_by_dimension: dict[str, list[str]] = {}
+        overall_gap_texts: list[str] = []
+        for gap in gaps:
+            description = str(gap.get("description") or "").strip()
+            if not description:
+                continue
+            dimension = str(gap.get("dimension") or "").strip().upper()
+            if dimension:
+                gap_texts_by_dimension.setdefault(dimension, []).append(description)
+            else:
+                overall_gap_texts.append(description)
+
+        covered_dimensions = [
+            dimension
+            for dimension in self._REPORT_DIMENSION_LABELS
+            if dimension in card_ids_by_dimension
+        ] + [
+            dimension
+            for dimension in card_ids_by_dimension
+            if dimension not in self._REPORT_DIMENSION_LABELS
+        ]
+        all_card_ids = [
+            card_id
+            for dimension in covered_dimensions
+            for card_id in card_ids_by_dimension[dimension]
+        ]
+        per_dimension_share = 60 // max(1, len(covered_dimensions))
+        sections: list[dict[str, Any]] = [{
+            "section_key": "summary",
+            "title": "摘要与主要发现",
+            "goal": f"概括{topic_description}的核心事实与主要发现",
+            "must_answer_questions": must_answer[:1] or [f"{topic_description}的核心事实是什么"],
+            "evidence_card_ids": all_card_ids[:4],
+            "known_gaps": [],
+            "estimated_share_percent": 10,
+        }]
+        question_index = 1 if must_answer else 0
+        for dimension in covered_dimensions:
+            label = self._REPORT_DIMENSION_LABELS.get(dimension, dimension)
+            questions: list[str] = []
+            if question_index < len(must_answer):
+                questions.append(must_answer[question_index])
+                question_index += 1
+            sections.append({
+                "section_key": f"background-{dimension.lower().replace('_', '-')}",
+                "title": f"背景调研：{label}",
+                "goal": f"基于证据卡陈述{topic_description}在{label}方面的公开事实",
+                "must_answer_questions": questions or [f"{topic_description}的{label}有哪些公开证据"],
+                "evidence_card_ids": list(card_ids_by_dimension[dimension]),
+                "known_gaps": gap_texts_by_dimension.get(dimension, []),
+                "estimated_share_percent": per_dimension_share,
+            })
+        sections.append({
+            "section_key": "analysis",
+            "title": "综合分析",
+            "goal": "在证据卡支持的事实之上做横向关联与矛盾分析",
+            "must_answer_questions": must_answer[question_index:] or ["各维度事实之间存在什么关联与矛盾"],
+            "evidence_card_ids": all_card_ids,
+            "known_gaps": [],
+            "estimated_share_percent": 15,
+        })
+        sections.append({
+            "section_key": "conclusion",
+            "title": "结论",
+            "goal": "总结可证实结论并如实列出仍未知事项",
+            "must_answer_questions": ["哪些结论有公开证据支撑，哪些仍属未知"],
+            "evidence_card_ids": [],
+            "known_gaps": overall_gap_texts[:5],
+            "estimated_share_percent": 10,
+        })
+        sections.append({
+            "section_key": "references",
+            "title": "参考资料与证据对照表",
+            "goal": "列出全部引用来源与证据卡的对照关系",
+            "must_answer_questions": ["每条结论对应哪些证据卡与来源"],
+            "evidence_card_ids": [],
+            "planned_exhibits": [{
+                "kind": "TABLE",
+                "caption": "证据卡与来源对照表",
+                "evidence_card_ids": all_card_ids,
+            }],
+            "known_gaps": [],
+            "estimated_share_percent": 5,
+        })
+        result["sections"] = sections
+        result["overall_gaps"] = overall_gap_texts
+        return base
+
+    def _handle_report_outline_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        known_card_ids = {
+            str(card.get("card_id") or "")
+            for card in payload.get("background_cards") or []
+            if isinstance(card, dict) and str(card.get("card_id") or "").strip()
+        }
+        candidate = payload.get("outline_candidate") if isinstance(payload.get("outline_candidate"), dict) else {}
+        unknown_by_section: dict[str, list[str]] = {}
+        for section in candidate.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            section_key = str(section.get("section_key") or "")
+            unknown = [
+                str(card_id)
+                for card_id in section.get("evidence_card_ids") or []
+                if str(card_id) not in known_card_ids
+            ]
+            for exhibit in section.get("planned_exhibits") or []:
+                if not isinstance(exhibit, dict):
+                    continue
+                unknown.extend(
+                    str(card_id)
+                    for card_id in exhibit.get("evidence_card_ids") or []
+                    if str(card_id) not in known_card_ids
+                )
+            if unknown:
+                unknown_by_section[section_key] = unknown
+        if not unknown_by_section:
+            return base
+        base["status"] = "REVISE"
+        base["result"]["verdict"] = "REVISE"
+        base["findings"] = [
+            {
+                "code": "RO_CARD_ID_UNKNOWN",
+                "severity": "P1",
+                "description": "提纲引用了输入证据卡之外的 card_id：" + "、".join(card_ids[:5]),
+                **({"section_key": section_key} if section_key else {}),
+            }
+            for section_key, card_ids in unknown_by_section.items()
+        ]
+        return base
+
 
     def _handle_background_research_synthesis(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
         payload = envelope.get("payload", {})

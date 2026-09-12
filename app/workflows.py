@@ -30,15 +30,15 @@ from .skills.research_claims import (
 from .secret_redaction import redact_secret_text, redact_secrets
 from .util import new_id, sha256_json, utc_now
 from .workflow_authoring import WorkflowAuthoringMixin
-from .workflow_defs import CRITIC_PRODUCER, WORKFLOWS
+from .workflow_defs import CRITIC_PRODUCER, WF4_REPORT_BRANCH_STEPS, WORKFLOWS
 from .background_research import (
-    BACKGROUND_DIMENSIONS,
     WF3B_PLAN_PROMPT,
     WF3B_RESEARCH_CRITIC,
     WF3B_SYNTHESIS_PROMPT,
     WF3B_WORKFLOW_TYPE,
     BackgroundResearchService,
     build_background_cards,
+    default_dimensions_for_options,
     normalize_wf3b_options,
 )
 from .workflow_gates import WorkflowGateMixin
@@ -345,7 +345,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             str(item).strip().upper()
             for item in options.get("required_dimensions") or []
             if str(item).strip()
-        ] or list(BACKGROUND_DIMENSIONS)
+        ] or default_dimensions_for_options(options)
         topic_id = str(options.get("topic_id") or "")
         topic = str(options.get("topic") or "")
 
@@ -806,7 +806,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         wf: dict[str, Any],
         state: dict[str, Any],
     ) -> tuple[str, str]:
-        steps = WORKFLOWS.get(str(wf.get("workflow_type") or ""), [])
+        steps = WorkflowEngine._steps_for({**wf, "state": state})
         step = int(wf.get("current_step") or 0)
         if step >= len(steps) or steps[step].get("type") != "WRITE_SECTIONS":
             return "", ""
@@ -924,7 +924,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         normalizer_version = str(
             getattr(self.executor, "output_normalizer_version", "") or ""
         )
-        steps = WORKFLOWS[wf["workflow_type"]]
+        steps = self._steps_for(wf)
         if not normalizer_version or wf["current_step"] >= len(steps):
             return False
         step_key = str(wf["current_step"])
@@ -2430,6 +2430,15 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 remaining.append(record)
         return remaining, accepted
 
+    def _project_document_type(self, project_id: str) -> str:
+        project = self.db.fetchone("SELECT config_json FROM projects WHERE id=?", (project_id,)) or {}
+        config = json.loads(project.get("config_json") or "{}")
+        return str(config.get("document_type") or "").strip().upper()
+
+    @staticmethod
+    def _is_survey_report_document_type(document_type: str) -> bool:
+        return document_type == "SURVEY_REPORT"
+
     def _required_workflow_types(
         self,
         project_id: str,
@@ -2442,11 +2451,18 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         elif workflow_type == WF3B_WORKFLOW_TYPE:
             required = ["WF-1_PROJECT_INTAKE"]
         elif workflow_type == "WF-4_PROPOSAL_AUTHORING":
-            required = ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION"]
             project = self.db.fetchone("SELECT config_json FROM projects WHERE id=?", (project_id,)) or {}
             config = json.loads(project.get("config_json") or "{}")
-            if bool(options.get("require_public_research", config.get("require_public_research", False))):
-                required.append("WF-3_HYBRID_ONLINE_ASSIST")
+            if self._is_survey_report_document_type(str(config.get("document_type") or "")):
+                # Survey reports research a public object: the minimal
+                # prerequisites are the completed WF-1 intake and a completed,
+                # import-approved WF-3B technical survey.  WF-2 templates and
+                # WF-3 proposal research do not apply to this branch.
+                required = ["WF-1_PROJECT_INTAKE", WF3B_WORKFLOW_TYPE]
+            else:
+                required = ["WF-1_PROJECT_INTAKE", "WF-2_TEMPLATE_EXTRACTION"]
+                if bool(options.get("require_public_research", config.get("require_public_research", False))):
+                    required.append("WF-3_HYBRID_ONLINE_ASSIST")
         elif workflow_type == "WF-5_SECURITY_REVIEW_AND_EXPORT":
             required = ["WF-4_PROPOSAL_AUTHORING"]
         return required
@@ -2468,6 +2484,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         allowed = set(required)
         if workflow_type == "WF-4_PROPOSAL_AUTHORING":
             allowed.add("WF-3_HYBRID_ONLINE_ASSIST")
+            allowed.add(WF3B_WORKFLOW_TYPE)
         unknown_types = sorted(set(explicit) - allowed)
         if unknown_types:
             raise ValueError(
@@ -2515,7 +2532,8 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         """Resolve and freeze the concrete completed workflows consumed downstream."""
         bindings: dict[str, str] = {}
         missing: list[str] = []
-        for required_type in self._required_workflow_types(project_id, workflow_type, options):
+        required_types = self._required_workflow_types(project_id, workflow_type, options)
+        for required_type in required_types:
             if required_type == "WF-4_PROPOSAL_AUTHORING":
                 rows = self.db.fetchall(
                     "SELECT id,state_json FROM workflows WHERE project_id=? AND workflow_type=? AND status='COMPLETED' ORDER BY updated_at DESC",
@@ -2541,9 +2559,11 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         # WF-3 is optional for authoring, but an existing completed and approved
         # research workflow is still a valid evidence source. Freeze it into the
         # WF-4 lineage even when the caller did not make public research mandatory.
+        # The survey-report branch consumes WF-3B instead and never WF-3.
         if (
             workflow_type == "WF-4_PROPOSAL_AUTHORING"
             and "WF-3_HYBRID_ONLINE_ASSIST" not in bindings
+            and WF3B_WORKFLOW_TYPE not in required_types
         ):
             optional_public_research = self.db.fetchone(
                 """SELECT id FROM workflows
@@ -2647,7 +2667,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             wf["workflow_type"],
             state.get("options") or {},
         )
-        steps = WORKFLOWS.get(wf["workflow_type"], [])
+        steps = self._steps_for({**wf, "state": state})
         current_step = int(wf.get("current_step") or 0)
         if current_step < len(steps):
             step = steps[current_step]
@@ -2768,6 +2788,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         }
         if lifecycle_context:
             state["workflow_lifecycle"] = copy.deepcopy(lifecycle_context)
+        self._freeze_report_branch_steps(project_id, workflow_type, state)
         prerequisite_error = self._prerequisite_error(missing_prerequisites)
         if prerequisite_error is None:
             prerequisite_error = wf3b_topic_error
@@ -2890,17 +2911,98 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             )
             if isinstance(candidate, dict):
                 definition = candidate
+        project = self.db.fetchone("SELECT config_json FROM projects WHERE id=?", (project_id,)) or {}
+        project_config = json.loads(project.get("config_json") or "{}")
+        document_type = str(project_config.get("document_type") or "").strip() or None
         normalized = normalize_wf3b_options(
             options,
             project_id=project_id,
             wf1_project_definition=definition,
+            document_type=document_type,
         )
+        if document_type and document_type.upper() == "SURVEY_REPORT" and wf1_id:
+            brief = self._wf3b_survey_research_brief(project_id, wf1_id, definition)
+            if brief:
+                normalized["survey_research_brief"] = brief
         if str(normalized.get("topic") or "").strip():
             return normalized, None
         return normalized, (
             "WF-3B 无法确定调研 topic：options.topic 未提供，且前置 WF-1 项目定义结果中没有可用的 "
             "project_title/problem_statement。请先完成 WF-1，或在 options.topic 显式给出主题后重新启动。"
         )
+
+    def _wf3b_survey_research_brief(
+        self,
+        project_id: str,
+        wf1_id: str,
+        definition: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Carry WF-1 task depth into the WF-3B plan request for survey reports.
+
+        The plan model must see the task's must-answer questions, evidence
+        discipline, scope exclusions, deliverable notes and the materials
+        cutoff — not just the topic string.  Everything here is extracted from
+        the completed WF-1 result and the project's uploaded materials; nothing
+        is invented.
+        """
+
+        seed = self._context_result(
+            project_id,
+            "P-PROJECT-DEFINITION-EXTRACT",
+            "argument_graph_seed",
+            workflow_id=wf1_id,
+            exact_workflow=True,
+        )
+        seed = seed if isinstance(seed, dict) else {}
+        items = (definition or {}).get("items") or []
+
+        def _content_text(item: dict[str, Any]) -> str:
+            content = item.get("content")
+            if isinstance(content, dict):
+                for key in ("requirement", "name", "demand_statement", "description", "statement"):
+                    text = str(content.get(key) or "").strip()
+                    if text:
+                        return text
+                return ""
+            return str(content or "").strip()
+
+        brief: dict[str, Any] = {}
+        questions = [
+            str(q.get("statement") or "").strip()
+            for q in seed.get("research_questions") or []
+            if isinstance(q, dict) and str(q.get("statement") or "").strip()
+        ]
+        if questions:
+            brief["must_answer_questions"] = questions
+        boundaries = seed.get("scope_boundaries")
+        if isinstance(boundaries, dict):
+            exclusions = [str(v).strip() for v in boundaries.get("out_of_scope") or [] if str(v).strip()]
+            if exclusions:
+                brief["scope_exclusions"] = exclusions
+        evidence = [
+            _content_text(item)
+            for item in items
+            if isinstance(item, dict) and item.get("item_type") == "COMPLIANCE_ITEM"
+        ]
+        evidence = [text for text in evidence if text]
+        if evidence:
+            brief["evidence_requirements"] = evidence
+        deliverables = [
+            _content_text(item)
+            for item in items
+            if isinstance(item, dict) and item.get("item_type") == "DELIVERABLE"
+        ]
+        deliverables = [text for text in deliverables if text]
+        if deliverables:
+            brief["deliverable_notes"] = deliverables
+        row = self.db.fetchone(
+            "SELECT MAX(created_at) FROM documents WHERE project_id=?",
+            (project_id,),
+        ) or {}
+        latest = str(row.get("MAX(created_at)") or "").strip()
+        if latest:
+            brief["materials_cutoff"] = latest[:10]
+        return brief
 
     @staticmethod
     def _has_nonconfirmable_quality_failure(output: dict[str, Any]) -> bool:
@@ -2939,7 +3041,18 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         """
         entry = self.pack.entry(producer_prompt)
         if str(entry.get("model_contract_mode") or "").upper() != "SEMANTIC":
-            return "NOT_APPLICABLE"
+            # Legacy full-contract producers may still self-repair deterministic
+            # model-repairable quality findings, but only when their input
+            # contract actually carries revision_findings; otherwise the
+            # feedback would be dropped silently and the retry would reproduce
+            # the same defect.
+            if (
+                self.context_builder._schema_for_path(
+                    producer_prompt, "payload.revision_findings"
+                )
+                is None
+            ):
+                return "NOT_APPLICABLE"
         if producer_prompt not in set(CRITIC_PRODUCER.values()):
             return "NOT_APPLICABLE"
 
@@ -2972,10 +3085,12 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         rounds = state.get("semantic_producer_regeneration_rounds") or {}
         completed = int(rounds.get(producer_prompt) or 0)
         if completed >= limit:
+            remaining = [str(item.get("description") or item.get("code") or item.get("gap_id") or "")
+                         for item in (gap_report or quality_findings)]
             state["last_error"] = (
-                f"{producer_prompt} 在 {completed} 轮非 USER 语义补全重生成后仍存在"
-                "证据或研究链缺口；继续自动重试不会增加新的证据来源。"
-                "该缺口保持内容阻断，不转为空问题人工 Gate。"
+                f"{producer_prompt} 在 {completed} 轮修复后仍未通过校验："
+                + "；".join(remaining[:5])
+                + "。自动修复预算已用完，保留内容阻断。"
             )
             self._clear_workflow_repair_rereview(state, producer_prompt)
             self._update(
@@ -3427,8 +3542,43 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
         if not row:
             raise KeyError(f"Workflow not found: {workflow_id}")
         row["state"] = json.loads(row.pop("state_json"))
-        row["steps"] = WORKFLOWS[row["workflow_type"]]
+        row["steps"] = self._steps_for(row)
         return row
+
+    @staticmethod
+    def _steps_for(wf: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the step list for one workflow.
+
+        The WF-4 report branch (SURVEY_REPORT projects) freezes its step list
+        into state at start so the run never mixes proposal-only steps in even
+        if the project configuration changes mid-run.
+        """
+
+        state = wf.get("state") if isinstance(wf.get("state"), dict) else {}
+        frozen = state.get("frozen_steps")
+        if (
+            wf.get("workflow_type") == "WF-4_PROPOSAL_AUTHORING"
+            and isinstance(frozen, list)
+            and frozen
+            and all(isinstance(step, dict) for step in frozen)
+        ):
+            return frozen
+        return WORKFLOWS.get(str(wf.get("workflow_type") or ""), [])
+
+    def _freeze_report_branch_steps(
+        self,
+        project_id: str,
+        workflow_type: str,
+        state: dict[str, Any],
+    ) -> None:
+        if workflow_type != "WF-4_PROPOSAL_AUTHORING":
+            return
+        if state.get("frozen_steps"):
+            return
+        if not self._is_survey_report_document_type(self._project_document_type(project_id)):
+            return
+        state["frozen_steps"] = copy.deepcopy(WF4_REPORT_BRANCH_STEPS)
+        state["report_branch"] = "SURVEY_REPORT"
 
     async def advance(self, workflow_id: str) -> dict[str, Any]:
         wf = self.get(workflow_id)
@@ -3542,6 +3692,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     return self.get(workflow_id)
             state.pop("last_error", None)
             state.pop("waiting_prerequisite", None)
+            self._freeze_report_branch_steps(wf["project_id"], wf["workflow_type"], state)
             state["recovered_from"] = (
                 "WAITING_PREREQUISITE"
                 if wf["status"] in {
@@ -3615,7 +3766,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
             # old generic technical retry budget before their category is known.
             return self._migrate_legacy_blocked_status(wf)
         wf["status"] = "RUNNING"
-        steps = WORKFLOWS[wf["workflow_type"]]
+        steps = self._steps_for(wf)
         state = wf["state"]
         while wf["current_step"] < len(steps):
             step = steps[wf["current_step"]]
@@ -4209,7 +4360,7 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                     ),
                     None,
                 )
-                workflow_steps = WORKFLOWS.get(wf["workflow_type"]) or []
+                workflow_steps = self._steps_for({**wf, "state": state})
                 next_step = (
                     workflow_steps[wf["current_step"] + 1]
                     if wf["current_step"] + 1 < len(workflow_steps)

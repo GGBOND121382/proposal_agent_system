@@ -1,0 +1,121 @@
+{
+  "case_id": "report_outline_critic-missing_input",
+  "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+  "case_type": "missing_input",
+  "description": "结构合法但证据卡清单缺失，无法核对引用，应要求用户补充",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "REPORT_OUTLINE_CRITIC",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "document_type": "SURVEY_REPORT",
+      "outline_candidate": {
+        "report_title": "DASH 系统公开调研报告",
+        "sections": [
+          {
+            "section_key": "object-evolution",
+            "title": "背景调研：对象与演进",
+            "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+            "must_answer_questions": [
+              "DASH 是什么？"
+            ],
+            "evidence_card_ids": [
+              "card-001"
+            ],
+            "known_gaps": []
+          }
+        ],
+        "overall_gaps": []
+      },
+      "background_cards": []
+    },
+    "expected_output_schema": "schemas/prompts/report_outline_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "verdict": "REVISE"
+    },
+    "findings": [],
+    "unresolved_items": [
+      {
+        "item_id": "unres-001",
+        "type": "MISSING",
+        "description": "缺少用于核对 evidence_card_ids 的调研证据卡清单",
+        "target_paths": [
+          "payload/background_cards"
+        ],
+        "required_action": "补充调研证据卡",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-001",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请提供提纲审查所需的 WF-3B 调研证据卡清单。",
+        "reason": "没有证据卡清单时无法核对提纲中的 evidence_card_ids 是否真实存在",
+        "target_paths": [
+          "payload/background_cards"
+        ],
+        "answer_schema": {
+          "type": "OBJECT",
+          "allowed_values": [],
+          "properties": {}
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

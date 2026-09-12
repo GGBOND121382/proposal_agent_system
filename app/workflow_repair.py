@@ -8,9 +8,15 @@ from typing import Any
 
 from .executor import PromptExecutionError
 from .deterministic_repair import apply_deterministic_contract_repairs
+from .contract_registry import normalize_exact_null_literals
 from .model_semantic_contracts import (
+    apply_semantic_model_output_defaults,
+    apply_wf1_survey_intake_defaults,
     argument_authoritative_repair_paths,
+    expand_semantic_model_output,
     project_argument_authoritative_state,
+    semantic_model_reference_errors,
+    supports_semantic_model_contract,
     targeted_repair_structural_blockers,
 )
 from .util import new_id, sha256_json, utc_now
@@ -27,9 +33,9 @@ from .json_pointer import (
 from .output_integrity import attach_trusted_source_catalog
 from .workflow_defs import CRITIC_PRODUCER
 from .background_research import (
-    BACKGROUND_DIMENSIONS,
     WF3B_PLAN_PROMPT,
     compare_background_search_candidates,
+    default_dimensions_for_options,
     normalize_background_plan,
 )
 from .contracts.semantic_contract import get_semantic_contract
@@ -235,9 +241,37 @@ class WorkflowRepairMixin:
         producer_input: dict[str, Any],
         quality_input: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Run the repaired object through the original deterministic chain."""
+        """Run the repaired object through the original deterministic chain.
 
-        immutable_candidate = copy.deepcopy(candidate)
+        Semantic-contract producers persist the *semantic* candidate (S/I local
+        ids, not yet expanded) when validation fails.  Repairing that candidate
+        therefore re-enters the exact producer validation chain — deterministic
+        defaults, semantic schema, semantic reference checks bound to the
+        *original* producer request, then expansion — before the canonical
+        chain runs.  Handing the unexpanded candidate straight to the canonical
+        reference validator was the wf-11d5a0f0ef814cfc failure: S1…S8 were
+        rejected as unknown ids and the repair loop could never converge.
+        """
+
+        working = copy.deepcopy(candidate)
+        if supports_semantic_model_contract(prompt_id) and "schema_version" not in working:
+            model_schema = self.pack.model_schema(prompt_id, "output")
+            working = apply_semantic_model_output_defaults(model_schema, working)
+            working, _null_report = normalize_exact_null_literals(working, model_schema)
+            working, _survey_report = apply_wf1_survey_intake_defaults(
+                prompt_id, producer_input, working
+            )
+            semantic_errors = self.pack.validate_model(prompt_id, "output", working)
+            semantic_errors.extend(
+                semantic_model_reference_errors(prompt_id, producer_input, working)
+            )
+            if semantic_errors:
+                raise PromptExecutionError(
+                    "Repaired producer output failed semantic contract validation",
+                    validation_errors=semantic_errors,
+                )
+            working = expand_semantic_model_output(prompt_id, producer_input, working)
+        immutable_candidate = copy.deepcopy(working)
         consumed = self.executor._normalize_output(
             prompt_id,
             copy.deepcopy(immutable_candidate),
@@ -803,10 +837,11 @@ class WorkflowRepairMixin:
                 str(item).strip().upper()
                 for item in options.get("required_dimensions") or []
                 if str(item).strip()
-            ] or list(BACKGROUND_DIMENSIONS)
+            ] or default_dimensions_for_options(options)
             plan, dimension_findings = normalize_background_plan(
                 plan,
                 required_dimensions=required_dimensions,
+                default_dimensions=default_dimensions_for_options(options),
             )
             if dimension_findings:
                 state.setdefault("background_plan_dimension_findings", []).append(

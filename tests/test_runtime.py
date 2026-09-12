@@ -105,7 +105,7 @@ async def finish_workflow(engine: WorkflowEngine, project_id: str, workflow_type
 
 def test_prompt_pack_and_all_normal_replays(runtime):
     _, pack, *_ = runtime
-    assert len(pack.prompt_ids()) == 35
+    assert len(pack.prompt_ids()) == 37
     for prompt_id in pack.prompt_ids():
         case = pack.replay_case(prompt_id, "normal")
         assert pack.validate(prompt_id, "input", case["input"]) == []
@@ -3350,7 +3350,11 @@ def test_semantic_producer_blocking_deficiency_regenerates_without_gate(
     exhausted = engine.get(workflow["id"])
     assert exhausted["status"] == "BLOCKED_CONTENT"
     assert engine.list_gates(workflow_id=workflow["id"]) == []
-    assert "不转为空问题人工 Gate" in exhausted["state"]["last_error"]
+    last_error = exhausted["state"]["last_error"]
+    # Budget exhaustion must surface the concrete remaining defects instead of
+    # a generic evidence-gap message.
+    assert "自动修复预算已用完" in last_error
+    assert "arg-evidence-gap-001" in last_error
 
 
 def test_producer_self_revise_is_routed_to_paired_critic(runtime, monkeypatch):

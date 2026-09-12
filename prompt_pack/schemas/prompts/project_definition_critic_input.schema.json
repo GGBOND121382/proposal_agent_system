@@ -169,6 +169,14 @@
           "items": {
             "$ref": "../common/human_resolution.schema.json"
           }
+        },
+        "document_type": {
+          "type": "string",
+          "enum": [
+            "RESEARCH_PROPOSAL",
+            "ENGINEERING_PROPOSAL",
+            "SURVEY_REPORT"
+          ]
         }
       },
       "additionalProperties": false,

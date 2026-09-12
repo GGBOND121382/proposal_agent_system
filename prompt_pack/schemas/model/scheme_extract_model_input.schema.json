@@ -4,6 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "document_type": {"type": "string", "enum": ["RESEARCH_PROPOSAL", "ENGINEERING_PROPOSAL", "SURVEY_REPORT"]},
     "extraction_scope": {
       "type": "array",
       "items": {

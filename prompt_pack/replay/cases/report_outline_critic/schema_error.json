@@ -1,0 +1,75 @@
+{
+  "case_id": "report_outline_critic-schema_error",
+  "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+  "case_type": "schema_error",
+  "description": "输入Envelope缺少security_context，应在调用模型前被Schema拒绝",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "REPORT_OUTLINE_CRITIC",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "document_type": "SURVEY_REPORT",
+      "outline_candidate": {
+        "report_title": "DASH 系统公开调研报告",
+        "sections": [
+          {
+            "section_key": "object-evolution",
+            "title": "背景调研：对象与演进",
+            "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+            "must_answer_questions": [
+              "DASH 是什么？"
+            ],
+            "evidence_card_ids": [
+              "card-001"
+            ],
+            "known_gaps": []
+          }
+        ]
+      },
+      "background_cards": [
+        {
+          "card_id": "card-001",
+          "dimension": "OBJECT_AND_EVOLUTION",
+          "claim_text": "DASH 是美国空军部公开披露的人机协同决策支持系统。",
+          "source_ids": [
+            "src-001"
+          ],
+          "evidence_mode": "FULLTEXT",
+          "scope_qualifiers": [],
+          "limitations": []
+        }
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/report_outline_critic_output.schema.json"
+  },
+  "expected_output": null,
+  "expected_validation": {
+    "input_schema_valid": false,
+    "output_schema_valid": false,
+    "expected_status": null
+  }
+}

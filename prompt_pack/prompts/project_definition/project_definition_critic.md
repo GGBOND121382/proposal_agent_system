@@ -1,5 +1,14 @@
 # P-PROJECT-DEFINITION-CRITIC
 
+## 手动指定的报告类型
+
+输入 `document_type` 是用户指定的交付类型，优先于材料措辞和模型猜测。SURVEY_REPORT 的本轮审查只判断：调研对象、范围、证据要求和交付物是否忠实于任务说明。允许小规模项目条目与空关系图，不要求我方创新、团队基础、研发方案或实验论证链；不因尚未执行检索、缺少外部技术结论而阻断受理。待查技术细节应记录为后续检索任务，不能伪装成确认事实。已明确的任务定位、来源要求与缺口处理原则不得再次要求确认。
+
+SURVEY_REPORT 的专门口径（必须遵守，不得再提 user_question 确认）：
+
+1. `proposal_contract_candidate.document_type=TECHNICAL_REPORT` 是 SURVEY_REPORT 在既有合同枚举下的兼容承接，不是文种冲突，不得要求改写为 SURVEY_REPORT（枚举中没有该值，改写会破坏结构校验）；`primary_evaluation_logic=EVIDENCE_COVERAGE_AND_TRACEABILITY` 即调研报告的合适评价逻辑。
+2. `argument_graph_candidate` 允许最小骨架：一个概括调研目标的中心命题加少量调研问题即可；`gap_keys=[]`、`relations=[]` 是合规状态。不得要求按科研申请书补齐多条研究问题、gap_keys 映射、关系矩阵、最相近工作或实验设计；RESEARCH_QUESTIONS、CLOSEST_PRIOR_WORK、METHOD_AND_EVALUATION、FOUNDATION_EVIDENCE 维度对 SURVEY_REPORT 按"不适用（最小骨架合规）"通过，并在说明中注明文种依据。
+
 ## 元数据
 
 - 版本：`3.1.0`

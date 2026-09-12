@@ -189,6 +189,28 @@
       "model_output_schema": "schemas/model/background_research_critic_model_output.schema.json"
     },
     {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "prompt_version": "1.0.0",
+      "prompt_file": "prompts/report/report_outline.md",
+      "input_schema": "schemas/prompts/report_outline_input.schema.json",
+      "output_schema": "schemas/prompts/report_outline_output.schema.json",
+      "model_profile": "planning",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Planning Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "prompt_version": "1.0.0",
+      "prompt_file": "prompts/report/report_outline_critic.md",
+      "input_schema": "schemas/prompts/report_outline_critic_input.schema.json",
+      "output_schema": "schemas/prompts/report_outline_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": "PLAN_CONFIRMATION"
+    },
+    {
       "prompt_id": "P-SCHEME-EXTRACT",
       "prompt_version": "2.1.0",
       "prompt_file": "prompts/scheme/scheme_extract.md",

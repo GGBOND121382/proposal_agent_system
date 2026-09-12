@@ -19,7 +19,8 @@ from .privacy import find_sensitive_values, redact_public_retrieval_content
 from .proposal_quality import SECTION_FUNCTION_ROLE_ALIASES
 from .workflow_repair import repair_override_key, producer_consumer_value
 from .background_research import (
-    BACKGROUND_DIMENSIONS,
+    ALL_BACKGROUND_DIMENSION_SET,
+    ALL_BACKGROUND_DIMENSIONS,
     WF3B_PLAN_PROMPT,
     WF3B_PLAN_CRITIC_PROMPT,
     WF3B_RESEARCH_CRITIC,
@@ -27,6 +28,8 @@ from .background_research import (
     WF3B_WORKFLOW_TYPE,
     background_execution_contract,
     build_background_cards,
+    default_dimensions_for_options,
+    resolve_dimension_mode,
 )
 from .model_semantic_contracts import project_argument_authoritative_state
 from .wf3_contracts import wf3_safe_package_valid_until
@@ -62,6 +65,28 @@ _CURRENT_WORKFLOW_ID: ContextVar[str | None] = ContextVar(
 _WORKFLOW_ARTIFACT_SOURCE_CACHE: ContextVar[dict[str, tuple[str, ...]] | None] = ContextVar(
     "proposal_context_artifact_source_cache",
     default=None,
+)
+
+REPORT_OUTLINE_PROMPT = "P-REPORT-OUTLINE"
+REPORT_OUTLINE_CRITIC_PROMPT = "P-REPORT-OUTLINE-CRITIC"
+_REPORT_CARD_KEYS = (
+    "card_id",
+    "dimension",
+    "claim_text",
+    "source_ids",
+    "evidence_mode",
+    "scope_qualifiers",
+    "limitations",
+)
+_REPORT_GAP_KEYS = ("gap_id", "scope", "dimension", "description")
+_REPORT_SOURCE_KEYS = ("source_id", "title", "url", "source_type", "published_at")
+_REPORT_BRIEF_KEYS = (
+    "must_answer_questions",
+    "evidence_requirements",
+    "materials_cutoff",
+    "source_priorities",
+    "scope_exclusions",
+    "deliverable_notes",
 )
 
 CRITICAL_CONTEXT_PATHS = {
@@ -1889,7 +1914,7 @@ class ContextBuilder:
         status = str(sufficiency.get("status") or "DEGRADED").upper()
         if status not in {"SUFFICIENT", "DEGRADED", "BLOCKING_FAILURE"}:
             status = "DEGRADED" if sufficiency.get("may_continue", True) else "BLOCKING_FAILURE"
-        allowed_dimensions = set(required_dimensions or BACKGROUND_DIMENSIONS)
+        allowed_dimensions = set(required_dimensions or ALL_BACKGROUND_DIMENSIONS)
         uncovered: list[str] = []
         for gap in sufficiency.get("research_gaps") or []:
             if not isinstance(gap, dict):
@@ -1997,6 +2022,167 @@ class ContextBuilder:
         }
         projected["queries"] = projected_queries
         return projected
+
+    def _wf4_report_branch_context(
+        self,
+        project_id: str,
+        state: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Load the bound WF-3B prerequisite's topic, brief, cards and gaps.
+
+        The WF-4 report branch grounds the outline in the persisted
+        TOPIC_BACKGROUND_RESULT artifact of the frozen WF-3B run.  Returns
+        None when the binding or the artifact is missing; callers must treat
+        that as a hard input error because template placeholders from the
+        replay fixture would otherwise silently reach the model.
+        """
+
+        bindings = (
+            state.get("prerequisite_workflow_ids")
+            if isinstance(state.get("prerequisite_workflow_ids"), dict)
+            else {}
+        )
+        wf3b_id = str(bindings.get(WF3B_WORKFLOW_TYPE) or "").strip()
+        if not wf3b_id:
+            return None
+        row = self.db.fetchone(
+            "SELECT state_json FROM workflows WHERE id=? AND project_id=?",
+            (wf3b_id, project_id),
+        )
+        if not row:
+            return None
+        wf3b_state = json.loads(row.get("state_json") or "{}")
+        options = (
+            wf3b_state.get("options")
+            if isinstance(wf3b_state.get("options"), dict)
+            else {}
+        )
+        artifact_id = str(wf3b_state.get("wf3b_background_result_artifact_id") or "").strip()
+        artifact_row = (
+            self.db.fetchone(
+                "SELECT content_json FROM artifacts WHERE id=? AND project_id=?",
+                (artifact_id, project_id),
+            )
+            if artifact_id
+            else None
+        )
+        if not artifact_row:
+            return None
+        artifact = json.loads(artifact_row.get("content_json") or "{}")
+
+        cards: list[dict[str, Any]] = []
+        for card in artifact.get("background_cards") or []:
+            if not isinstance(card, dict):
+                continue
+            projected = {
+                key: copy.deepcopy(card.get(key))
+                for key in _REPORT_CARD_KEYS
+                if card.get(key) is not None
+            }
+            if all(
+                str(projected.get(key) or "").strip()
+                for key in ("card_id", "dimension", "claim_text")
+            ):
+                cards.append(projected)
+
+        referenced_source_ids: list[str] = []
+        for card in cards:
+            for source_id in card.get("source_ids") or []:
+                source_id = str(source_id or "").strip()
+                if source_id and source_id not in referenced_source_ids:
+                    referenced_source_ids.append(source_id)
+        referenced = set(referenced_source_ids)
+        sources: list[dict[str, Any]] = []
+        for entry in artifact.get("source_catalog") or []:
+            if not isinstance(entry, dict):
+                continue
+            if referenced and str(entry.get("source_id") or "") not in referenced:
+                continue
+            projected_source = {
+                key: copy.deepcopy(entry.get(key))
+                for key in _REPORT_SOURCE_KEYS
+                if entry.get(key) is not None
+            }
+            if str(projected_source.get("source_id") or "").strip():
+                sources.append(projected_source)
+
+        gaps: list[dict[str, Any]] = []
+        for gap in artifact.get("background_gaps") or []:
+            if not isinstance(gap, dict):
+                continue
+            projected = {
+                key: copy.deepcopy(gap.get(key))
+                for key in _REPORT_GAP_KEYS
+                if gap.get(key) is not None
+            }
+            description = str(projected.get("description") or "").strip()
+            if not description:
+                description = str(gap.get("query") or "").strip() or json.dumps(
+                    gap, ensure_ascii=False
+                )[:200]
+            projected["description"] = description
+            gaps.append(projected)
+
+        brief = options.get("survey_research_brief")
+        if isinstance(brief, dict):
+            brief = {
+                key: copy.deepcopy(value)
+                for key, value in brief.items()
+                if key in _REPORT_BRIEF_KEYS and value is not None
+            }
+        else:
+            brief = None
+
+        return {
+            "topic_id": str(options.get("topic_id") or "").strip(),
+            "topic": str(options.get("topic") or "").strip(),
+            "survey_research_brief": brief or None,
+            "background_cards": cards,
+            "background_gaps": gaps,
+            "source_catalog": sources,
+        }
+
+    @staticmethod
+    def _project_report_outline_candidate(result: dict[str, Any]) -> dict[str, Any]:
+        """Project a persisted P-REPORT-OUTLINE result onto the critic schema."""
+
+        source = result if isinstance(result, dict) else {}
+        sections: list[dict[str, Any]] = []
+        for section in source.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            projected = {
+                key: copy.deepcopy(section.get(key))
+                for key in (
+                    "section_key",
+                    "title",
+                    "goal",
+                    "must_answer_questions",
+                    "evidence_card_ids",
+                    "planned_exhibits",
+                    "known_gaps",
+                    "estimated_share_percent",
+                )
+                if section.get(key) is not None
+            }
+            if "planned_exhibits" in projected:
+                projected["planned_exhibits"] = [
+                    {
+                        key: copy.deepcopy(exhibit.get(key))
+                        for key in ("kind", "caption", "evidence_card_ids")
+                        if exhibit.get(key) is not None
+                    }
+                    for exhibit in section.get("planned_exhibits") or []
+                    if isinstance(exhibit, dict)
+                ]
+            sections.append(projected)
+        candidate = {
+            key: copy.deepcopy(source.get(key))
+            for key in ("report_title", "audience", "overall_gaps")
+            if source.get(key) is not None
+        }
+        candidate["sections"] = sections
+        return candidate
 
     def _approved_public_claims(
         self,
@@ -2326,6 +2512,11 @@ class ContextBuilder:
 
     def _apply_common_payload(self, envelope: dict[str, Any], prompt_id: str, project: dict[str, Any], config: dict[str, Any], docs: list[dict[str, Any]], context_hash: str, state: dict[str, Any], workflow_id: str | None) -> None:
         payload = envelope["payload"]
+        # A user-selected genre is authoritative; retain it in the hashed input.
+        if config.get("document_type") and self._schema_for_path(prompt_id, "payload.document_type") is not None:
+            self._set_path_if_valid(
+                prompt_id, envelope, "payload.document_type", config["document_type"], strict=True
+            )
         strict_live_inputs = str(getattr(self, "runtime_mode", "REPLAY")).upper() == "LIVE"
         material_dependent_fields = {
             "object_context",
@@ -2446,6 +2637,11 @@ class ContextBuilder:
                 ("payload.target_task_type", wf3_payload["target_task_type"]),
                 ("payload.allowed_topics", wf3_payload["allowed_topics"]),
             ])
+            # A SURVEY_REPORT researches a public object (e.g. a foreign
+            # public system): naming that object is the task, not a leak.
+            # The security package must not anonymize the public object away.
+            if str(config.get("document_type") or "").strip().upper() == "SURVEY_REPORT":
+                replacements.append(("payload.delivery_mode", "PUBLIC_OBJECT_SURVEY"))
         if prompt_id == "P-SAFE-ONLINE-PACKAGE-CRITIC":
             wf3_payload = self._wf3_online_assist_payload(
                 project=project,
@@ -2469,6 +2665,8 @@ class ContextBuilder:
                 ("payload.source_summary", self._wf3_source_summary(wf3_payload["source_items"])),
                 ("payload.deterministic_scan", self._wf3_deterministic_scan(package_candidate, config)),
             ])
+            if str(config.get("document_type") or "").strip().upper() == "SURVEY_REPORT":
+                replacements.append(("payload.delivery_mode", "PUBLIC_OBJECT_SURVEY"))
         if prompt_id == "P-PUBLIC-RESEARCH-PLAN":
             options = state.get("options") if isinstance(state.get("options"), dict) else {}
             safe_package_for_plan = self._result(project["id"], "P-SAFE-ONLINE-PACKAGE") or {}
@@ -2520,13 +2718,13 @@ class ContextBuilder:
             options = state.get("options") if isinstance(state.get("options"), dict) else {}
             required_dimensions = [
                 str(item).upper()
-                for item in options.get("required_dimensions") or BACKGROUND_DIMENSIONS
-                if str(item).upper() in BACKGROUND_DIMENSIONS
+                for item in options.get("required_dimensions") or default_dimensions_for_options(options)
+                if str(item).upper() in ALL_BACKGROUND_DIMENSION_SET
             ]
             optional_dimensions = [
                 str(item).upper()
                 for item in options.get("optional_dimensions") or []
-                if str(item).upper() in BACKGROUND_DIMENSIONS
+                if str(item).upper() in ALL_BACKGROUND_DIMENSION_SET
                 and str(item).upper() not in required_dimensions
             ]
             retrieval_contract = background_execution_contract(
@@ -2534,6 +2732,7 @@ class ContextBuilder:
             )
             replacements.extend([
                 ("payload.task_type", "PUBLIC_BACKGROUND_RESEARCH"),
+                ("payload.research_dimension_mode", resolve_dimension_mode(None, options)),
                 ("payload.topic", {
                     "topic_id": str(options.get("topic_id") or ""),
                     "topic_description": str(options.get("topic") or "").strip(),
@@ -2545,8 +2744,17 @@ class ContextBuilder:
                 ("payload.evidence_requirements", self._wf3_evidence_requirements(options)),
                 ("payload.retrieval_contract", retrieval_contract),
             ])
+            if isinstance(options.get("survey_research_brief"), dict) and options["survey_research_brief"]:
+                replacements.append(("payload.survey_research_brief", copy.deepcopy(options["survey_research_brief"])))
             if state.get("background_search_feedback"):
-                replacements.append(("payload.retrieval_feedback", copy.deepcopy(state["background_search_feedback"])))
+                # Feedback summaries quote public web excerpts; redact contact
+                # details exactly like retrieved_sources so the outbound scan
+                # does not block the follow-up plan on a public email address.
+                redacted_feedback, _feedback_matches = redact_public_retrieval_content(
+                    copy.deepcopy(state["background_search_feedback"]),
+                    "$.payload.retrieval_feedback",
+                )
+                replacements.append(("payload.retrieval_feedback", redacted_feedback))
         if prompt_id == WF3B_PLAN_CRITIC_PROMPT:
             options = state.get("options") if isinstance(state.get("options"), dict) else {}
             safe_package_for_plan = self._result(
@@ -2575,9 +2783,64 @@ class ContextBuilder:
                     "prohibited_inferences": list(safe_package_for_plan.get("prohibited_inferences") or []),
                     "prohibited_outputs": list(safe_package_for_plan.get("prohibited_outputs") or []),
                 }),
-                ("payload.required_dimensions", list(options.get("required_dimensions") or BACKGROUND_DIMENSIONS)),
+                ("payload.required_dimensions", list(options.get("required_dimensions") or default_dimensions_for_options(options))),
                 ("payload.executable_queries", list(plan.get("queries") or [])),
             ])
+        if prompt_id in {REPORT_OUTLINE_PROMPT, REPORT_OUTLINE_CRITIC_PROMPT}:
+            report_context = self._wf4_report_branch_context(project["id"], state)
+            if (
+                report_context is None
+                or not report_context["topic"]
+                or not report_context["topic_id"]
+            ):
+                raise ValueError(
+                    f"{prompt_id} 需要已完成且已持久化 TOPIC_BACKGROUND_RESULT 的 "
+                    "WF-3B 前置绑定；未找到绑定工作流或其背景调研结果工件。"
+                )
+            if not report_context["background_cards"]:
+                raise ValueError(
+                    f"{prompt_id} 的 WF-3B 前置没有任何通过来源绑定校验的证据卡；"
+                    "报告提纲必须建立在真实证据卡上，不得使用模板占位内容。"
+                )
+            report_brief = report_context.get("survey_research_brief")
+            if prompt_id == REPORT_OUTLINE_PROMPT:
+                replacements.extend([
+                    ("payload.topic", {
+                        "topic_id": report_context["topic_id"],
+                        "topic_description": report_context["topic"],
+                    }),
+                    ("payload.research_dimension_mode", "SURVEY_TECHNICAL"),
+                    ("payload.background_cards", report_context["background_cards"]),
+                    ("payload.background_gaps", report_context["background_gaps"]),
+                    ("payload.source_catalog", report_context["source_catalog"]),
+                ])
+                if report_brief:
+                    replacements.append(("payload.survey_research_brief", report_brief))
+                report_title_hint = str(project.get("name") or "").strip()
+                if report_title_hint:
+                    replacements.append(("payload.report_title_hint", report_title_hint))
+            else:
+                outline_candidate = (
+                    self._repair_override(state, REPORT_OUTLINE_PROMPT, workflow_id=workflow_id)
+                    or self._result(
+                        project["id"],
+                        REPORT_OUTLINE_PROMPT,
+                        workflow_id=workflow_id,
+                        exact_workflow=True,
+                    )
+                )
+                if not isinstance(outline_candidate, dict) or not outline_candidate.get("sections"):
+                    raise ValueError(
+                        "P-REPORT-OUTLINE-CRITIC 需要本工作流已完成的 "
+                        "P-REPORT-OUTLINE 结果作为审查对象。"
+                    )
+                replacements.extend([
+                    ("payload.outline_candidate", self._project_report_outline_candidate(outline_candidate)),
+                    ("payload.background_cards", report_context["background_cards"]),
+                    ("payload.source_catalog", report_context["source_catalog"]),
+                ])
+                if report_brief:
+                    replacements.append(("payload.survey_research_brief", report_brief))
         human_resolutions = self._human_resolutions_for_prompt(state, prompt_id, workflow_id)
         if "human_resolutions" in payload or human_resolutions:
             replacements.append(("payload.human_resolutions", human_resolutions))
@@ -3402,7 +3665,7 @@ class ContextBuilder:
                         "payload.retrieval_summary",
                         self._wf3b_retrieval_summary(
                             search_results,
-                            list(options.get("required_dimensions") or BACKGROUND_DIMENSIONS),
+                            list(options.get("required_dimensions") or default_dimensions_for_options(options)),
                         ),
                     ))
             retrieval_redaction_matches: list[Any] = []

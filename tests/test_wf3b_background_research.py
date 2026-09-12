@@ -8,14 +8,19 @@ from types import SimpleNamespace
 import pytest
 
 from app.background_research import (
+    ALL_BACKGROUND_DIMENSION_SET,
     BACKGROUND_DIMENSIONS,
+    SURVEY_RESEARCH_DIMENSIONS,
     UNSCOPED_DIMENSION,
     WF3B_WORKFLOW_TYPE,
     background_execution_contract,
     build_background_cards,
+    default_dimensions_for_options,
     normalize_background_plan,
     normalize_required_dimensions,
     normalize_wf3b_options,
+    resolve_background_dimension_policy,
+    resolve_dimension_mode,
     resolve_wf3b_topic,
     wf3b_topic_id,
 )
@@ -167,6 +172,138 @@ def test_wf3b_unknown_or_empty_dimensions_fail_fast():
         normalize_required_dimensions({"background_dimensions": []})
     with pytest.raises(ValueError, match="必须是背景维度数组"):
         normalize_required_dimensions({"required_dimensions": "APPLICATION_SCENARIO"})
+
+
+def test_survey_report_dimension_policy_defaults_to_six_technical_dimensions():
+    policy = resolve_background_dimension_policy("SURVEY_REPORT")
+    assert policy["mode"] == "SURVEY_TECHNICAL"
+    assert policy["default_required"] == list(SURVEY_RESEARCH_DIMENSIONS)
+    assert len(policy["default_required"]) == 6
+    assert set(policy["allowed"]) == ALL_BACKGROUND_DIMENSION_SET
+
+    legacy = resolve_background_dimension_policy(None)
+    assert legacy["mode"] == "APPLICATION_BACKGROUND"
+    assert legacy["default_required"] == list(BACKGROUND_DIMENSIONS)
+    assert set(legacy["allowed"]) == set(BACKGROUND_DIMENSIONS)
+
+
+def test_wf3b_survey_report_options_default_freezes_six_dimensions():
+    normalized = normalize_wf3b_options(None, document_type="SURVEY_REPORT")
+    assert normalized["required_dimensions"] == list(SURVEY_RESEARCH_DIMENSIONS)
+    assert normalized["required_dimensions_origin"] == "DEFAULT_ALL"
+    assert normalized["research_dimension_mode"] == "SURVEY_TECHNICAL"
+    assert normalized["document_type"] == "SURVEY_REPORT"
+
+
+def test_wf3b_survey_report_explicit_subset_and_legacy_supplement():
+    normalized = normalize_wf3b_options(
+        {"background_dimensions": ["evaluation_and_effect", "OBJECT_AND_EVOLUTION", " object_and_evolution "]},
+        document_type="SURVEY_REPORT",
+    )
+    assert normalized["required_dimensions"] == ["OBJECT_AND_EVOLUTION", "EVALUATION_AND_EFFECT"]
+    assert normalized["required_dimensions_origin"] == "WORKFLOW_OPTIONS"
+
+    supplemented = normalize_wf3b_options(
+        {"background_dimensions": ["LIMITATIONS_AND_GAPS", "INDUSTRY_SCALE_AND_TREND"]},
+        document_type="SURVEY_REPORT",
+    )
+    assert supplemented["required_dimensions"] == ["LIMITATIONS_AND_GAPS", "INDUSTRY_SCALE_AND_TREND"]
+
+
+def test_wf3b_survey_dimensions_rejected_in_application_mode():
+    with pytest.raises(ValueError, match="未知背景维度"):
+        normalize_required_dimensions({"background_dimensions": ["OBJECT_AND_EVOLUTION"]})
+    with pytest.raises(ValueError, match="未知背景维度"):
+        normalize_required_dimensions(
+            {"background_dimensions": ["NOT_A_DIMENSION"]},
+            document_type="SURVEY_REPORT",
+        )
+
+
+def test_wf3b_dimension_mode_resolution_prefers_frozen_options_mode():
+    assert resolve_dimension_mode("SURVEY_REPORT") == "SURVEY_TECHNICAL"
+    assert resolve_dimension_mode(None, {"research_dimension_mode": "SURVEY_TECHNICAL"}) == "SURVEY_TECHNICAL"
+    assert resolve_dimension_mode(None) == "APPLICATION_BACKGROUND"
+    assert default_dimensions_for_options({"research_dimension_mode": "SURVEY_TECHNICAL"}) == list(
+        SURVEY_RESEARCH_DIMENSIONS
+    )
+    assert default_dimensions_for_options({}) == list(BACKGROUND_DIMENSIONS)
+
+
+def test_normalize_background_plan_accepts_survey_dimensions_and_rejects_unknown():
+    plan, findings = normalize_background_plan(
+        {
+            "queries": [
+                {"query": "DASH 2 experiment modules", "dimensions": ["FUNCTION_AND_ARCHITECTURE"]},
+                {"query": "residential renovation decision support", "dimensions": ["MADE_UP_DIMENSION"]},
+            ]
+        },
+        required_dimensions=list(SURVEY_RESEARCH_DIMENSIONS),
+        default_dimensions=list(SURVEY_RESEARCH_DIMENSIONS),
+    )
+    assert plan["required_dimensions"] == list(SURVEY_RESEARCH_DIMENSIONS)
+    assert plan["queries"][0]["dimensions"] == ["FUNCTION_AND_ARCHITECTURE"]
+    assert plan["queries"][1]["dimensions"] == []
+    codes = [f["code"] for f in findings]
+    assert "BACKGROUND_PLAN_UNKNOWN_DIMENSION" in codes
+    uncovered = next(f for f in findings if f["code"] == "BACKGROUND_PLAN_DIMENSION_UNCOVERED")
+    assert set(uncovered["dimensions"]) == set(SURVEY_RESEARCH_DIMENSIONS) - {"FUNCTION_AND_ARCHITECTURE"}
+    assert plan["dimension_coverage"]["FUNCTION_AND_ARCHITECTURE"]["status"] == "PLANNED"
+
+
+def test_build_background_cards_scopes_survey_dimensions_and_flags_gaps():
+    synthesis = {
+        "claims": [
+            {"claim_id": "c1", "claim_text": "DASH 2 验证了战斗管理人机协同。", "dimension": "EVALUATION_AND_EFFECT"},
+            {"claim_id": "c2", "claim_text": "无维度声明。", "dimension": "WHATEVER"},
+        ]
+    }
+    validation = {
+        "bindings": [
+            {"claim_id": "c1", "source_ids": ["s1"], "evidence_mode": "FULLTEXT"},
+            {"claim_id": "c2", "source_ids": [], "evidence_mode": "NONE"},
+        ],
+        "findings": [],
+    }
+    bundle = build_background_cards(
+        synthesis,
+        {},
+        validation,
+        required_dimensions=list(SURVEY_RESEARCH_DIMENSIONS),
+        topic_id="topic-x",
+        default_dimensions=list(SURVEY_RESEARCH_DIMENSIONS),
+    )
+    by_claim = {card["claim_id"]: card for card in bundle["background_cards"]}
+    assert by_claim["c1"]["dimension"] == "EVALUATION_AND_EFFECT"
+    assert by_claim["c2"]["dimension"] == UNSCOPED_DIMENSION
+    assert bundle["background_dimensions"]["EVALUATION_AND_EFFECT"]["status"] == "COVERED"
+    assert bundle["background_dimensions"]["OBJECT_AND_EVOLUTION"]["status"] == "GAP"
+    gap_dimensions = {gap["dimension"] for gap in bundle["background_gaps"]}
+    assert "OBJECT_AND_EVOLUTION" in gap_dimensions
+    assert "EVALUATION_AND_EFFECT" not in gap_dimensions
+
+
+def test_wf3b_topic_falls_back_to_slim_project_basic_item():
+    definition = {
+        "items": [
+            {
+                "item_type": "PROJECT_BASIC",
+                "content": {"project_name": " 美空军DASH系统调研分析报告 "},
+            }
+        ]
+    }
+    topic, origin = resolve_wf3b_topic(None, wf1_project_definition=definition)
+    assert (topic, origin) == ("美空军DASH系统调研分析报告", "WF1_PROJECT_DEFINITION")
+
+    normalized = normalize_wf3b_options(
+        None,
+        project_id="project-x",
+        wf1_project_definition=definition,
+        document_type="SURVEY_REPORT",
+    )
+    assert normalized["topic"] == "美空军DASH系统调研分析报告"
+    assert normalized["topic_origin"] == "WF1_PROJECT_DEFINITION"
+    assert normalized["topic_id"].startswith("topic-")
 
 
 def test_wf3b_topic_resolution_order_and_deterministic_topic_id():

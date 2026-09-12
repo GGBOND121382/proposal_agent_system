@@ -16,7 +16,7 @@ from .executor import (
     PromptExecutionError,
     PromptExecutor as BasePromptExecutor,
 )
-from .contract_registry import CONTRACT_REGISTRY_VERSION
+from .contract_registry import CONTRACT_REGISTRY_VERSION, normalize_exact_null_literals
 from .argument_two_stage_orchestration import (
     ARGUMENT_DESIGN_STAGE,
     ARGUMENT_SKELETON_STAGE,
@@ -33,6 +33,7 @@ from .background_research import WF3B_DIRECT_TOOL_ARGUMENTS_PROMPTS
 from .model_semantic_contracts import (
     SEMANTIC_MODEL_CONTRACT_VERSION,
     apply_semantic_model_output_defaults,
+    apply_wf1_survey_intake_defaults,
     build_semantic_model_input,
     expand_semantic_model_output,
     semantic_model_reference_errors,
@@ -1512,6 +1513,8 @@ class RuntimePromptExecutor(BasePromptExecutor):
                 )
             raw_response_text = result.raw_text
             provider_output = copy.deepcopy(result.output)
+            model_null_literal_paths: list[str] = []
+            survey_default_paths: list[str] = []
             try:
                 if contract_recovery is not None:
                     consumed_output = copy.deepcopy(contract_recovery["consumed_output"])
@@ -1520,6 +1523,16 @@ class RuntimePromptExecutor(BasePromptExecutor):
                         provider_output = apply_semantic_model_output_defaults(
                             self.pack.model_schema(prompt_id, "output"), provider_output
                         )
+                        provider_output, model_null_literal_report = normalize_exact_null_literals(
+                            provider_output, self.pack.model_schema(prompt_id, "output")
+                        )
+                        model_null_literal_paths = list(model_null_literal_report.get("paths") or [])
+                        provider_output, survey_default_report = apply_wf1_survey_intake_defaults(
+                            prompt_id, model_envelope, provider_output
+                        )
+                        survey_default_paths = [
+                            str(item.get("path")) for item in survey_default_report
+                        ]
                         semantic_output_errors = self.pack.validate_model(
                             prompt_id, "output", provider_output
                         )
@@ -1540,6 +1553,16 @@ class RuntimePromptExecutor(BasePromptExecutor):
                         prompt_id, provider_output, model_envelope,
                         project_id=project_id,
                     )
+                    if model_null_literal_paths:
+                        consumed_output.setdefault("warnings", []).append(
+                            "SYSTEM_EXACT_NULL_LITERAL_NORMALIZATION(model-output): "
+                            + ", ".join(model_null_literal_paths[:12])
+                        )
+                    if survey_default_paths:
+                        consumed_output.setdefault("warnings", []).append(
+                            "SYSTEM_WF1_SURVEY_INTAKE_DEFAULT: "
+                            + ", ".join(survey_default_paths[:12])
+                        )
             except PromptExecutionError as exc:
                 raise self._provider_contract_failure(
                     f"Provider output contract validation failed: {exc}",

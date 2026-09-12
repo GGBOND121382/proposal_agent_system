@@ -4739,6 +4739,11 @@ _WF1_STATUS_VERDICTS = {
 }
 
 
+def _wf1_document_type_input(envelope: dict[str, Any]) -> dict[str, str]:
+    kind = (envelope.get("payload") or {}).get("document_type")
+    return {"document_type": kind} if kind in {"SURVEY_REPORT", "RESEARCH_PROPOSAL", "ENGINEERING_PROPOSAL"} else {}
+
+
 def build_scheme_extract_model_input(canonical_envelope: dict[str, Any]) -> dict[str, Any]:
     payload = _wf3_payload(canonical_envelope)
     cards, _ = _wf1_evidence_cards(canonical_envelope, "guide_documents")
@@ -4753,6 +4758,7 @@ def build_scheme_extract_model_input(canonical_envelope: dict[str, Any]) -> dict
             "version": int(version) if isinstance(version, int) and not isinstance(version, bool) and version >= 1 else 1,
         }
     return {
+        **_wf1_document_type_input(canonical_envelope),
         "extraction_scope": scope_values,
         "existing_profile": existing,
         "human_resolutions": _wf1_human_resolutions(canonical_envelope),
@@ -4834,6 +4840,7 @@ def build_scheme_critic_model_input(canonical_envelope: dict[str, Any]) -> dict[
                 "description": str(finding.get("description") or ""),
             })
     return {
+        **_wf1_document_type_input(canonical_envelope),
         "scheme_candidate": {
             "scheme_name": str(candidate.get("scheme_name") or "").strip(),
             "scheme_type": str(candidate.get("scheme_type") or "").strip(),
@@ -4911,6 +4918,7 @@ def build_project_definition_extract_model_input(canonical_envelope: dict[str, A
     revision_issues = _wf1_revision_issues(canonical_envelope)
     if revision_issues:
         result["revision_issues"] = revision_issues
+    result.update(_wf1_document_type_input(canonical_envelope))
     return result
 
 
@@ -4994,6 +5002,7 @@ def build_project_definition_critic_model_input(canonical_envelope: dict[str, An
                 "description": str(finding.get("description") or ""),
             })
     return {
+        **_wf1_document_type_input(canonical_envelope),
         "candidate": {
             "project_name": project_name,
             "items": items,
@@ -5342,7 +5351,7 @@ def expand_project_definition_extract_model_output(canonical_envelope: dict[str,
 
     scheme_profile = payload.get("scheme_profile") if isinstance(payload.get("scheme_profile"), Mapping) else {}
     contract_hint = semantic_output.get("proposal_contract") if isinstance(semantic_output.get("proposal_contract"), Mapping) else {}
-    document_kind = str(semantic_output.get("document_kind") or "UNKNOWN")
+    document_kind = str(payload.get("document_type") or semantic_output.get("document_kind") or "UNKNOWN")
     document_type = {
         "RESEARCH_PROPOSAL": "RESEARCH_PROPOSAL",
         "ENGINEERING_PROPOSAL": "ENGINEERING_PROPOSAL",
@@ -5658,6 +5667,7 @@ def _wf1_semantic_reference_errors(prompt_id: str, canonical_envelope: dict[str,
                 errors.append(f"/findings/{index}/target_local_id: unknown rule local_id {target!r}")
     elif prompt_id == "P-PROJECT-DEFINITION-EXTRACT":
         keys: list[str] = []
+        item_types: dict[str, str] = {}
         for index, item in enumerate(semantic_output.get("items") or []):
             if not isinstance(item, Mapping):
                 continue
@@ -5665,6 +5675,7 @@ def _wf1_semantic_reference_errors(prompt_id: str, canonical_envelope: dict[str,
             if key in keys:
                 errors.append(f"/items/{index}/local_key: duplicate local_key {key!r}")
             keys.append(key)
+            item_types[key] = str(item.get("item_type") or "")
         known = set(keys)
         for index, relation in enumerate(semantic_output.get("relations") or []):
             if not isinstance(relation, Mapping):
@@ -5684,6 +5695,13 @@ def _wf1_semantic_reference_errors(prompt_id: str, canonical_envelope: dict[str,
             for kindex, key in enumerate(question.get("gap_keys") or []):
                 if str(key) not in known:
                     errors.append(f"/argument_seed/research_questions/{qindex}/gap_keys/{kindex}: unknown item local_key {key!r}")
+                    continue
+                gap_type = item_types.get(str(key)) or ""
+                if gap_type not in {"GAP", "PROBLEM"}:
+                    errors.append(
+                        f"/argument_seed/research_questions/{qindex}/gap_keys/{kindex}: "
+                        f"item {key!r} has item_type {gap_type!r}; gap_keys must reference GAP or PROBLEM items"
+                    )
         for index, finding in enumerate(findings):
             target = finding.get("target_local_id")
             if target is not None and str(target) not in known:
@@ -5908,6 +5926,95 @@ def _semantic_diff_paths(before: Any, after: Any, path_tokens: tuple[Any,...]=()
     return [] if before==after else [format_pointer(path_tokens)]
 
 
+def _repair_producer_model_output_schema(object_type: str) -> Mapping[str, Any] | None:
+    """Load the producer's semantic model output schema for patch typing.
+
+    Repair paths are relative to the producer's *semantic* candidate, so the
+    expected value type comes from the model output contract, not the canonical
+    persistence schema.  Unknown object types simply skip the check; the
+    canonical validation chain remains the backstop.
+    """
+    normalized = re.sub(r"[^A-Z0-9]+", "_", str(object_type or "").upper()).strip("_")
+    if not normalized:
+        return None
+    prompt_id = "P-" + normalized.replace("_", "-")
+    if prompt_id not in SEMANTIC_PROMPTS:
+        return None
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "prompt_pack"
+        / "schemas"
+        / "model"
+        / f"{normalized.lower()}_model_output.schema.json"
+    )
+    if not schema_path.is_file():
+        return None
+    try:
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return schema if isinstance(schema, Mapping) else None
+
+
+def _schema_node_for_pointer(schema: Any, path: str) -> Mapping[str, Any] | None:
+    node: Any = schema
+    try:
+        tokens = parse_pointer(path)
+    except JsonPointerError:
+        return None
+    for token in tokens:
+        if not isinstance(node, Mapping):
+            return None
+        items = node.get("items")
+        if isinstance(items, Mapping) and token.isdigit():
+            node = items
+            continue
+        properties = node.get("properties")
+        if isinstance(properties, Mapping) and token in properties:
+            node = properties[token]
+            continue
+        return None
+    return node if isinstance(node, Mapping) else None
+
+
+def _json_value_type_name(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def _schema_allows_json_value(node: Mapping[str, Any], value: Any) -> bool:
+    declared = node.get("type")
+    if declared is None:
+        for union_key in ("anyOf", "oneOf"):
+            branches = node.get(union_key)
+            if isinstance(branches, list) and branches:
+                return any(
+                    isinstance(branch, Mapping) and _schema_allows_json_value(branch, value)
+                    for branch in branches
+                )
+        return True
+    allowed = declared if isinstance(declared, list) else [declared]
+    actual = _json_value_type_name(value)
+    if actual in allowed:
+        return True
+    # A JSON integer is a valid JSON number.
+    return actual == "integer" and "number" in allowed
+
+
+
 
 def targeted_repair_semantic_errors(
     canonical_envelope: dict[str, Any],
@@ -5915,6 +6022,10 @@ def targeted_repair_semantic_errors(
 ) -> list[str]:
     payload = canonical_envelope.get("payload") or {}
     original = ((payload.get("original_object") or {}).get("content") or {})
+    object_type = str(
+        ((payload.get("original_object") or {}).get("object_type") or "")
+    ).upper()
+    producer_schema = _repair_producer_model_output_schema(object_type)
     allowed = _effective_repair_allowed_paths(payload, original)
     protected = [
         _repair_model_path(str(p))
@@ -6002,6 +6113,23 @@ def targeted_repair_semantic_errors(
             )
             continue
 
+        # Patch values must use the target field's native JSON type.  A
+        # stringified "[]" is not an array and a fabricated "null" string is
+        # not null; this also covers missing-field insertions, which the
+        # container-shape comparison below cannot reach.
+        if producer_schema is not None:
+            schema_node = _schema_node_for_pointer(producer_schema, path)
+            if (
+                schema_node is not None
+                and schema_node.get("type") is not None
+                and not _schema_allows_json_value(schema_node, after)
+            ):
+                errors.append(
+                    f"/changes/{i}/value: patch value type does not match target field "
+                    f"{path!r} (expected {schema_node.get('type')}, got {_json_value_type_name(after)})"
+                )
+                continue
+
         reference_field = _repair_reference_field(path)
         if reference_field:
             if not _reference_repair_is_local(original, path, after):
@@ -6016,9 +6144,6 @@ def targeted_repair_semantic_errors(
                 f"/changes/{i}/value: changing business-object structure is not a local repair and requires escalation"
             )
 
-    object_type = str(
-        ((payload.get("original_object") or {}).get("object_type") or "")
-    ).upper()
     if decision == "APPLY" and object_type == "ARGUMENT_ARCHITECTURE" and not errors:
         repaired = copy.deepcopy(original)
         for change in changes:
@@ -9031,6 +9156,64 @@ def apply_semantic_model_output_defaults(model_output_schema: Mapping[str, Any],
             cleaned.append({**question, "allowed_values": kept})
         normalized["user_questions"] = cleaned
     return normalized
+
+
+WF1_SURVEY_INTAKE_DEFAULT_RULE = "WF1_SURVEY_INTAKE_DEFAULT"
+
+# Manual SURVEY_REPORT intake explicitly accepts that gap relations are closed
+# by later research retrieval and that the delivery brief may carry no
+# page/question ceiling.  These three nested fields are therefore deterministic
+# Runtime defaults in survey mode only; RESEARCH_PROPOSAL intake still requires
+# authored gap links and confirmed contract limits.
+_WF1_SURVEY_CONTRACT_NULL_FIELDS = ("max_main_pages", "max_core_research_questions")
+
+
+def apply_wf1_survey_intake_defaults(
+    prompt_id: str,
+    canonical_envelope: Mapping[str, Any],
+    semantic_output: Any,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Fill deterministic survey-intake gaps before semantic validation.
+
+    Only ``P-PROJECT-DEFINITION-EXTRACT`` under an explicit ``SURVEY_REPORT``
+    payload document type qualifies.  The rule fills *missing* keys only and
+    never rewrites authored values: a real page limit from the material stays
+    binding, and word counts are never converted into fabricated page counts.
+    The normalization is idempotent and returns a per-path change report so
+    every applied default stays auditable.
+    """
+    if prompt_id != "P-PROJECT-DEFINITION-EXTRACT" or not isinstance(semantic_output, dict):
+        return semantic_output, []
+    envelope = canonical_envelope if isinstance(canonical_envelope, Mapping) else {}
+    document_type = _wf1_document_type_input(dict(envelope)).get("document_type")
+    if document_type != "SURVEY_REPORT":
+        return semantic_output, []
+
+    normalized = copy.deepcopy(semantic_output)
+    report: list[dict[str, Any]] = []
+
+    def record(path: str, value: Any) -> None:
+        report.append(
+            {"path": path, "value": copy.deepcopy(value), "rule": WF1_SURVEY_INTAKE_DEFAULT_RULE}
+        )
+
+    seed = normalized.get("argument_seed")
+    if isinstance(seed, dict):
+        questions = seed.get("research_questions")
+        if isinstance(questions, list):
+            for index, question in enumerate(questions):
+                if not isinstance(question, dict) or "gap_keys" in question:
+                    continue
+                question["gap_keys"] = []
+                record(f"/argument_seed/research_questions/{index}/gap_keys", [])
+    contract = normalized.get("proposal_contract")
+    if isinstance(contract, dict):
+        for field in _WF1_SURVEY_CONTRACT_NULL_FIELDS:
+            if field in contract:
+                continue
+            contract[field] = None
+            record(f"/proposal_contract/{field}", None)
+    return normalized, report
 
 
 def expand_semantic_model_output(prompt_id: str, canonical_envelope: dict[str, Any], semantic_output: dict[str, Any]) -> dict[str, Any]:

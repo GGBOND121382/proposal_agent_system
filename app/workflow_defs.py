@@ -54,6 +54,15 @@ WORKFLOWS: dict[str, list[dict[str, Any]]] = {
     ],
 }
 
+# WF-4 report branch (SURVEY_REPORT): frozen into the workflow state at start
+# by document type; the proposal step list in WORKFLOWS stays untouched and
+# this branch is not a separately startable workflow type.  Section writing
+# and integration are appended to this branch in a later phase.
+WF4_REPORT_BRANCH_STEPS: list[dict[str, Any]] = [
+    {"prompt_id": "P-REPORT-OUTLINE"},
+    {"prompt_id": "P-REPORT-OUTLINE-CRITIC"},
+]
+
 GATE_ROLE = {
     "SCHEME_CONFIRMATION": "PROJECT_OWNER",
     "PROJECT_DEFINITION_CONFIRMATION": "PROJECT_OWNER",
@@ -104,6 +113,7 @@ CRITIC_PRODUCER = {
     "P-WRITE-BLUEPRINT-CRITIC": "P-WRITE-BLUEPRINT",
     "P-WRITE-CRITIC": "P-WRITE-CONTENT",
     "P-EXPRESSION-CRITIC": "P-EXPRESSION-POLISH",
+    "P-REPORT-OUTLINE-CRITIC": "P-REPORT-OUTLINE",
 }
 
 

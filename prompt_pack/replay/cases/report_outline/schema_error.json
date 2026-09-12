@@ -1,0 +1,65 @@
+{
+  "case_id": "report_outline-schema_error",
+  "prompt_id": "P-REPORT-OUTLINE",
+  "case_type": "schema_error",
+  "description": "输入Envelope缺少security_context，应在调用模型前被Schema拒绝",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "REPORT_OUTLINE",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "task_type": "REPORT_OUTLINE",
+      "document_type": "SURVEY_REPORT",
+      "topic": {
+        "topic_id": "topic-dash",
+        "topic_description": "美国空军公开系统 DASH（人机协同决策支持）公开对象调研"
+      },
+      "research_dimension_mode": "SURVEY_TECHNICAL",
+      "background_cards": [
+        {
+          "card_id": "card-001",
+          "dimension": "OBJECT_AND_EVOLUTION",
+          "claim_text": "DASH 是美国空军部公开披露的人机协同决策支持系统。",
+          "source_ids": [
+            "src-001"
+          ],
+          "evidence_mode": "FULLTEXT",
+          "scope_qualifiers": [],
+          "limitations": []
+        }
+      ],
+      "background_gaps": []
+    },
+    "expected_output_schema": "schemas/prompts/report_outline_output.schema.json"
+  },
+  "expected_output": null,
+  "expected_validation": {
+    "input_schema_valid": false,
+    "output_schema_valid": false,
+    "expected_status": null
+  }
+}

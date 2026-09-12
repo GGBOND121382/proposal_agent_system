@@ -15,6 +15,11 @@ class ProjectCreate(BaseModel):
     prohibited_external_fields: list[str] = Field(default_factory=list)
     recipient_scope: list[str] = Field(default_factory=lambda: ["内部用户"])
     task_instruction: dict[str, Any] | None = None
+    document_type: Literal["RESEARCH_PROPOSAL", "ENGINEERING_PROPOSAL", "SURVEY_REPORT"] | None = None
+
+
+class ProjectDocumentTypeUpdate(BaseModel):
+    document_type: Literal["RESEARCH_PROPOSAL", "ENGINEERING_PROPOSAL", "SURVEY_REPORT"]
 
 
 class PromptExecuteRequest(BaseModel):

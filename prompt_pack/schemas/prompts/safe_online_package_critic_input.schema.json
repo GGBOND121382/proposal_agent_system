@@ -299,6 +299,12 @@
           },
           "minItems": 1,
           "uniqueItems": true
+        },
+        "delivery_mode": {
+          "type": "string",
+          "enum": [
+            "PUBLIC_OBJECT_SURVEY"
+          ]
         }
       },
       "additionalProperties": false,

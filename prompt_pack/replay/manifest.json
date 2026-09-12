@@ -1050,6 +1050,66 @@
       "case_type": "need_user_input",
       "status": "IMPLEMENTED",
       "fixture_path": "replay/cases/background_research_critic/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/normal.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/missing_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/schema_error.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/high_risk.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/normal.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/missing_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/schema_error.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/high_risk.json"
+    },
+    {
+      "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_outline_critic/need_user_input.json"
     }
   ]
 }

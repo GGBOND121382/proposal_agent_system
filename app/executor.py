@@ -11,6 +11,7 @@ from .background_research import WF3B_RUNTIME_OWNED_SOURCE_REFS_PROMPTS
 from .model_semantic_contracts import (
     SEMANTIC_MODEL_CONTRACT_VERSION,
     apply_semantic_model_output_defaults,
+    apply_wf1_survey_intake_defaults,
     build_semantic_model_input,
     expand_semantic_model_output,
     semantic_model_reference_errors,
@@ -84,7 +85,7 @@ TRACE_SOURCE_KIND_ALIASES = {
     "CONFIRMED_FACT": "FACT",
     "ARGUMENT_GRAPH": "ARGUMENT_NODE",
 }
-OUTPUT_NORMALIZER_VERSION = "2026-09-09.v59-document-version-alias"
+OUTPUT_NORMALIZER_VERSION = "2026-09-10.v60-manual-document-type"
 MODEL_CONTEXT_PROJECTION_VERSION = "2026-09-04.v5-wf3b-claim-bound-import-sources"
 MODEL_SYSTEM_PROMPT_VERSION = "2026-08-13.v4-wf3-contract-retry-feedback"
 
@@ -1150,6 +1151,14 @@ class PromptExecutor:
             "CURRENT_ADOPTION": "LITERATURE_REVIEW",
             "OPERATIONAL_CONSTRAINT": "KEY_ISSUE",
             "RESEARCH_SIGNIFICANCE": "BACKGROUND_AND_SIGNIFICANCE",
+            # Survey-report technical dimensions: map onto registered section
+            # profiles so dimension labels used as profile hints stay valid.
+            "OBJECT_AND_EVOLUTION": "PROJECT_OVERVIEW",
+            "FUNCTION_AND_ARCHITECTURE": "TECHNICAL_ROUTE",
+            "WORKFLOW_AND_INTERACTION": "METHOD_AND_ALGORITHM",
+            "TECHNOLOGY_AND_IMPLEMENTATION": "METHOD_AND_ALGORITHM",
+            "EVALUATION_AND_EFFECT": "EVALUATION",
+            "LIMITATIONS_AND_GAPS": "KEY_ISSUE",
         }
         changes: list[str] = []
         result = output.get("result") if isinstance(output.get("result"), dict) else {}
@@ -2003,12 +2012,24 @@ class PromptExecutor:
                 direct_tool_arguments=semantic_model_contract,
             )
             raw_response_text = result.raw_text
+            model_null_literal_paths: list[str] = []
+            survey_default_paths: list[str] = []
             try:
                 provider_output = result.output
                 if semantic_model_contract:
                     provider_output = apply_semantic_model_output_defaults(
                         self.pack.model_schema(prompt_id, "output"), provider_output
                     )
+                    provider_output, model_null_literal_report = normalize_exact_null_literals(
+                        provider_output, self.pack.model_schema(prompt_id, "output")
+                    )
+                    model_null_literal_paths = list(model_null_literal_report.get("paths") or [])
+                    provider_output, survey_default_report = apply_wf1_survey_intake_defaults(
+                        prompt_id, model_envelope, provider_output
+                    )
+                    survey_default_paths = [
+                        str(item.get("path")) for item in survey_default_report
+                    ]
                     semantic_output_errors = self.pack.validate_model(prompt_id, "output", provider_output)
                     semantic_output_errors.extend(semantic_model_reference_errors(prompt_id, model_envelope, provider_output))
                     if semantic_output_errors:
@@ -2018,6 +2039,16 @@ class PromptExecutor:
                         )
                     provider_output = expand_semantic_model_output(prompt_id, model_envelope, provider_output)
                 output = self._normalize_output(prompt_id, provider_output, model_envelope, project_id=project_id)
+                if model_null_literal_paths:
+                    output.setdefault("warnings", []).append(
+                        "SYSTEM_EXACT_NULL_LITERAL_NORMALIZATION(model-output): "
+                        + ", ".join(model_null_literal_paths[:12])
+                    )
+                if survey_default_paths:
+                    output.setdefault("warnings", []).append(
+                        "SYSTEM_WF1_SURVEY_INTAKE_DEFAULT: "
+                        + ", ".join(survey_default_paths[:12])
+                    )
             except PromptExecutionError as exc:
                 raise ProviderError(
                     f"Provider output contract validation failed: {exc}",

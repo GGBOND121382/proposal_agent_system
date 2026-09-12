@@ -35,6 +35,7 @@
             <h3>新建项目</h3>
             <label>项目名称<input name="name" required /></label>
             <label>说明<textarea name="description"></textarea></label>
+            <label>报告类型<select name="document_type" required><option value="RESEARCH_PROPOSAL">科研项目申请书</option><option value="ENGINEERING_PROPOSAL">工程方案</option><option value="SURVEY_REPORT">调研分析报告</option></select></label>
             <label>安全等级<select name="security_level"><option>INTERNAL</option><option>PUBLIC</option><option>SENSITIVE</option><option>CLASSIFIED</option></select></label>
             <label class="check"><input type="checkbox" name="internet_access_allowed" /> 允许经审批后访问互联网</label>
             <label class="check"><input type="checkbox" name="anonymized_external_processing_allowed" /> 允许经安全脱敏和人工审批后外发公共研究任务</label>
@@ -43,6 +44,9 @@
           <div class="card">
             <h3>当前项目</h3>
             <select id="projectSelect"></select>
+            <label>报告类型<select id="projectDocumentType"><option value="">尚未指定</option><option value="RESEARCH_PROPOSAL">科研项目申请书</option><option value="ENGINEERING_PROPOSAL">工程方案</option><option value="SURVEY_REPORT">调研分析报告</option></select></label>
+            <button id="saveProjectDocumentType" type="button">保存报告类型</button>
+            <small>按所选类型处理材料。已有工作流请在保存后重建。</small>
             <pre id="projectInfo">尚未选择项目</pre>
           </div>
         </div>
@@ -85,11 +89,20 @@
             <label>任务类型<select id="wf3TaskType"><option>PUBLIC_RESEARCH</option><option>PUBLIC_TEMPLATE_ANALYSIS</option><option>GENERIC_LANGUAGE_ASSIST</option></select></label>
           </div>
           <div id="wf3bOptions" class="workflow-options" hidden>
-            <h4>WF-3B Topic 背景调研（可留空，由系统从 WF-1 结果取 topic 并默认覆盖全部 8 个背景维度；需 WF-1 已完成后启动）</h4>
+            <h4>WF-3B Topic 背景调研（可留空，由系统从 WF-1 结果取 topic 并默认覆盖该文种的全部维度；需 WF-1 已完成后启动）</h4>
             <label>Topic 覆盖（可选）<textarea id="wf3bTopicOverride" placeholder="留空则从 WF-1 结果取 topic；填写后以此 topic 做应用背景调研。"></textarea></label>
             <label>补充说明 focus（可选）<textarea id="wf3bFocus" placeholder="例如：重点关注近三年的示范应用与成本变化。"></textarea></label>
             <fieldset>
-              <legend>背景维度（不勾选任何项=默认全部 8 维）</legend>
+              <legend>技术调研维度（调研报告默认全选这 6 维；不勾选任何项=按文种默认）</legend>
+              <label><input type="checkbox" class="wf3bDimension" value="OBJECT_AND_EVOLUTION" /> OBJECT_AND_EVOLUTION 对象与演进</label>
+              <label><input type="checkbox" class="wf3bDimension" value="FUNCTION_AND_ARCHITECTURE" /> FUNCTION_AND_ARCHITECTURE 功能与架构</label>
+              <label><input type="checkbox" class="wf3bDimension" value="WORKFLOW_AND_INTERACTION" /> WORKFLOW_AND_INTERACTION 流程与交互</label>
+              <label><input type="checkbox" class="wf3bDimension" value="TECHNOLOGY_AND_IMPLEMENTATION" /> TECHNOLOGY_AND_IMPLEMENTATION 技术与实现</label>
+              <label><input type="checkbox" class="wf3bDimension" value="EVALUATION_AND_EFFECT" /> EVALUATION_AND_EFFECT 评估与效果</label>
+              <label><input type="checkbox" class="wf3bDimension" value="LIMITATIONS_AND_GAPS" /> LIMITATIONS_AND_GAPS 局限与缺口</label>
+            </fieldset>
+            <fieldset>
+              <legend>应用背景维度（科研申请书默认全部 8 维；调研报告可作显式补充）</legend>
               <label><input type="checkbox" class="wf3bDimension" value="APPLICATION_SCENARIO" /> APPLICATION_SCENARIO 应用场景</label>
               <label><input type="checkbox" class="wf3bDimension" value="STAKEHOLDER_AND_PAIN" /> STAKEHOLDER_AND_PAIN 利益方与痛点</label>
               <label><input type="checkbox" class="wf3bDimension" value="INDUSTRY_SCALE_AND_TREND" /> INDUSTRY_SCALE_AND_TREND 规模与趋势</label>

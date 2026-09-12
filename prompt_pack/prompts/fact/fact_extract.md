@@ -1,5 +1,9 @@
 # P-FACT-EXTRACT
 
+## 用户指定的交付类型
+
+若 `payload.document_type=SURVEY_REPORT`，输入可能仅是要求智能体开展调研的任务说明。此时抽取实际存在的任务要求、约束和交付物，使用 REQUIREMENT 或 PLAN；“需要核查哪些模块/技术/效果”不是外部系统事实。未提供的技术答案留到后续检索，不要求用户预先给出结论或研发团队基础。
+
 ## 元数据
 
 - 版本：`2.0.0`
@@ -31,12 +35,13 @@
 - `locked_facts`
 - `authority_rules`
 - `security_constraints`
+- `revision_findings`（若存在：上一轮确定性质量校验给出的结构化修复意见，必须逐条修复后再输出，不得无视或整体重写规避）
 
 任一必需字段缺失、对象版本不一致、Hash过期或安全环境不允许时，不得继续生成正常结果。应返回 `NEED_USER_INPUT` 或 `BLOCK`，并给出字段级问题或Finding。
 
 ## 执行步骤
 
-1. 按单一可判真命题拆分。
+1. 按单一可判真命题拆分。REQUIREMENT 条目是任务指令而非可判真命题，允许枚举待核查事项，不强制原子拆分；FACT、PLAN、EXPECTED_RESULT 等命题型条目才必须一条记录一个命题。
 2. 分类FACT、PLAN、EXPECTED_RESULT等。
 3. 识别主体和时间状态。
 4. 绑定数字对象、单位和条件。

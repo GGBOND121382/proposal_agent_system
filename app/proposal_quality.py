@@ -242,13 +242,18 @@ def _contains_application_marker(combined: str) -> bool:
 
 
 def _document_kind_hint(payload: dict[str, Any]) -> str:
-    """Heuristic document-kind hint for quality-gate scope selection.
+    """Prefer the user's explicit genre; use heuristics only for legacy inputs.
 
     The persisted scheme profile schema is frozen (additionalProperties:
     false), so the semantic document_kind cannot be stored there.  The hint
     combines the confirmed scheme profile text with human resolutions; absent
     any signal the gate keeps the strict APPLICATION behavior.
     """
+    explicit = payload.get("document_type")
+    if explicit == "SURVEY_REPORT":
+        return "RESEARCH_REPORT"
+    if explicit in {"RESEARCH_PROPOSAL", "ENGINEERING_PROPOSAL"}:
+        return "APPLICATION"
     scheme = payload.get("scheme_profile")
     if not isinstance(scheme, dict):
         scheme = payload.get("scheme_candidate")
@@ -524,13 +529,19 @@ class ProposalQualityGuard:
                 "PROJECT_KNOWLEDGE_AGENT",
             ))
         objectives = [i for i in pd.get("items", []) if isinstance(i, dict) and i.get("item_type") == "OBJECTIVE"]
-        objective_text = " ".join(_texts([i.get("content") for i in objectives]))
-        if objectives and re.search(r"构建.*系统|形成.*原型", objective_text) and not any(t in types for t in ["PROBLEM", "INNOVATION", "EXPERIMENT"]):
+        # Check each objective separately: joining all texts first would let a
+        # regex span across unrelated objectives and misfire.
+        masquerading = any(
+            re.search(r"构建.*系统|形成.*原型", " ".join(_texts([i.get("content")])))
+            for i in objectives
+        )
+        if objectives and masquerading and not any(t in types for t in ["PROBLEM", "INNOVATION", "EXPERIMENT"]):
             findings.append(QualityFinding(
                 "QG_ENGINEERING_OBJECTIVE_MASQUERADES_AS_RESEARCH", "P1", "PROJECT_DEFINITION", "OBJECTIVE",
                 "items", "项目目标仅描述构建系统/原型，未由研究问题、新机制和验证命题支撑，存在文种漂移。",
                 "先形成中心研究命题和可检验研究问题，再把原型系统降为验证载体或成果，而不是研究目标本身。",
                 "PROJECT_KNOWLEDGE_AGENT",
+                blocking=not research_report,
             ))
 
         item_by_id = {
@@ -598,7 +609,8 @@ class ProposalQualityGuard:
             claim_id = str(fact.get("claim_id") or "fact")
             text = str(fact.get("claim_text") or "").strip()
             clauses = [part for part in re.split(r"[；;。]", text) if part.strip()]
-            if len(clauses) > 1 or re.search(r"既.+又|不仅.+而且|同时.+并且", text):
+            directive_claim = fact.get("claim_type") == "REQUIREMENT"
+            if not directive_claim and (len(clauses) > 1 or re.search(r"既.+又|不仅.+而且|同时.+并且", text)):
                 non_atomic.append(claim_id)
             if not fact.get("subject_id") or not fact.get("temporal_status") or not fact.get("knowledge_status"):
                 incomplete.append(claim_id)
@@ -633,7 +645,9 @@ class ProposalQualityGuard:
         return findings
 
     def _audit_readiness(self, payload: dict[str, Any], output: dict[str, Any]) -> list[QualityFinding]:
-        findings = self._audit_project_definition(payload.get("project_definition") or {})
+        findings = self._audit_project_definition(
+            payload.get("project_definition") or {}, document_kind=_document_kind_hint(payload)
+        )
         result = output.get("result") or {}
         stage = str(payload.get("readiness_stage") or "READY_FOR_ARGUMENT_ARCHITECTURE")
         if result.get("assessed_stage") != stage:

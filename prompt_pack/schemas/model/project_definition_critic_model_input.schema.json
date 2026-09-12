@@ -16,6 +16,7 @@
     "evidence_cards"
   ],
   "properties": {
+    "document_type": {"type": "string", "enum": ["RESEARCH_PROPOSAL", "ENGINEERING_PROPOSAL", "SURVEY_REPORT"]},
     "candidate": {
       "type": "object",
       "additionalProperties": false,

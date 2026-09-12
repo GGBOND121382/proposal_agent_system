@@ -3,7 +3,7 @@
   "baseline_commit": "ac7e3032a51c682c6bee6e2461d3393cc14835d7",
   "prompt_registry": {
     "version": "2.0",
-    "entry_count": 35,
+    "entry_count": 37,
     "required_fields": [
       "prompt_id",
       "prompt_version",
@@ -15,8 +15,8 @@
       "executor_role",
       "next_human_gate"
     ],
-    "entries_sha256": "dbb5ab066dc5616b885d42b42bdea731c35898d75710e8ba2882ace1e6bf7f77",
-    "registry_git_blob_sha": "6c4d9a7977c6573a222ab12980367f9473d34aa3"
+    "entries_sha256": "b8271bb073ebca7381283d13fa3b92b8a7aca2f5a13eee92d50f30502f1b046c",
+    "registry_git_blob_sha": "ac36ccaa464fabf7ae172d5bef5766a8feb68d1d"
   },
   "workflow_state_machine": {
     "workflows": {

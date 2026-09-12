@@ -235,6 +235,66 @@ def test_research_report_kind_still_reports_but_does_not_block_on_shallow_graph(
     assert shallow and shallow[0].blocking is False
 
 
+def _pd_with_objective_texts(texts: list[str]) -> dict:
+    items = [
+        {
+            "item_id": "item-basic",
+            "item_type": "PROJECT_BASIC",
+            "content": {"summary": "调研任务"},
+            "knowledge_status": "ESTIMATED",
+            "source_refs": [],
+        }
+    ]
+    for index, text in enumerate(texts, 1):
+        items.append(
+            {
+                "item_id": f"item-obj-{index}",
+                "item_type": "OBJECTIVE",
+                "content": {"statement": text},
+                "knowledge_status": "ESTIMATED",
+                "source_refs": [],
+            }
+        )
+    return {"items": items, "relations": []}
+
+
+def test_engineering_objective_check_matches_within_single_objective() -> None:
+    guard = ProposalQualityGuard()
+    # "形成" ends one objective and "原型" begins another; the joined-text
+    # regex would misfire, per-objective checking must not.
+    pd = _pd_with_objective_texts(
+        ["梳理流程，并形成流程图。", "调研原型迭代效率相关的公开证据。"]
+    )
+    findings = guard._audit_project_definition(pd, document_kind="APPLICATION")
+    assert not any(
+        f.code == "QG_ENGINEERING_OBJECTIVE_MASQUERADES_AS_RESEARCH"
+        for f in findings
+    )
+    # A single objective that really promises to build a system still fires.
+    pd = _pd_with_objective_texts(["构建一套智能决策支持系统。"])
+    findings = guard._audit_project_definition(pd, document_kind="APPLICATION")
+    masquerade = [
+        f
+        for f in findings
+        if f.code == "QG_ENGINEERING_OBJECTIVE_MASQUERADES_AS_RESEARCH"
+    ]
+    assert masquerade and masquerade[0].blocking is True
+
+
+def test_engineering_objective_check_is_advisory_for_research_report() -> None:
+    guard = ProposalQualityGuard()
+    # Survey-report objectives are investigation targets ("核查/梳理"), not
+    # engineering promises; even a literal match must not block intake.
+    pd = _pd_with_objective_texts(["构建DASH系统组成的完整认知框架。"])
+    findings = guard._audit_project_definition(pd, document_kind="RESEARCH_REPORT")
+    masquerade = [
+        f
+        for f in findings
+        if f.code == "QG_ENGINEERING_OBJECTIVE_MASQUERADES_AS_RESEARCH"
+    ]
+    assert masquerade and masquerade[0].blocking is False
+
+
 def _qg_revise_output() -> dict:
     return {
         "result": {},

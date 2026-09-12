@@ -180,6 +180,12 @@
           "items": {
             "$ref": "../common/human_resolution.schema.json"
           }
+        },
+        "delivery_mode": {
+          "type": "string",
+          "enum": [
+            "PUBLIC_OBJECT_SURVEY"
+          ]
         }
       },
       "additionalProperties": false,

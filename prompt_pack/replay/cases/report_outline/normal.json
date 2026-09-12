@@ -1,0 +1,326 @@
+{
+  "case_id": "report_outline-normal",
+  "prompt_id": "P-REPORT-OUTLINE",
+  "case_type": "normal",
+  "description": "证据卡与任务简报齐全，应生成完整报告提纲",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "REPORT_OUTLINE",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "task_type": "REPORT_OUTLINE",
+      "document_type": "SURVEY_REPORT",
+      "topic": {
+        "topic_id": "topic-dash",
+        "topic_description": "美国空军公开系统 DASH（人机协同决策支持）公开对象调研"
+      },
+      "research_dimension_mode": "SURVEY_TECHNICAL",
+      "survey_research_brief": {
+        "must_answer_questions": [
+          "DASH 是什么、由谁主导、演进脉络如何？",
+          "DASH 有哪些功能模块、体系架构如何？",
+          "DASH 的运行流程与人机协同方式是什么？",
+          "DASH 用了哪些关键技术、效果如何、哪些仍不知道？"
+        ],
+        "evidence_requirements": [
+          "事实性陈述必须绑定公开来源证据卡"
+        ],
+        "materials_cutoff": "2026-08-01",
+        "source_priorities": [
+          "官方发布",
+          "一手技术文档"
+        ],
+        "scope_exclusions": [
+          "不涉及非公开系统与涉密能力"
+        ],
+        "deliverable_notes": [
+          "背景调研为报告主体",
+          "末尾附参考资料与证据对照表"
+        ]
+      },
+      "background_cards": [
+        {
+          "card_id": "card-001",
+          "dimension": "OBJECT_AND_EVOLUTION",
+          "claim_text": "DASH 是美国空军部公开披露的人机协同决策支持系统，用于加速作战管理决策。",
+          "source_ids": [
+            "src-001"
+          ],
+          "evidence_mode": "FULLTEXT",
+          "scope_qualifiers": [],
+          "limitations": []
+        },
+        {
+          "card_id": "card-002",
+          "dimension": "FUNCTION_AND_ARCHITECTURE",
+          "claim_text": "公开资料显示 DASH 采用模块化架构，将数据融合、方案生成与人工裁决拆分为可组合模块。",
+          "source_ids": [
+            "src-002"
+          ],
+          "evidence_mode": "FULLTEXT",
+          "scope_qualifiers": [
+            "基于公开报道"
+          ],
+          "limitations": [
+            "未披露接口规范"
+          ]
+        },
+        {
+          "card_id": "card-003",
+          "dimension": "EVALUATION_AND_EFFECT",
+          "claim_text": "公开报道称 DASH 在演习中将方案生成时间从数小时缩短到数分钟量级。",
+          "source_ids": [
+            "src-003"
+          ],
+          "evidence_mode": "SNIPPET",
+          "scope_qualifiers": [],
+          "limitations": [
+            "无第三方独立评估"
+          ]
+        }
+      ],
+      "background_gaps": [
+        {
+          "gap_id": "gap-001",
+          "scope": "效果证据",
+          "dimension": "EVALUATION_AND_EFFECT",
+          "description": "缺少公开量化效果评估数据"
+        }
+      ],
+      "report_title_hint": "DASH 系统公开调研报告",
+      "source_catalog": [
+        {
+          "source_id": "src-001",
+          "title": "示例来源一",
+          "url": "https://example.com/1",
+          "source_type": "GOVERNMENT",
+          "published_at": "2025-01-01"
+        },
+        {
+          "source_id": "src-002",
+          "title": "示例来源二",
+          "url": "https://example.com/2",
+          "source_type": "NEWS",
+          "published_at": "2025-02-01"
+        },
+        {
+          "source_id": "src-003",
+          "title": "示例来源三",
+          "url": "https://example.com/3",
+          "source_type": "ACADEMIC",
+          "published_at": null
+        }
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/report_outline_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE",
+    "prompt_version": "1.0.0",
+    "status": "PASS",
+    "result": {
+      "report_title": "DASH 系统公开调研报告",
+      "audience": "关注军事 AI 与人机协同系统的研究人员",
+      "sections": [
+        {
+          "section_key": "executive-summary",
+          "title": "摘要与主要发现",
+          "goal": "概括调研对象、主要结论与关键缺口",
+          "must_answer_questions": [
+            "本报告关于 DASH 的主要发现是什么？"
+          ],
+          "evidence_card_ids": [
+            "card-001",
+            "card-003"
+          ],
+          "known_gaps": [],
+          "estimated_share_percent": 10
+        },
+        {
+          "section_key": "object-evolution",
+          "title": "背景调研：对象与演进",
+          "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+          "must_answer_questions": [
+            "DASH 是什么、由谁主导、演进脉络如何？"
+          ],
+          "evidence_card_ids": [
+            "card-001"
+          ],
+          "planned_exhibits": [
+            {
+              "kind": "TABLE",
+              "caption": "DASH 公开演进时间线",
+              "evidence_card_ids": [
+                "card-001"
+              ]
+            }
+          ],
+          "known_gaps": [],
+          "estimated_share_percent": 15
+        },
+        {
+          "section_key": "architecture-modules",
+          "title": "背景调研：模块与架构",
+          "goal": "回答 DASH 有哪些功能模块、体系架构如何",
+          "must_answer_questions": [
+            "DASH 有哪些功能模块、体系架构如何？"
+          ],
+          "evidence_card_ids": [
+            "card-002"
+          ],
+          "planned_exhibits": [
+            {
+              "kind": "MERMAID_FIGURE",
+              "caption": "DASH 公开资料可证实的模块关系图",
+              "evidence_card_ids": [
+                "card-002"
+              ]
+            }
+          ],
+          "known_gaps": [
+            "接口规范与内部数据模型未公开"
+          ],
+          "estimated_share_percent": 20
+        },
+        {
+          "section_key": "workflow-interaction",
+          "title": "背景调研：运行流程与人机协同",
+          "goal": "回答 DASH 的运行流程与人机协同方式",
+          "must_answer_questions": [
+            "DASH 的运行流程与人机协同方式是什么？"
+          ],
+          "evidence_card_ids": [
+            "card-002"
+          ],
+          "known_gaps": [
+            "缺少官方逐环节流程披露，只能描述模块级协同方式"
+          ],
+          "estimated_share_percent": 15
+        },
+        {
+          "section_key": "key-technologies",
+          "title": "背景调研：关键技术",
+          "goal": "回答 DASH 用了哪些关键技术及其公开实现证据",
+          "must_answer_questions": [
+            "DASH 用了哪些关键技术？"
+          ],
+          "evidence_card_ids": [
+            "card-002"
+          ],
+          "known_gaps": [
+            "关键技术的具体实现细节未公开"
+          ],
+          "estimated_share_percent": 15
+        },
+        {
+          "section_key": "effect-evidence",
+          "title": "背景调研：效果证据",
+          "goal": "回答 DASH 效果如何、有哪些公开效果证据",
+          "must_answer_questions": [
+            "DASH 效果如何？"
+          ],
+          "evidence_card_ids": [
+            "card-003"
+          ],
+          "planned_exhibits": [
+            {
+              "kind": "TABLE",
+              "caption": "DASH 公开效果证据汇总表",
+              "evidence_card_ids": [
+                "card-003"
+              ]
+            }
+          ],
+          "known_gaps": [
+            "缺少公开量化效果评估数据，无第三方独立评估"
+          ],
+          "estimated_share_percent": 10
+        },
+        {
+          "section_key": "analysis-conclusion",
+          "title": "综合分析与结论",
+          "goal": "在证据卡支持的事实之上给出综合判断，并列出仍不知道的内容",
+          "must_answer_questions": [
+            "哪些仍不知道？"
+          ],
+          "evidence_card_ids": [
+            "card-001",
+            "card-003"
+          ],
+          "known_gaps": [],
+          "estimated_share_percent": 10
+        },
+        {
+          "section_key": "references-evidence-map",
+          "title": "参考资料与证据对照表",
+          "goal": "列出全部公开来源与证据卡的对应关系",
+          "must_answer_questions": [
+            "各结论分别由哪些证据卡支撑？"
+          ],
+          "evidence_card_ids": [
+            "card-001",
+            "card-002",
+            "card-003"
+          ],
+          "known_gaps": [],
+          "estimated_share_percent": 5
+        }
+      ],
+      "overall_gaps": [
+        "缺少公开量化效果评估数据",
+        "DASH 内部实现细节未公开"
+      ]
+    },
+    "findings": [],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "PASS"
+  }
+}

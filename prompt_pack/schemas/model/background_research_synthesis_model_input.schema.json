@@ -13,6 +13,12 @@
           "items": {
             "type": "string",
             "enum": [
+              "OBJECT_AND_EVOLUTION",
+              "FUNCTION_AND_ARCHITECTURE",
+              "WORKFLOW_AND_INTERACTION",
+              "TECHNOLOGY_AND_IMPLEMENTATION",
+              "EVALUATION_AND_EFFECT",
+              "LIMITATIONS_AND_GAPS",
               "APPLICATION_SCENARIO",
               "STAKEHOLDER_AND_PAIN",
               "INDUSTRY_SCALE_AND_TREND",
@@ -39,6 +45,12 @@
               "dimension": {
                 "type": "string",
                 "enum": [
+                  "OBJECT_AND_EVOLUTION",
+                  "FUNCTION_AND_ARCHITECTURE",
+                  "WORKFLOW_AND_INTERACTION",
+                  "TECHNOLOGY_AND_IMPLEMENTATION",
+                  "EVALUATION_AND_EFFECT",
+                  "LIMITATIONS_AND_GAPS",
                   "APPLICATION_SCENARIO",
                   "STAKEHOLDER_AND_PAIN",
                   "INDUSTRY_SCALE_AND_TREND",
@@ -145,6 +157,12 @@
           "items": {
             "type": "string",
             "enum": [
+              "OBJECT_AND_EVOLUTION",
+              "FUNCTION_AND_ARCHITECTURE",
+              "WORKFLOW_AND_INTERACTION",
+              "TECHNOLOGY_AND_IMPLEMENTATION",
+              "EVALUATION_AND_EFFECT",
+              "LIMITATIONS_AND_GAPS",
               "APPLICATION_SCENARIO",
               "STAKEHOLDER_AND_PAIN",
               "INDUSTRY_SCALE_AND_TREND",

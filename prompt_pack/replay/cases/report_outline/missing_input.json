@@ -1,0 +1,143 @@
+{
+  "case_id": "report_outline-missing_input",
+  "prompt_id": "P-REPORT-OUTLINE",
+  "case_type": "missing_input",
+  "description": "结构合法但调研证据卡整体缺失，无法生成有证据支撑的提纲，应要求用户补充",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "REPORT_OUTLINE",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "task_type": "REPORT_OUTLINE",
+      "document_type": "SURVEY_REPORT",
+      "topic": {
+        "topic_id": "topic-dash",
+        "topic_description": "美国空军公开系统 DASH（人机协同决策支持）公开对象调研"
+      },
+      "research_dimension_mode": "SURVEY_TECHNICAL",
+      "background_cards": [],
+      "background_gaps": []
+    },
+    "expected_output_schema": "schemas/prompts/report_outline_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE",
+    "prompt_version": "1.0.0",
+    "status": "NEED_USER_INPUT",
+    "result": {
+      "report_title": "DASH 系统公开调研报告（保守提纲）",
+      "sections": [
+        {
+          "section_key": "object-evolution",
+          "title": "背景调研：对象与演进",
+          "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+          "must_answer_questions": [
+            "DASH 是什么？"
+          ],
+          "evidence_card_ids": [],
+          "known_gaps": [
+            "无任何调研证据卡，本章全部内容待证据补齐"
+          ]
+        }
+      ],
+      "overall_gaps": [
+        "WF-3B 调研证据卡整体缺失，提纲无法获得证据支撑"
+      ]
+    },
+    "findings": [
+      {
+        "code": "OUTLINE_EVIDENCE_BASE_MISSING",
+        "severity": "P0",
+        "category": "EVIDENCE",
+        "target_type": "INPUT",
+        "target_path_or_span": "payload/background_cards",
+        "description": "调研证据卡整体缺失，提纲无法获得任何证据支撑",
+        "evidence_refs": [
+          "background_cards"
+        ],
+        "repairable": true,
+        "repair_instruction": "补充 WF-3B 产出的调研证据卡后重新生成提纲",
+        "suggested_route": "USER",
+        "blocking": true
+      }
+    ],
+    "unresolved_items": [
+      {
+        "item_id": "unres-001",
+        "type": "MISSING",
+        "description": "缺少 WF-3B 产出的调研证据卡",
+        "target_paths": [
+          "payload/background_cards"
+        ],
+        "required_action": "补充调研证据卡",
+        "blocking": true
+      }
+    ],
+    "user_questions": [
+      {
+        "question_id": "q-001",
+        "question_type": "MISSING_INFORMATION",
+        "question": "请提供本报告可用的 WF-3B 调研证据卡清单。",
+        "reason": "没有任何证据卡时无法为章节分配 evidence_card_ids",
+        "target_paths": [
+          "payload/background_cards"
+        ],
+        "answer_schema": {
+          "type": "OBJECT",
+          "allowed_values": [],
+          "properties": {}
+        },
+        "blocking": true,
+        "priority": "P1"
+      }
+    ],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "NEED_USER_INPUT"
+  }
+}

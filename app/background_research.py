@@ -58,6 +58,88 @@ BACKGROUND_DIMENSIONS: tuple[str, ...] = (
 )
 BACKGROUND_DIMENSION_SET = frozenset(BACKGROUND_DIMENSIONS)
 
+# Technical-survey dimensions used when the project's document type is a
+# survey/analysis report (SURVEY_REPORT): the deliverable explains the
+# researched object itself, so the frozen required set shifts from the
+# application-background eight to these six.  The application eight stay
+# allowed as explicit supplements (e.g. industry scale or research
+# significance when the user asks for them) but are never required by
+# default in survey mode.
+SURVEY_RESEARCH_DIMENSIONS: tuple[str, ...] = (
+    "OBJECT_AND_EVOLUTION",
+    "FUNCTION_AND_ARCHITECTURE",
+    "WORKFLOW_AND_INTERACTION",
+    "TECHNOLOGY_AND_IMPLEMENTATION",
+    "EVALUATION_AND_EFFECT",
+    "LIMITATIONS_AND_GAPS",
+)
+SURVEY_RESEARCH_DIMENSION_SET = frozenset(SURVEY_RESEARCH_DIMENSIONS)
+
+# Every dimension the runtime may accept anywhere in WF-3B.  Filtering,
+# coverage accounting and UNSCOPED assignment must use this union so a
+# survey-mode dimension is never swallowed as unknown.
+ALL_BACKGROUND_DIMENSIONS: tuple[str, ...] = (
+    SURVEY_RESEARCH_DIMENSIONS + BACKGROUND_DIMENSIONS
+)
+ALL_BACKGROUND_DIMENSION_SET = frozenset(ALL_BACKGROUND_DIMENSIONS)
+
+DIMENSION_MODE_SURVEY_TECHNICAL = "SURVEY_TECHNICAL"
+DIMENSION_MODE_APPLICATION_BACKGROUND = "APPLICATION_BACKGROUND"
+_SURVEY_DOCUMENT_TYPES = frozenset({"SURVEY_REPORT"})
+
+
+def resolve_background_dimension_policy(document_type: Any = None) -> dict[str, Any]:
+    """Resolve the allowed/default dimension sets for one WF-3B run.
+
+    Single source of truth shared by option normalization, plan filtering,
+    coverage accounting, prompts and the UI contract.  ``SURVEY_REPORT``
+    projects get the six technical-survey dimensions as the default required
+    set; the application eight remain selectable as explicit supplements.
+    Every other (or unknown) document type keeps the legacy eight.
+    """
+
+    doc_type = _clean_text(document_type).upper()
+    if doc_type in _SURVEY_DOCUMENT_TYPES:
+        return {
+            "mode": DIMENSION_MODE_SURVEY_TECHNICAL,
+            "allowed": list(ALL_BACKGROUND_DIMENSIONS),
+            "default_required": list(SURVEY_RESEARCH_DIMENSIONS),
+            "ordering": list(ALL_BACKGROUND_DIMENSIONS),
+        }
+    return {
+        "mode": DIMENSION_MODE_APPLICATION_BACKGROUND,
+        "allowed": list(BACKGROUND_DIMENSIONS),
+        "default_required": list(BACKGROUND_DIMENSIONS),
+        "ordering": list(BACKGROUND_DIMENSIONS),
+    }
+
+
+def default_required_dimensions(document_type: Any = None) -> list[str]:
+    return list(resolve_background_dimension_policy(document_type)["default_required"])
+
+
+def resolve_dimension_mode(document_type: Any = None, options: dict[str, Any] | None = None) -> str:
+    """Resolve the dimension mode, preferring a frozen mode inside options."""
+
+    source = _nested_options(options) if isinstance(options, dict) else {}
+    frozen = _clean_text(source.get("research_dimension_mode")).upper()
+    if frozen in {DIMENSION_MODE_SURVEY_TECHNICAL, DIMENSION_MODE_APPLICATION_BACKGROUND}:
+        return frozen
+    return str(resolve_background_dimension_policy(document_type)["mode"])
+
+
+def default_dimensions_for_options(
+    options: dict[str, Any] | None,
+    *,
+    document_type: Any = None,
+) -> list[str]:
+    """Mode-aware replacement for the legacy ``or list(BACKGROUND_DIMENSIONS)`` fallback."""
+
+    mode = resolve_dimension_mode(document_type, options)
+    if mode == DIMENSION_MODE_SURVEY_TECHNICAL:
+        return list(SURVEY_RESEARCH_DIMENSIONS)
+    return list(BACKGROUND_DIMENSIONS)
+
 # Synthesis claims that do not name a valid dimension still produce a card, but
 # they never count toward the frozen dimension coverage.
 UNSCOPED_DIMENSION = "UNSCOPED"
@@ -82,40 +164,45 @@ def _nested_options(options: dict[str, Any] | None) -> dict[str, Any]:
 
 def normalize_required_dimensions(
     options: dict[str, Any] | None,
+    *,
+    document_type: Any = None,
 ) -> tuple[list[str], str]:
     """Freeze the required background dimension set for one WF-3B run.
 
-    An explicit ``required_dimensions``/``background_dimensions`` option selects
-    a subset of the eight canonical dimensions; otherwise all eight are
-    required.  Unknown dimensions fail at workflow creation rather than later
-    inside the search skill.
+    The allowed and default sets come from the document-type policy: a
+    ``SURVEY_REPORT`` project defaults to the six technical-survey dimensions
+    (with the application eight allowed as explicit supplements), while every
+    other project keeps the legacy eight.  Unknown dimensions fail at
+    workflow creation rather than later inside the search skill.
     """
 
+    policy = resolve_background_dimension_policy(document_type)
     source = _nested_options(options)
     raw = source.get("required_dimensions")
     if raw is None:
         raw = source.get("background_dimensions")
     if raw is None:
-        return list(BACKGROUND_DIMENSIONS), "DEFAULT_ALL"
+        return list(policy["default_required"]), "DEFAULT_ALL"
     if not isinstance(raw, (list, tuple)):
         raise ValueError("WF-3B required_dimensions 必须是背景维度数组")
+    allowed = set(policy["allowed"])
     selected: list[str] = []
     for item in raw:
         dimension = _clean_text(item).upper()
         if not dimension:
             continue
-        if dimension not in BACKGROUND_DIMENSION_SET:
+        if dimension not in allowed:
             raise ValueError(
                 "WF-3B required_dimensions 含未知背景维度："
                 + dimension
                 + "；可选值为 "
-                + "、".join(BACKGROUND_DIMENSIONS)
+                + "、".join(policy["allowed"])
             )
         if dimension not in selected:
             selected.append(dimension)
     if not selected:
         raise ValueError("WF-3B required_dimensions 至少需要一个有效背景维度")
-    ordered = [name for name in BACKGROUND_DIMENSIONS if name in selected]
+    ordered = [name for name in policy["ordering"] if name in selected]
     return ordered, "WORKFLOW_OPTIONS"
 
 
@@ -148,6 +235,17 @@ def resolve_wf3b_topic(
         if research_object and research_object not in title:
             return f"{title}：{research_object}", "WF1_PROJECT_DEFINITION"
         return title, "WF1_PROJECT_DEFINITION"
+    # Slim semantic WF-1 results carry no top-level project_title; the title
+    # lives in the PROJECT_BASIC item content instead.
+    for item in definition.get("items") or []:
+        if not isinstance(item, dict) or item.get("item_type") != "PROJECT_BASIC":
+            continue
+        content = item.get("content")
+        if not isinstance(content, dict):
+            continue
+        name = _clean_text(content.get("project_name"))
+        if name:
+            return name, "WF1_PROJECT_DEFINITION"
     problem = definition.get("problem_definition")
     statement = _clean_text((problem or {}).get("problem_statement")) if isinstance(problem, dict) else ""
     if statement:
@@ -164,12 +262,14 @@ def normalize_wf3b_options(
     *,
     project_id: str = "",
     wf1_project_definition: dict[str, Any] | None = None,
+    document_type: Any = None,
 ) -> dict[str, Any]:
     """Return the normalized WF-3B options consumed by workflow state.
 
-    The returned mapping always carries the frozen ``required_dimensions`` and
-    the topic resolution metadata.  When no topic can be resolved the ``topic``
-    key is absent and ``topic_origin`` is ``UNRESOLVED``; the caller decides the
+    The returned mapping always carries the frozen ``required_dimensions``,
+    the dimension mode resolved from the project document type, and the topic
+    resolution metadata.  When no topic can be resolved the ``topic`` key is
+    absent and ``topic_origin`` is ``UNRESOLVED``; the caller decides the
     blocking semantics.
     """
 
@@ -177,9 +277,17 @@ def normalize_wf3b_options(
     normalized = copy.deepcopy(source)
     normalized.pop("wf3b", None)
     normalized.pop("background_research", None)
-    dimensions, dimensions_origin = normalize_required_dimensions(source)
+    doc_type = _clean_text(document_type) or _clean_text(source.get("document_type"))
+    policy = resolve_background_dimension_policy(doc_type)
+    dimensions, dimensions_origin = normalize_required_dimensions(
+        source,
+        document_type=doc_type,
+    )
     normalized["required_dimensions"] = dimensions
     normalized["required_dimensions_origin"] = dimensions_origin
+    normalized["research_dimension_mode"] = policy["mode"]
+    if doc_type:
+        normalized["document_type"] = doc_type.upper()
     topic, topic_origin = resolve_wf3b_topic(
         source,
         wf1_project_definition=wf1_project_definition,
@@ -201,6 +309,7 @@ def normalize_background_plan(
     plan: dict[str, Any] | None,
     *,
     required_dimensions: list[str] | tuple[str, ...],
+    default_dimensions: list[str] | tuple[str, ...] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Freeze the background dimension boundary onto the model-authored plan.
 
@@ -208,15 +317,22 @@ def normalize_background_plan(
     ``required_dimensions``, drops query dimension tags outside the frozen set,
     and reports (without rewriting) which frozen dimensions the plan does not
     cover.  Findings are deterministic facts for the Critic and for audit; they
-    never fabricate coverage.
+    never fabricate coverage.  ``default_dimensions`` is the mode-aware
+    fallback used when ``required_dimensions`` is empty; callers should pass
+    the frozen default for the run instead of relying on the legacy eight.
     """
 
+    fallback = [
+        _clean_text(item).upper()
+        for item in default_dimensions or []
+        if _clean_text(item).upper() in ALL_BACKGROUND_DIMENSION_SET
+    ] or list(BACKGROUND_DIMENSIONS)
     normalized = copy.deepcopy(plan) if isinstance(plan, dict) else {}
     required = [
         _clean_text(item).upper()
         for item in required_dimensions
-        if _clean_text(item).upper() in BACKGROUND_DIMENSION_SET
-    ] or list(BACKGROUND_DIMENSIONS)
+        if _clean_text(item).upper() in ALL_BACKGROUND_DIMENSION_SET
+    ] or fallback
     required_set = set(required)
     findings: list[dict[str, Any]] = []
     normalized["task_type"] = "PUBLIC_BACKGROUND_RESEARCH"
@@ -241,7 +357,7 @@ def normalize_background_plan(
             dimension = _clean_text(raw).upper()
             if not dimension:
                 continue
-            if dimension not in BACKGROUND_DIMENSION_SET:
+            if dimension not in ALL_BACKGROUND_DIMENSION_SET:
                 findings.append({
                     "code": "BACKGROUND_PLAN_UNKNOWN_DIMENSION",
                     "severity": "P1",
@@ -432,6 +548,7 @@ def build_background_cards(
     *,
     required_dimensions: list[str] | tuple[str, ...],
     topic_id: str = "",
+    default_dimensions: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Build deterministic background evidence cards from validated claims.
 
@@ -439,14 +556,20 @@ def build_background_cards(
     validation become cards.  ``card_id`` is runtime-generated and stable for
     the same topic/claim/dimension triple.  Frozen dimensions without any
     validated claim become explicit ``background_gaps``; they are never filled
-    from model memory.
+    from model memory.  ``default_dimensions`` is the mode-aware fallback when
+    ``required_dimensions`` is empty.
     """
 
+    fallback = [
+        _clean_text(item).upper()
+        for item in default_dimensions or []
+        if _clean_text(item).upper() in ALL_BACKGROUND_DIMENSION_SET
+    ] or list(BACKGROUND_DIMENSIONS)
     required = [
         _clean_text(item).upper()
         for item in required_dimensions
-        if _clean_text(item).upper() in BACKGROUND_DIMENSION_SET
-    ] or list(BACKGROUND_DIMENSIONS)
+        if _clean_text(item).upper() in ALL_BACKGROUND_DIMENSION_SET
+    ] or fallback
     validation = claim_validation if isinstance(claim_validation, dict) else {}
     bindings = {
         str(item.get("claim_id") or ""): item
@@ -472,7 +595,7 @@ def build_background_cards(
         dimension = _clean_text(
             claim.get("dimension") or claim.get("background_dimension")
         ).upper()
-        if dimension not in BACKGROUND_DIMENSION_SET:
+        if dimension not in ALL_BACKGROUND_DIMENSION_SET:
             dimension = UNSCOPED_DIMENSION
         cards.append({
             "card_id": "bgcard-"
@@ -558,8 +681,8 @@ class BackgroundResearchService(PublicResearchService):
         dimensions = [
             _clean_text(item).upper()
             for item in (plan or {}).get("required_dimensions") or []
-            if _clean_text(item).upper() in BACKGROUND_DIMENSION_SET
-        ] or list(BACKGROUND_DIMENSIONS)
+            if _clean_text(item).upper() in ALL_BACKGROUND_DIMENSION_SET
+        ] or default_required_dimensions((plan or {}).get("document_type"))
         result["coverage"] = {
             "status": "PASS",
             "quality_profile": BACKGROUND_QUALITY_PROFILE,

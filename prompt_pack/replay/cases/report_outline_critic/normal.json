@@ -1,0 +1,203 @@
+{
+  "case_id": "report_outline_critic-normal",
+  "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+  "case_type": "normal",
+  "description": "提纲候选与证据卡一致、缺口标注完整，应判定通过",
+  "input": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+    "prompt_version": "1.0.0",
+    "task": {
+      "task_id": "task-001",
+      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
+      "current_step": "REPORT_OUTLINE_CRITIC",
+      "attempt": 1,
+      "writing_mode": null
+    },
+    "security_context": {
+      "project_security_level": "INTERNAL",
+      "input_max_security_level": "INTERNAL",
+      "required_environment": "OFFLINE_LOCAL",
+      "online_transfer_approval_status": "NOT_REQUIRED",
+      "allowed_model_endpoint_ids": [
+        "offline-primary"
+      ],
+      "prohibited_fields": [
+        "真实项目名称"
+      ],
+      "recipient_scope": [
+        "内部用户"
+      ],
+      "policy_version": "2.0"
+    },
+    "scope": {
+      "project_id": "project-001",
+      "target_object_ids": [
+        "obj-001"
+      ],
+      "read_only_object_ids": [],
+      "protected_object_ids": []
+    },
+    "freshness": {
+      "source_document_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "target_section_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scheme_profile_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "project_definition_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fact_context_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "template_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "security_policy_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "payload": {
+      "document_type": "SURVEY_REPORT",
+      "outline_candidate": {
+        "report_title": "DASH 系统公开调研报告",
+        "audience": "关注军事 AI 与人机协同系统的研究人员",
+        "sections": [
+          {
+            "section_key": "object-evolution",
+            "title": "背景调研：对象与演进",
+            "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+            "must_answer_questions": [
+              "DASH 是什么、由谁主导、演进脉络如何？"
+            ],
+            "evidence_card_ids": [
+              "card-001"
+            ],
+            "planned_exhibits": [
+              {
+                "kind": "TABLE",
+                "caption": "DASH 公开演进时间线",
+                "evidence_card_ids": [
+                  "card-001"
+                ]
+              }
+            ],
+            "known_gaps": [],
+            "estimated_share_percent": 30
+          },
+          {
+            "section_key": "architecture-modules",
+            "title": "背景调研：模块与架构",
+            "goal": "回答 DASH 有哪些功能模块、体系架构如何",
+            "must_answer_questions": [
+              "DASH 有哪些功能模块、体系架构如何？"
+            ],
+            "evidence_card_ids": [
+              "card-002"
+            ],
+            "planned_exhibits": [
+              {
+                "kind": "MERMAID_FIGURE",
+                "caption": "DASH 公开资料可证实的模块关系图",
+                "evidence_card_ids": [
+                  "card-002"
+                ]
+              }
+            ],
+            "known_gaps": [
+              "接口规范未公开"
+            ],
+            "estimated_share_percent": 40
+          },
+          {
+            "section_key": "effect-evidence",
+            "title": "背景调研：效果证据",
+            "goal": "回答 DASH 效果如何、哪些仍不知道",
+            "must_answer_questions": [
+              "DASH 效果如何、哪些仍不知道？"
+            ],
+            "evidence_card_ids": [],
+            "known_gaps": [
+              "缺少公开量化效果评估数据"
+            ],
+            "estimated_share_percent": 30
+          }
+        ],
+        "overall_gaps": [
+          "缺少公开量化效果评估数据"
+        ]
+      },
+      "background_cards": [
+        {
+          "card_id": "card-001",
+          "dimension": "OBJECT_AND_EVOLUTION",
+          "claim_text": "DASH 是美国空军部公开披露的人机协同决策支持系统。",
+          "source_ids": [
+            "src-001"
+          ],
+          "evidence_mode": "FULLTEXT",
+          "scope_qualifiers": [],
+          "limitations": []
+        },
+        {
+          "card_id": "card-002",
+          "dimension": "FUNCTION_AND_ARCHITECTURE",
+          "claim_text": "公开资料显示 DASH 采用模块化架构，将数据融合、方案生成与人工裁决拆分为可组合模块。",
+          "source_ids": [
+            "src-002"
+          ],
+          "evidence_mode": "FULLTEXT",
+          "scope_qualifiers": [
+            "基于公开报道"
+          ],
+          "limitations": [
+            "未披露接口规范"
+          ]
+        }
+      ],
+      "survey_research_brief": {
+        "must_answer_questions": [
+          "DASH 是什么、由谁主导、演进脉络如何？",
+          "DASH 有哪些功能模块、体系架构如何？",
+          "DASH 效果如何、哪些仍不知道？"
+        ],
+        "deliverable_notes": [
+          "背景调研为报告主体"
+        ]
+      },
+      "source_catalog": [
+        {
+          "source_id": "src-001",
+          "title": "示例来源一",
+          "url": "https://example.com/1",
+          "source_type": "GOVERNMENT",
+          "published_at": "2025-01-01"
+        },
+        {
+          "source_id": "src-002",
+          "title": "示例来源二",
+          "url": "https://example.com/2",
+          "source_type": "NEWS",
+          "published_at": "2025-02-01"
+        },
+        {
+          "source_id": "src-003",
+          "title": "示例来源三",
+          "url": "https://example.com/3",
+          "source_type": "ACADEMIC",
+          "published_at": null
+        }
+      ]
+    },
+    "expected_output_schema": "schemas/prompts/report_outline_critic_output.schema.json"
+  },
+  "expected_output": {
+    "schema_version": "2.0",
+    "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+    "prompt_version": "1.0.0",
+    "status": "PASS",
+    "result": {
+      "verdict": "ACCEPT"
+    },
+    "findings": [],
+    "unresolved_items": [],
+    "user_questions": [],
+    "source_refs": [],
+    "warnings": []
+  },
+  "expected_validation": {
+    "input_schema_valid": true,
+    "output_schema_valid": true,
+    "expected_status": "PASS"
+  }
+}

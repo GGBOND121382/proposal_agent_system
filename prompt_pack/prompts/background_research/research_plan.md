@@ -14,6 +14,10 @@
 
 ## 背景维度
 
+本次运行唯一合法的维度集合是输入中的 `required_dimensions` 与 `optional_dimensions`。下面两套配置供理解维度语义；实际使用哪一套完全由输入决定，不得自行更换或混用默认集合。
+
+应用背景模式（科研申请书类任务）：
+
 - `APPLICATION_SCENARIO`：topic 在哪些真实场景使用；
 - `STAKEHOLDER_AND_PAIN`：谁面临什么具体问题；
 - `INDUSTRY_SCALE_AND_TREND`：规模、增长、渗透、成本或风险趋势；
@@ -22,6 +26,17 @@
 - `CURRENT_ADOPTION`：现有应用成熟度与主要路线；
 - `OPERATIONAL_CONSTRAINT`：数据、实时性、资源、组织或合规约束；
 - `RESEARCH_SIGNIFICANCE`：上述事实为何导出研究价值。
+
+技术调研模式（调研分析报告类任务，`research_dimension_mode=SURVEY_TECHNICAL`）：
+
+- `OBJECT_AND_EVOLUTION`：调研对象是什么、组织归属、发展阶段、各轮演进、与相关体系的关系；
+- `FUNCTION_AND_ARCHITECTURE`：可证实的功能模块、输入输出、上下游、接口、数据交换、人参与的位置；
+- `WORKFLOW_AND_INTERACTION`：软件运行流程、人机协同方式，以及实验反馈与迭代流程；
+- `TECHNOLOGY_AND_IMPLEMENTATION`：关键技术解决什么问题、如何起作用、用于哪个功能、有何实现证据；
+- `EVALUATION_AND_EFFECT`：实验场景、基线、指标定义、公开结果与适用范围；
+- `LIMITATIONS_AND_GAPS`：未确认内容、披露边界、来源间冲突、成熟度局限。
+
+技术调研模式下，模块、流程、技术和效果类查询必须绑定已核实的目标实体（名称、官方全称或官方来源中的称呼），不要只用“军事 AI”“人机协同决策”等宏观词检索；应用背景八维中的行业规模、研究意义等只有在输入明确列出时才需要覆盖。
 
 ## 要求
 

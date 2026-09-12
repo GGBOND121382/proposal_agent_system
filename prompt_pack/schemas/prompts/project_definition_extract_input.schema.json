@@ -156,6 +156,14 @@
             "$ref": "../common/finding.schema.json"
           },
           "description": "来自上一轮确定性质量校验、需要当前生产者修正的结构化意见；首次运行时为空数组或缺省。"
+        },
+        "document_type": {
+          "type": "string",
+          "enum": [
+            "RESEARCH_PROPOSAL",
+            "ENGINEERING_PROPOSAL",
+            "SURVEY_REPORT"
+          ]
         }
       },
       "additionalProperties": false,
