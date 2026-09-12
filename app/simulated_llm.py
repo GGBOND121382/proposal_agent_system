@@ -1019,10 +1019,20 @@ class SimulatedLLM:
             "EVALUATION_AND_EFFECT": "核实实验场景、指标与公开效果",
             "LIMITATIONS_AND_GAPS": "核实披露边界、冲突与成熟度局限",
         }
+        literature_intent = bool(payload.get("literature_review_intent"))
+        if literature_intent:
+            purpose_by_dimension = {
+                key: "围绕该维度检索学术科技文献与正式技术报告"
+                for key in purpose_by_dimension
+            }
         result["queries"] = [
             {
                 "query_id": f"query-{index:03d}",
-                "query": f"{topic} {dimension.lower().replace('_', ' ')} 公开统计 政策 案例",
+                "query": (
+                    f"{topic} {dimension.lower().replace('_', ' ')} 学术论文 文献综述"
+                    if literature_intent
+                    else f"{topic} {dimension.lower().replace('_', ' ')} 公开统计 政策 案例"
+                ),
                 "dimension": dimension,
                 "purpose": purpose_by_dimension.get(dimension, "覆盖该背景维度的公开证据"),
             }

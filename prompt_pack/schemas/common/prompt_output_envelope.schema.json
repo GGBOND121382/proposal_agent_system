@@ -107,6 +107,18 @@
     },
     {
       "$ref": "../prompts/expression_critic_output.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_outline_output.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_outline_critic_output.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_section_write_output.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_content_critic_output.schema.json"
     }
   ]
 }

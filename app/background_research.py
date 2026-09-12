@@ -257,6 +257,65 @@ def wf3b_topic_id(project_id: str, topic: str) -> str:
     return "topic-" + sha256_json({"project_id": str(project_id), "topic": topic})[:20]
 
 
+# Deterministic literature-review intent detection.  A survey task whose
+# operator-facing brief explicitly asks for recent scientific literature
+# (rather than only public-object background) flips WF-3B plan semantics to
+# academic-first while keeping the same SURVEY_REPORT document type.  The
+# terms are intentionally explicit phrases; single generic characters such as
+# “文献” alone are not enough.
+LITERATURE_REVIEW_INTENT_TERMS: tuple[str, ...] = (
+    "文献综述",
+    "科技文献",
+    "学术文献",
+    "学术论文",
+    "技术论文",
+    "文献数量",
+    "外文文献",
+    "中文核心",
+    "核心期刊",
+    "论文",
+    "literature review",
+    "literature survey",
+    "academic literature",
+    "scholarly literature",
+    "academic papers",
+)
+
+
+def detect_literature_review_intent(
+    document_type: Any = None,
+    options: dict[str, Any] | None = None,
+) -> bool:
+    """Return True when a SURVEY_REPORT task explicitly requests a literature review.
+
+    The decision is fully deterministic: only ``SURVEY_REPORT`` projects can
+    carry the intent, and only when the survey brief (or the WF-3B ``focus``
+    option) explicitly mentions scientific literature / papers / review
+    semantics.  Topics, dimensions and model output never influence the flag.
+    """
+
+    source = _nested_options(options)
+    doc_type = (_clean_text(document_type) or _clean_text(source.get("document_type"))).upper()
+    if doc_type != "SURVEY_REPORT":
+        return False
+    fragments: list[str] = []
+    focus = _clean_text(source.get("focus"))
+    if focus:
+        fragments.append(focus)
+    brief = source.get("survey_research_brief")
+    if isinstance(brief, dict):
+        for key in ("evidence_requirements", "deliverable_notes", "must_answer_questions"):
+            value = brief.get(key)
+            if isinstance(value, str):
+                fragments.append(value)
+            elif isinstance(value, (list, tuple)):
+                fragments.extend(str(item) for item in value if str(item).strip())
+    haystack = "\n".join(fragments).lower()
+    if not haystack.strip():
+        return False
+    return any(term.lower() in haystack for term in LITERATURE_REVIEW_INTENT_TERMS)
+
+
 def normalize_wf3b_options(
     options: dict[str, Any] | None,
     *,
@@ -288,6 +347,7 @@ def normalize_wf3b_options(
     normalized["research_dimension_mode"] = policy["mode"]
     if doc_type:
         normalized["document_type"] = doc_type.upper()
+    normalized["literature_review_intent"] = detect_literature_review_intent(doc_type, source)
     topic, topic_origin = resolve_wf3b_topic(
         source,
         wf1_project_definition=wf1_project_definition,

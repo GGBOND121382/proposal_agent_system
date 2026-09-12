@@ -107,6 +107,18 @@
     },
     {
       "$ref": "../prompts/expression_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_outline_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_outline_critic_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_section_write_input.schema.json"
+    },
+    {
+      "$ref": "../prompts/report_content_critic_input.schema.json"
     }
   ],
   "properties": {

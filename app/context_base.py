@@ -2880,6 +2880,7 @@ class ContextBuilder:
             replacements.extend([
                 ("payload.task_type", "PUBLIC_BACKGROUND_RESEARCH"),
                 ("payload.research_dimension_mode", resolve_dimension_mode(None, options)),
+                ("payload.literature_review_intent", bool(options.get("literature_review_intent"))),
                 ("payload.topic", {
                     "topic_id": str(options.get("topic_id") or ""),
                     "topic_description": str(options.get("topic") or "").strip(),

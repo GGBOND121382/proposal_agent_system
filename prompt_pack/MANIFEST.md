@@ -13,7 +13,7 @@
 
 | 路径 | 字节 | SHA-256 |
 |---|---:|---|
-| `BUILD_REPORT.json` | 462 | `ea32380a8ab8077a7b63f3295cee48125d5f146647e0a72544ea2b7ea8a5bd22` |
+| `BUILD_REPORT.json` | 267571 | `fbe7631b21150f844b3410316b433c9574d486319eb2e541b2ecfa52dd72b6f3` |
 | `DEVELOPMENT_CHECKLIST.md` | 529 | `c357983692e45c0da2539d5f3e62f7d0c0a5dc5c980dba915f124ffc49a25dc6` |
 | `MODEL_CONFIGURATION.md` | 1904 | `fe91b5d95de6d58724189f167e110415f52f05ee9ef085f01156138d628b21b9` |
 | `README.md` | 3549 | `2d7b7ad1879ae6c85bdcdb9cb4986e509398b176d804e1ef59d05833ac594172` |
@@ -48,7 +48,7 @@
 | `prompts/argument/argument_architecture.md` | 2314 | `a54e6f26dedaa81458e6cc6c64817c330502b1764c84cd119bcfd3d103ef20c5` |
 | `prompts/argument/argument_architecture_critic.md` | 3062 | `25cfd933cc53071e0b3d0a9f584f5f8b115ce6237759b3ac992413ceae367907` |
 | `prompts/background_research/research_critic.md` | 2132 | `e005359156c4ad5e8a2fb897cc7bd4ae9ed44bba3e4ee8472e8d17d8653ac418` |
-| `prompts/background_research/research_plan.md` | 6731 | `07f5df6c2d6dd4728f76d2531cc205159d98200338f1f64048d5cbf2f86406d3` |
+| `prompts/background_research/research_plan.md` | 7494 | `cf8981b39ff392f7be08b0ff8dca6300cae7a3522fd888556edd5f16cd1bac75` |
 | `prompts/background_research/research_plan_critic.md` | 1690 | `6fc323d920673a1dc4e1c11afe8bcea9df78526d4b46c538995117f977da55d4` |
 | `prompts/background_research/research_synthesis.md` | 3208 | `690e6046bf3aaeebee82339e5f45aed871df7e9c12d9a2a07e9e3602536c0bb6` |
 | `prompts/fact/fact_critic.md` | 6040 | `10cc5ee4d399aad3a4433258c94beb06c5151775d26ff23c76983e443ff9e9eb` |
@@ -302,8 +302,8 @@
 | `schemas/common/prior_section_digest.schema.json` | 1174 | `6447fffa1777e609f4b6c61a5e72c0b8baa9de4052b83c84c90f7f50ebda67cd` |
 | `schemas/common/project_item.schema.json` | 93575 | `acdc50a904218563ee706ac609a50638baf8565a2d07248f78512203aea7bde9` |
 | `schemas/common/project_relation.schema.json` | 3374 | `e666404007bc49dac6f247d7dec5ee63baf534a5ab58e23d1147e5b33d173d37` |
-| `schemas/common/prompt_input_envelope.schema.json` | 3195 | `694cfc3825180db213c2a7c3aff9fd92aa081eaeb42638e4d96e8ad6b44c6e87` |
-| `schemas/common/prompt_output_envelope.schema.json` | 3035 | `48dee6ce78019d9924fcbd33dfd42b0c685dffc9828d1140c6b5e21c43001ea9` |
+| `schemas/common/prompt_input_envelope.schema.json` | 3507 | `1c08f6e30b18b3a02d7f3465b54042a82f837c4b200f6a72e83dc64cd5343a60` |
+| `schemas/common/prompt_output_envelope.schema.json` | 3351 | `3d1cf5bc6084098651334b286c8aa58fb7074ced08ff85177e105355bf95ed5c` |
 | `schemas/common/proposal_contract.schema.json` | 1437 | `3f915143c1769abe5701e2b5e8ce87b9f8326e0f71eb509bbd2f7e1af169db03` |
 | `schemas/common/quality_scorecard.schema.json` | 884 | `3f162c6862de7302e28b2fda5b5e9c5e6212f508472c85d3bf7f4766963a8c49` |
 | `schemas/common/research_sufficiency.schema.json` | 2428 | `0cd9d096c2b511f4a34ae7f7be14d2ed1c906f41437acbb960a6605d66fa0718` |
@@ -368,7 +368,7 @@
 | `schemas/prompts/background_research_critic_output.schema.json` | 2966 | `14155e1ce0d617d98a63c6ee9bd8ee827d6b941c0dac65987dd169bdb425b435` |
 | `schemas/prompts/background_research_plan_critic_input.schema.json` | 7606 | `5ed71bca27b9f05e211a2f153bb859c5cd39202c76355c82b6437de27e8bd5ac` |
 | `schemas/prompts/background_research_plan_critic_output.schema.json` | 2068 | `5feca8c455d17762e366a3766199f00de0f97021a98f6fcc71761ee296bea762` |
-| `schemas/prompts/background_research_plan_input.schema.json` | 19859 | `93f82f4ce04c481c43271d2f3e4aec778cae5be7888ee866148fe0c7f62543f8` |
+| `schemas/prompts/background_research_plan_input.schema.json` | 19936 | `47397f96702b71e4c18a365a55e33810ef58875fab3deeca360bd17af64b949a` |
 | `schemas/prompts/background_research_plan_output.schema.json` | 6716 | `c1eb2d1026b64e7941164eabc92cc73d467351666d2a0de3435297c750c69e28` |
 | `schemas/prompts/background_research_synthesis_input.schema.json` | 11158 | `fd549e6ec16354536eeaac47563f6d2a848d620599556e8d61735a017e772bda` |
 | `schemas/prompts/background_research_synthesis_output.schema.json` | 9055 | `94bd6395ae92a630ca87f0676d01428d856d00dd85acb4fd91241b21c7a69aa5` |
