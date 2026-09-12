@@ -1,16 +1,16 @@
 {
-  "case_id": "report_outline_critic-missing_input",
-  "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+  "case_id": "report_content_critic-missing_input",
+  "prompt_id": "P-REPORT-CONTENT-CRITIC",
   "case_type": "missing_input",
   "description": "结构合法但证据卡清单缺失，无法核对引用，应要求用户补充",
   "input": {
     "schema_version": "2.0",
-    "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+    "prompt_id": "P-REPORT-CONTENT-CRITIC",
     "prompt_version": "1.0.0",
     "task": {
       "task_id": "task-001",
-      "workflow_type": "TOPIC_BACKGROUND_RESEARCH",
-      "current_step": "REPORT_OUTLINE_CRITIC",
+      "workflow_type": "PROPOSAL_AUTHORING",
+      "current_step": "REPORT_CONTENT_CRITIC",
       "attempt": 1,
       "writing_mode": null
     },
@@ -49,31 +49,37 @@
     },
     "payload": {
       "document_type": "SURVEY_REPORT",
-      "outline_candidate": {
-        "report_title": "DASH 系统公开调研报告",
-        "overall_gaps": [],
-        "report_sections": [
-          {
-            "section_key": "object-evolution",
-            "title": "背景调研：对象与演进",
-            "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
-            "must_answer_questions": [
-              "DASH 是什么？"
-            ],
-            "evidence_card_ids": [
-              "card-001"
-            ],
-            "known_gaps": []
-          }
-        ]
-      },
+      "outline_sections": [
+        {
+          "section_key": "object-evolution",
+          "title": "背景调研：对象与演进",
+          "goal": "回答 DASH 是什么、由谁主导、演进脉络如何",
+          "must_answer_questions": [
+            "DASH 是什么？"
+          ],
+          "evidence_card_ids": [
+            "bgcard-001"
+          ],
+          "known_gaps": []
+        }
+      ],
+      "section_drafts": [
+        {
+          "section_key": "object-evolution",
+          "title": "背景调研：对象与演进",
+          "markdown_body": "DASH 是美国空军部公开披露的人机协同决策支持项目 [bgcard-001]。",
+          "cited_card_ids": [
+            "bgcard-001"
+          ]
+        }
+      ],
       "background_cards": []
     },
-    "expected_output_schema": "schemas/prompts/report_outline_critic_output.schema.json"
+    "expected_output_schema": "schemas/prompts/report_content_critic_output.schema.json"
   },
   "expected_output": {
     "schema_version": "2.0",
-    "prompt_id": "P-REPORT-OUTLINE-CRITIC",
+    "prompt_id": "P-REPORT-CONTENT-CRITIC",
     "prompt_version": "1.0.0",
     "status": "NEED_USER_INPUT",
     "result": {
@@ -84,7 +90,7 @@
       {
         "item_id": "unres-001",
         "type": "MISSING",
-        "description": "缺少用于核对 evidence_card_ids 的调研证据卡清单",
+        "description": "缺少用于核对 [card_id] 引用的调研证据卡清单",
         "target_paths": [
           "payload/background_cards"
         ],
@@ -96,8 +102,8 @@
       {
         "question_id": "q-001",
         "question_type": "MISSING_INFORMATION",
-        "question": "请提供提纲审查所需的 WF-3B 调研证据卡清单。",
-        "reason": "没有证据卡清单时无法核对提纲中的 evidence_card_ids 是否真实存在",
+        "question": "请提供全文内容检查所需的 WF-3B 调研证据卡清单。",
+        "reason": "没有证据卡清单时无法核对正文引用是否指向真实证据",
         "target_paths": [
           "payload/background_cards"
         ],

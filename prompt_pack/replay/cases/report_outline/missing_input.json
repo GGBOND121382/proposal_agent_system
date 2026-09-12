@@ -67,7 +67,10 @@
     "status": "NEED_USER_INPUT",
     "result": {
       "report_title": "DASH 系统公开调研报告（保守提纲）",
-      "sections": [
+      "overall_gaps": [
+        "WF-3B 调研证据卡整体缺失，提纲无法获得证据支撑"
+      ],
+      "report_sections": [
         {
           "section_key": "object-evolution",
           "title": "背景调研：对象与演进",
@@ -80,9 +83,6 @@
             "无任何调研证据卡，本章全部内容待证据补齐"
           ]
         }
-      ],
-      "overall_gaps": [
-        "WF-3B 调研证据卡整体缺失，提纲无法获得证据支撑"
       ]
     },
     "findings": [

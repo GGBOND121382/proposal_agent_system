@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .candidate_integrity import visible_document_snapshot
+from .context_base import REPORT_CONTENT_CRITIC_PROMPT
 from .dependency_preflight import DependencyIssue, DependencyReport
 from .executor import PromptExecutionError, PromptExecutor
 from .llm import MODEL_RESPONSE_PROTOCOL_VERSION
@@ -2430,6 +2431,34 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 remaining.append(record)
         return remaining, accepted
 
+    def _accept_report_content_critic_runs(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+        reason: str,
+    ) -> None:
+        """Record report content-critic REVISE runs as accepted stage output.
+
+        The report branch caps directed revision at one round.  Findings that
+        survive stay open as quality records for final review, but they must
+        not re-block a workflow whose documented policy decision is to continue
+        to assembly with the unresolved items listed in the report itself.
+        """
+
+        rows = self.db.fetchall(
+            "SELECT id FROM prompt_runs WHERE workflow_id=? AND prompt_id=? ORDER BY created_at",
+            (wf["id"], REPORT_CONTENT_CRITIC_PROMPT),
+        )
+        accepted = state.setdefault("accepted_step_results", {})
+        for index, row in enumerate(rows or []):
+            accepted[f"report-content-critic-{index + 1}"] = {
+                "prompt_id": REPORT_CONTENT_CRITIC_PROMPT,
+                "run_id": str(row.get("id") or ""),
+                "status": "REVISE",
+                "accepted_at": utc_now(),
+                "reason": reason,
+            }
+
     def _project_document_type(self, project_id: str) -> str:
         project = self.db.fetchone("SELECT config_json FROM projects WHERE id=?", (project_id,)) or {}
         config = json.loads(project.get("config_json") or "{}")
@@ -3895,6 +3924,64 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                 wf = self.get(workflow_id)
                 state = wf["state"]
                 continue
+            if step.get("type") == "REPORT_WRITE_SECTIONS":
+                try:
+                    result = await self._write_report_sections(wf, state)
+                except WorkflowInputRequired as exc:
+                    return self._pause_for_workflow_input(wf, state, exc)
+                except ProviderRetriesExhausted as exc:
+                    return self._block_provider_retries_exhausted(
+                        wf,
+                        state,
+                        exc,
+                        boundary="REPORT_WRITE_SECTIONS",
+                    )
+                except ValueError as exc:
+                    report = self._runtime_configuration_report(
+                        exc,
+                        scope="REPORT_WRITE_SECTIONS_RUNTIME",
+                    )
+                    if report is not None:
+                        return self._pause_for_configuration(
+                            wf,
+                            state,
+                            report,
+                            source="REPORT_WRITE_SECTIONS_RUNTIME",
+                        )
+                    state["last_error"] = redact_secret_text(str(exc))
+                    self._update(
+                        wf,
+                        status=WorkflowStatus.BLOCKED_CONTENT.value,
+                        state=state,
+                    )
+                    return self.get(workflow_id)
+                except KeyError as exc:
+                    state["last_error"] = redact_secret_text(str(exc))
+                    self._update(
+                        wf,
+                        status=WorkflowStatus.BLOCKED_TECHNICAL.value,
+                        state=state,
+                    )
+                    return self.get(workflow_id)
+                if result is not None:
+                    return result
+                wf = self.get(workflow_id)
+                state = wf["state"]
+                continue
+            if step.get("type") == "REPORT_ASSEMBLE":
+                try:
+                    self._assemble_report(wf, state)
+                except (ValueError, KeyError) as exc:
+                    state["last_error"] = redact_secret_text(str(exc))
+                    self._update(
+                        wf,
+                        status=WorkflowStatus.BLOCKED_TECHNICAL.value,
+                        state=state,
+                    )
+                    return self.get(workflow_id)
+                wf["current_step"] += 1
+                self._update(wf, current_step=wf["current_step"], state=state)
+                continue
             if step.get("type") == "GATE":
                 wf["current_step"] += 1
                 self._update(wf, current_step=wf["current_step"], state=state)
@@ -4163,6 +4250,80 @@ class WorkflowEngine(WorkflowAuthoringMixin, WorkflowRepairMixin, WorkflowGateMi
                         state=state,
                     )
                     return self.get(workflow_id)
+            if prompt_id == REPORT_CONTENT_CRITIC_PROMPT and effective_status == "REVISE":
+                # The report branch never routes content findings back into the
+                # generic producer-repair machinery: findings carry a section_key
+                # and trigger at most one directed section rewrite round; without
+                # locatable sections or after that round they stay on the record
+                # and the workflow continues to assembly.
+                findings = [
+                    item
+                    for item in effective_output.get("findings") or []
+                    if isinstance(item, dict)
+                ]
+                affected_keys = {
+                    str(item.get("section_key") or "").strip()
+                    for item in findings
+                    if str(item.get("section_key") or "").strip()
+                }
+                revision_round = int(state.get("report_revision_round") or 0)
+                if revision_round >= 1 or not affected_keys:
+                    state["report_unresolved_findings"] = findings
+                    state["report_content_review_status"] = "REVISE_UNRESOLVED"
+                    self._accept_report_content_critic_runs(
+                        wf, state, reason="REPORT_REVISION_POLICY_CONTINUE"
+                    )
+                    wf["current_step"] += 1
+                    self._update(wf, current_step=wf["current_step"], state=state)
+                    wf = self.get(workflow_id)
+                    state = wf["state"]
+                    continue
+                state["report_revision_round"] = revision_round + 1
+                progress_map = (
+                    state.get("report_section_progress")
+                    if isinstance(state.get("report_section_progress"), dict)
+                    else {}
+                )
+                revised_any = False
+                for key in affected_keys:
+                    progress = progress_map.get(key)
+                    if isinstance(progress, dict) and str(progress.get("status") or "") == "COMPLETED":
+                        progress["status"] = "PENDING_REVISION"
+                        progress.pop("last_error", None)
+                        revised_any = True
+                if not revised_any:
+                    # Findings name sections that have no completed draft (for
+                    # example a chapter that already failed to generate).  There
+                    # is nothing a rewrite round could change; keep the record.
+                    state["report_unresolved_findings"] = findings
+                    state["report_content_review_status"] = "REVISE_UNRESOLVED"
+                    self._accept_report_content_critic_runs(
+                        wf, state, reason="REPORT_REVISION_POLICY_CONTINUE"
+                    )
+                    wf["current_step"] += 1
+                    self._update(wf, current_step=wf["current_step"], state=state)
+                    wf = self.get(workflow_id)
+                    state = wf["state"]
+                    continue
+                state["report_revision_guidance"] = {
+                    key: [
+                        str(item.get("description") or "")
+                        for item in findings
+                        if str(item.get("section_key") or "").strip() == key
+                        and str(item.get("description") or "").strip()
+                    ]
+                    for key in sorted(affected_keys)
+                }
+                write_step = next(
+                    index
+                    for index, item in enumerate(steps)
+                    if item.get("type") == "REPORT_WRITE_SECTIONS"
+                )
+                wf["current_step"] = write_step
+                self._update(wf, status="RUNNING", current_step=write_step, state=state)
+                wf = self.get(workflow_id)
+                state = wf["state"]
+                continue
             if effective_status == "REVISE":
                 state.setdefault("semantic_failure_history", []).append({
                     **semantic_revise_classification().to_dict(),

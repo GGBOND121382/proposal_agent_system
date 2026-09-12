@@ -1170,7 +1170,7 @@ class SimulatedLLM:
             "known_gaps": [],
             "estimated_share_percent": 5,
         })
-        result["sections"] = sections
+        result["report_sections"] = sections
         result["overall_gaps"] = overall_gap_texts
         return base
 
@@ -1183,7 +1183,7 @@ class SimulatedLLM:
         }
         candidate = payload.get("outline_candidate") if isinstance(payload.get("outline_candidate"), dict) else {}
         unknown_by_section: dict[str, list[str]] = {}
-        for section in candidate.get("sections") or []:
+        for section in candidate.get("report_sections") or []:
             if not isinstance(section, dict):
                 continue
             section_key = str(section.get("section_key") or "")
@@ -1215,6 +1215,80 @@ class SimulatedLLM:
             }
             for section_key, card_ids in unknown_by_section.items()
         ]
+        return base
+
+    def _handle_report_section_write(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        section = payload.get("section") if isinstance(payload.get("section"), dict) else {}
+        section_key = str(section.get("section_key") or "").strip()
+        cards = [item for item in payload.get("background_cards") or [] if isinstance(item, dict)]
+        card_by_id = {str(card.get("card_id") or ""): card for card in cards}
+        cited_ids = [
+            str(card_id)
+            for card_id in section.get("evidence_card_ids") or []
+            if str(card_id) in card_by_id
+        ] or [str(card.get("card_id")) for card in cards if str(card.get("card_id") or "")]
+        paragraphs: list[str] = []
+        questions = [str(q).strip() for q in section.get("must_answer_questions") or [] if str(q).strip()]
+        if questions:
+            paragraphs.append("本章需回答的问题：" + "；".join(questions) + "。")
+        for card_id in cited_ids:
+            card = card_by_id[card_id]
+            claim = str(card.get("claim_text") or "").strip()
+            if claim:
+                paragraphs.append(f"{claim} [{card_id}]")
+        gaps = [str(gap).strip() for gap in section.get("known_gaps") or [] if str(gap).strip()]
+        if gaps:
+            paragraphs.append("已知缺口：" + "；".join(gaps) + "。")
+        guidance = [str(g).strip() for g in payload.get("revision_guidance") or [] if str(g).strip()]
+        if guidance:
+            paragraphs.append("本章按内容检查意见修订：" + "；".join(guidance) + "。")
+        if not paragraphs:
+            paragraphs.append("本章暂无可用证据卡内容。")
+        result["section_key"] = section_key
+        result["markdown_body"] = "\n\n".join(paragraphs)
+        result["cited_card_ids"] = cited_ids
+        result["unresolved_questions"] = []
+        return base
+
+    def _handle_report_content_critic(self, base: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
+        payload = envelope.get("payload", {})
+        result = base["result"]
+        outline_sections = [
+            item for item in payload.get("outline_sections") or [] if isinstance(item, dict)
+        ]
+        drafts = [item for item in payload.get("section_drafts") or [] if isinstance(item, dict)]
+        draft_keys = {str(item.get("section_key") or "") for item in drafts}
+        findings: list[dict[str, Any]] = []
+        for section in outline_sections:
+            section_key = str(section.get("section_key") or "").strip()
+            title = str(section.get("title") or "")
+            key_lower = section_key.lower()
+            if "reference" in key_lower or "参考资料" in title or "证据对照" in title:
+                continue
+            if section_key and section_key not in draft_keys:
+                findings.append({
+                    "code": "RC_MUST_ANSWER_MISSING",
+                    "severity": "P1",
+                    "section_key": section_key,
+                    "description": f"提纲章节“{title or section_key}”没有对应正文。",
+                })
+        for draft in drafts:
+            body = str(draft.get("markdown_body") or "")
+            if not body.strip():
+                findings.append({
+                    "code": "RC_MUST_ANSWER_MISSING",
+                    "severity": "P1",
+                    "section_key": str(draft.get("section_key") or ""),
+                    "description": "章节正文为空。",
+                })
+        if findings:
+            base["status"] = "REVISE"
+            result["verdict"] = "REVISE"
+            base["findings"] = findings
+        else:
+            result["verdict"] = "ACCEPT"
         return base
 
 

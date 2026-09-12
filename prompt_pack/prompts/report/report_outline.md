@@ -21,7 +21,7 @@
 1. 只输出模型 Schema 要求的语义字段。不生成 `section_id`、`outline_id`、Hash、版本、状态、路由、Gate 等机器字段；`section_key` 是供人阅读的小写语义键，章节顺序与稳定 ID 由运行时分配。
 2. 每章必须有：`title`、`goal`（本章回答什么）、`must_answer_questions`（数组）、`known_gaps`（本章确认无法回答的问题，可为空数组）。
 3. `evidence_card_ids` 只能引用输入 `background_cards` 中真实存在的 `card_id`，不得编造或推测卡片 ID；没有可用证据的章节该字段留空数组。
-4. 如需在信封级 `source_refs` 标注来源，`source_id` 只能引用输入 `source_catalog` 中真实存在的条目；`source_catalog` 是 WF-3B 调研来源的可信目录，不得编造其他来源 ID。
+4. 信封级 `source_refs` 必须留空数组：本节点的证据绑定由 `evidence_card_ids` 承载，来源身份由代码从 `source_catalog` 还原；不得自行编造或拼接来源 ID。
 5. `planned_exhibits` 是本章的表格/图示计划，每项含 `kind`（`TABLE` 或 `MERMAID_FIGURE`）、`caption` 与支撑它的 `evidence_card_ids`；图表必须有证据卡支撑，不得规划无来源的图表。
 6. 证据不足的章节必须在 `known_gaps` 中写明无法回答的问题，不得用措辞暗示证据存在；各章确认的缺口应汇总进 `overall_gaps`。宁可标注未知，不得从通用知识虚构调研对象（如 DASH）的实现细节、指标或结论。
 7. `must_answer_questions` 应覆盖任务简报 `survey_research_brief.must_answer_questions` 中的必答问题；输入中的 `background_gaps` 若无法由现有证据回答，应反映在相应章节的 `known_gaps` 或 `overall_gaps` 中，而不是假装已解决。
@@ -33,4 +33,4 @@
 - `OUTLINE_INPUT_SECURITY_BLOCK`：输入声明的密级越权或任务触及受保护对象，发现对应问题时生成可定位Finding，并根据严重程度改变status。
 - `OUTLINE_EVIDENCE_BASE_MISSING`：证据卡整体缺失、提纲无法获得任何证据支撑，发现对应问题时生成可定位Finding，并根据严重程度改变status。
 
-只返回模型 Schema 中的 `report_title`、`sections`，以及可选的 `audience`、`overall_gaps`。
+只返回模型 Schema 中的 `report_title`、`report_sections`，以及可选的 `audience`、`overall_gaps`。

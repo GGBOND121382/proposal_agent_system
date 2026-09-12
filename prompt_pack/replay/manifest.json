@@ -1110,6 +1110,66 @@
       "case_type": "need_user_input",
       "status": "IMPLEMENTED",
       "fixture_path": "replay/cases/report_outline_critic/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/normal.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/missing_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/schema_error.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/high_risk.json"
+    },
+    {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_section_write/need_user_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "normal",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/normal.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "missing_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/missing_input.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "schema_error",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/schema_error.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "high_risk",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/high_risk.json"
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "case_type": "need_user_input",
+      "status": "IMPLEMENTED",
+      "fixture_path": "replay/cases/report_content_critic/need_user_input.json"
     }
   ]
 }

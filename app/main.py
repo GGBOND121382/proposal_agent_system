@@ -359,6 +359,62 @@ def staged_workflow_files(workflow_id: str) -> dict[str, Any]:
         raise HTTPException(404, str(exc)) from exc
 
 
+@app.get("/api/workflows/{workflow_id}/report")
+def get_workflow_report(workflow_id: str) -> dict[str, Any]:
+    row = db.fetchone("SELECT state_json FROM workflows WHERE id=?", (workflow_id,))
+    if not row:
+        raise HTTPException(404, "Workflow not found")
+    state = json.loads(row.get("state_json") or "{}")
+    progress = state.get("report_section_progress") or {}
+    markdown = None
+    artifact_id = str(state.get("report_markdown_artifact_id") or "")
+    if artifact_id:
+        artifact = db.fetchone(
+            "SELECT content_json FROM artifacts WHERE id=? AND artifact_type='REPORT_MARKDOWN'",
+            (artifact_id,),
+        )
+        if artifact:
+            markdown = (json.loads(artifact["content_json"]) or {}).get("markdown")
+    return {
+        "workflow_id": workflow_id,
+        "delivery": state.get("report_delivery") or None,
+        "sections": [
+            {
+                "section_key": str(key),
+                "title": entry.get("title"),
+                "status": entry.get("status"),
+                "attempts": entry.get("attempts"),
+                "last_error": entry.get("last_error"),
+                "summary": entry.get("summary"),
+            }
+            for key, entry in progress.items()
+            if isinstance(entry, dict)
+        ],
+        "markdown": markdown,
+    }
+
+
+@app.get("/api/workflows/{workflow_id}/report/download")
+def download_workflow_report(workflow_id: str, format: str = "md") -> FileResponse:
+    row = db.fetchone("SELECT state_json FROM workflows WHERE id=?", (workflow_id,))
+    if not row:
+        raise HTTPException(404, "Workflow not found")
+    state = json.loads(row.get("state_json") or "{}")
+    delivery = state.get("report_delivery") or {}
+    path_value = str(
+        delivery.get("markdown_path" if format == "md" else "docx_path") or ""
+    )
+    path = Path(path_value) if path_value else None
+    if path is None or not path.exists():
+        raise HTTPException(404, "Report file not found")
+    media_type = (
+        "text/markdown"
+        if format == "md"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    return FileResponse(path, media_type=media_type, filename=path.name)
+
+
 @app.get("/api/gates")
 def list_gates(project_id: str | None = None, workflow_id: str | None = None) -> list[dict[str, Any]]:
     return workflows.list_gates(project_id, workflow_id)

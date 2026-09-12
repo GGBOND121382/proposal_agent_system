@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
+from .context_base import (
+    REPORT_CONTENT_CRITIC_PROMPT,
+    REPORT_OUTLINE_PROMPT,
+    REPORT_SECTION_WRITE_PROMPT,
+)
 from .executor import PromptExecutionError
 from .llm import MODEL_RESPONSE_PROTOCOL_VERSION
+from .retry_policy import ProviderRetriesExhausted
 from .runtime_failures import FailureCategory, classify_runtime_failure
-from .util import sha256_json, sha256_text
+from .util import new_id, sha256_json, sha256_text, utc_now
 from .workflow_input import CURRENT_PROPOSAL_INPUT, WorkflowInputRequired, material_input_questions
 from .workflow_status import WorkflowStatus
 
@@ -716,6 +724,561 @@ class WorkflowAuthoringMixin:
         self._create_gate(refreshed, "CANDIDATE_REVIEW", target_id=wf["id"], questions=[])
         self._update(refreshed, status="WAITING_GATE", state=state)
         return self.get(wf["id"])
+
+    _REPORT_SECTION_ORDER = {"BODY": 0, "ABSTRACT": 1, "CONCLUSION": 2}
+    REPORT_SECTION_MAX_ATTEMPTS = 2
+
+    @staticmethod
+    def _report_section_kind(section: dict[str, Any]) -> str:
+        key = str(section.get("section_key") or "").lower()
+        title = str(section.get("title") or "")
+        if "reference" in key or "参考资料" in title or "证据对照" in title or "文献" in title:
+            return "REFERENCES"
+        if "abstract" in key or "summary" in key or "摘要" in title:
+            return "ABSTRACT"
+        if "conclusion" in key or "结论" in title:
+            return "CONCLUSION"
+        return "BODY"
+
+    async def _write_report_sections(
+        self,
+        wf: dict[str, Any],
+        state: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Write survey-report sections one at a time with persisted progress.
+
+        Unlike the proposal section chain there is no per-section critic loop:
+        body sections are written first, abstract and conclusion last, and
+        reference tables are code-generated during assembly.  Progress is
+        committed after every section so a provider interruption resumes from
+        the failed section instead of restarting the report.
+        """
+
+        outline = self._context_result(
+            wf["project_id"],
+            REPORT_OUTLINE_PROMPT,
+            workflow_id=wf["id"],
+            exact_workflow=True,
+        ) or {}
+        sections = [
+            section
+            for section in outline.get("report_sections") or []
+            if isinstance(section, dict) and str(section.get("section_key") or "").strip()
+        ]
+        if not sections:
+            raise ValueError(
+                "报告分章写作需要已确认的 P-REPORT-OUTLINE 提纲，但未找到 report_sections。"
+            )
+        writable = [
+            (index, section)
+            for index, section in enumerate(sections)
+            if self._report_section_kind(section) != "REFERENCES"
+        ]
+        writable.sort(
+            key=lambda pair: (
+                self._REPORT_SECTION_ORDER[self._report_section_kind(pair[1])],
+                pair[0],
+            )
+        )
+        progress_map = state.setdefault("report_section_progress", {})
+        provider_retry = getattr(self, "_execute_prompt_with_provider_retry", None)
+
+        for _outline_index, section in writable:
+            section_key = str(section["section_key"])
+            progress = progress_map.get(section_key)
+            if not isinstance(progress, dict):
+                progress = None
+            if progress and str(progress.get("status") or "") == "COMPLETED":
+                continue
+            attempts = int((progress or {}).get("attempts") or 0)
+            if progress and str(progress.get("status") or "") == "PENDING_REVISION":
+                attempts = 0
+            if attempts >= self.REPORT_SECTION_MAX_ATTEMPTS:
+                progress["status"] = "FAILED"
+                progress["updated_at"] = utc_now()
+                self._update(wf, state=state)
+                continue
+
+            active_section = {
+                key: section.get(key)
+                for key in (
+                    "section_key",
+                    "title",
+                    "goal",
+                    "must_answer_questions",
+                    "evidence_card_ids",
+                    "known_gaps",
+                    "planned_exhibits",
+                )
+                if section.get(key) is not None
+            }
+            # The section-write input schema requires goal/questions/gaps; a
+            # missing value would silently drop the section replacement and
+            # leak the pack's placeholder section to the model.
+            if not str(active_section.get("goal") or "").strip():
+                active_section["goal"] = str(section.get("title") or section_key)
+            active_section.setdefault("must_answer_questions", [])
+            active_section.setdefault("known_gaps", [])
+            state["active_report_section"] = active_section
+            progress = {
+                "section_key": section_key,
+                "title": section.get("title"),
+                "status": "RUNNING",
+                "attempts": attempts,
+                "updated_at": utc_now(),
+            }
+            progress_map[section_key] = progress
+
+            completed = False
+            while (
+                not completed
+                and int(progress.get("attempts") or 0) < self.REPORT_SECTION_MAX_ATTEMPTS
+            ):
+                progress["attempts"] = int(progress.get("attempts") or 0) + 1
+                progress["status"] = "RUNNING"
+                progress["updated_at"] = utc_now()
+                self._update(wf, state=state)
+                try:
+                    envelope = self.context_builder.build(
+                        REPORT_SECTION_WRITE_PROMPT,
+                        wf["project_id"],
+                        workflow_id=wf["id"],
+                        workflow_state=state,
+                    )
+                    if callable(provider_retry):
+                        result = await provider_retry(
+                            wf,
+                            state,
+                            prompt_id=REPORT_SECTION_WRITE_PROMPT,
+                            envelope=envelope,
+                        )
+                    else:
+                        result = await self.executor.execute(
+                            REPORT_SECTION_WRITE_PROMPT,
+                            envelope,
+                            project_id=wf["project_id"],
+                            workflow_id=wf["id"],
+                            original_environment=state.get("original_environment"),
+                        )
+                except (WorkflowInputRequired, ProviderRetriesExhausted):
+                    # Progress is already persisted; a resume retries this section
+                    # because attempts remain below the cap.
+                    self._update(wf, state=state)
+                    raise
+                except Exception as exc:  # per-section isolation: record and continue
+                    progress["last_error"] = str(exc)[:500]
+                    progress["updated_at"] = utc_now()
+                    self._update(wf, state=state)
+                    continue
+                if str(result.get("status") or "") == "PASS":
+                    output_result = (result.get("output") or {}).get("result") or {}
+                    body = str(output_result.get("markdown_body") or "")
+                    if not body.strip():
+                        progress["last_error"] = "P-REPORT-SECTION-WRITE 返回空正文"
+                        progress["updated_at"] = utc_now()
+                        self._update(wf, state=state)
+                        continue
+                    artifact_id = new_id("artifact")
+                    content = {
+                        "section_key": section_key,
+                        "title": section.get("title"),
+                        "markdown_body": body,
+                        "cited_card_ids": output_result.get("cited_card_ids") or [],
+                        "unresolved_questions": output_result.get("unresolved_questions") or [],
+                        "run_id": str(result.get("run_id") or ""),
+                        "created_at": utc_now(),
+                    }
+                    row = self.db.fetchone(
+                        "SELECT COALESCE(MAX(version),0) AS v FROM artifacts WHERE project_id=? AND workflow_id=? AND artifact_type='REPORT_SECTION'",
+                        (wf["project_id"], wf["id"]),
+                    )
+                    self.db.execute(
+                        """INSERT INTO artifacts(id,project_id,workflow_id,artifact_type,prompt_id,version,status,security_level,context_hash,content_json,created_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            artifact_id,
+                            wf["project_id"],
+                            wf["id"],
+                            "REPORT_SECTION",
+                            REPORT_SECTION_WRITE_PROMPT,
+                            int((row or {}).get("v") or 0) + 1,
+                            "PASS",
+                            self._project_level(wf["project_id"]),
+                            sha256_json({k: v for k, v in content.items() if k != "created_at"}),
+                            json.dumps(content, ensure_ascii=False),
+                            content["created_at"],
+                        ),
+                    )
+                    progress["status"] = "COMPLETED"
+                    progress["run_id"] = content["run_id"]
+                    progress["artifact_id"] = artifact_id
+                    progress["summary"] = body[:200]
+                    progress.pop("last_error", None)
+                    progress["updated_at"] = utc_now()
+                    self._update(wf, state=state)
+                    completed = True
+                    continue
+                progress["last_error"] = (
+                    f"P-REPORT-SECTION-WRITE 返回 {result.get('status') or 'ERROR'}"
+                )
+                progress["updated_at"] = utc_now()
+                self._update(wf, state=state)
+
+            if not completed:
+                progress["status"] = "FAILED"
+                progress["updated_at"] = utc_now()
+                self._update(wf, state=state)
+
+        state.pop("active_report_section", None)
+        completed_keys = [
+            key
+            for key, progress in progress_map.items()
+            if isinstance(progress, dict) and str(progress.get("status") or "") == "COMPLETED"
+        ]
+        if not completed_keys:
+            state["last_error"] = "报告分章写作没有任何一章成功生成正文。"
+            self._update(wf, status=WorkflowStatus.BLOCKED_CONTENT.value, state=state)
+            return self.get(wf["id"])
+        wf["current_step"] += 1
+        self._update(wf, current_step=wf["current_step"], state=state)
+        return None
+
+    def _assemble_report(self, wf: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+        """Assemble the survey report Markdown and persist it.
+
+        Assembly is deterministic code: the outline order decides chapter
+        placement, reference tables are generated from the evidence catalog,
+        and failed chapters remain visible as explicit placeholders instead of
+        being silently dropped.  The delivery record states content and check
+        status truthfully.
+        """
+
+        outline = self._context_result(
+            wf["project_id"],
+            REPORT_OUTLINE_PROMPT,
+            workflow_id=wf["id"],
+            exact_workflow=True,
+        ) or {}
+        sections = [
+            section
+            for section in outline.get("report_sections") or []
+            if isinstance(section, dict) and str(section.get("section_key") or "").strip()
+        ]
+        if not sections:
+            raise ValueError("报告整合需要已确认的 P-REPORT-OUTLINE 提纲。")
+        project = self.db.fetchone(
+            "SELECT name FROM projects WHERE id=?", (wf["project_id"],)
+        ) or {}
+        report_title = str(
+            outline.get("report_title") or project.get("name") or "调研报告"
+        ).strip()
+        report_context = self.context_builder._wf4_report_branch_context(
+            wf["project_id"], state
+        ) or {}
+        progress_map = (
+            state.get("report_section_progress")
+            if isinstance(state.get("report_section_progress"), dict)
+            else {}
+        )
+        drafts = {
+            str(draft.get("section_key")): draft
+            for draft in self.context_builder._wf4_report_section_drafts(
+                wf["project_id"], wf["id"], state
+            )
+        }
+        cards = report_context.get("background_cards") or []
+        sources = {
+            str(source.get("source_id") or ""): source
+            for source in report_context.get("source_catalog") or []
+            if isinstance(source, dict) and str(source.get("source_id") or "").strip()
+        }
+
+        missing_sections: list[str] = []
+        parts: list[str] = [f"# {report_title}", ""]
+        parts.append("## 目录")
+        parts.append("")
+        for index, section in enumerate(sections, start=1):
+            parts.append(f"{index}. {section.get('title') or section['section_key']}")
+        parts.append("")
+        for section in sections:
+            section_key = str(section["section_key"])
+            title = str(section.get("title") or section_key)
+            parts.append(f"## {title}")
+            parts.append("")
+            if self._report_section_kind(section) == "REFERENCES":
+                parts.extend(self._report_references_markdown(cards, sources))
+            elif section_key in drafts:
+                parts.append(
+                    self._normalize_report_body(
+                        str(drafts[section_key].get("markdown_body") or "").strip(),
+                        title,
+                    )
+                )
+            else:
+                progress = progress_map.get(section_key)
+                reason = (
+                    str(progress.get("last_error") or "")
+                    if isinstance(progress, dict)
+                    else ""
+                ) or "该章节未完成正文生成"
+                missing_sections.append(title)
+                parts.append(f"【本章未能生成：{reason}】")
+            parts.append("")
+
+        gap_lines: list[str] = []
+        for gap in outline.get("overall_gaps") or []:
+            text = str(gap if not isinstance(gap, dict) else gap.get("description") or "").strip()
+            if text:
+                gap_lines.append(f"- {text}")
+        for section in sections:
+            for gap in section.get("known_gaps") or []:
+                text = str(gap).strip()
+                if text:
+                    gap_lines.append(f"- 【{section.get('title') or section['section_key']}】{text}")
+        unresolved = [
+            item
+            for item in state.get("report_unresolved_findings") or []
+            if isinstance(item, dict)
+        ]
+        if gap_lines or unresolved:
+            parts.append("## 附录：已知缺口")
+            parts.append("")
+            parts.extend(gap_lines)
+            for finding in unresolved:
+                description = str(finding.get("description") or "").strip()
+                if description:
+                    parts.append(f"- 【内容检查未解决】{description}")
+            parts.append("")
+
+        critic_result = self._context_result(
+            wf["project_id"],
+            REPORT_CONTENT_CRITIC_PROMPT,
+            workflow_id=wf["id"],
+            exact_workflow=True,
+        ) or {}
+        if not critic_result:
+            # A critic that never passed (for example REVISE kept on the record
+            # after the single revision round) has no PASS artifact; read the
+            # latest run output directly so the report never claims NOT_RUN
+            # for a review that actually happened.
+            row = self.db.fetchone(
+                "SELECT output_json FROM prompt_runs WHERE project_id=? AND workflow_id=? AND prompt_id=? AND output_json IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+                (wf["project_id"], wf["id"], REPORT_CONTENT_CRITIC_PROMPT),
+            )
+            if row:
+                try:
+                    critic_output = json.loads(row.get("output_json") or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    critic_output = {}
+                critic_result = critic_output.get("result") or {}
+                if not critic_result.get("verdict") and critic_output.get("status"):
+                    critic_result = {**critic_result, "status": critic_output["status"]}
+        verdict = str(
+            critic_result.get("verdict")
+            or critic_result.get("status")
+            or "NOT_RUN"
+        )
+        if verdict == "REVISE" and unresolved:
+            verdict = "REVISE（未解决项已如实记录）"
+        checks = {
+            "content_critic_verdict": verdict,
+            "content_critic_unresolved_findings": len(unresolved),
+            "revision_rounds_used": int(state.get("report_revision_round") or 0),
+            "outbound_security_checks": "NOT_TRIGGERED（报告分支全部本地处理，无对外发送内容）",
+        }
+        parts.append("## 附录：检查状态")
+        parts.append("")
+        parts.append(f"- 全文内容检查结论：{verdict}")
+        parts.append("- 外围安全/出境检查：未触发（报告分支全部本地处理，无对外发送内容）")
+        if unresolved:
+            parts.append(f"- 存在 {len(unresolved)} 条内容检查未解决项，已在上方缺口附录中列出。")
+        if missing_sections:
+            parts.append("- 以下章节未能生成正文：" + "、".join(missing_sections))
+        parts.append("")
+
+        markdown = "\n".join(parts).strip() + "\n"
+        content_status = "COMPLETED" if not missing_sections else "PARTIAL"
+        delivery: dict[str, Any] = {
+            "content_status": content_status,
+            "missing_sections": missing_sections,
+            "checks": checks,
+            "generated_at": utc_now(),
+        }
+
+        settings = getattr(
+            getattr(getattr(self, "executor", None), "gateway", None), "settings", None
+        )
+        exports_dir = Path(
+            getattr(settings, "exports_dir", None) or (Path("data") / "exports")
+        )
+        exports_dir.mkdir(parents=True, exist_ok=True)
+        markdown_path = exports_dir / f"report_{wf['id']}.md"
+        markdown_path.write_text(markdown, encoding="utf-8")
+        delivery["markdown_path"] = str(markdown_path)
+
+        docx_path = exports_dir / f"report_{wf['id']}.docx"
+        try:
+            self._write_report_docx(markdown, docx_path)
+            delivery["docx_status"] = "GENERATED"
+            delivery["docx_path"] = str(docx_path)
+        except Exception as exc:
+            delivery["docx_status"] = "FAILED"
+            delivery["docx_error"] = str(exc)[:300]
+
+        artifact_id = new_id("artifact")
+        artifact_content = {
+            "report_title": report_title,
+            "markdown": markdown,
+            "delivery": {key: value for key, value in delivery.items() if key != "docx_error"},
+            "created_at": delivery["generated_at"],
+        }
+        row = self.db.fetchone(
+            "SELECT COALESCE(MAX(version),0) AS v FROM artifacts WHERE project_id=? AND workflow_id=? AND artifact_type='REPORT_MARKDOWN'",
+            (wf["project_id"], wf["id"]),
+        )
+        self.db.execute(
+            """INSERT INTO artifacts(id,project_id,workflow_id,artifact_type,prompt_id,version,status,security_level,context_hash,content_json,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                artifact_id,
+                wf["project_id"],
+                wf["id"],
+                "REPORT_MARKDOWN",
+                None,
+                int((row or {}).get("v") or 0) + 1,
+                "PASS",
+                self._project_level(wf["project_id"]),
+                sha256_json({k: v for k, v in artifact_content.items() if k != "created_at"}),
+                json.dumps(artifact_content, ensure_ascii=False),
+                artifact_content["created_at"],
+            ),
+        )
+        self.db.audit(
+            "REPORT_ASSEMBLED",
+            project_id=wf["project_id"],
+            object_id=artifact_id,
+            metadata={
+                "workflow_id": wf["id"],
+                "content_status": content_status,
+                "missing_sections": missing_sections,
+                "docx_status": delivery["docx_status"],
+            },
+        )
+        state["report_markdown_artifact_id"] = artifact_id
+        state["report_delivery"] = delivery
+        return delivery
+
+    @classmethod
+    def _normalize_report_body(cls, body: str, title: str) -> str:
+        """Normalize one section body for whole-document assembly.
+
+        Section bodies are model output: subsection headings often reuse the
+        chapter level (``##``) and figures arrive as ``[[MERMAID]]`` placeholder
+        blocks.  Assembly demotes every in-body heading one level (chapter
+        titles own ``##``) and rewrites mermaid placeholders into fenced
+        ``mermaid`` code blocks with a bold caption.
+        """
+
+        body = cls._strip_duplicate_section_heading(body, title)
+        lines = body.splitlines()
+        out: list[str] = []
+        index = 0
+        while index < len(lines):
+            line = lines[index]
+            if line.strip().startswith("[[MERMAID]]"):
+                caption = (
+                    line.strip()[len("[[MERMAID]]"):].split("|")[0].strip() or "图示"
+                )
+                index += 1
+                graph: list[str] = []
+                while index < len(lines) and lines[index].strip():
+                    graph.append(lines[index])
+                    index += 1
+                out.append(f"**图：{caption}**")
+                out.append("")
+                out.append("```mermaid")
+                out.extend(graph)
+                out.append("```")
+                continue
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                hashes = len(stripped) - len(stripped.lstrip("#"))
+                line = "#" * min(hashes + 1, 6) + stripped[hashes:]
+            out.append(line)
+            index += 1
+        text = "\n".join(out)
+        while "\n\n\n" in text:
+            text = text.replace("\n\n\n", "\n\n")
+        return text
+
+    @staticmethod
+    def _strip_duplicate_section_heading(body: str, title: str) -> str:
+        """Drop a leading heading that just repeats the assembly chapter title."""
+
+        lines = body.splitlines()
+        first = next((index for index, line in enumerate(lines) if line.strip()), None)
+        if first is None:
+            return body
+        heading = lines[first].lstrip("#").strip()
+        if lines[first].lstrip().startswith("#") and heading == title.strip():
+            del lines[first]
+            while lines and not lines[0].strip():
+                del lines[0]
+            return "\n".join(lines)
+        return body
+
+    @staticmethod
+    def _report_references_markdown(
+        cards: list[dict[str, Any]],
+        sources: dict[str, dict[str, Any]],
+    ) -> list[str]:
+        lines = [
+            "| 证据卡 | 结论摘要 | 来源 |",
+            "|---|---|---|",
+        ]
+        for card in cards:
+            card_id = str(card.get("card_id") or "")
+            claim = str(card.get("claim_text") or "").replace("|", "\\|")
+            if len(claim) > 80:
+                claim = claim[:80] + "…"
+            source_labels = []
+            for source_id in card.get("source_ids") or []:
+                source = sources.get(str(source_id)) or {}
+                title = str(source.get("title") or source_id)
+                url = str(source.get("url") or "")
+                label = f"[{source_id}] {title}"
+                if url:
+                    label = f"[{source_id}] [{title}]({url})"
+                source_labels.append(label.replace("|", "\\|"))
+            lines.append(f"| {card_id} | {claim} | {'<br>'.join(source_labels)} |")
+        if len(lines) == 2:
+            lines.append("| （无） | 本次调研未产生已绑定来源的证据卡 | |")
+        lines.append("")
+        return lines
+
+    @staticmethod
+    def _write_report_docx(markdown: str, path: Path) -> None:
+        import docx
+
+        document = docx.Document()
+        in_code = False
+        for line in markdown.splitlines():
+            if line.strip().startswith("```"):
+                if in_code:
+                    document.add_paragraph("（图示源码见 Markdown 全文的 mermaid 代码块）")
+                in_code = not in_code
+                continue
+            if in_code:
+                continue
+            if line.startswith("### "):
+                document.add_heading(line[4:].strip(), level=3)
+            elif line.startswith("## "):
+                document.add_heading(line[3:].strip(), level=2)
+            elif line.startswith("# "):
+                document.add_heading(line[2:].strip(), level=1)
+            elif line.strip():
+                document.add_paragraph(line.replace("**", ""))
+        document.save(str(path))
 
     def _three_section_mode(self, state: dict[str, Any]) -> bool:
         options = state.get("options") or {}

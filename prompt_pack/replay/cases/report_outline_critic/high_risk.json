@@ -53,7 +53,7 @@
       "document_type": "SURVEY_REPORT",
       "outline_candidate": {
         "report_title": "DASH 系统公开调研报告",
-        "sections": [
+        "report_sections": [
           {
             "section_key": "object-evolution",
             "title": "背景调研：对象与演进",

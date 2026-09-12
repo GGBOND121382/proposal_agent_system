@@ -56,11 +56,16 @@ WORKFLOWS: dict[str, list[dict[str, Any]]] = {
 
 # WF-4 report branch (SURVEY_REPORT): frozen into the workflow state at start
 # by document type; the proposal step list in WORKFLOWS stays untouched and
-# this branch is not a separately startable workflow type.  Section writing
-# and integration are appended to this branch in a later phase.
+# this branch is not a separately startable workflow type.  After the outline
+# gate, sections are written one at a time with per-section progress persisted
+# in the state, the content critic may send affected sections back for at most
+# one directed revision round, and assembly is pure code.
 WF4_REPORT_BRANCH_STEPS: list[dict[str, Any]] = [
     {"prompt_id": "P-REPORT-OUTLINE"},
     {"prompt_id": "P-REPORT-OUTLINE-CRITIC"},
+    {"type": "REPORT_WRITE_SECTIONS"},
+    {"prompt_id": "P-REPORT-CONTENT-CRITIC"},
+    {"type": "REPORT_ASSEMBLE"},
 ]
 
 GATE_ROLE = {
@@ -114,6 +119,7 @@ CRITIC_PRODUCER = {
     "P-WRITE-CRITIC": "P-WRITE-CONTENT",
     "P-EXPRESSION-CRITIC": "P-EXPRESSION-POLISH",
     "P-REPORT-OUTLINE-CRITIC": "P-REPORT-OUTLINE",
+    "P-REPORT-CONTENT-CRITIC": "P-REPORT-OUTLINE",
 }
 
 

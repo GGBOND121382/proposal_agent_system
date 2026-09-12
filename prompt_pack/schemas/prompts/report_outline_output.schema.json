@@ -32,7 +32,14 @@
           "type": "string",
           "minLength": 1
         },
-        "sections": {
+        "overall_gaps": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "report_sections": {
           "type": "array",
           "minItems": 1,
           "items": {
@@ -117,19 +124,12 @@
               "known_gaps"
             ]
           }
-        },
-        "overall_gaps": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
         }
       },
       "additionalProperties": false,
       "required": [
         "report_title",
-        "sections"
+        "report_sections"
       ]
     },
     "findings": {

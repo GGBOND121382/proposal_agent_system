@@ -52,7 +52,10 @@
       "outline_candidate": {
         "report_title": "DASH 系统公开调研报告",
         "audience": "关注军事 AI 与人机协同系统的研究人员",
-        "sections": [
+        "overall_gaps": [
+          "缺少公开量化效果评估数据"
+        ],
+        "report_sections": [
           {
             "section_key": "object-evolution",
             "title": "背景调研：对象与演进",
@@ -112,9 +115,6 @@
             ],
             "estimated_share_percent": 30
           }
-        ],
-        "overall_gaps": [
-          "缺少公开量化效果评估数据"
         ]
       },
       "background_cards": [

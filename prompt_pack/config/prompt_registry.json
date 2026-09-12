@@ -211,6 +211,28 @@
       "next_human_gate": "PLAN_CONFIRMATION"
     },
     {
+      "prompt_id": "P-REPORT-SECTION-WRITE",
+      "prompt_version": "1.0.0",
+      "prompt_file": "prompts/report/report_section_write.md",
+      "input_schema": "schemas/prompts/report_section_write_input.schema.json",
+      "output_schema": "schemas/prompts/report_section_write_output.schema.json",
+      "model_profile": "formal_writing",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Writing Agent",
+      "next_human_gate": null
+    },
+    {
+      "prompt_id": "P-REPORT-CONTENT-CRITIC",
+      "prompt_version": "1.0.0",
+      "prompt_file": "prompts/report/report_content_critic.md",
+      "input_schema": "schemas/prompts/report_content_critic_input.schema.json",
+      "output_schema": "schemas/prompts/report_content_critic_output.schema.json",
+      "model_profile": "critic",
+      "required_environment": "OFFLINE_LOCAL",
+      "executor_role": "Critic Agent",
+      "next_human_gate": null
+    },
+    {
       "prompt_id": "P-SCHEME-EXTRACT",
       "prompt_version": "2.1.0",
       "prompt_file": "prompts/scheme/scheme_extract.md",

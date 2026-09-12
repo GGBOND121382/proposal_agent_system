@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "report_outline_critic_input.schema.json",
+  "$id": "report_section_write_input.schema.json",
   "type": "object",
   "properties": {
     "schema_version": {
       "const": "2.0"
     },
     "prompt_id": {
-      "const": "P-REPORT-OUTLINE-CRITIC"
+      "const": "P-REPORT-SECTION-WRITE"
     },
     "prompt_version": {
       "const": "1.0.0"
@@ -115,51 +115,60 @@
     "payload": {
       "type": "object",
       "properties": {
+        "task_type": {
+          "const": "REPORT_SECTION_WRITE"
+        },
         "document_type": {
           "const": "SURVEY_REPORT"
         },
-        "outline_candidate": {
+        "report_title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "section": {
           "type": "object",
           "properties": {
-            "report_title": {
+            "section_key": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+            },
+            "title": {
               "type": "string",
               "minLength": 1
             },
-            "audience": {
+            "goal": {
               "type": "string",
               "minLength": 1
             },
-            "overall_gaps": {
+            "must_answer_questions": {
               "type": "array",
               "items": {
                 "type": "string",
                 "minLength": 1
               }
             },
-            "report_sections": {
+            "evidence_card_ids": {
               "type": "array",
-              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "planned_exhibits": {
+              "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
-                  "section_key": {
+                  "kind": {
                     "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                    "enum": [
+                      "TABLE",
+                      "MERMAID_FIGURE"
+                    ]
                   },
-                  "title": {
+                  "caption": {
                     "type": "string",
                     "minLength": 1
-                  },
-                  "goal": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "must_answer_questions": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    }
                   },
                   "evidence_card_ids": {
                     "type": "array",
@@ -167,66 +176,35 @@
                       "type": "string",
                       "minLength": 1
                     }
-                  },
-                  "planned_exhibits": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "TABLE",
-                            "MERMAID_FIGURE"
-                          ]
-                        },
-                        "caption": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "evidence_card_ids": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        }
-                      },
-                      "additionalProperties": false,
-                      "required": [
-                        "kind",
-                        "caption"
-                      ]
-                    }
-                  },
-                  "known_gaps": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "estimated_share_percent": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 100
                   }
                 },
                 "additionalProperties": false,
                 "required": [
-                  "section_key",
-                  "title",
-                  "goal",
-                  "must_answer_questions",
-                  "known_gaps"
+                  "kind",
+                  "caption"
                 ]
               }
+            },
+            "known_gaps": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "estimated_share_percent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
             }
           },
           "additionalProperties": false,
           "required": [
-            "report_title",
-            "report_sections"
+            "section_key",
+            "title",
+            "goal",
+            "must_answer_questions",
+            "known_gaps"
           ]
         },
         "background_cards": {
@@ -280,50 +258,34 @@
             ]
           }
         },
-        "survey_research_brief": {
-          "type": "object",
-          "properties": {
-            "must_answer_questions": {
-              "type": "array",
-              "items": {
+        "evidence_passages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "passage_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "relevance": {
                 "type": "string",
                 "minLength": 1
               }
             },
-            "evidence_requirements": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "materials_cutoff": {
-              "type": "string",
-              "minLength": 1
-            },
-            "source_priorities": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "scope_exclusions": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              }
-            },
-            "deliverable_notes": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          },
-          "additionalProperties": false
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "text"
+            ]
+          }
         },
         "source_catalog": {
           "type": "array",
@@ -358,19 +320,74 @@
               "source_id"
             ]
           }
+        },
+        "previous_section_summaries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "section_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "section_key",
+              "title",
+              "summary"
+            ]
+          }
+        },
+        "glossary": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "term": {
+                "type": "string",
+                "minLength": 1
+              },
+              "definition": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "term"
+            ]
+          }
+        },
+        "revision_guidance": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "additionalProperties": false,
       "required": [
+        "task_type",
         "document_type",
-        "outline_candidate",
+        "report_title",
+        "section",
         "background_cards"
       ]
     },
     "expected_output_schema": {
       "type": "string",
       "minLength": 1,
-      "const": "schemas/prompts/report_outline_critic_output.schema.json"
+      "const": "schemas/prompts/report_section_write_output.schema.json"
     },
     "trusted_source_catalog": {
       "type": "array",

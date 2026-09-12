@@ -69,6 +69,8 @@ _WORKFLOW_ARTIFACT_SOURCE_CACHE: ContextVar[dict[str, tuple[str, ...]] | None] =
 
 REPORT_OUTLINE_PROMPT = "P-REPORT-OUTLINE"
 REPORT_OUTLINE_CRITIC_PROMPT = "P-REPORT-OUTLINE-CRITIC"
+REPORT_SECTION_WRITE_PROMPT = "P-REPORT-SECTION-WRITE"
+REPORT_CONTENT_CRITIC_PROMPT = "P-REPORT-CONTENT-CRITIC"
 _REPORT_CARD_KEYS = (
     "card_id",
     "dimension",
@@ -749,13 +751,18 @@ class ContextBuilder:
                 continue
             ordered = sorted(
                 (
-                    (int(step) if str(step).isdigit() else -1, item)
+                    (
+                        int(step) if str(step).isdigit() else -1,
+                        str(item.get("run_id") or ""),
+                        item,
+                    )
                     for step, item in accepted.items()
                     if isinstance(item, dict)
                 ),
+                key=lambda entry: (entry[0], entry[1]),
                 reverse=True,
             )
-            for _, item in ordered:
+            for _, _, item in ordered:
                 run_id = str(item.get("run_id") or "").strip()
                 gate_id = str(item.get("gate_id") or "").strip()
                 if not run_id or not gate_id:
@@ -2148,7 +2155,7 @@ class ContextBuilder:
 
         source = result if isinstance(result, dict) else {}
         sections: list[dict[str, Any]] = []
-        for section in source.get("sections") or []:
+        for section in source.get("report_sections") or []:
             if not isinstance(section, dict):
                 continue
             projected = {
@@ -2181,8 +2188,148 @@ class ContextBuilder:
             for key in ("report_title", "audience", "overall_gaps")
             if source.get(key) is not None
         }
-        candidate["sections"] = sections
+        candidate["report_sections"] = sections
         return candidate
+
+    def _wf4_report_branch_state(
+        self,
+        project_id: str,
+        state: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Return the frozen WF-3B prerequisite state for the report branch."""
+
+        bindings = (
+            state.get("prerequisite_workflow_ids")
+            if isinstance(state.get("prerequisite_workflow_ids"), dict)
+            else {}
+        )
+        wf3b_id = str(bindings.get(WF3B_WORKFLOW_TYPE) or "").strip()
+        if not wf3b_id:
+            return None
+        row = self.db.fetchone(
+            "SELECT state_json FROM workflows WHERE id=? AND project_id=?",
+            (wf3b_id, project_id),
+        )
+        if not row:
+            return None
+        try:
+            return json.loads(row.get("state_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return None
+
+    def _wf4_report_evidence_passages(
+        self,
+        project_id: str,
+        state: dict[str, Any],
+        source_ids: set[str],
+        *,
+        limit: int = 12,
+        max_chars: int = 800,
+    ) -> list[dict[str, Any]]:
+        """Project WF-3B search passages cited by the given sources.
+
+        The writer receives short excerpts instead of full pages so the prompt
+        stays small; source identity still comes from the code-managed catalog.
+        """
+
+        wf3b_state = self._wf4_report_branch_state(project_id, state) or {}
+        search = (
+            wf3b_state.get("background_search_results")
+            if isinstance(wf3b_state.get("background_search_results"), dict)
+            else {}
+        )
+        passages: list[dict[str, Any]] = []
+        for passage in search.get("passages") or []:
+            if not isinstance(passage, dict):
+                continue
+            source_ref = (
+                passage.get("source_ref")
+                if isinstance(passage.get("source_ref"), dict)
+                else {}
+            )
+            source_id = str(
+                source_ref.get("source_id") or passage.get("source_id") or ""
+            ).strip()
+            if source_ids and source_id not in source_ids:
+                continue
+            text = str(passage.get("text") or "").strip()
+            if not source_id or not text:
+                continue
+            passages.append({
+                "source_id": source_id,
+                "text": text[:max_chars],
+            })
+            if len(passages) >= limit:
+                break
+        return passages
+
+    @staticmethod
+    def _report_glossary(cards: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, str]]:
+        """Collect abbreviation definitions already present in evidence cards."""
+
+        pattern = re.compile(r"([\u4e00-\u9fffA-Za-z][^，。（）()；;：:]{0,40}?)（([A-Z][A-Za-z0-9\-]{1,15})）")
+        seen: set[str] = set()
+        glossary: list[dict[str, str]] = []
+        for card in cards:
+            text = str(card.get("claim_text") or "")
+            for match in pattern.finditer(text):
+                term = str(match.group(2) or "").strip()
+                definition = str(match.group(1) or "").strip().lstrip("，、；;：: ")
+                if not term or term in seen:
+                    continue
+                seen.add(term)
+                glossary.append({"term": term, "definition": definition or term})
+                if len(glossary) >= limit:
+                    return glossary
+        return glossary
+
+    def _wf4_report_section_drafts(
+        self,
+        project_id: str,
+        workflow_id: str,
+        state: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the latest persisted REPORT_SECTION draft per section key.
+
+        Only sections whose progress still reads COMPLETED are drafts; sections
+        sent back for directed revision keep their old artifact on disk but are
+        not passed to the whole-document review as current content.
+        """
+
+        rows = self.db.fetchall(
+            """SELECT content_json FROM artifacts
+               WHERE project_id=? AND workflow_id=? AND artifact_type='REPORT_SECTION' AND status='PASS'
+               ORDER BY version DESC,created_at DESC""",
+            (project_id, workflow_id),
+        )
+        progress_map = (
+            state.get("report_section_progress")
+            if isinstance(state, dict) and isinstance(state.get("report_section_progress"), dict)
+            else {}
+        )
+        seen: set[str] = set()
+        drafts: list[dict[str, Any]] = []
+        for row in rows or []:
+            try:
+                content = json.loads(row.get("content_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            section_key = str(content.get("section_key") or "").strip()
+            if not section_key or section_key in seen:
+                continue
+            progress = progress_map.get(section_key)
+            if progress_map and (
+                not isinstance(progress, dict)
+                or str(progress.get("status") or "") != "COMPLETED"
+            ):
+                continue
+            seen.add(section_key)
+            drafts.append({
+                key: copy.deepcopy(content.get(key))
+                for key in ("section_key", "title", "markdown_body", "cited_card_ids")
+                if content.get(key) is not None
+            })
+        return drafts
 
     def _approved_public_claims(
         self,
@@ -2829,13 +2976,135 @@ class ContextBuilder:
                         exact_workflow=True,
                     )
                 )
-                if not isinstance(outline_candidate, dict) or not outline_candidate.get("sections"):
+                if not isinstance(outline_candidate, dict) or not outline_candidate.get("report_sections"):
                     raise ValueError(
                         "P-REPORT-OUTLINE-CRITIC 需要本工作流已完成的 "
                         "P-REPORT-OUTLINE 结果作为审查对象。"
                     )
                 replacements.extend([
                     ("payload.outline_candidate", self._project_report_outline_candidate(outline_candidate)),
+                    ("payload.background_cards", report_context["background_cards"]),
+                    ("payload.source_catalog", report_context["source_catalog"]),
+                ])
+                if report_brief:
+                    replacements.append(("payload.survey_research_brief", report_brief))
+        if prompt_id in {REPORT_SECTION_WRITE_PROMPT, REPORT_CONTENT_CRITIC_PROMPT}:
+            report_context = self._wf4_report_branch_context(project["id"], state)
+            if (
+                report_context is None
+                or not report_context["topic"]
+                or not report_context["topic_id"]
+            ):
+                raise ValueError(
+                    f"{prompt_id} 需要已完成且已持久化 TOPIC_BACKGROUND_RESULT 的 "
+                    "WF-3B 前置绑定；未找到绑定工作流或其背景调研结果工件。"
+                )
+            if not report_context["background_cards"]:
+                raise ValueError(
+                    f"{prompt_id} 的 WF-3B 前置没有任何通过来源绑定校验的证据卡；"
+                    "报告正文必须建立在真实证据卡上，不得使用模板占位内容。"
+                )
+            outline_result = self._result(
+                project["id"],
+                REPORT_OUTLINE_PROMPT,
+                workflow_id=workflow_id,
+                exact_workflow=True,
+            )
+            if not isinstance(outline_result, dict) or not outline_result.get("report_sections"):
+                raise ValueError(
+                    f"{prompt_id} 需要本工作流已完成的 P-REPORT-OUTLINE 结果作为写作依据。"
+                )
+            report_brief = report_context.get("survey_research_brief")
+            if prompt_id == REPORT_SECTION_WRITE_PROMPT:
+                section = state.get("active_report_section")
+                if not isinstance(section, dict) or not str(section.get("section_key") or "").strip():
+                    raise ValueError(
+                        "P-REPORT-SECTION-WRITE 需要工作流状态中的 active_report_section；"
+                        "缺少当前写作章节是编排错误。"
+                    )
+                section_key = str(section["section_key"])
+                for required_key in ("title", "goal", "must_answer_questions", "known_gaps"):
+                    if section.get(required_key) is None:
+                        raise ValueError(
+                            f"P-REPORT-SECTION-WRITE 的章节 {section_key} 缺少提纲字段 "
+                            f"{required_key}；章节替换一旦静默失败，模型将看到模板占位章节。"
+                        )
+                card_ids = {
+                    str(card_id or "").strip()
+                    for card_id in section.get("evidence_card_ids") or []
+                    if str(card_id or "").strip()
+                }
+                section_cards = [
+                    card
+                    for card in report_context["background_cards"]
+                    if str(card.get("card_id") or "") in card_ids
+                ] or list(report_context["background_cards"])
+                source_ids = {
+                    str(source_id or "").strip()
+                    for card in section_cards
+                    for source_id in card.get("source_ids") or []
+                    if str(source_id or "").strip()
+                }
+                report_title = str(
+                    outline_result.get("report_title") or project.get("name") or ""
+                ).strip()
+                replacements.extend([
+                    ("payload.report_title", report_title),
+                    ("payload.section", copy.deepcopy(section)),
+                    ("payload.background_cards", section_cards),
+                    ("payload.source_catalog", report_context["source_catalog"]),
+                ])
+                passages = self._wf4_report_evidence_passages(
+                    project["id"], state, source_ids
+                )
+                if passages:
+                    replacements.append(("payload.evidence_passages", passages))
+                progress_map = (
+                    state.get("report_section_progress")
+                    if isinstance(state.get("report_section_progress"), dict)
+                    else {}
+                )
+                summaries = [
+                    {
+                        "section_key": str(key),
+                        "title": str(progress.get("title") or ""),
+                        "summary": str(progress.get("summary") or "")[:200],
+                    }
+                    for key, progress in progress_map.items()
+                    if isinstance(progress, dict)
+                    and str(progress.get("status") or "") == "COMPLETED"
+                    and str(key) != section_key
+                    and str(progress.get("summary") or "").strip()
+                ]
+                if summaries:
+                    replacements.append(("payload.previous_section_summaries", summaries))
+                glossary = self._report_glossary(section_cards)
+                if glossary:
+                    replacements.append(("payload.glossary", glossary))
+                guidance = (
+                    state.get("report_revision_guidance")
+                    if isinstance(state.get("report_revision_guidance"), dict)
+                    else {}
+                ).get(section_key)
+                if guidance:
+                    replacements.append((
+                        "payload.revision_guidance",
+                        [str(item) for item in guidance if str(item).strip()],
+                    ))
+            else:
+                drafts = self._wf4_report_section_drafts(
+                    project["id"],
+                    str(workflow_id or ""),
+                    state,
+                )
+                if not drafts:
+                    raise ValueError(
+                        "P-REPORT-CONTENT-CRITIC 需要本工作流至少一章已完成的正文；"
+                        "没有任何 REPORT_SECTION 工件时不得执行全文内容检查。"
+                    )
+                replacements.extend([
+                    ("payload.outline_sections", self._project_report_outline_candidate(outline_result)["report_sections"]),
+                    ("payload.section_drafts", drafts),
                     ("payload.background_cards", report_context["background_cards"]),
                     ("payload.source_catalog", report_context["source_catalog"]),
                 ])

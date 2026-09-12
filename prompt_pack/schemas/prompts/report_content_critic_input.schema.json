@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "report_outline_critic_input.schema.json",
+  "$id": "report_content_critic_input.schema.json",
   "type": "object",
   "properties": {
     "schema_version": {
       "const": "2.0"
     },
     "prompt_id": {
-      "const": "P-REPORT-OUTLINE-CRITIC"
+      "const": "P-REPORT-CONTENT-CRITIC"
     },
     "prompt_version": {
       "const": "1.0.0"
@@ -118,116 +118,132 @@
         "document_type": {
           "const": "SURVEY_REPORT"
         },
-        "outline_candidate": {
-          "type": "object",
-          "properties": {
-            "report_title": {
-              "type": "string",
-              "minLength": 1
-            },
-            "audience": {
-              "type": "string",
-              "minLength": 1
-            },
-            "overall_gaps": {
-              "type": "array",
-              "items": {
+        "outline_sections": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "section_key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              },
+              "title": {
                 "type": "string",
                 "minLength": 1
+              },
+              "goal": {
+                "type": "string",
+                "minLength": 1
+              },
+              "must_answer_questions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "evidence_card_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "planned_exhibits": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "TABLE",
+                        "MERMAID_FIGURE"
+                      ]
+                    },
+                    "caption": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "evidence_card_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "caption"
+                  ]
+                }
+              },
+              "known_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "estimated_share_percent": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
               }
             },
-            "report_sections": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "section_key": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-                  },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "goal": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "must_answer_questions": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "evidence_card_ids": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "planned_exhibits": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "TABLE",
-                            "MERMAID_FIGURE"
-                          ]
-                        },
-                        "caption": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "evidence_card_ids": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        }
-                      },
-                      "additionalProperties": false,
-                      "required": [
-                        "kind",
-                        "caption"
-                      ]
-                    }
-                  },
-                  "known_gaps": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "estimated_share_percent": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 100
-                  }
-                },
-                "additionalProperties": false,
-                "required": [
-                  "section_key",
-                  "title",
-                  "goal",
-                  "must_answer_questions",
-                  "known_gaps"
-                ]
+            "additionalProperties": false,
+            "required": [
+              "section_key",
+              "title",
+              "goal",
+              "must_answer_questions",
+              "known_gaps"
+            ]
+          }
+        },
+        "section_drafts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "section_key": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "markdown_body": {
+                "type": "string",
+                "minLength": 1
+              },
+              "cited_card_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "unresolved_questions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
               }
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "report_title",
-            "report_sections"
-          ]
+            },
+            "additionalProperties": false,
+            "required": [
+              "section_key",
+              "title",
+              "markdown_body"
+            ]
+          }
         },
         "background_cards": {
           "type": "array",
@@ -280,6 +296,40 @@
             ]
           }
         },
+        "source_catalog": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "published_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "source_id"
+            ]
+          }
+        },
         "survey_research_brief": {
           "type": "object",
           "properties": {
@@ -324,53 +374,20 @@
             }
           },
           "additionalProperties": false
-        },
-        "source_catalog": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "source_id": {
-                "type": "string",
-                "minLength": 1
-              },
-              "title": {
-                "type": "string",
-                "minLength": 1
-              },
-              "url": {
-                "type": "string",
-                "minLength": 1
-              },
-              "source_type": {
-                "type": "string",
-                "minLength": 1
-              },
-              "published_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "additionalProperties": false,
-            "required": [
-              "source_id"
-            ]
-          }
         }
       },
       "additionalProperties": false,
       "required": [
         "document_type",
-        "outline_candidate",
+        "outline_sections",
+        "section_drafts",
         "background_cards"
       ]
     },
     "expected_output_schema": {
       "type": "string",
       "minLength": 1,
-      "const": "schemas/prompts/report_outline_critic_output.schema.json"
+      "const": "schemas/prompts/report_content_critic_output.schema.json"
     },
     "trusted_source_catalog": {
       "type": "array",

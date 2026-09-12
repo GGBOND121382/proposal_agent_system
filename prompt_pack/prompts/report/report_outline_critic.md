@@ -26,6 +26,8 @@
 
 ## Finding代码
 
+信封级 `source_refs` 必须留空数组；来源身份核对通过 `code`、`section_key` 与描述完成，不得编造来源 ID。
+
 - `RO_SECTION_WITHOUT_EVIDENCE`：章节分配了必答问题却没有任何证据卡支撑，且未在 `known_gaps` 中说明。
 - `RO_GAP_HIDDEN`：章节或全报告把确认无法回答的问题伪装成已覆盖。
 - `RO_CARD_ID_UNKNOWN`：`evidence_card_ids` 引用了不存在的 `card_id`，或引用的卡片与该章必答问题语义无关。

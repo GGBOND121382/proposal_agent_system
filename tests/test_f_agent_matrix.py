@@ -24,8 +24,8 @@ def reloaded_pack() -> PromptPack:
 def test_f_manifest_is_complete():
     report = validate()
     assert report["status"] == "PASS", report["errors"]
-    assert report["counts"]["prompts"] == 37
-    assert report["counts"]["replay_cases"] == 185
+    assert report["counts"]["prompts"] == 39
+    assert report["counts"]["replay_cases"] == 195
     assert report["counts"]["agent_matrix"] == {
         "positive": 3,
         "negative": 5,
